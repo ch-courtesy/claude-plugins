@@ -1,0 +1,21 @@
+{
+  "name": "courtesy-claude-plugins",
+  "owner": {
+    "name": "예의상",
+    "email": "ch.courtesy@gmail.com"
+  },
+  "metadata": {
+    "description": "예의상 채널에서 공유하는 플러그인들의 마켓플레이스",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "project-init",
+      "source": "./plugins/project-init",
+      "description": "새 프로젝트 시작 시 필요한 기본 지침과 도구를 자동으로 설정해주는 플러그인",
+      "version": "0.1.0",
+      "category": "scaffold",
+      "tags": ["scaffold", "init", "bootstrap"]
+    }
+  ]
+}
