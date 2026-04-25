@@ -36,7 +36,7 @@ jobs:
 
       - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: |
             이 PR을 리뷰해 주세요. 사람 리뷰어를 대체하지 않는 1차 스크리닝입니다.
 
