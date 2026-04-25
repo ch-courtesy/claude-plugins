@@ -1,0 +1,65 @@
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+jobs:
+  review:
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.draft == false)
+      || (github.event_name == 'issue_comment'
+          && github.event.issue.pull_request != null
+          && contains(github.event.comment.body, '@claude'))
+      || (github.event_name == 'pull_request_review_comment'
+          && contains(github.event.comment.body, '@claude'))
+      || (github.event_name == 'pull_request_review'
+          && contains(github.event.review.body, '@claude'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            이 PR을 리뷰해 주세요. 사람 리뷰어를 대체하지 않는 1차 스크리닝입니다.
+
+            **출력 방식 — 중요:**
+            - **요약·총평 코멘트를 만들지 마세요.** 전체 평가를 PR 본문에 다는 코멘트는 금지.
+            - 각 피드백은 **그 피드백이 적용되는 정확한 파일·라인에 inline review comment**로 달아주세요.
+            - 여러 라인에 걸친 이슈는 해당 범위에 **단 하나**의 multi-line review comment로.
+            - **예외**: PR description 자체의 문제(목적·이유 누락 등)는 라인이 없으므로 PR 일반 코멘트 1개로만 게시.
+
+            **한 코멘트 형식 (한국어, 간결):**
+            - 첫 줄: `[BLOCKING]` / `[ISSUE]` / `[NIT]` 태그 + 한 문장 요지
+            - 필요하면 1-2줄 이유나 대안
+
+            **체크 우선순위:**
+            1. PR description에 "무엇을 / 왜"가 명확한가?
+            2. 변경이 선언된 목표를 빠짐없이 구현했는가? 누락·우회·과잉 복잡도 여부.
+            3. 스코프 초과 (무관한 리팩토링·곁가지 튜닝) 없는가?
+            4. 불필요·저가치 요소 (미사용 import·변수, 디버그 로그, 신호 없는 주석, 추측성 확장) 없는가?
+            5. 일반 코드 품질: 네이밍·보안·외부 요청 신규 추가.
+
+            **하지 말 것:**
+            - 요약/총평 코멘트 추가 (PR description 예외 외에는 모두 inline).
+            - 코드가 이미 말하는 것을 다시 설명하는 코멘트.
+            - 추측성 "future-proofing" 권장.
+
+            이 리뷰는 참고 의견입니다. 최종 판단은 사람 리뷰어가 합니다.
