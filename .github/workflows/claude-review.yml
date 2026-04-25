@@ -37,6 +37,8 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: |
+            --allowedTools mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)
           prompt: |
             이 PR을 리뷰해 주세요. 사람 리뷰어를 대체하지 않는 1차 스크리닝입니다.
 
