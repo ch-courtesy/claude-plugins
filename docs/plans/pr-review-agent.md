@@ -81,17 +81,19 @@ PR이 건드린 파일 성격에 따라:
 ## 후속 작업
 
 1. ✅ Phase 1 워크플로 작성 — `.github/workflows/claude-review.yml`
-2. ⏳ **사용자 작업 필요**:
-   - 로컬에서 `claude setup-token` 실행 → 출력된 토큰 복사
-   - GitHub repo Settings → Secrets → `CLAUDE_CODE_OAUTH_TOKEN` 이름으로 등록
-   - 워크플로 파일을 default 브랜치에 머지 (default 브랜치의 워크플로만 트리거됨)
+2. ⏳ **사용자 작업 필요** (3가지 모두 필요):
+   - **(a) OAuth 토큰**: 로컬에서 `claude setup-token` 실행 → 출력 토큰을 GitHub Secret `CLAUDE_CODE_OAUTH_TOKEN`으로 등록
+   - **(b) Claude GitHub App 설치**: https://github.com/apps/claude → Install → 이 리포 선택. **OAuth 토큰만으로는 부족** — App이 리포 권한(PR 코멘트 게시 등) 부여
+   - **(c) 머지**: 워크플로 파일을 default 브랜치(main)에 머지
 3. ⏳ 테스트 PR 1~2개로 시운전 → 프롬프트 튜닝 (Phase 2 진입)
 
 ## 검증된 전제 (2026-04-25)
 
 - Anthropic 공식 액션: `anthropics/claude-code-action@v1` (GitHub Marketplace 등록명: "Claude Code Action Official")
-- 인증: `CLAUDE_CODE_OAUTH_TOKEN` 사용 (Pro/Max 전용, `claude setup-token`으로 생성). `anthropic_api_key` input에 OAuth 토큰 secret을 그대로 전달
-- 대안 인증: `ANTHROPIC_API_KEY` (별도 과금) / Bedrock / Vertex / Foundry
+- 인증 = **두 단계 모두 필요**:
+  - (1) Anthropic API 인증: `CLAUDE_CODE_OAUTH_TOKEN` (Pro/Max 전용, `claude setup-token`). `anthropic_api_key` input에 그대로 전달
+  - (2) GitHub 리포 권한: Claude GitHub App (https://github.com/apps/claude) 설치. 미설치 시 워크플로가 401 "Claude Code is not installed on this repository"로 실패
+- 대안 인증: `ANTHROPIC_API_KEY` (별도 과금) / Bedrock / Vertex / Foundry — 이 경우에도 GitHub App 설치는 동일하게 필요
 - 커스텀 프롬프트는 `with.prompt` 입력으로 주입
 - 사용량 한도: 본인 Pro/Max 구독 한도와 공유됨 (별도 spend cap 없음). 트래픽이 본인 일반 Claude 사용에 영향
 - 보안 주의: 외부 컨트리뷰터 PR도 본인 OAuth 토큰으로 실행됨. 공식 액션의 sandbox에 의존하므로 신뢰 못 할 PR 트래픽이 늘어나면 `ANTHROPIC_API_KEY`로 분리 검토
