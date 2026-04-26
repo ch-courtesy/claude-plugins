@@ -28,9 +28,9 @@ description: 새 프로젝트를 시작할 때 기본 지침을 자동으로 설
 
 3. **생성할 카테고리 확인.** 사용 가능한 형제 `*-rule-creator` 스킬을 열거하고 접미사 `-rule-creator`를 제거해 카테고리 목록을 **런타임에 도출**합니다 (예: `git-rule-creator` → `git`). 1단계에서 "남은 카테고리 중 선택해서 추가"를 고른 경우, 이 목록에서 이미 `rules/<name>.md`가 존재하는 카테고리는 제외합니다. 목록은 하드코딩하지 않습니다.
 
-   도출한 목록을 사용자에게 노출하는 방식은 둘 중 하나:
-   - 일반 메시지 프리앰블로 목록을 먼저 출력한 뒤 `AskUserQuestion` 호출
-   - `AskUserQuestion`의 "전체 생성" 옵션에 `preview` 필드를 붙여 옆 패널에 렌더링
+   **열거 방법.** 이 `SKILL.md`가 위치한 디렉토리의 부모(즉, 이 스킬의 형제 스킬들이 있는 `skills/` 디렉토리)에서 `*-rule-creator`로 끝나는 디렉토리만 추립니다. 예: 이 파일이 `<plugin-root>/skills/bootstrap/SKILL.md`라면 `<plugin-root>/skills/`를 스캔하여 `git-rule-creator/`, `bash-rule-creator/`, … 같은 디렉토리를 찾습니다. 플러그인 설치 경로를 추측하거나 작업 디렉토리/홈 디렉토리를 전역 탐색하지 않습니다.
+
+   도출한 목록은 `AskUserQuestion` 호출 직전 일반 메시지 프리앰블로 한 번 출력합니다 (예: `생성할 카테고리 후보: git, bash, security, …`). 옵션의 `preview` 필드는 사용하지 않습니다 — `preview`는 mockup·코드 스니펫처럼 시각적 비교가 필요한 경우용이며, 단순 카테고리 나열에는 적합하지 않습니다.
 
    그 다음 `AskUserQuestion`(single-select)로 확인합니다:
    - **전체 생성 (Recommended)** — 도출된 목록 전부 생성
