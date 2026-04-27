@@ -1,3 +1,13 @@
 {
-  "enabledPlugins": {}
+  "extraKnownMarketplaces": {
+    "courtesy-claude-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "ch-courtesy/claude-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "project-init@courtesy-claude-plugins": true
+  }
 }
