@@ -17,14 +17,20 @@ description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 `rules/
    - `label` (필수): `AskUserQuestion` 옵션 라벨로 사용.
    - `description` (선택): 옵션 설명.
    - `recommended` (선택, boolean): `true`이면 라벨 끝에 `(Recommended)`를 붙이고 옵션 목록의 가장 앞에 둡니다. 한 템플릿에만 둡니다.
-   - `on_create` (선택, 자유 문자열): 4단계의 파일 기록 후 수행할 사후 작업 지시.
+   - `inputs` (선택, 리스트): 본문에 채워 넣을 입력값들의 선언적 스펙. 4단계 입력 수집에서 사용. 각 항목은 `name` (placeholder 키), `header` (`AskUserQuestion` header, ≤12자), `question` (질문 텍스트), `options` (`{label, description, value?}` 2~4개) 필드를 가집니다. `value`가 없으면 `label`을 값으로 사용합니다.
+   - `on_create` (선택, 자유 문자열): 5단계의 파일 기록 후 수행할 사후 작업 지시.
 
    필수 필드가 없는 템플릿은 후보에서 제외하고 사용자에게 알립니다.
 
 3. **선택.** 위에서 만든 옵션을 `AskUserQuestion`(single-select)로 사용자에게 묻습니다. 후보가 한 개뿐이면 묻지 않고 그대로 선택합니다.
 
-4. **파일 기록 및 사후 작업.**
-   - 선택된 템플릿의 frontmatter를 제거한 본문을 `rules/context.md`로 기록합니다. 상위 디렉토리 부재 시 함께 생성합니다.
+4. **입력 수집.** 선택된 템플릿의 frontmatter에 `inputs`가 있으면 각 항목을 순서대로 `AskUserQuestion`(single-select)로 묻습니다.
+   - 사용자가 옵션을 선택하면 그 옵션의 `value`(없으면 `label`)가 placeholder 값이 됩니다.
+   - 사용자가 "Other"로 자유 텍스트를 입력하면 그 텍스트가 placeholder 값이 됩니다.
+   - 수집된 값들로 본문의 `{{name}}` placeholder를 일괄 치환합니다. 치환되지 않은 placeholder(예: 사용자가 빠뜨린 항목)는 그대로 두어 사용자가 나중에 인지할 수 있게 합니다.
+
+5. **파일 기록 및 사후 작업.**
+   - 선택된 템플릿의 frontmatter를 제거하고 placeholder 치환이 끝난 본문을 `rules/context.md`로 기록합니다. 상위 디렉토리 부재 시 함께 생성합니다.
    - 이미 `rules/context.md`가 있으면 덮어쓰지 않고 diff를 보여 사용자에게 확인합니다.
    - 템플릿에 `on_create`가 있으면 그 지시를 그대로 수행합니다 (디렉토리·빈 파일 생성, 안내 메시지 출력 등).
 
