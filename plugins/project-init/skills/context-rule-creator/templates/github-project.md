@@ -126,8 +126,9 @@ issue 생성 시점에는 비어 있어도 되고, 인계가 일어날 때마다
 1. **시작 전**: 관련 issue 존재 확인. 없으면 작업을 멈추고 새 issue를 먼저 만듭니다. issue body·comments를 읽고 **body 상단 핸드오프 메모와 마지막 `[handoff]` comment를 가장 먼저** 확인합니다.
 2. **시작 시**: Status를 `In Progress`로, Assignee를 본인으로 설정합니다. "시작" comment를 남깁니다.
 3. **진행 중**: 의미 있는 발견·결정·차단을 **즉시** comment로 기록합니다. 계획 섹션이 변경되면 issue body의 해당 섹션도 갱신합니다.
-4. **완료 시**: 검증 계획에 따라 DoD 점검 → Status를 `Review` 또는 `Done`으로 → issue body의 핸드오프 메모 최신화 → `[handoff]` prefix comment 추가 → Assignee 해제.
-5. **append-only**: comments는 수정·삭제하지 않습니다. 정정은 새 comment로 추가합니다.
+4. **commit 전**: issue body의 "검증 계획"에 명시된 항목 중 자동화 가능한 것은 commit 전에 모두 실행해 통과를 확인합니다. 통과 흔적은 commit message 또는 issue comment(`[verification]` prefix 권장)에 남깁니다. 미통과 시 commit 중단 → 원인 수정 → 재검증. **검증 미실행·미통과 상태로 commit하지 않습니다 — "급하다"·"작은 변경이라"는 면제 사유가 아닙니다.** 사용자 환경이 필요한 수동 검증 항목은 핸드오프 메모에 누가·언제 진행할지 명시합니다.
+5. **완료 시**: 검증 계획에 따라 DoD 점검 → Status를 `Review` 또는 `Done`으로 → issue body의 핸드오프 메모 최신화 → `[handoff]` prefix comment 추가 → Assignee 해제.
+6. **append-only**: comments는 수정·삭제하지 않습니다. 정정은 새 comment로 추가합니다.
 
 ## 태스크 단위
 
