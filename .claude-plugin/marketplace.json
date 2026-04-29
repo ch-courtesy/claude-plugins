@@ -13,7 +13,7 @@
       "name": "project-init",
       "source": "./plugins/project-init",
       "description": "새 프로젝트 시작 시 필요한 기본 지침과 도구를 자동으로 설정해주는 플러그인",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "category": "scaffold",
       "tags": ["scaffold", "init", "bootstrap"]
     }
