@@ -65,7 +65,7 @@
 
 ### 검증 에이전트
 
-구현 모드 두 가지 중 **프로젝트 시작 시 명시**해야 합니다. default 없음. 모드는 프로젝트 단위로만 전환하며 PR 단위 override는 허용하지 않습니다.
+구현 모드 두 가지 중 **프로젝트 시작 시 명시**해야 합니다. default 없음. 모드는 프로젝트 단위로만 전환하며 PR 단위 override는 허용하지 않습니다 — 같은 프로젝트의 PR이 일관된 기준·동일 트리거로 검증돼야 감사 추적과 게이트의 신뢰성이 유지되기 때문. 특정 PR이 모드 외 처리를 필요로 한다면 모드 변경이 아니라 검증 에이전트의 차단·환송 절차나 사용자 명시 예외 승인으로 다룹니다.
 
 #### Mode A — claude-code-action workflow
 
@@ -190,12 +190,12 @@ parent 브랜치에는 항상 slug가 붙기 때문에(`<id>-<slug>` 형태) `fe
 
 ## 권한 매트릭스
 
-|  | 코드 수정 | 브랜치 생성 | rebase | PR 리뷰 | PR 머지 | sub Status | parent Status |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| 오케스트레이터 | ✗ | parent 브랜치, parent 통합 PR | ✗ | ✗ | ✗ | ✗ | →`In Progress`(승인 후), →`Review` |
-| 작업 에이전트 | ✓ (자기 sub) | sub 브랜치 | parent ← main | ✗ | ✗ | →`In Progress`, →`Review` | ✗ |
-| 검증 에이전트 | ✗ | ✗ | ✗ | ✓ | ✓ (sub PR 한정) | →`In Progress`(환송), →`Done` | ✗ |
-| 사용자 | — | — | — | — | ✓ (parent 통합 PR) | — | →`In Progress`(승인), →`Done` |
+|  | 코드 수정 | 브랜치 생성 | rebase | PR 생성 | PR 리뷰 | PR 머지 | sub Status | parent Status |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| 오케스트레이터 | ✗ | parent 브랜치 | ✗ | parent 통합 PR | ✗ | ✗ | ✗ | →`In Progress`(승인 후), →`Review` |
+| 작업 에이전트 | ✓ (자기 sub) | sub 브랜치 | parent ← main | sub-태스크 PR | ✗ | ✗ | →`In Progress`, →`Review` | ✗ |
+| 검증 에이전트 | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ (sub PR 한정) | →`In Progress`(환송), →`Done` | ✗ |
+| 사용자 | — | — | — | — | — | ✓ (parent 통합 PR) | — | →`In Progress`(승인), →`Done` |
 
 ## 흐름 요약
 
