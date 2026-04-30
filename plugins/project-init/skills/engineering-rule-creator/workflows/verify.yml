@@ -31,7 +31,7 @@ jobs:
 
             1. PR description의 sub-태스크 ID를 식별. 본문을 읽고 완료 기준(DoD)을 추출 — DoD를 1차 기준으로 (검증 계획은 참고).
             2. PR diff를 검토하고 DoD 각 항목을 코드·산출물에 매핑.
-            3. 코드 품질·로직 이슈를 file:line inline review comment로 작성.
+            3. 코드 품질·로직 이슈를 file:line inline review comment로 작성. `gh pr review --comment`는 일반 코멘트만 생성하므로 사용하지 말고, GitHub Reviews API(`gh api /repos/<owner>/<repo>/pulls/<pr>/reviews`에 `event`, `body`, `comments: [{path, line, body}]`)로 review와 inline comment를 함께 생성.
             4. 결정:
                - 통과: `gh pr review --approve` → `gh pr merge` → sub-태스크 Status를 `Done`으로 + 통과 결정 기록.
                - 차단: `gh pr review --request-changes` → 차단 기록을 sub-태스크 로그에 추가 → Status를 `In Progress`로 환송.
