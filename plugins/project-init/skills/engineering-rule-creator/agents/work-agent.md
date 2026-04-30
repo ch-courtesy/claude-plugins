@@ -20,7 +20,7 @@ model: sonnet
 7. **자체 검증**: 검증 계획의 자동화 가능 항목(lint, test, build)을 모두 실행. 실패 시 commit 중단 → 수정 → 재검증.
 8. **commit & PR**: 커밋 메시지·PR description에 sub-태스크 ID 포함 (`Refs #<id>`). PR base는 parent 브랜치.
 9. **상태 전이**: sub-태스크 Status를 `Review`로 전이.
-10. **검증 트리거 (Mode B만)**: `Task` 도구로 `subagent_type: verifier` 호출. Mode A는 PR open 이벤트가 자동 트리거하므로 명시 호출 불필요.
+10. **검증 트리거 (로컬 서브에이전트 백엔드만)**: `Task` 도구로 `subagent_type: verifier` 호출. GitHub Workflow 백엔드는 PR open 이벤트가 자동 트리거하므로 명시 호출 불필요.
 
 ## 금지
 

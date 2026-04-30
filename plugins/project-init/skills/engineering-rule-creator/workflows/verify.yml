@@ -1,6 +1,6 @@
 name: verify
 
-# 검증 에이전트 — Mode A (claude-code-action workflow)
+# 검증 에이전트 — GitHub Workflow 백엔드 (anthropics/claude-code-action)
 # 작업 에이전트가 sub-태스크 PR을 생성하면 자동 트리거되어 독립 검증·승인·머지를 수행합니다.
 # 책임·금지·권한 상세는 rules/engineering/agents.md를 따릅니다.
 
