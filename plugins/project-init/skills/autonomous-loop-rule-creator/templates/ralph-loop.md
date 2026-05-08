@@ -10,17 +10,18 @@ on_create: |
   5. .loops/locks/.gitkeep, .loops/archive/.gitkeep 생성
   6. .gitignore에 다음 라인 추가 (이미 있으면 skip):
      - .loops/locks/
+     - ../<project-name>-loops/   # sibling 워크트리. 부모 git에서 무시 — 일반적으로 git은 ../ 패턴을 추적하지 않으나 실수 방지를 위한 명시적 신호. 사용자가 LOOP_WORKTREE_BASE로 변경 시 조정 필요
   7. 사용자에게 다음 안내 메시지 출력:
      "자율 루프가 설치되었습니다.
       sibling 워크트리는 ../<project-name>-loops/<task-id>/ 에 생성됩니다.
-      LOOP_WORKTREE_BASE 환경변수로 위치 변경 가능.
+      LOOP_WORKTREE_BASE 환경 변수로 위치 변경 가능.
 
       새 task 시작:
         ./.loops/loop.sh <task-id>           # 첫 호출: 워크트리 + 메타 파일 생성
         \$EDITOR ../<project-name>-loops/<task-id>/.loop/PROMPT.md   # 작업 정의 채움
         ./.loops/loop.sh <task-id>           # 두 번째 호출: 루프 시작
 
-      동시 실행: MAX_CONCURRENT 환경변수로 조정 (기본 3).
+      동시 실행: MAX_CONCURRENT 환경 변수로 조정 (기본 3).
       자세한 내용은 .loops/README.md 참조."
 ---
 
@@ -283,7 +284,7 @@ NOTES.md가 100줄 넘으면 큰 실패는 `.loop/failures/<n>-<short-name>.md`�
 - **워크트리 루트의 `DONE`**: 완료 판정(§3.4) 모두 만족할 때 작성. 빈 파일이거나 한 줄 메시지.
 - **`.loop/ESCALATION.md`**: 진전 불가능 시 §5.2 양식으로 작성.
 
-두 파일을 임의로 작성·삭제하지 않는다. 신호는 진실해야 한다. 거짓 `DONE`은 가짜 완료 위장이고, 거짓 ESCALATION은 작업 회피다 — 둘 다 §1.1·§1.4 위반이다.
+두 파일을 임의로 작성·삭제하지 않는다. 신호는 진실해야 한다. 거짓 `DONE`은 가짜 완료 위장이고, 거짓 ESCALATION은 작업 회피다 — 둘 다 §1의 1항(평가 기준)·4항(작업 범위) 위반이다.
 
 ## 13. 체크리스트
 
