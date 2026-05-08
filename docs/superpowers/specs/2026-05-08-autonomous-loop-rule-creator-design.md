@@ -4,6 +4,13 @@
 대상 플러그인: `plugins/project-init/`
 신규 스킬 위치: `plugins/project-init/skills/autonomous-loop-rule-creator/`
 
+본 스펙은 **단일 task 자율 수행 원자**를 다룬다 (Layer 1). 멀티 task 합성·DAG 스케줄링·집계는 별도 레이어인 `autonomous-orchestration-rule-creator`(Layer 2)가 본 원자를 호출해 처리한다 — `2026-05-09-autonomous-orchestration-rule-creator-design.md` 참조.
+
+Layer 2 호환을 위해 Layer 1이 충족해야 하는 요구사항:
+- task-id에 슬래시(`<goal-id>/<task-id>`) 허용 — 워크트리 경로·브랜치명에 그대로 사용
+- 락 파일명은 슬래시를 `-`로 치환해 안전화
+- 워크트리에 메타 파일이 이미 있으면 시드 스킵 (Layer 2가 합성한 PROMPT.md 보존)
+
 ## 1. 목적
 
 대상 프로젝트에 **랄프 루프 기반 자율 수행 환경**을 한 번의 스킬 호출로 설치한다. 산출물은 다음을 모두 충족해야 한다.
