@@ -127,6 +127,58 @@ create_worktree() {
   echo "  $0 $TASK_ID"
 }
 
+# ----- 동시성 락 -----
+
+acquire_lock() {
+  mkdir -p "$LOCK_DIR"
+
+  local running
+  running=$(find "$LOCK_DIR" -name "*.lock" -type f 2>/dev/null | wc -l | tr -d ' ')
+  if [[ $running -ge $MAX_CONCURRENT ]]; then
+    die "이미 $running개 loop이 동작 중 (최대: $MAX_CONCURRENT). 새 loop 거부."
+  fi
+
+  if [[ -f "$LOCK_FILE" ]]; then
+    local existing_pid
+    existing_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "?")
+    die "task $TASK_ID가 이미 동작 중 (PID: $existing_pid). 종료 후 재실행."
+  fi
+
+  echo $$ > "$LOCK_FILE"
+  trap "rm -f $LOCK_FILE" EXIT
+}
+
+# ----- 이터레이션 호출 -----
+
+iterate() {
+  local n
+  n=$(($(ls "$WT/.loop/iterations/"*.log 2>/dev/null | wc -l | tr -d ' ') + 1))
+
+  echo "[$(now_iso)] 이터 #$n 시작"
+
+  # 워크트리 안에서 호출 (cwd 격리)
+  (
+    cd "$WT"
+    cat .loop/PROMPT.md | claude \
+      --print \
+      --no-session-persistence \
+      --dangerously-skip-permissions \
+      --system-prompt-file CLAUDE.md \
+      --add-dir . \
+      --output-format json \
+      > ".loop/iterations/$n.log" 2>&1
+  )
+
+  local exit_code=$?
+  echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code)"
+
+  if [[ $exit_code -ne 0 ]]; then
+    echo "WARN: claude 호출이 0이 아닌 exit code 반환. iterations/$n.log 확인 권장."
+  fi
+
+  # 호출 결과는 워크트리 안에서 검사 (게이트는 Task 8에서 추가)
+}
+
 # ----- 메인 -----
 
 if [[ ! -d "$WT" ]]; then
@@ -134,6 +186,16 @@ if [[ ! -d "$WT" ]]; then
   exit 0
 fi
 
-# 이후 분기는 Task 7~9에서 추가
-echo "TODO: 이터레이션 루프 진입 — Task 7~9에서 구현"
-exit 0
+# 워크트리 존재 → 이터레이션 루프 진입
+acquire_lock
+
+START_TIME=$(date +%s)
+
+while true; do
+  iterate
+
+  # 종료 조건은 Task 8에서 추가
+  break  # 임시: 한 번만 돌고 종료
+done
+
+echo "[$(now_iso)] 루프 종료 (한 이터 후 임시 종료. Task 8 이후 정식 루프)"
