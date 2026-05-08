@@ -141,7 +141,7 @@ acquire_lock() {
   if [[ -f "$LOCK_FILE" ]]; then
     local existing_pid
     existing_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "?")
-    die "task $TASK_ID가 이미 동작 중 (PID: $existing_pid). 종료 후 재실행."
+    die "task $TASK_ID가 이미 동작 중 (PID: $existing_pid). 종료 후 재실행. 프로세스가 없으면: rm $LOCK_FILE"
   fi
 
   echo $$ > "$LOCK_FILE"
@@ -152,24 +152,24 @@ acquire_lock() {
 
 iterate() {
   local n
-  n=$(($(ls "$WT/.loop/iterations/"*.log 2>/dev/null | wc -l | tr -d ' ') + 1))
+  n=$(($(find "$WT/.loop/iterations" -name "*.log" -type f 2>/dev/null | wc -l | tr -d ' ') + 1))
 
   echo "[$(now_iso)] 이터 #$n 시작"
 
-  # 워크트리 안에서 호출 (cwd 격리)
+  local exit_code=0
   (
     cd "$WT"
-    cat .loop/PROMPT.md | claude \
+    claude \
       --print \
       --no-session-persistence \
       --dangerously-skip-permissions \
       --system-prompt-file CLAUDE.md \
       --add-dir . \
       --output-format json \
+      < .loop/PROMPT.md \
       > ".loop/iterations/$n.log" 2>&1
-  )
+  ) || exit_code=$?
 
-  local exit_code=$?
   echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code)"
 
   if [[ $exit_code -ne 0 ]]; then
