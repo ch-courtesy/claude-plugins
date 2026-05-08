@@ -24,61 +24,88 @@
 | 외부 셸 루프 (`while + claude --print`) | **채택** | 프로세스 경계 분리, 콜드 스타트 보장, 드라이버/워커 책임 분리 |
 | Stop 훅 기반 (Anthropic `ralph-wiggum` 플러그인) | **기각** | `settings.json` 영구 변경, 세션 라이프사이클 결합, 콜드 스타트 위배, 비용 폭주 가시성 낮음 |
 | `claude --bare` 격리 | **기각** | OAuth/keychain 사용자에게 인증 실패 (API key 미보유 환경 가정) |
-| Stop 훅 외 격리 (scratch CWD + `--system-prompt-file` + `--add-dir`) | **채택** | API key 없이도 격리 가능. 잔여 위험은 사용자 레벨 CLAUDE.md/settings로 한정 |
+| Sibling git worktree 격리 (워크트리 + 워크트리 내 CLAUDE.md) | **채택** | 프로젝트 트리 밖 워크트리는 CLAUDE.md walk-up 경로에서 벗어나 프로젝트 CLAUDE.md를 완전 차단. 동시 실행도 자연스럽게 격리 |
 | 드라이버 측 사이드카 JSON 합성 (`recent.md` 자동 생성) | **기각** | 드라이버 추출은 잡음 비율 높음. 모델 큐레이션 마크다운으로 대체 |
 | 모델 큐레이션 메모리 파일 (PLAN/NOTES/HANDOFF/RUN_LOG) | **채택** | 신호 큐레이션은 모델 책임, 사람도 검증·교정 가능 |
-| Git worktree 격리 (안 3) | **기각 (현 단계)** | 설치 부담 큼. 향후 변종 템플릿으로 추가 가능 |
+| 자기 분류 = git commit prefix | **채택** | git 히스토리가 자연스러운 시간축, 크래시 안전, 드라이버가 `git log` 파싱으로 streak 측정 |
+| 동시 실행 (워크트리 격리 + `MAX_CONCURRENT` 락) | **채택** | 워크트리 자동 격리로 race 없음. 공유 자원(API rate)만 캡으로 관리 |
 
-## 3. 산출물 트리 (스킬이 대상 프로젝트에 생성)
+## 3. 산출물 트리
+
+스킬이 대상 프로젝트에 직접 생성하는 파일과, 드라이버가 런타임에 sibling 위치에 만드는 워크트리의 두 영역으로 나뉜다.
+
+### 3.1 스킬이 생성 (대상 프로젝트 안)
 
 ```
 <project root>/
 ├── rules/
-│   └── autonomous-loop.md            # 헌법 SSOT
+│   └── autonomous-loop.md            # 헌법 SSOT (워크트리의 CLAUDE.md로 복사되는 원본)
 └── .loops/
-    ├── README.md                     # 새 task 생성·운영 가이드
+    ├── README.md                     # 새 task 생성·워크트리 라이프사이클·동시 실행 가이드
     ├── PROMPT.template.md            # 새 task의 PROMPT.md 시드 (YAML frontmatter 포함)
-    ├── loop.sh                       # 외부 드라이버
-    └── templates/                    # task 인스턴스용 메모리 파일 스텁
-        ├── PLAN.template.md
-        ├── NOTES.template.md
-        ├── HANDOFF.template.md
-        ├── RUN_LOG.template.md
-        └── ESCALATION.template.md
+    ├── loop.sh                       # 외부 드라이버 — 워크트리 라이프사이클·동시성 제어
+    ├── templates/                    # 워크트리 메모리 파일 스텁
+    │   ├── PLAN.template.md
+    │   ├── NOTES.template.md
+    │   ├── HANDOFF.template.md
+    │   ├── RUN_LOG.template.md
+    │   └── ESCALATION.template.md
+    ├── locks/                        # 워크트리별 RUNNING 락 (gitignored)
+    │   └── .gitkeep
+    └── archive/                       # DONE된 task의 메타 파일 보관
+        └── <task-id>/                # PLAN·NOTES·RUN_LOG·HANDOFF의 최종 상태
 ```
 
-스킬은 task 인스턴스 디렉토리(`.loops/<task-id>/`)는 생성하지 않는다. 사용자가 README의 절차로 만들거나, `loop.sh`가 첫 호출 시 누락된 파일을 `.loops/templates/`에서 시드한다.
+추가로 `.gitignore`에 다음 라인이 추가된다:
+- `.loops/locks/` (런타임 락파일 비추적)
+- `.loops/archive/` (선택, 사용자 정책에 따라)
 
-### 3.1 task 인스턴스 트리 (사용자 또는 `loop.sh`가 생성)
+### 3.2 드라이버가 런타임 생성 (sibling 위치, 프로젝트 트리 밖)
 
 ```
-.loops/<task-id>/
-├── PROMPT.md                 # 작업 정의 + 이터 프로토콜. 불변
-├── PLAN.md                   # 마일스톤 체크박스. 모델 갱신
-├── NOTES.md                  # 학습 누적 (실패 접근·발견 제약·작동 패턴). 모델 갱신
-├── HANDOFF.md                # 직전 이터 → 다음 이터 편지. 모델 매 이터 덮어쓰기
-├── RUN_LOG.md                # 한 줄 요약 누적. 모델 매 이터 append
-├── iterations/
-│   └── <n>.log               # 매 이터 stdout 캡처 (사후 디버깅)
-├── failures/                 # (선택) 큰 실패 포스트모템. 모델 자율 생성
-├── fixtures/                 # (선택) 확정 작동 코드 조각
-└── ESCALATION.md             # 정지 사유 (있을 때만)
+<parent>/                             # <project>의 부모 디렉토리
+├── <project>/                        # 메인 프로젝트 (위 §3.1)
+└── <project>-loops/                  # ← sibling. 프로젝트 트리 밖 → CLAUDE.md walk-up 차단
+    └── <task-id>/                    # git worktree (autonomous-loop/<task-id> 브랜치)
+        ├── CLAUDE.md                 # 헌법 — loop.sh가 rules/autonomous-loop.md에서 복사
+        ├── .loop/                    # 메타 파일 — 워크트리의 .git/info/exclude로 비추적
+        │   ├── PROMPT.md             # 작업 정의 + 이터 프로토콜. 불변. 사용자 작성
+        │   ├── PLAN.md               # 마일스톤 체크박스. 모델 갱신
+        │   ├── NOTES.md              # 학습 누적. 모델 갱신
+        │   ├── HANDOFF.md            # 직전 이터 → 다음 이터 편지. 모델 매 이터 덮어쓰기
+        │   ├── RUN_LOG.md            # 한 줄 요약 누적
+        │   ├── iterations/
+        │   │   └── <n>.log           # 매 이터 stdout 캡처
+        │   ├── failures/             # (선택) 큰 실패 포스트모템
+        │   ├── fixtures/             # (선택) 확정 작동 코드 조각
+        │   └── ESCALATION.md         # 정지 사유 (있을 때만)
+        └── (프로젝트 파일들 — autonomous-loop/<task-id> 브랜치 체크아웃)
 ```
+
+**워크트리 위치 환경 변수:** `LOOP_WORKTREE_BASE` 미지정 시 기본 `<project>/../<project-name>-loops/`. 사용자가 환경 변수로 변경 가능 (예: `~/.claude-loops/<project>/`).
+
+**격리 보장:** 워크트리 cwd는 프로젝트 트리 밖이므로 CLAUDE.md auto-discovery walk-up이 `<project>/CLAUDE.md`에 도달하지 않는다. 워크트리 자체의 `CLAUDE.md`만 헌법으로 로드되고, 잔여 walk-up은 `~/.claude/CLAUDE.md` 사용자 레벨까지만 (수용).
+
+**워크트리 정리:** DONE 후 사용자가 `git merge autonomous-loop/<task-id>` 후 `git worktree remove <worktree-path>`. 또는 `git worktree prune`. 자동 정리는 안 한다 — 사람의 검토를 거치도록.
 
 ## 4. 메모리 파일 모델
 
 랄프 루프의 핵심 가정: **기억은 LLM이 아닌 파일에 있다.** 매 이터레이션은 콜드 스타트이며, 직전 추론 과정은 다음 이터가 보지 못한다 — 결과물(코드·테스트·메모리 파일)만 본다.
 
-### 4.1 파일별 역할
+### 4.1 파일별 역할 (모두 워크트리의 `.loop/` 아래)
 
 | 파일 | 역할 | 갱신 빈도 | 갱신 주체 |
 |---|---|---|---|
-| `PROMPT.md` | 작업 정의 + 이터 프로토콜 (불변) | 절대 안 함 | 사용자 (생성 시 1회) |
-| `PLAN.md` | 마일스톤 체크박스로 권위 있는 진전 추적 | 진전 시마다 | 모델 |
-| `NOTES.md` | 큐레이션 학습 — 실패 접근·발견 제약·작동 패턴 | 실패·발견 시마다 | 모델 |
-| `HANDOFF.md` | 다음 이터에 보내는 편지 — 무엇을 했고·뭐가 막혔고·다음 단계 | 매 이터 종료 직전 (덮어쓰기) | 모델 |
-| `RUN_LOG.md` | 한 줄 요약 누적 — 시각·시도·결과·다음 단계 | 매 이터 종료 직전 (append) | 모델 |
-| `iterations/<n>.log` | stdout 캡처 (사후 디버깅용) | 매 이터 | 드라이버 |
+| `.loop/PROMPT.md` | 작업 정의 + 이터 프로토콜 (불변) | 절대 안 함 | 사용자 (생성 시 1회) |
+| `.loop/PLAN.md` | 마일스톤 체크박스로 권위 있는 진전 추적 | 진전 시마다 | 모델 |
+| `.loop/NOTES.md` | 큐레이션 학습 — 실패 접근·발견 제약·작동 패턴 | 실패·발견 시마다 | 모델 |
+| `.loop/HANDOFF.md` | 다음 이터에 보내는 편지 — 무엇을 했고·뭐가 막혔고·다음 단계 | 매 이터 종료 직전 (덮어쓰기) | 모델 |
+| `.loop/RUN_LOG.md` | 한 줄 요약 누적 — 시각·시도·결과·다음 단계 | 매 이터 종료 직전 (append) | 모델 |
+| `.loop/iterations/<n>.log` | stdout 캡처 (사후 디버깅용) | 매 이터 | 드라이버 |
+| `<worktree>/CLAUDE.md` | 헌법 (시스템 프롬프트로 주입) | 워크트리 생성 시 1회 | 드라이버 (rules/autonomous-loop.md에서 복사) |
+| `<worktree>/DONE` | 완료 신호 (있을 때만) | 완료 시 1회 | 모델 |
+
+**`.loop/` 디렉토리와 `CLAUDE.md`는 워크트리의 `.git/info/exclude`로 비추적**. 머지 시 메인 브랜치를 오염시키지 않음.
 
 **모든 큐레이션은 모델 책임이다.** 드라이버가 자동 추출하지 않는다 — 자동 추출은 잡음 비율이 높아 다음 이터의 신호를 흐린다.
 
@@ -121,18 +148,18 @@ JSON 사이드카는 사용하지 않는다. 자기 분류 신호는 git commit 
 
 ### 6.1 절 구성
 
-1. 제1 원칙 (절대 규칙) — 평가 기준·테스트·아키텍처·작업 범위·의존성·보안 6대 불가침
-2. 이터레이션 모델 — 콜드 스타트, 디스크 상태가 진실, 입력·출력 정의
+1. 제1 원칙 (절대 규칙) — 평가 기준·테스트·아키텍처·작업 범위·의존성·보안 6대 불가침. **워크트리 안에서 동작하나, 메인 브랜치 머지 시점의 변경 책임도 동일**
+2. 이터레이션 모델 — 콜드 스타트, 디스크 상태가 진실, 워크트리 안에서 모든 작업 수행
 3. 작업 흐름 — 수용 기준 확인·계획·5단계 이터레이션·자기 분류·완료 판정
 4. 이터레이션 상한·조기 정지 — 상한 N회·동일 에러 3회·진동·fix:symptom 누적·예산 임계치
 5. 에스컬레이션 — 트리거·보고 양식·후 정지
 6. 관찰성·로깅 — 매 이터 기록·의사결정 근거 명시·불확실성 표시
-7. 금지 행동 — 12가지 (테스트 약화·suppressor 신규·force push·secrets·위장 등)
+7. 금지 행동 — 12가지 (테스트 약화·suppressor 신규·force push·secrets·위장 등) + 워크트리 밖 파일 수정 금지·`CLAUDE.md`/`.loop/` 수정 금지
 8. 근본 원인 추구 — 표면 vs 근본·증상 우회는 명시적·"일단 동작" 부정
 9. 의사소통 — 정직·간결·완료 정의 준수
 10. 하네스 자체에 대한 태도 — 우회 대신 보고
-11. 메모리 파일 운영 — PLAN/NOTES/HANDOFF/RUN_LOG 큐레이션 의무
-12. 종료 신호 — DONE / ESCALATION.md 진실성 의무
+11. 메모리 파일 운영 — PLAN/NOTES/HANDOFF/RUN_LOG 큐레이션 의무. 모두 `.loop/` 아래에 위치
+12. 종료 신호 — DONE / ESCALATION.md 진실성 의무. 워크트리 루트의 `DONE` 또는 `.loop/ESCALATION.md`만 인정
 13. 체크리스트 — 시작·이터 후·완료 전
 
 ### 6.2 객관 게이트 표시
@@ -216,10 +243,11 @@ verify: <실행 가능한 명령. 예: pnpm test --filter=auth. 0 exit이면 검
 
 ## 절대 안 됨
 
-- `rules/autonomous-loop.md`, `PROMPT.md` 수정
-- 거짓 DONE / ESCALATION.md
-- 작업 범위 밖 파일 수정
-- 자기 분류 누락한 채 commit
+- `CLAUDE.md` (워크트리 루트의 헌법), `.loop/PROMPT.md` 수정
+- 워크트리 밖 파일 수정 (모든 작업은 워크트리 안에서)
+- 거짓 `DONE` (워크트리 루트) / 거짓 `.loop/ESCALATION.md`
+- 작업 범위(scope) 밖 파일 수정
+- 자기 분류 prefix 누락한 채 commit
 - NOTES.md의 "실패한 접근" 재시도 (정당한 사유 없이)
 ```
 
@@ -230,94 +258,189 @@ verify: <실행 가능한 명령. 예: pnpm test --filter=auth. 0 exit이면 검
 ### 8.1 호출 인터페이스
 
 ```bash
-.loops/loop.sh <task-id> [--max-iterations N] [--wall-clock-minutes N]
+./.loops/loop.sh <task-id> [--max-iterations N] [--wall-clock-minutes N]
 ```
 
-`<task-id>`는 `.loops/<task-id>/` 디렉토리 이름. 누락된 메모리 파일이 있으면 빈 스텁으로 시드.
+환경 변수:
+- `LOOP_WORKTREE_BASE` — 워크트리 부모 디렉토리. 기본 `<project>/../<project-name>-loops/`
+- `MAX_CONCURRENT` — 동시 실행 가능한 loop 수. 기본 3
 
-### 8.2 매 이터 호출 (cwd = `.loops/<task-id>/`)
+`<task-id>`는 워크트리 디렉토리 이름. 워크트리가 없으면 첫 호출 시 생성하고 사용자에게 PROMPT.md 작성을 안내한 후 종료. 두 번째 호출부터 실제 loop 시작.
+
+### 8.2 워크트리 라이프사이클
+
+**8.2.1 워크트리 부재 시 (첫 호출):**
 
 ```bash
-cat PROMPT.md | claude \
+PROJECT_ROOT="$(git rev-parse --show-toplevel)"
+PROJECT_NAME="$(basename "$PROJECT_ROOT")"
+WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
+WT="$WT_BASE/$TASK_ID"
+BRANCH="autonomous-loop/$TASK_ID"
+
+mkdir -p "$WT_BASE"
+git -C "$PROJECT_ROOT" worktree add "$WT" -b "$BRANCH"
+
+# 헌법을 워크트리 CLAUDE.md로 복사
+cp "$PROJECT_ROOT/rules/autonomous-loop.md" "$WT/CLAUDE.md"
+
+# 메타 파일 시드
+mkdir -p "$WT/.loop/iterations"
+cp "$PROJECT_ROOT/.loops/PROMPT.template.md" "$WT/.loop/PROMPT.md"
+cp "$PROJECT_ROOT/.loops/templates/PLAN.template.md" "$WT/.loop/PLAN.md"
+cp "$PROJECT_ROOT/.loops/templates/NOTES.template.md" "$WT/.loop/NOTES.md"
+cp "$PROJECT_ROOT/.loops/templates/HANDOFF.template.md" "$WT/.loop/HANDOFF.md"
+cp "$PROJECT_ROOT/.loops/templates/RUN_LOG.template.md" "$WT/.loop/RUN_LOG.md"
+
+# 워크트리 로컬 비추적 등록
+{
+  echo "CLAUDE.md"
+  echo ".loop/"
+} >> "$WT/.git/info/exclude"
+
+echo "워크트리 생성: $WT"
+echo "다음 파일을 채워 주세요: $WT/.loop/PROMPT.md"
+echo "채운 후 다시 실행: ./.loops/loop.sh $TASK_ID"
+exit 0
+```
+
+**8.2.2 워크트리 존재 시 (이터레이션 루프):**
+
+동시성 락 확인 후 실제 루프 진입.
+
+**8.2.3 DONE 처리:**
+
+```bash
+# 메타 파일 영속화
+mkdir -p "$PROJECT_ROOT/.loops/archive/$TASK_ID"
+cp "$WT/.loop/"{PLAN,NOTES,HANDOFF,RUN_LOG}.md "$PROJECT_ROOT/.loops/archive/$TASK_ID/"
+
+echo "task $TASK_ID 완료. 머지 검토:"
+echo "  cd $PROJECT_ROOT"
+echo "  git log $BRANCH"
+echo "  git merge $BRANCH         # 또는 PR 생성"
+echo "  git worktree remove $WT"
+```
+드라이버는 자동 머지하지 않는다 — 사람이 PR로 검토하거나 직접 머지.
+
+**8.2.4 ESCALATION 처리:**
+
+워크트리는 그대로 유지. 사람이 들어가서 수정·재시작 가능. 메타 파일 archive 복사 안 함 (작업 진행 중).
+
+### 8.3 동시성 제어
+
+매 호출 시작 시:
+
+```bash
+LOCK_DIR="$PROJECT_ROOT/.loops/locks"
+mkdir -p "$LOCK_DIR"
+
+running=$(find "$LOCK_DIR" -name "*.lock" -type f 2>/dev/null | wc -l)
+if [[ $running -ge ${MAX_CONCURRENT:-3} ]]; then
+  echo "이미 $running 개 loop이 동작 중 (최대: ${MAX_CONCURRENT:-3}). 거부."
+  exit 2
+fi
+
+LOCK="$LOCK_DIR/$TASK_ID.lock"
+if [[ -f "$LOCK" ]]; then
+  echo "task $TASK_ID가 이미 동작 중. 기존 종료 후 재실행."
+  exit 3
+fi
+echo $$ > "$LOCK"
+trap "rm -f $LOCK" EXIT
+```
+
+락 파일은 PID 보관. crashed 프로세스의 stale 락은 `kill -0 <pid>` 검사로 정리 가능 (선택).
+
+### 8.4 매 이터 호출 (cwd = `<worktree>/`)
+
+```bash
+cd "$WT"
+cat .loop/PROMPT.md | claude \
   --print \
   --no-session-persistence \
   --dangerously-skip-permissions \
-  --system-prompt-file ../../rules/autonomous-loop.md \
-  --add-dir ../.. \
+  --system-prompt-file CLAUDE.md \
+  --add-dir . \
   --output-format json \
-  > "iterations/$n.log"
+  > ".loop/iterations/$n.log"
 ```
 
-### 8.3 격리 메커니즘
+### 8.5 격리 메커니즘
 
-- cwd = `.loops/<task-id>/` → 프로젝트 hooks 비활성 (settings 위로 안 올라감), auto-memory 자체 버킷
-- `--system-prompt-file rules/autonomous-loop.md` → 헌법 강제 주입
-- `--no-session-persistence` → 콜드 스타트 보장
-- `--add-dir <project root>` → 프로젝트 코드 접근 명시
-- `--print` → 한 번 응답 후 종료 (프로세스 경계)
-- `--dangerously-skip-permissions` → 무인 운영. 격리 디렉토리 가정으로 정당화
+- **cwd = 워크트리 (프로젝트 트리 밖)** → CLAUDE.md walk-up이 프로젝트 CLAUDE.md에 도달하지 않음
+- **워크트리에 `CLAUDE.md` 존재 (헌법 복사본)** → 워크트리의 closest CLAUDE.md로 자동 발견됨
+- **`--system-prompt-file CLAUDE.md`** → 헌법 명시 주입 (auto-discovery 의존성 제거)
+- **`.git/info/exclude`로 `CLAUDE.md`·`.loop/` 비추적** → 머지 시 메인 브랜치를 오염시키지 않음
+- **`--no-session-persistence`** → 콜드 스타트 보장
+- **`--add-dir .`** → 워크트리 안에서 도구 접근
+- **`--print`** → 한 번 응답 후 종료 (프로세스 경계)
+- **`--dangerously-skip-permissions`** → 무인 운영. 워크트리 격리로 정당화
 
-**잔여 위험 (수용):** 사용자 레벨 `~/.claude/CLAUDE.md` / `~/.claude/settings.json` / auto-memory는 차단 불가. 사용자가 본인 환경을 통제한다고 가정. README에 "루프 시작 전 `~/.claude/` 검토 권장" 명시.
+**잔여 위험 (수용):** 사용자 레벨 `~/.claude/CLAUDE.md` / `~/.claude/settings.json` / auto-memory는 차단 불가 (워크트리 위치와 무관). 사용자가 본인 환경을 통제한다고 가정. README에 "루프 시작 전 `~/.claude/` 검토 권장" 명시.
 
-### 8.4 객관 게이트 (매 이터 검사)
+### 8.6 객관 게이트 (매 이터 검사, 워크트리 안에서 평가)
 
 | 가드 | 메커니즘 | 위반 시 |
 |---|---|---|
 | 이터 상한 | 카운터 ≤ `--max-iterations` (기본 30) | halt + 에스컬레이션 자동 작성 |
 | 시계 캡 | 누적 시간 ≤ `--wall-clock-minutes` (기본 120) | halt |
-| DONE 파일 | 존재 검사 | 정상 종료 |
-| ESCALATION.md | 존재 검사 | halt (사람 처리 대기) |
-| 테스트 약화 | `find tests/ -type f -exec sha256sum {} \;` 시작 시점 vs 매 이터 | halt |
-| 의존성 동결 | `package.json`/`requirements.txt`/`Cargo.toml` 등 매니페스트 해시 | halt |
+| DONE 파일 | 워크트리 루트의 `DONE` 존재 검사 | 정상 종료 + archive |
+| ESCALATION.md | `.loop/ESCALATION.md` 존재 검사 | halt (사람 처리 대기) |
+| 테스트 약화 | 워크트리의 `tests/**` 해시 비교 | halt |
+| 의존성 동결 | 워크트리의 매니페스트 해시 | halt |
 | Scope 위반 | `git diff --name-only` vs PROMPT.md frontmatter의 `scope.include`/`scope.exclude` (yq 파싱) | halt + diff stash |
 | Suppressor 신규 | `git diff` grep `noqa\|@ts-ignore\|eslint-disable\|#pragma warning disable` | halt |
 | Secrets | `gitleaks detect --staged` (있을 때) | halt |
 | fix:symptom streak | `git log --pretty=format:%s -2 \| grep -c '^fix:symptom'` ≥ 2 | halt + 에스컬레이션 |
 | 진동 | 최근 4 커밋의 변경 파일 셋 비교 — 두 상태 토글 검출 | halt |
 
-### 8.5 매 이터 의사 코드
+각 가드는 워크트리 안에서 평가되므로 **다른 워크트리(다른 task)와 독립**. 동시 실행 시 한 task의 게이트 검사가 다른 task에 영향 주지 않는다.
+
+### 8.7 매 이터 의사 코드
 
 ```bash
-n=$(($(ls iterations/*.log 2>/dev/null | wc -l) + 1))
+# (워크트리 존재·락 확보 가정)
+cd "$WT"
+n=$(($(ls .loop/iterations/*.log 2>/dev/null | wc -l) + 1))
 START_HASH_TESTS=$(hash_tests)
 START_HASH_DEPS=$(hash_deps)
 
 # PROMPT.md frontmatter 파싱 (scope·verify)
-SCOPE_INCLUDE=$(yq '.scope.include[]' PROMPT.md)
-SCOPE_EXCLUDE=$(yq '.scope.exclude[]' PROMPT.md)
-VERIFY_CMD=$(yq '.verify' PROMPT.md)
-
-# 메모리 파일 시드 (없으면 .loops/templates/에서)
-seed_memory_files
+SCOPE_INCLUDE=$(yq '.scope.include[]' .loop/PROMPT.md)
+SCOPE_EXCLUDE=$(yq '.scope.exclude[]' .loop/PROMPT.md)
+VERIFY_CMD=$(yq '.verify' .loop/PROMPT.md)
 
 # 호출
-cat PROMPT.md | claude \
+cat .loop/PROMPT.md | claude \
   --print --no-session-persistence --dangerously-skip-permissions \
-  --system-prompt-file ../../rules/autonomous-loop.md \
-  --add-dir ../.. --output-format json \
-  > "iterations/$n.log"
+  --system-prompt-file CLAUDE.md \
+  --add-dir . --output-format json \
+  > ".loop/iterations/$n.log"
 
 # 게이트 검사
-[[ -f DONE ]] && exit 0
-[[ -f ESCALATION.md ]] && exit 1
+[[ -f DONE ]] && { archive_meta_files; exit 0; }
+[[ -f .loop/ESCALATION.md ]] && exit 1
 [[ "$(hash_tests)" != "$START_HASH_TESTS" ]] && halt "tests modified"
 [[ "$(hash_deps)" != "$START_HASH_DEPS" ]] && halt "deps modified"
 out_of_scope=$(diff_vs_scope) && [[ -n "$out_of_scope" ]] && halt "out of scope: $out_of_scope"
 new_suppressors=$(grep_new_suppressors) && [[ -n "$new_suppressors" ]] && halt "new suppressors"
-fix_symptom_streak=$(git log --pretty=format:%s -2 | grep -c '^fix:symptom') && [[ $fix_symptom_streak -ge 2 ]] && halt "fix:symptom streak"
+fix_symptom_streak=$(git log --pretty=format:%s -2 | grep -c '^fix:symptom')
+[[ $fix_symptom_streak -ge 2 ]] && halt "fix:symptom streak"
 oscillation=$(detect_oscillation) && [[ -n "$oscillation" ]] && halt "oscillation"
 [[ $n -ge $MAX_ITERS ]] && halt "max iterations"
 [[ $(elapsed_minutes) -ge $WALL_CLOCK ]] && halt "wall clock"
 ```
 
-`halt()` 동작: 진행 중 변경을 git stash + 표준 형식의 자동 ESCALATION.md 작성 + exit 1.
+`halt()` 동작: 진행 중 변경을 워크트리 안에서 git stash + 표준 형식의 자동 ESCALATION.md 작성 + exit 1.
 
-### 8.6 의도적 비-범위
+### 8.8 의도적 비-범위
 
-- 다중 task 동시 실행 (한 번에 한 task)
-- 분산 실행·재시도
+- 슈퍼바이저 프로세스(stream-json 실시간 소비)
+- 분산 실행
 - 토큰 사전 추정·달러 캡 (`--max-budget-usd`는 OAuth에 무의미)
-- 단순 셸. 복잡도 증가가 필요하면 향후 안 3 변종(슈퍼바이저·worktree)으로 분기
+- 자동 머지 — 항상 사람의 검토 후 머지
+- 단순 셸. 복잡도 증가가 필요하면 향후 슈퍼바이저 변종으로 분기
 
 ## 9. 스킬 구조 (`plugins/project-init/skills/autonomous-loop-rule-creator/`)
 
@@ -346,30 +469,41 @@ autonomous-loop-rule-creator/
   - `PROMPT.template.md` → `.loops/PROMPT.template.md`
   - `loop.sh` → `.loops/loop.sh` (chmod +x)
   - `loops-README.md` → `.loops/README.md`
-- `.loops/templates/` 아래에 task 인스턴스용 메모리 파일 스텁 배치 (사용자가 `cp -r` 또는 `loop.sh`가 시드)
-- `.gitignore`에 `.loops/*/iterations/*.log` 추가 (선택: 사용자가 stdout 캡처를 git에서 제외하고 싶을 때)
+  - 메모리 파일 스텁 5종 → `.loops/templates/`
+- `.loops/locks/.gitkeep`, `.loops/archive/.gitkeep` 생성 (디렉토리 추적용)
+- `.gitignore`에 다음 라인 추가 (이미 있으면 skip):
+  - `.loops/locks/`
+  - `<project-name>-loops/` (sibling 워크트리 디렉토리. 부모 git에서 무시 — git 자체 추적은 안 되지만 실수 방지)
 - 기존 파일 존재 시 덮어쓰지 않고 사용자에게 diff 확인
 
 ### 9.2 템플릿 (`templates/ralph-loop.md`) frontmatter
 
 ```yaml
 ---
-label: 랄프 루프 (외부 셸 드라이버, 객관 게이트)
-description: 매 이터 콜드 스타트 + 4대 메모리 파일 + git commit 자기 분류
+label: 랄프 루프 (sibling 워크트리, 객관 게이트, 동시 실행 지원)
+description: 매 이터 콜드 스타트 + 4대 메모리 파일 + git commit 자기 분류 + 워크트리 격리
 recommended: true
 on_create: |
   1. assets/PROMPT.template.md를 .loops/PROMPT.template.md로 복사
   2. assets/loop.sh를 .loops/loop.sh로 복사하고 chmod +x
   3. assets/loops-README.md를 .loops/README.md로 복사
-  4. assets/PLAN.template.md, NOTES.template.md, HANDOFF.template.md, RUN_LOG.template.md, ESCALATION.template.md를
-     .loops/templates/ 아래로 복사
-  5. .gitignore에 `.loops/*/iterations/*.log` 라인 추가 (이미 있으면 skip)
-  6. 사용자에게 다음 안내 메시지 출력:
-     "자율 루프가 설치되었습니다. 새 task 시작:
-        mkdir .loops/<task-id>
-        cp .loops/PROMPT.template.md .loops/<task-id>/PROMPT.md
-        $EDITOR .loops/<task-id>/PROMPT.md   # 작업 정의 채움
-        ./.loops/loop.sh <task-id>"
+  4. assets/{PLAN,NOTES,HANDOFF,RUN_LOG,ESCALATION}.template.md를 .loops/templates/ 아래로 복사
+  5. .loops/locks/.gitkeep, .loops/archive/.gitkeep 생성
+  6. .gitignore에 다음 라인 추가 (이미 있으면 skip):
+     - .loops/locks/
+     - ../<project-name>-loops/   # sibling 워크트리 위치 — 사용자가 LOOP_WORKTREE_BASE로 변경 시 조정 필요
+  7. 사용자에게 다음 안내 메시지 출력:
+     "자율 루프가 설치되었습니다.
+      sibling 워크트리는 ../<project-name>-loops/<task-id>/ 에 생성됩니다.
+      LOOP_WORKTREE_BASE 환경 변수로 위치 변경 가능.
+
+      새 task 시작:
+        ./.loops/loop.sh <task-id>           # 첫 호출: 워크트리 + 메타 파일 생성
+        $EDITOR ../<project-name>-loops/<task-id>/.loop/PROMPT.md   # 작업 정의 채움
+        ./.loops/loop.sh <task-id>           # 두 번째 호출: 루프 시작
+
+      동시 실행: MAX_CONCURRENT 환경 변수로 조정 (기본 3).
+      자세한 내용은 .loops/README.md 참조."
 ---
 
 # autonomous-loop — 자율 루프 운영 규칙
@@ -386,46 +520,139 @@ on_create: |
 - 자율 루프는 모든 프로젝트의 기본값으로 적합하지 않다 → `bootstrap`의 카테고리 선택 단계에서 사용자가 명시적으로 체크해야 생성됨 (이미 `bootstrap`의 동작 — "전체 / 일부 / 없음" 선택)
 - 권장 가이드라인: README나 `bootstrap` 안내문에 "자율 루프는 장시간 무인 작업이 필요할 때만 추가" 명시
 
-## 10. 새 task 시작 절차 (사용자 워크플로)
+## 10. 사용자 워크플로 (`.loops/README.md`에 안내)
 
-`.loops/README.md`에 안내:
+### 10.1 새 task 시작
 
 ```bash
-# 1. task 디렉토리 생성
-mkdir -p .loops/auth-refactor
+# 1. 첫 호출 — 워크트리 + 메타 파일 생성
+./.loops/loop.sh auth-refactor
+# 출력: "워크트리 생성: ../<project>-loops/auth-refactor"
+#       "다음 파일을 채워 주세요: ../<project>-loops/auth-refactor/.loop/PROMPT.md"
 
-# 2. PROMPT.md 시드 후 작업 정의 채움
-cp .loops/PROMPT.template.md .loops/auth-refactor/PROMPT.md
-$EDITOR .loops/auth-refactor/PROMPT.md
-# - {{task_description}}, {{acceptance_criteria}}, {{scope_in}}, {{scope_out}}, {{verify_command}} 채움
+# 2. PROMPT.md에 작업 정의 채움
+$EDITOR ../<project>-loops/auth-refactor/.loop/PROMPT.md
+# - YAML frontmatter: scope.include / scope.exclude / verify
+# - 본문 placeholder: {{task_description}}, {{acceptance_criteria}}, ...
 
-# 3. 빈 메모리 파일 시드 (loop.sh가 자동 시드하기도 함)
-cp .loops/templates/{PLAN,NOTES,HANDOFF,RUN_LOG}.template.md .loops/auth-refactor/
-
-# 4. 루프 시작
+# 3. 두 번째 호출 — 실제 루프 시작
 ./.loops/loop.sh auth-refactor
 
-# 5. 진행 모니터링 (별도 터미널)
-tail -f .loops/auth-refactor/RUN_LOG.md
-ls -la .loops/auth-refactor/iterations/
+# 4. 진행 모니터링 (별도 터미널)
+tail -f ../<project>-loops/auth-refactor/.loop/RUN_LOG.md
+ls -la ../<project>-loops/auth-refactor/.loop/iterations/
 
-# 6. 정지: Ctrl+C, 또는 DONE/ESCALATION.md가 생기면 자동 종료
+# 5. 정지: Ctrl+C, 또는 DONE/ESCALATION.md가 생기면 자동 종료
 ```
 
-## 11. 향후 확장
+### 10.2 DONE 후 머지
 
-- 변종 템플릿: 워크트리 격리(안 3) / 수용-테스트 앵커(안 4) / 다중 task 병렬
+```bash
+# 워크트리에서 검토
+cd ../<project>-loops/auth-refactor
+git log autonomous-loop/auth-refactor
+
+# 메인 프로젝트로 돌아와 머지 (또는 PR 생성)
+cd <project>
+git merge autonomous-loop/auth-refactor
+# 또는: gh pr create --base main --head autonomous-loop/auth-refactor
+
+# 워크트리 정리
+git worktree remove ../<project>-loops/auth-refactor
+git branch -d autonomous-loop/auth-refactor   # 또는 -D
+```
+
+archive 메타 파일은 `.loops/archive/auth-refactor/`에 보관됨 — 나중에 회고·재학습용.
+
+### 10.3 동시 실행
+
+```bash
+# 두 task 병렬 실행
+./.loops/loop.sh auth-refactor &
+./.loops/loop.sh schema-migration &
+
+# 진행 모니터링 (집계)
+tail -f ../<project>-loops/*/.loop/RUN_LOG.md
+
+# 동시 실행 캡 조정 (기본 3)
+MAX_CONCURRENT=5 ./.loops/loop.sh new-task &
+
+# 모든 워크트리 목록
+git worktree list
+
+# 모든 RUNNING 락 확인
+ls .loops/locks/
+```
+
+### 10.4 ESCALATION 처리
+
+```bash
+# 정지된 task의 보고서 읽기
+cat ../<project>-loops/<task-id>/.loop/ESCALATION.md
+
+# 사람이 결정 후 워크트리에서 수정·재시작
+cd ../<project>-loops/<task-id>
+$EDITOR .loop/PROMPT.md   # 명세 조정
+$EDITOR .loop/NOTES.md    # 학습 보강
+rm .loop/ESCALATION.md    # 보고 해제
+cd <project>
+./.loops/loop.sh <task-id>   # 재시작
+```
+
+## 11. 동시 실행 모델
+
+### 11.1 자동 격리 (워크트리로 인해 무료)
+
+| 자원 | 격리 | 비고 |
+|---|---|---|
+| 작업 파일 (코드·테스트) | ✅ 워크트리별 | git worktree가 working tree 분리 |
+| Git 브랜치·커밋 | ✅ `autonomous-loop/<task-id>` 별 | 히스토리 인터리빙 없음 |
+| 메타 파일 | ✅ `<worktree>/.loop/` 별 | 교차 오염 없음 |
+| Iteration 카운터 | ✅ 워크트리별 | 충돌 없음 |
+| auto-memory 버킷 | ✅ cwd 키 → 워크트리별 독립 | 자동 |
+| 객관 게이트 평가 | ✅ 워크트리 안에서 | 한 task의 변경이 다른 task의 게이트에 영향 없음 |
+
+### 11.2 명시적 관리 자원
+
+| 자원 | 충돌 방식 | 대응 |
+|---|---|---|
+| Anthropic API rate limit | 동시 요청 폭증 → 429 | `MAX_CONCURRENT` 캡 (기본 3). 락 디렉토리로 강제 |
+| 디스크 (워크트리 + node_modules 등) | N개 worktree = N개 working copy | 사용자 자각. `pnpm` 등 hardlink 도구 권장 |
+| CPU (테스트·빌드 병렬) | 자연 분배 | 테스트 러너의 병렬 옵션 조정 가능 |
+| 사용자 모니터링 | 분산 | `tail -f ../<project>-loops/*/.loop/RUN_LOG.md` 집계 |
+
+### 11.3 동시성 락
+
+`.loops/locks/<task-id>.lock` 파일에 PID 기록. trap으로 EXIT 시 자동 정리. crashed 프로세스의 stale lock은 README의 정리 절차로 사용자가 처리.
+
+같은 task-id 이중 실행은 락 검사로 차단.
+
+### 11.4 한 task의 두 단계 동시 진행
+
+같은 task에서 두 번째 `loop.sh` 호출을 시도하면 락이 있어 거부됨 (exit 3). 한 task = 한 워크트리 = 한 진행자 원칙.
+
+## 12. 향후 확장
+
+- 변종 템플릿: 슈퍼바이저(stream-json 실시간 소비) / 수용-테스트 앵커(verify 통과를 종료 조건으로 자물쇠) / 멀티 작업 의존 그래프
 - 메모리 파일 자동 회전: NOTES.md 100줄 초과 시 `failures/`로 분할 (드라이버 또는 모델)
 - API key 사용 환경: `--bare` + `--max-budget-usd` 옵션 추가 (조건부)
 - GitHub Issue 에스컬레이션: ESCALATION.md → `gh issue create` 자동화 (선택 훅)
+- 워크트리 자동 정리: DONE된 task의 워크트리를 사용자 동의 하에 자동 remove
+- 비-git 프로젝트 지원: 현재 설계는 git worktree 가정. git 미사용 프로젝트는 단순 디렉토리 복사 변종 필요
 
-## 12. 검증 기준 (스킬 완성도)
+## 13. 검증 기준 (스킬 완성도)
 
 이 설계가 구현됐다고 인정되려면:
 
-1. `bootstrap` 호출 흐름에서 `autonomous-loop` 카테고리 선택 시 위 트리가 정확히 생성된다
-2. 생성된 `loop.sh`가 빈 task 디렉토리에서 호출돼도 메모리 파일 시드 후 첫 이터를 돌릴 수 있다
-3. 생성된 PROMPT.md placeholder가 모두 사용자가 채울 수 있는 형태로 명시된다
-4. 헌법(`rules/autonomous-loop.md`)이 자체완결적이며 자율-루프-지침 등 외부 문서를 참조하지 않는다
-5. 드라이버의 객관 게이트 9종(테스트 약화·의존성·scope·suppressor·secrets·fix:symptom streak·진동·이터 상한·시계 캡)이 모두 구현·테스트된다
-6. 사용자 레벨 CLAUDE.md/settings 잔여 위험이 README에 명시된다
+1. `bootstrap` 호출 흐름에서 `autonomous-loop` 카테고리 선택 시 §3.1의 트리가 정확히 생성된다
+2. `loop.sh`가 워크트리 부재 시 `git worktree add`로 sibling 위치(`<project>/../<project-name>-loops/<task-id>/`)에 워크트리를 생성하고 헌법·메모리 스텁을 시드한 후 사용자에게 PROMPT.md 작성을 안내하고 종료한다
+3. `loop.sh`가 워크트리 존재 시 동시성 락(`MAX_CONCURRENT`·task별)을 검사한 후 매 이터를 워크트리 cwd에서 실행한다
+4. 워크트리에 자기만의 `CLAUDE.md`가 존재하고 `.git/info/exclude`로 비추적되어, 이후 머지에 들어가지 않는다
+5. 생성된 PROMPT.md template의 YAML frontmatter(scope·verify)가 `yq`로 파싱 가능하고 placeholder가 모두 사용자가 채울 수 있는 형태로 명시된다
+6. 헌법(`rules/autonomous-loop.md`)이 자체완결적이며 외부 소스 문서를 참조하지 않는다
+7. 드라이버의 객관 게이트 9종(테스트 약화·의존성·scope·suppressor·secrets·fix:symptom streak·진동·이터 상한·시계 캡)이 모두 구현·테스트된다
+8. DONE 시 `.loop/` 메타 파일이 `<project>/.loops/archive/<task-id>/`로 영속화되고 사용자에게 머지 절차가 안내된다
+9. ESCALATION.md 작성 시 워크트리는 보존되고 archive 복사는 일어나지 않는다
+10. 두 task가 동시에 실행될 때 각자의 워크트리·브랜치·메타 파일·iteration 카운터가 격리되어 race가 발생하지 않는다
+11. 같은 task-id 이중 실행이 락으로 차단된다
+12. 사용자 레벨 CLAUDE.md/settings 잔여 위험이 README에 명시된다
