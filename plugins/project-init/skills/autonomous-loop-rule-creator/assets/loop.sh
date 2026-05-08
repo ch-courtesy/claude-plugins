@@ -39,10 +39,27 @@ require_tool claude
 # ----- 인자 파싱 -----
 
 if [[ $# -lt 1 ]]; then
-  die "사용: $0 <task-id>"
+  die "사용: $0 <task-id> [--max-iterations N] [--wall-clock-minutes N]"
 fi
 
 TASK_ID="$1"
+shift
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --max-iterations)
+      MAX_ITERATIONS_OVERRIDE="$2"
+      shift 2
+      ;;
+    --wall-clock-minutes)
+      WALL_CLOCK_MINUTES_OVERRIDE="$2"
+      shift 2
+      ;;
+    *)
+      die "알 수 없는 옵션: $1"
+      ;;
+  esac
+done
 
 # ----- 경로 계산 -----
 
@@ -55,11 +72,11 @@ BRANCH="autonomous-loop/$TASK_ID"
 TASK_ID_SAFE="$(sanitize_for_filename "$TASK_ID")"
 LOCK_DIR="$PROJECT_ROOT/.loops/locks"
 LOCK_FILE="$LOCK_DIR/$TASK_ID_SAFE.lock"
-ARCHIVE_DIR="$PROJECT_ROOT/.loops/archive/$TASK_ID_SAFE"
+ARCHIVE_DIR="$PROJECT_ROOT/.loops/archive/$TASK_ID"
 
-# 캡 기본값
-MAX_ITERATIONS="${MAX_ITERATIONS:-30}"
-WALL_CLOCK_MINUTES="${WALL_CLOCK_MINUTES:-120}"
+# 캡 기본값 (CLI > 환경 변수 > 디폴트)
+MAX_ITERATIONS="${MAX_ITERATIONS_OVERRIDE:-${MAX_ITERATIONS:-30}}"
+WALL_CLOCK_MINUTES="${WALL_CLOCK_MINUTES_OVERRIDE:-${WALL_CLOCK_MINUTES:-120}}"
 MAX_CONCURRENT="${MAX_CONCURRENT:-3}"
 
 # ----- 워크트리 생성 (첫 호출용) -----
@@ -75,6 +92,12 @@ create_worktree() {
   cp "$PROJECT_ROOT/rules/autonomous-loop.md" "$WT/CLAUDE.md" \
     || die "rules/autonomous-loop.md를 찾을 수 없음. 스킬이 정상 설치됐는지 확인하세요."
 
+  # 템플릿 디렉토리 존재 확인
+  [[ -d "$PROJECT_ROOT/.loops/templates" ]] \
+    || die ".loops/templates/가 없습니다. autonomous-loop-rule-creator 스킬을 먼저 실행하세요."
+  [[ -f "$PROJECT_ROOT/.loops/PROMPT.template.md" ]] \
+    || die ".loops/PROMPT.template.md가 없습니다. 스킬 설치를 확인하세요."
+
   # 메타 파일 시드
   mkdir -p "$WT/.loop/iterations"
   cp "$PROJECT_ROOT/.loops/PROMPT.template.md" "$WT/.loop/PROMPT.md"
@@ -83,12 +106,15 @@ create_worktree() {
   cp "$PROJECT_ROOT/.loops/templates/HANDOFF.template.md" "$WT/.loop/HANDOFF.md"
   cp "$PROJECT_ROOT/.loops/templates/RUN_LOG.template.md" "$WT/.loop/RUN_LOG.md"
 
-  # 워크트리 로컬 비추적 등록
+  # 워크트리 로컬 비추적 등록 (git worktree의 .git는 파일이므로 실제 gitdir 경로 사용)
+  local wt_gitdir
+  wt_gitdir="$(git -C "$WT" rev-parse --git-dir)"
+  mkdir -p "$wt_gitdir/info"
   {
     echo "CLAUDE.md"
     echo ".loop/"
     echo "DONE"
-  } >> "$WT/.git/info/exclude"
+  } >> "$wt_gitdir/info/exclude"
 
   echo ""
   echo "워크트리 생성 완료: $WT"
