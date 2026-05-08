@@ -57,11 +57,13 @@ verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이�
    - 이번에 무엇을 했는지
    - 무엇이 막혔거나 막힐 수 있는지
    - 다음 단계 추천 (구체적으로)
-2. **`.loop/RUN_LOG.md`에 한 줄 추가** — 형식: `[<ISO timestamp>] <한 줄 요약>`
-3. **git commit** — 자기 분류 prefix로 시작:
+2. **`.loop/RUN_LOG.md`에 한 줄 추가** — 형식: `[<ISO timestamp>] <시도·결과·다음 단계>`
+3. **`.loop/PLAN.md` 체크박스 갱신** (진전 있을 때)
+4. **실패·발견 시 `.loop/NOTES.md` 갱신** (실패 접근 또는 새 제약 추가)
+5. **git commit** — 자기 분류 prefix로 시작:
    `fix:root` / `fix:symptom` / `feat` / `refactor` / `test` / `chore`
-4. **완료 판정 (§3.4) 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료**
-5. **진전 불가능 → `.loop/ESCALATION.md` 작성·종료** (양식: 헌법 §5.2 참조)
+6. **완료 판정 (헌법 §3.4) 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료**
+7. **진전 불가능 → `.loop/ESCALATION.md` 작성·종료** (양식: 헌법 §5.2 참조)
 
 ## 절대 안 됨
 
