@@ -51,8 +51,10 @@
 |---|---|---|
 | 우회 패치 수용 | 유지 | NOTES.md에 workaround·재조사 필요 명시 |
 | 마일스톤 재정밀 | 유지 | 마일스톤 정의·검증 엄밀화 |
-| 잘못된 가정 | `git revert HEAD` | 영향 마일스톤·위험 갱신 |
-| 마일스톤 무효 | `git revert HEAD` | PLAN 재구성 |
+| 잘못된 가정, HEAD 1개로 처리 가능 | `git revert HEAD` | 영향 마일스톤·위험 갱신 |
+| 다중 commit 영향 또는 광범위 재구성 필요 | revert 안 함 → ESCALATION (`architecture-gap`) | 사람 결정 대기 |
+
+revert는 HEAD 단일 commit에 한정. 다중 commit 영향은 ESCALATION으로 (헌법 §3.3 마지막 단락).
 
 revert 시 message: `chore: revert <짧은 SHA> — fix:symptom 자체 교정 (사유)`. 드라이버 streak 검사는 `^fix:symptom`만 grep하므로 `chore:` prefix는 streak에 포함 안 됨.
 
