@@ -1456,5 +1456,77 @@ EOF
 )
 echo "OK"
 
+echo "=== TEST 40: stop이 claude 자식 프로세스도 종료 (orphan 방지) ==="
+ORPHAN_TASK="orphan-prevent"
+loop prepare "$ORPHAN_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$ORPHAN_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Orphan Prevention Test
+EOF
+
+# 오래 자는 mock claude — 자신의 PID를 파일에 기록
+CLAUDE_PID_FILE="$WORK_DIR/orphan-claude.pid"
+LONG_MOCK="$WORK_DIR/long-mock-bin"
+mkdir -p "$LONG_MOCK"
+cat > "$LONG_MOCK/claude" <<MOCKEOF
+#!/usr/bin/env bash
+cat > /dev/null
+echo \$\$ > "$CLAUDE_PID_FILE"
+sleep 60
+MOCKEOF
+chmod +x "$LONG_MOCK/claude"
+
+# 백그라운드에서 loop start 실행
+rm -f "$CLAUDE_PID_FILE"
+PATH="$LONG_MOCK:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 \
+  bash "$LOOP_SH_SRC" start "$ORPHAN_TASK" > "$WORK_DIR/orphan-output.log" 2>&1 &
+LOOP_PID=$!
+
+# claude PID 파일이 생길 때까지 대기 (max 5초)
+for _ in 1 2 3 4 5; do
+  [[ -f "$CLAUDE_PID_FILE" ]] && break
+  sleep 1
+done
+[[ -f "$CLAUDE_PID_FILE" ]] || {
+  echo "FAIL: mock claude 미시작"
+  kill -KILL "$LOOP_PID" 2>/dev/null
+  exit 1
+}
+CLAUDE_REAL_PID=$(cat "$CLAUDE_PID_FILE")
+kill -0 "$CLAUDE_REAL_PID" 2>/dev/null \
+  || { echo "FAIL: claude 프로세스가 시작 안 됨"; exit 1; }
+
+# stop으로 SIGTERM 전송
+loop stop "$ORPHAN_TASK"
+
+# claude 자식이 정리됐는지 확인 (최대 3초 grace)
+ORPHAN_DEAD=0
+for _ in 1 2 3; do
+  if ! kill -0 "$CLAUDE_REAL_PID" 2>/dev/null; then
+    ORPHAN_DEAD=1
+    break
+  fi
+  sleep 1
+done
+
+if [[ $ORPHAN_DEAD -eq 0 ]]; then
+  kill -KILL "$CLAUDE_REAL_PID" 2>/dev/null
+  echo "FAIL: stop 후 claude 자식이 orphan으로 잔존 (PID $CLAUDE_REAL_PID)"
+  exit 1
+fi
+
+# lock 파일 정리됐는지
+[[ ! -f "$PROJECT/.loops/locks/$ORPHAN_TASK.lock" ]] \
+  || { echo "FAIL: stop 후 lock 파일 잔존"; exit 1; }
+
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
