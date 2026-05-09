@@ -1,5 +1,13 @@
 # `autonomous-loop-rule-creator` Implementation Plan
 
+> **⚠️ SUPERSEDED — 구 설계 문서**
+>
+> 본 plan은 `plugins/project-init/skills/autonomous-loop-rule-creator/` 기반 rule-creator 패턴을 기술하지만, **실제 구현은 `plugins/autopilot/skills/loop/`** 자기완결 스킬로 통합되었습니다 (commit `4357e45`, 2026-05-09).
+>
+> 본문에 등장하는 경로 `plugins/project-init/skills/autonomous-loop-rule-creator/`·`assets/`·`templates/`는 **현재 PR에 존재하지 않습니다**. 최신 구조는 `plugins/autopilot/skills/loop/{SKILL.md, references/}` 참조. 재구조 배경은 spec(`docs/superpowers/specs/2026-05-08-autonomous-loop-rule-creator-design.md`) §14 참조.
+>
+> 본 문서는 결정·구현 이력 보존용으로 유지합니다. 새 작업의 시작점으로 사용하지 마세요.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 대상 프로젝트에 랄프 루프 기반 자율 수행 환경(헌법 + sibling 워크트리 드라이버 + 4대 메모리 파일 큐레이션 + 9가지 객관 게이트)을 한 번의 스킬 호출로 설치하는 새 rule-creator 스킬을 만든다.
