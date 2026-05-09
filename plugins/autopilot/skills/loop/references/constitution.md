@@ -73,6 +73,17 @@
 
 **`fix:symptom`으로 commit한 이터는 종료 전 PLAN.md를 재검토한다** (자체 교정 게이트). 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신. 이 단계가 streak 발생을 사전 차단한다.
 
+재검증 결과에 따라 commit 처리:
+
+| 판단 | commit 처리 | PLAN 처리 |
+|---|---|---|
+| 우회 패치 수용 (root cause 추후 규명) | 유지 | NOTES.md에 workaround 위치·재조사 필요 명시 |
+| 마일스톤 정의 재정밀 | 유지 | 마일스톤 정의·검증 엄밀화 |
+| 잘못된 가정 위 변경 | `git revert HEAD` | 영향 마일스톤·위험 갱신 |
+| 마일스톤 자체 무효 (분할·재배치 필요) | `git revert HEAD` | PLAN 재구성 — 새 마일스톤으로 |
+
+revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 교정 (사유)` 형식. 드라이버의 streak 검사는 `^fix:symptom`으로 grep하므로 `chore:` prefix는 streak에 포함되지 않는다.
+
 ### 3.4 완료 판정 (4-Level Verifier)
 
 다음 4 단계를 **모두** 통과할 때만 `DONE`을 작성한다 — 단순 verify 통과는 부분적 신호일 뿐.
