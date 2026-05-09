@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# loop.sh — 자율 루프 외부 셸 드라이버
-# 사용: ./.loops/loop.sh <task-id>
+# loop.sh — 자율 루프 외부 셸 드라이버 (subcommand 기반)
+#
+# 사용:
+#   ./.loops/loop.sh prepare <task-id>
+#   ./.loops/loop.sh start   <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]
+#   ./.loops/loop.sh status  [<task-id>]
+#   ./.loops/loop.sh stop    <task-id>
+#   ./.loops/loop.sh list
+#   ./.loops/loop.sh cleanup <task-id> [--force]
+#   ./.loops/loop.sh logs    <task-id> [--tail] [--iter N]
 #
 # 환경 변수:
 #   LOOP_WORKTREE_BASE     워크트리 부모 디렉토리 (기본: <project>/../<project-name>-loops)
@@ -36,101 +44,20 @@ require_tool git
 require_tool yq
 require_tool claude
 
-# ----- 인자 파싱 -----
+# ----- 경로 계산 헬퍼 -----
 
-if [[ $# -lt 1 ]]; then
-  die "사용: $0 <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]"
-fi
-
-TASK_ID="$1"
-shift
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --max-iterations)
-      MAX_ITERATIONS_OVERRIDE="$2"
-      shift 2
-      ;;
-    --wall-clock-minutes)
-      WALL_CLOCK_MINUTES_OVERRIDE="$2"
-      shift 2
-      ;;
-    --watch)
-      WATCH_MODE=1
-      shift
-      ;;
-    *)
-      die "알 수 없는 옵션: $1"
-      ;;
-  esac
-done
-
-WATCH_MODE="${WATCH_MODE:-0}"
-
-# ----- 경로 계산 -----
-
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
-  || die "git 저장소 안에서 실행해야 합니다."
-PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
-WT="$WT_BASE/$TASK_ID"
-BRANCH="autonomous-loop/$TASK_ID"
-TASK_ID_SAFE="$(sanitize_for_filename "$TASK_ID")"
-LOCK_DIR="$PROJECT_ROOT/.loops/locks"
-LOCK_FILE="$LOCK_DIR/$TASK_ID_SAFE.lock"
-ARCHIVE_DIR="$PROJECT_ROOT/.loops/archive/$TASK_ID"
-
-# 캡 기본값 (CLI > 환경 변수 > 디폴트)
-MAX_ITERATIONS="${MAX_ITERATIONS_OVERRIDE:-${MAX_ITERATIONS:-30}}"
-WALL_CLOCK_MINUTES="${WALL_CLOCK_MINUTES_OVERRIDE:-${WALL_CLOCK_MINUTES:-120}}"
-MAX_CONCURRENT="${MAX_CONCURRENT:-3}"
-
-# ----- 워크트리 생성 (첫 호출용) -----
-
-create_worktree() {
-  echo "[$(now_iso)] 워크트리 생성 시작: $WT"
-
-  mkdir -p "$WT_BASE"
-  git -C "$PROJECT_ROOT" worktree add "$WT" -b "$BRANCH" \
-    || die "git worktree add 실패: $WT"
-
-  # 헌법을 워크트리 CLAUDE.md로 복사
-  cp "$PROJECT_ROOT/rules/autonomous-loop.md" "$WT/CLAUDE.md" \
-    || die "rules/autonomous-loop.md를 찾을 수 없음. 스킬이 정상 설치됐는지 확인하세요."
-
-  # 템플릿 디렉토리 존재 확인
-  [[ -d "$PROJECT_ROOT/.loops/templates" ]] \
-    || die ".loops/templates/가 없습니다. autonomous-loop-rule-creator 스킬을 먼저 실행하세요."
-  [[ -f "$PROJECT_ROOT/.loops/PROMPT.template.md" ]] \
-    || die ".loops/PROMPT.template.md가 없습니다. 스킬 설치를 확인하세요."
-
-  # 메타 파일 시드
-  mkdir -p "$WT/.loop/iterations"
-  cp "$PROJECT_ROOT/.loops/PROMPT.template.md" "$WT/.loop/PROMPT.md"
-  cp "$PROJECT_ROOT/.loops/templates/PLAN.template.md" "$WT/.loop/PLAN.md"
-  cp "$PROJECT_ROOT/.loops/templates/NOTES.template.md" "$WT/.loop/NOTES.md"
-  cp "$PROJECT_ROOT/.loops/templates/HANDOFF.template.md" "$WT/.loop/HANDOFF.md"
-  cp "$PROJECT_ROOT/.loops/templates/RUN_LOG.template.md" "$WT/.loop/RUN_LOG.md"
-
-  # 워크트리 로컬 비추적 등록 (git worktree의 .git는 파일이므로 실제 gitdir 경로 사용)
-  local wt_gitdir
-  wt_gitdir="$(git -C "$WT" rev-parse --git-dir)"
-  mkdir -p "$wt_gitdir/info"
-  {
-    echo "CLAUDE.md"
-    echo ".loop/"
-    echo "DONE"
-  } >> "$wt_gitdir/info/exclude"
-
-  echo ""
-  echo "워크트리 생성 완료: $WT"
-  echo "브랜치: $BRANCH"
-  echo ""
-  echo "다음 파일을 채워 주세요:"
-  echo "  $WT/.loop/PROMPT.md"
-  echo ""
-  echo "채운 후 다시 실행:"
-  echo "  $0 $TASK_ID"
+compute_paths() {
+  local task_id="$1"
+  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || die "git 저장소 안에서 실행해야 합니다."
+  PROJECT_NAME="$(basename "$PROJECT_ROOT")"
+  WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
+  WT="$WT_BASE/$task_id"
+  BRANCH="autonomous-loop/$task_id"
+  TASK_ID_SAFE="$(sanitize_for_filename "$task_id")"
+  LOCK_DIR="$PROJECT_ROOT/.loops/locks"
+  LOCK_FILE="$LOCK_DIR/$TASK_ID_SAFE.lock"
+  LOOPS_DIR="$PROJECT_ROOT/.loops/$task_id"
 }
 
 # ----- 동시성 락 -----
@@ -183,8 +110,6 @@ hash_deps() {
 }
 
 read_scope_include() {
-  # PROMPT.md frontmatter 분리 후 yq 파싱 (markdown body의 angle bracket이 yq를 깨지 않도록)
-  # multi-line sed 블록: macOS BSD sed는 {1d; ...} 세미콜론 구문을 거부하므로 newline 사용
   sed -n '1,/^---$/{
     1d
     /^---$/d
@@ -266,7 +191,6 @@ count_fix_symptom_streak() {
 }
 
 detect_oscillation() {
-  # 최근 4 커밋의 변경 파일 셋이 두 상태로 토글되는지 검사
   local commits
   commits=$(cd "$WT" && git log --pretty=tformat:%H -4 2>/dev/null || true)
   [[ $(echo "$commits" | wc -l | tr -d ' ') -lt 4 ]] && return 0
@@ -277,7 +201,6 @@ detect_oscillation() {
     sets+=("$(cd "$WT" && git diff-tree --no-commit-id --name-only -r "$commit" 2>/dev/null | sort | md5sum | awk '{print $1}')")
   done <<< "$commits"
 
-  # set[0] == set[2] 그리고 set[1] == set[3]이면 토글
   if [[ ${#sets[@]} -eq 4 ]] \
      && [[ "${sets[0]}" == "${sets[2]}" ]] \
      && [[ "${sets[1]}" == "${sets[3]}" ]] \
@@ -300,6 +223,7 @@ halt() {
   (cd "$WT" && git add -A && git stash push -m "auto-stash by loop.sh halt" 2>/dev/null) || true
 
   # 자동 ESCALATION 작성
+  mkdir -p "$WT/.loop"
   cat > "$WT/.loop/ESCALATION.md" <<EOF
 # 에스컬레이션 보고 (드라이버 자동 작성)
 
@@ -326,26 +250,6 @@ $reason
 EOF
 
   exit 1
-}
-
-# ----- DONE 처리: 메타 파일 archive -----
-
-archive_meta_files() {
-  mkdir -p "$ARCHIVE_DIR"
-  cp "$WT/.loop/PLAN.md" "$ARCHIVE_DIR/" 2>/dev/null || true
-  cp "$WT/.loop/NOTES.md" "$ARCHIVE_DIR/" 2>/dev/null || true
-  cp "$WT/.loop/HANDOFF.md" "$ARCHIVE_DIR/" 2>/dev/null || true
-  cp "$WT/.loop/RUN_LOG.md" "$ARCHIVE_DIR/" 2>/dev/null || true
-
-  echo ""
-  echo "task $TASK_ID 완료. 메타 파일 보관: $ARCHIVE_DIR"
-  echo ""
-  echo "머지 검토:"
-  echo "  cd $PROJECT_ROOT"
-  echo "  git log $BRANCH"
-  echo "  git merge $BRANCH"
-  echo "  git worktree remove $WT"
-  echo "  git branch -d $BRANCH"
 }
 
 # ----- 이터레이션 호출 -----
@@ -389,7 +293,6 @@ iterate() {
   fi
 
   # 객관 게이트 9종
-  # sentinel-aware: 처음에 디렉토리/매니페스트가 없었으면 최초 생성은 위반이 아님
   if [[ "$start_hash_tests" != "no-tests-dir" ]] \
      && [[ "$(hash_tests)" != "$start_hash_tests" ]]; then
     halt "테스트 약화 — tests/** 해시 변경"
@@ -421,54 +324,475 @@ iterate() {
   return 0
 }
 
-# ----- 메인 -----
+# ----- subcommand: prepare -----
 
-if [[ ! -d "$WT" ]]; then
-  create_worktree
-  exit 0
+cmd_prepare() {
+  local task_id="$1"
+  [[ -z "$task_id" ]] && die "사용: $0 prepare <task-id>"
+
+  compute_paths "$task_id"
+
+  local prompt_dst="$LOOPS_DIR/PROMPT.md"
+  if [[ -f "$prompt_dst" ]]; then
+    die "이미 준비되어 있습니다: $prompt_dst\n재준비하려면 먼저 삭제하세요: rm $prompt_dst"
+  fi
+
+  local prompt_src="$PROJECT_ROOT/.loops/PROMPT.template.md"
+  [[ -f "$prompt_src" ]] || die ".loops/PROMPT.template.md를 찾을 수 없습니다. autonomous-loop-rule-creator 스킬을 먼저 실행하세요."
+
+  mkdir -p "$LOOPS_DIR"
+  cp "$prompt_src" "$prompt_dst"
+
+  echo "준비 완료. 다음 파일을 편집하세요:"
+  echo "  $prompt_dst"
+  echo ""
+  echo "편집 후 루프를 시작하려면:"
+  echo "  $0 start $task_id"
+}
+
+# ----- subcommand: start -----
+
+cmd_start() {
+  local task_id="$1"
+  shift || true
+  [[ -z "$task_id" ]] && die "사용: $0 start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]"
+
+  local max_iterations_override="" wall_clock_minutes_override="" watch_mode=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --max-iterations)
+        max_iterations_override="$2"
+        shift 2
+        ;;
+      --wall-clock-minutes)
+        wall_clock_minutes_override="$2"
+        shift 2
+        ;;
+      --watch)
+        watch_mode=1
+        shift
+        ;;
+      *)
+        die "알 수 없는 옵션: $1"
+        ;;
+    esac
+  done
+
+  compute_paths "$task_id"
+  TASK_ID="$task_id"
+
+  MAX_ITERATIONS="${max_iterations_override:-${MAX_ITERATIONS:-30}}"
+  WALL_CLOCK_MINUTES="${wall_clock_minutes_override:-${WALL_CLOCK_MINUTES:-120}}"
+  MAX_CONCURRENT="${MAX_CONCURRENT:-3}"
+  WATCH_MODE="$watch_mode"
+
+  # 1. PROMPT.md 존재 확인
+  local prompt_path="$LOOPS_DIR/PROMPT.md"
+  if [[ ! -f "$prompt_path" ]]; then
+    die "PROMPT.md가 없습니다. 먼저 실행하세요: $0 prepare $task_id"
+  fi
+
+  # 2. placeholder 검사
+  local placeholders
+  placeholders=$(grep -oE '\{\{[^}]+\}\}' "$prompt_path" 2>/dev/null || true)
+  if [[ -n "$placeholders" ]]; then
+    die "채워지지 않은 placeholder가 있습니다: $(echo "$placeholders" | tr '\n' ' ')\n$prompt_path 를 편집하세요."
+  fi
+
+  # 3. 락 획득
+  acquire_lock
+
+  # 4. 워크트리 생성 (없는 경우)
+  if [[ ! -d "$WT" ]]; then
+    echo "[$(now_iso)] 워크트리 생성 시작: $WT"
+
+    mkdir -p "$WT_BASE"
+    git -C "$PROJECT_ROOT" worktree add "$WT" -b "$BRANCH" \
+      || die "git worktree add 실패: $WT"
+
+    # 헌법을 워크트리 CLAUDE.md로 복사
+    cp "$PROJECT_ROOT/rules/autonomous-loop.md" "$WT/CLAUDE.md" \
+      || die "rules/autonomous-loop.md를 찾을 수 없음. 스킬이 정상 설치됐는지 확인하세요."
+
+    # 템플릿 디렉토리 존재 확인
+    [[ -d "$PROJECT_ROOT/.loops/templates" ]] \
+      || die ".loops/templates/가 없습니다. autonomous-loop-rule-creator 스킬을 먼저 실행하세요."
+
+    # 메타 파일 시드
+    mkdir -p "$WT/.loop/iterations"
+    cp "$LOOPS_DIR/PROMPT.md" "$WT/.loop/PROMPT.md"
+    cp "$PROJECT_ROOT/.loops/templates/PLAN.template.md" "$WT/.loop/PLAN.md"
+    cp "$PROJECT_ROOT/.loops/templates/NOTES.template.md" "$WT/.loop/NOTES.md"
+    cp "$PROJECT_ROOT/.loops/templates/HANDOFF.template.md" "$WT/.loop/HANDOFF.md"
+    cp "$PROJECT_ROOT/.loops/templates/RUN_LOG.template.md" "$WT/.loop/RUN_LOG.md"
+
+    # 워크트리 로컬 비추적 등록
+    local wt_gitdir
+    wt_gitdir="$(git -C "$WT" rev-parse --git-dir)"
+    mkdir -p "$wt_gitdir/info"
+    {
+      echo "CLAUDE.md"
+      echo ".loop/"
+      echo "DONE"
+    } >> "$wt_gitdir/info/exclude"
+
+    echo "[$(now_iso)] 워크트리 생성 완료: $WT"
+    echo "브랜치: $BRANCH"
+  else
+    echo "[$(now_iso)] 기존 워크트리 사용: $WT"
+  fi
+
+  # 5. 이터레이션 루프
+  START_TIME=$(date +%s)
+  local n=0
+
+  while true; do
+    n=$((n + 1))
+
+    set +e
+    iterate
+    local iter_status=$?
+    set -e
+
+    if [[ $iter_status -eq 100 ]]; then
+      echo "[$(now_iso)] DONE 신호 감지. 정상 종료."
+      # cleanup 시 archive로 이동하도록 안내만
+      echo ""
+      echo "task $task_id 완료."
+      echo "메타 파일 정리 및 워크트리 제거:"
+      echo "  $0 cleanup $task_id"
+      exit 0
+    fi
+    if [[ $iter_status -eq 101 ]]; then
+      echo "[$(now_iso)] ESCALATION.md 감지. 사람 처리 대기."
+      if [[ $WATCH_MODE -eq 1 ]]; then
+        echo "[$(now_iso)] --watch 모드: ESCALATION.md 사라짐 polling 중 (60초 간격, Ctrl+C로 종료)..."
+        while [[ -f "$WT/.loop/ESCALATION.md" ]]; do
+          sleep 60
+        done
+        echo "[$(now_iso)] ESCALATION.md 해제 감지. 루프 재개."
+        continue
+      fi
+      exit 1
+    fi
+    if [[ $iter_status -ne 0 ]]; then
+      exit "$iter_status"
+    fi
+
+    if [[ $n -ge $MAX_ITERATIONS ]]; then
+      halt "이터 상한 도달 ($n / $MAX_ITERATIONS)"
+    fi
+
+    if [[ $(elapsed_minutes) -ge $WALL_CLOCK_MINUTES ]]; then
+      halt "시계 캡 도달 ($(elapsed_minutes) / $WALL_CLOCK_MINUTES 분)"
+    fi
+  done
+}
+
+# ----- subcommand: status -----
+
+cmd_status() {
+  local filter_task_id="${1:-}"
+
+  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || die "git 저장소 안에서 실행해야 합니다."
+  PROJECT_NAME="$(basename "$PROJECT_ROOT")"
+  WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
+  LOCK_DIR="$PROJECT_ROOT/.loops/locks"
+
+  # task-id 목록 수집: .loops/<task-id>/ 디렉토리 (시스템 디렉토리 제외)
+  local loops_base="$PROJECT_ROOT/.loops"
+  local task_ids=()
+
+  if [[ -n "$filter_task_id" ]]; then
+    task_ids=("$filter_task_id")
+  else
+    while IFS= read -r dir; do
+      local basename_dir
+      basename_dir="$(basename "$dir")"
+      # 시스템 디렉토리 제외
+      case "$basename_dir" in
+        locks|templates|archive) continue ;;
+      esac
+      [[ -d "$dir" ]] || continue
+      task_ids+=("$basename_dir")
+    done < <(find "$loops_base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+  fi
+
+  if [[ ${#task_ids[@]} -eq 0 ]]; then
+    echo "실행 중인 task가 없습니다."
+    echo "새 task를 시작하려면: $0 prepare <task-id>"
+    return 0
+  fi
+
+  printf "%-20s %-12s %-12s %s\n" "TASK-ID" "STATE" "ITERATIONS" "LAST-UPDATE"
+  printf "%-20s %-12s %-12s %s\n" "--------------------" "------------" "------------" "-----------"
+
+  for tid in "${task_ids[@]}"; do
+    local tid_safe
+    tid_safe="$(sanitize_for_filename "$tid")"
+    local lock_file="$LOCK_DIR/$tid_safe.lock"
+    local wt="$WT_BASE/$tid"
+    local loops_dir="$loops_base/$tid"
+    local state="-"
+    local iterations="-"
+    local last_update="-"
+
+    # 상태 판정
+    if [[ -f "$lock_file" ]]; then
+      state="running"
+    elif [[ -d "$wt" ]]; then
+      if [[ -f "$wt/.loop/ESCALATION.md" ]]; then
+        state="escalated"
+      elif [[ -f "$wt/DONE" ]]; then
+        state="done"
+      else
+        state="idle"
+      fi
+    elif [[ -d "$loops_dir" ]]; then
+      # PROMPT.md만 있으면 prepared, 메모리 파일이 있으면 archived
+      if [[ -f "$loops_dir/PLAN.md" ]] || [[ -f "$loops_dir/NOTES.md" ]]; then
+        state="archived"
+      elif [[ -f "$loops_dir/PROMPT.md" ]]; then
+        state="prepared"
+      fi
+    fi
+
+    # 이터 횟수
+    if [[ -d "$wt/.loop/iterations" ]]; then
+      local cnt
+      cnt=$(find "$wt/.loop/iterations" -name "*.log" -type f 2>/dev/null | wc -l | tr -d ' ')
+      iterations="$cnt"
+    elif [[ -d "$loops_dir" ]]; then
+      # archived 상태에서 RUN_LOG.md로 추정
+      if [[ -f "$loops_dir/RUN_LOG.md" ]]; then
+        local cnt
+        cnt=$(grep -c '^\[' "$loops_dir/RUN_LOG.md" 2>/dev/null || echo "?")
+        iterations="$cnt"
+      fi
+    fi
+
+    # 마지막 갱신 시각
+    local ref_file=""
+    if [[ -d "$wt/.loop" ]]; then
+      ref_file="$wt/.loop/RUN_LOG.md"
+    elif [[ -f "$loops_dir/RUN_LOG.md" ]]; then
+      ref_file="$loops_dir/RUN_LOG.md"
+    fi
+    if [[ -n "$ref_file" ]] && [[ -f "$ref_file" ]]; then
+      last_update=$(date -r "$ref_file" -u +%Y-%m-%dT%H:%MZ 2>/dev/null || stat -c %y "$ref_file" 2>/dev/null | cut -c1-16 || echo "-")
+    fi
+
+    printf "%-20s %-12s %-12s %s\n" "$tid" "$state" "$iterations" "$last_update"
+  done
+}
+
+# ----- subcommand: stop -----
+
+cmd_stop() {
+  local task_id="$1"
+  [[ -z "$task_id" ]] && die "사용: $0 stop <task-id>"
+
+  compute_paths "$task_id"
+
+  if [[ ! -f "$LOCK_FILE" ]]; then
+    die "$task_id 에 대한 실행 중인 loop가 없습니다."
+  fi
+
+  local pid
+  pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+  if [[ -z "$pid" ]]; then
+    die "락 파일에서 PID를 읽을 수 없습니다: $LOCK_FILE"
+  fi
+
+  echo "SIGTERM 전송: PID $pid (task: $task_id)"
+  kill -TERM "$pid" 2>/dev/null || echo "WARN: PID $pid 에 SIGTERM 전송 실패 (이미 종료됐을 수 있음)"
+
+  # 5초간 종료 대기
+  local waited=0
+  while [[ $waited -lt 5 ]]; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "프로세스 종료 확인."
+      break
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+
+  if kill -0 "$pid" 2>/dev/null; then
+    echo "WARN: PID $pid 가 5초 후에도 살아있습니다."
+    echo "강제 종료하려면: kill -9 $pid"
+  fi
+
+  rm -f "$LOCK_FILE"
+  echo "락 파일 제거 완료: $LOCK_FILE"
+}
+
+# ----- subcommand: list -----
+
+cmd_list() {
+  cmd_status ""
+}
+
+# ----- subcommand: cleanup -----
+
+cmd_cleanup() {
+  local task_id="$1"
+  shift || true
+  [[ -z "$task_id" ]] && die "사용: $0 cleanup <task-id> [--force]"
+
+  local force=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=1; shift ;;
+      *) die "알 수 없는 옵션: $1" ;;
+    esac
+  done
+
+  compute_paths "$task_id"
+  TASK_ID="$task_id"
+
+  # 1. 실행 중 확인
+  if [[ -f "$LOCK_FILE" ]]; then
+    if [[ $force -eq 0 ]]; then
+      die "task $task_id 가 실행 중입니다. 먼저 정지하세요: $0 stop $task_id\n강제 실행: $0 cleanup $task_id --force"
+    fi
+    echo "WARN: 락 파일이 있지만 --force로 진행합니다."
+    rm -f "$LOCK_FILE"
+  fi
+
+  # 2. 워크트리 존재 확인
+  if [[ ! -d "$WT" ]]; then
+    die "$task_id 에 대한 워크트리가 없습니다: $WT"
+  fi
+
+  # 3. DONE 확인
+  if [[ ! -f "$WT/DONE" ]] && [[ $force -eq 0 ]]; then
+    die "task $task_id 에 DONE 신호가 없습니다.\n--force 없이 cleanup하려면 먼저 DONE 파일이 필요합니다: $0 cleanup $task_id --force"
+  fi
+
+  # 4. 메타 파일 archive (.loops/<task-id>/ 로 이동)
+  mkdir -p "$LOOPS_DIR"
+  for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md; do
+    if [[ -f "$WT/.loop/$f" ]]; then
+      cp "$WT/.loop/$f" "$LOOPS_DIR/" 2>/dev/null || true
+    fi
+  done
+  echo "메타 파일 보관: $LOOPS_DIR"
+
+  # 5. 워크트리 제거
+  local wt_remove_flags=""
+  [[ $force -eq 1 ]] && wt_remove_flags="--force"
+  git -C "$PROJECT_ROOT" worktree remove $wt_remove_flags "$WT" \
+    || die "git worktree remove 실패. 수동 제거: git worktree remove --force $WT"
+
+  # 6. 브랜치 삭제
+  local branch_delete_flag="-d"
+  [[ $force -eq 1 ]] && branch_delete_flag="-D"
+  git -C "$PROJECT_ROOT" branch $branch_delete_flag "$BRANCH" 2>/dev/null \
+    || echo "WARN: 브랜치 삭제 실패 (이미 머지됐거나 없을 수 있음): $BRANCH"
+
+  echo ""
+  echo "정리 완료: $task_id"
+  echo "보관된 메타 파일: $LOOPS_DIR"
+}
+
+# ----- subcommand: logs -----
+
+cmd_logs() {
+  local task_id="$1"
+  shift || true
+  [[ -z "$task_id" ]] && die "사용: $0 logs <task-id> [--tail] [--iter N]"
+
+  local tail_mode=0 iter_n=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --tail) tail_mode=1; shift ;;
+      --iter) iter_n="$2"; shift 2 ;;
+      *) die "알 수 없는 옵션: $1" ;;
+    esac
+  done
+
+  compute_paths "$task_id"
+
+  if [[ -n "$iter_n" ]]; then
+    # 이터 로그 출력 (워크트리 우선, fallback 없음)
+    local iter_log="$WT/.loop/iterations/$iter_n.log"
+    [[ -f "$iter_log" ]] || die "이터 로그가 없습니다: $iter_log"
+    cat "$iter_log"
+    return 0
+  fi
+
+  # RUN_LOG.md 위치 찾기 (워크트리 우선, archived fallback)
+  local run_log=""
+  if [[ -f "$WT/.loop/RUN_LOG.md" ]]; then
+    run_log="$WT/.loop/RUN_LOG.md"
+  elif [[ -f "$LOOPS_DIR/RUN_LOG.md" ]]; then
+    run_log="$LOOPS_DIR/RUN_LOG.md"
+  else
+    die "RUN_LOG.md를 찾을 수 없습니다. task-id가 올바른지 확인하세요: $task_id"
+  fi
+
+  if [[ $tail_mode -eq 1 ]]; then
+    tail -f "$run_log"
+  else
+    cat "$run_log"
+  fi
+}
+
+# ----- 사용법 출력 -----
+
+usage() {
+  cat >&2 <<'EOF'
+사용법이 바뀌었습니다.
+
+Subcommands:
+  prepare <task-id>       PROMPT.md 시드 생성
+  start <task-id>         검증 후 워크트리·락 생성 + 루프 시작
+  status [<task-id>]      상태 조회
+  stop <task-id>          실행 중 정지
+  list                    전체 task 상태
+  cleanup <task-id>       DONE 후 정리
+  logs <task-id>          로그 조회
+
+자세한 내용: ./.loops/README.md
+EOF
+  exit 1
+}
+
+# ----- subcommand 디스패처 -----
+
+if [[ $# -lt 1 ]]; then
+  usage
 fi
 
-# 워크트리 존재 → 이터레이션 루프 진입
-acquire_lock
+SUBCOMMAND="$1"
+shift
 
-START_TIME=$(date +%s)
-n=0
-
-while true; do
-  n=$((n + 1))
-
-  set +e
-  iterate
-  iter_status=$?
-  set -e
-
-  if [[ $iter_status -eq 100 ]]; then
-    echo "[$(now_iso)] DONE 신호 감지. 정상 종료."
-    archive_meta_files
-    exit 0
-  fi
-  if [[ $iter_status -eq 101 ]]; then
-    echo "[$(now_iso)] ESCALATION.md 감지. 사람 처리 대기."
-    if [[ $WATCH_MODE -eq 1 ]]; then
-      echo "[$(now_iso)] --watch 모드: ESCALATION.md 사라짐 polling 중 (60초 간격, Ctrl+C로 종료)..."
-      while [[ -f "$WT/.loop/ESCALATION.md" ]]; do
-        sleep 60
-      done
-      echo "[$(now_iso)] ESCALATION.md 해제 감지. 루프 재개."
-      continue
-    fi
-    exit 1
-  fi
-  if [[ $iter_status -ne 0 ]]; then
-    # halt가 이미 종료시킴. 도달 안 해야 함.
-    exit "$iter_status"
-  fi
-
-  if [[ $n -ge $MAX_ITERATIONS ]]; then
-    halt "이터 상한 도달 ($n / $MAX_ITERATIONS)"
-  fi
-
-  if [[ $(elapsed_minutes) -ge $WALL_CLOCK_MINUTES ]]; then
-    halt "시계 캡 도달 ($(elapsed_minutes) / $WALL_CLOCK_MINUTES 분)"
-  fi
-done
+case "$SUBCOMMAND" in
+  prepare)
+    cmd_prepare "$@"
+    ;;
+  start)
+    cmd_start "$@"
+    ;;
+  status)
+    cmd_status "${1:-}"
+    ;;
+  stop)
+    cmd_stop "${1:-}"
+    ;;
+  list)
+    cmd_list
+    ;;
+  cleanup)
+    cmd_cleanup "$@"
+    ;;
+  logs)
+    cmd_logs "$@"
+    ;;
+  *)
+    echo "알 수 없는 subcommand: $SUBCOMMAND" >&2
+    usage
+    ;;
+esac

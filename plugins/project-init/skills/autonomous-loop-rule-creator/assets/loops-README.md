@@ -15,10 +15,12 @@
 .loops/
 ├── README.md                  # 본 문서
 ├── PROMPT.template.md         # 새 task의 PROMPT.md 시드
-├── loop.sh                    # 외부 드라이버
+├── loop.sh                    # 외부 드라이버 (subcommand 기반)
 ├── templates/                 # 메모리 파일 스텁
 ├── locks/                     # 동시 실행 락 (gitignored)
-└── archive/                   # DONE된 task의 메타 파일 보관
+└── <task-id>/                 # task별 통합 디렉토리
+    ├── PROMPT.md              # prepare 생성, start 후 워크트리로 복사
+    └── (cleanup 후) PLAN/NOTES/HANDOFF/RUN_LOG.md  # 아카이브
 ```
 
 런타임 워크트리:
@@ -26,7 +28,7 @@
 <project>/../<project-name>-loops/<task-id>/
 ├── CLAUDE.md                  # 헌법 (rules/autonomous-loop.md 복사본)
 ├── .loop/                     # 메타 파일 (워크트리 .git/info/exclude로 비추적)
-│   ├── PROMPT.md              # 작업 정의 (사용자 작성)
+│   ├── PROMPT.md              # 작업 정의 (prepare에서 복사)
 │   ├── PLAN.md                # 마일스톤 (모델 갱신)
 │   ├── NOTES.md               # 학습 누적 (모델 갱신)
 │   ├── HANDOFF.md             # 직전 → 다음 편지 (모델 매 이터 덮어쓰기)
@@ -36,49 +38,88 @@
 └── (프로젝트 파일들 — autonomous-loop/<task-id> 브랜치 체크아웃)
 ```
 
-## 새 task 시작
+## Subcommand 일람
+
+```
+loop.sh prepare <task-id>             # PROMPT.md 시드 생성
+loop.sh start   <task-id> [옵션]      # 검증 후 워크트리·락 생성 + 루프 시작
+loop.sh status  [<task-id>]           # 상태 조회 (전체 또는 단일)
+loop.sh stop    <task-id>             # 실행 중 정지 (SIGTERM)
+loop.sh list                          # 전체 task 상태 (status 별칭)
+loop.sh cleanup <task-id> [--force]   # DONE 후 정리
+loop.sh logs    <task-id> [옵션]      # 로그 조회
+```
+
+## 새 task 시작 워크플로
 
 ```bash
-# 1. 첫 호출 — 워크트리 + 메타 파일 생성
-./.loops/loop.sh auth-refactor
-# 출력: "워크트리 생성: ../<project>-loops/auth-refactor"
-#       "다음 파일을 채워 주세요: ../<project>-loops/auth-refactor/.loop/PROMPT.md"
+# 1. PROMPT.md 시드 생성
+./.loops/loop.sh prepare auth-refactor
+# 출력: "준비 완료. 다음 파일을 편집하세요: .loops/auth-refactor/PROMPT.md"
 
 # 2. PROMPT.md에 작업 정의 채움
-$EDITOR ../<project>-loops/auth-refactor/.loop/PROMPT.md
+$EDITOR .loops/auth-refactor/PROMPT.md
 # - YAML frontmatter: scope.include / scope.exclude / verify
 # - 본문 placeholder: {{task_description}}, {{acceptance_criteria}}, ...
 
-# 3. 두 번째 호출 — 실제 루프 시작
-./.loops/loop.sh auth-refactor
+# 3. 루프 시작
+./.loops/loop.sh start auth-refactor
 
 # 4. 진행 모니터링 (별도 터미널)
-tail -f ../<project>-loops/auth-refactor/.loop/RUN_LOG.md
+./.loops/loop.sh logs auth-refactor --tail
 
 # 5. 정지: Ctrl+C, 또는 DONE/ESCALATION.md가 생기면 자동 종료
 ```
 
-## DONE 후 머지
+## 상태 조회
 
 ```bash
+./.loops/loop.sh status               # 모든 task 상태 테이블
+./.loops/loop.sh status auth-refactor # 단일 task 상태
+```
+
+상태 값:
+- `prepared`: PROMPT.md 준비됨, start 전
+- `running`: 루프 실행 중 (락 파일 있음)
+- `idle`: 워크트리 있음, 락 없음 (일시 정지)
+- `escalated`: ESCALATION.md 있음 (사람 개입 필요)
+- `done`: DONE 파일 있음 (cleanup 대기)
+- `archived`: 워크트리 정리됨, 메타 파일 보관됨
+
+## 정지
+
+```bash
+./.loops/loop.sh stop auth-refactor   # SIGTERM + 5초 대기 + 락 해제
+```
+
+## DONE 후 머지 및 정리
+
+```bash
+# 워크트리에서 검토
 cd ../<project>-loops/auth-refactor
 git log autonomous-loop/auth-refactor
 
+# 메인 프로젝트로 돌아와 머지 (또는 PR 생성)
 cd <project>
 git merge autonomous-loop/auth-refactor    # 또는 PR 생성
-git worktree remove ../<project>-loops/auth-refactor
-git branch -d autonomous-loop/auth-refactor
+
+# 정리 (메타 파일 아카이브 + 워크트리 제거 + 브랜치 삭제)
+./.loops/loop.sh cleanup auth-refactor
 ```
 
-archive 메타 파일은 `.loops/archive/auth-refactor/`에 보관됩니다 — 회고·재학습용.
+cleanup 후 메타 파일은 `.loops/auth-refactor/`에 보관됩니다 — 회고·재학습용.
+
+## 로그 조회
+
+```bash
+./.loops/loop.sh logs auth-refactor             # RUN_LOG.md 출력
+./.loops/loop.sh logs auth-refactor --tail      # RUN_LOG.md 실시간 스트림
+./.loops/loop.sh logs auth-refactor --iter 3    # 이터 #3 로그 출력
+```
 
 ## DONE_WITH_CONCERNS 처리
 
 이터가 verify는 통과했으나 self-review에서 의심점을 발견하면 `DONE` 대신 HANDOFF.md의 `## 의심점` 섹션을 작성하고 정상 종료합니다. 사용자 개입은 보통 불필요 — 다음 이터가 의심점을 읽고 검증·해소한 후 깨끗한 `DONE`을 작성합니다.
-
-다음 이터가 의심점을 해소하지 못하면:
-- 의심점이 NOTES.md의 "확정된 사실"·"실패한 접근"으로 옮겨가 누적
-- 의심이 fix:symptom 누적이나 architecture-gap ESCALATION으로 발전 가능
 
 ## ESCALATION 처리
 
@@ -91,27 +132,25 @@ $EDITOR .loop/PROMPT.md           # 명세 조정
 $EDITOR .loop/NOTES.md            # 학습 보강
 rm .loop/ESCALATION.md            # 보고 해제
 cd <project>
-./.loops/loop.sh <task-id>        # 재시작
+./.loops/loop.sh start <task-id>  # 재시작
 ```
 
 ```bash
 # --watch 모드면 사용자는 ESCALATION.md 정리만 하면 자동 재시작:
-./.loops/loop.sh <task-id> --watch         # 처음 시작 시 watch 모드
+./.loops/loop.sh start <task-id> --watch
 # (ESCALATION 발생 시 driver는 60초마다 polling. 사용자가 ESCALATION.md 정리하면 즉시 재개)
 ```
 
 ## 동시 실행
 
 ```bash
-./.loops/loop.sh auth-refactor &
-./.loops/loop.sh schema-migration &
+./.loops/loop.sh start auth-refactor &
+./.loops/loop.sh start schema-migration &
 
-tail -f ../<project>-loops/*/.loop/RUN_LOG.md
-
-MAX_CONCURRENT=5 ./.loops/loop.sh new-task &   # 캡 상향
-
+./.loops/loop.sh status                        # 모든 task 상태
 git worktree list                              # 모든 워크트리
-ls .loops/locks/                                # 모든 RUNNING 락
+
+MAX_CONCURRENT=5 ./.loops/loop.sh start new-task &   # 캡 상향
 ```
 
 `MAX_CONCURRENT` 환경 변수 (기본 3)로 동시 실행 캡 조정. 같은 task-id 이중 실행은 락으로 차단됩니다.
@@ -123,7 +162,7 @@ ls .loops/locks/                                # 모든 RUNNING 락
 - `MAX_ITERATIONS` — 한 task의 이터 상한. 기본 30
 - `WALL_CLOCK_MINUTES` — 한 task의 시계 캡. 기본 120
 
-## CLI 플래그
+## start CLI 플래그
 
 - `--max-iterations N` — 이터 상한 (기본 30, 환경 변수 우선)
 - `--wall-clock-minutes N` — 시계 캡 (기본 120, 환경 변수 우선)
@@ -156,5 +195,16 @@ ls .loops/locks/                                # 모든 RUNNING 락
 ## 안전 정지
 
 - Ctrl+C: 진행 중 이터까지 완료 후 락 해제
+- `./.loops/loop.sh stop <task-id>`: SIGTERM + 락 해제
 - `kill <PID>`: SIGTERM. 락은 trap으로 해제됨
 - 모든 `loop.sh` 종료: 각자의 락 파일이 자동 정리
+
+## stale 락 정리
+
+크래시로 락이 남은 경우:
+
+```bash
+ls .loops/locks/                                 # 남은 락 확인
+cat .loops/locks/<task-id>.lock                  # PID 확인
+kill -0 <pid> 2>/dev/null || rm .loops/locks/<task-id>.lock   # 프로세스 없으면 제거
+```
