@@ -20,7 +20,8 @@ for f in SKILL.md \
          references/operational-guide.md \
          references/prepare.md \
          references/status-format.md \
-         references/troubleshooting.md; do
+         references/troubleshooting.md \
+         references/agent-prompts.md; do
   [[ -f "$SKILL_DIR/$f" ]] || { echo "FAIL: $f 부재"; exit 1; }
   echo "OK: $f"
 done

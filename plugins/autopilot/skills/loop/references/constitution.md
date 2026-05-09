@@ -354,6 +354,8 @@ NOTES.md가 100줄 넘으면 큰 실패는 `.loop/failures/<n>-<short-name>.md`�
 
 **브리프 품질이 응답 품질을 결정한다.** 브리프에는 무엇을·왜·이미 시도한 것·응답 형식을 모두 포함. "X를 분석해 줘" 같은 단문 브리프 금지.
 
+**브리프 양식 표준:** 위 권장 케이스 중 "독립 시각 검증"·"병렬 가설 테스트"는 `references/agent-prompts.md`의 3종 양식(spec-compliance-reviewer·code-quality-reviewer·parallel-hypothesis-tester)을 따른다. 양식은 superpowers `subagent-driven-development` 패턴을 자율 루프 컨텍스트로 적응한 것 — 자기완결 브리프·status enum·결과 후속 처리가 표준화돼 있다.
+
 ## 12. 종료 신호
 
 루프의 종료·진행 의도는 다음 신호로 표현한다.

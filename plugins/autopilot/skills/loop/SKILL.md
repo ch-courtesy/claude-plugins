@@ -72,6 +72,7 @@ target 프로젝트에 `.loops/locks/` 부재 시 prepare/start 첫 호출에 �
 | `prepare.md` | prepare 인터랙티브 절차 상세 |
 | `status-format.md` | status 출력 형식 가이드 |
 | `troubleshooting.md` | ESCALATION 카테고리별 처리 가이드 |
+| `agent-prompts.md` | 이터 내 Agent dispatch 브리프 양식 3종 (spec-compliance-reviewer · code-quality-reviewer · parallel-hypothesis-tester). 헌법 §11.6 참조 |
 
 ## 의존성 (target 프로젝트)
 
