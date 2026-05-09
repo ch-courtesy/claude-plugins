@@ -1528,5 +1528,79 @@ fi
 
 echo "OK"
 
+echo "=== TEST 41: --force cleanup이 실행 중 프로세스를 먼저 SIGTERM (race 방지) ==="
+FORCE_TASK="force-cleanup-running"
+loop prepare "$FORCE_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$FORCE_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Force Cleanup Running Test
+EOF
+
+# 오래 자는 mock claude — 자신의 PID를 파일에 기록
+CLAUDE_PID_FILE_41="$WORK_DIR/force-claude.pid"
+LONG_MOCK_41="$WORK_DIR/force-mock-bin"
+mkdir -p "$LONG_MOCK_41"
+cat > "$LONG_MOCK_41/claude" <<MOCKEOF
+#!/usr/bin/env bash
+cat > /dev/null
+echo \$\$ > "$CLAUDE_PID_FILE_41"
+sleep 60
+MOCKEOF
+chmod +x "$LONG_MOCK_41/claude"
+
+# 백그라운드에서 loop start
+rm -f "$CLAUDE_PID_FILE_41"
+PATH="$LONG_MOCK_41:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 \
+  bash "$LOOP_SH_SRC" start "$FORCE_TASK" > "$WORK_DIR/force-output.log" 2>&1 &
+LOOP_PID_41=$!
+
+# claude PID 파일 대기
+for _ in 1 2 3 4 5; do
+  [[ -f "$CLAUDE_PID_FILE_41" ]] && break
+  sleep 1
+done
+[[ -f "$CLAUDE_PID_FILE_41" ]] || {
+  echo "FAIL: mock claude 미시작"
+  kill -KILL "$LOOP_PID_41" 2>/dev/null
+  exit 1
+}
+CLAUDE_PID_41=$(cat "$CLAUDE_PID_FILE_41")
+LOCK_FILE_41="$PROJECT/.loops/locks/$FORCE_TASK.lock"
+[[ -f "$LOCK_FILE_41" ]] || { echo "FAIL: lock 파일 미생성"; exit 1; }
+
+# --force cleanup
+loop cleanup "$FORCE_TASK" --force > /dev/null 2>&1
+
+# bash와 claude 모두 종료됐는지 (최대 3초 grace)
+ALL_DEAD=0
+for _ in 1 2 3; do
+  if ! kill -0 "$LOOP_PID_41" 2>/dev/null && ! kill -0 "$CLAUDE_PID_41" 2>/dev/null; then
+    ALL_DEAD=1
+    break
+  fi
+  sleep 1
+done
+
+if [[ $ALL_DEAD -eq 0 ]]; then
+  kill -KILL "$LOOP_PID_41" 2>/dev/null
+  kill -KILL "$CLAUDE_PID_41" 2>/dev/null
+  echo "FAIL: --force cleanup 후 프로세스 잔존 (bash $LOOP_PID_41, claude $CLAUDE_PID_41)"
+  exit 1
+fi
+
+# lock·워크트리 정리
+[[ ! -f "$LOCK_FILE_41" ]] || { echo "FAIL: lock 파일 잔존"; exit 1; }
+WT_41="$WORK_DIR/myproject-loops/$FORCE_TASK"
+[[ ! -d "$WT_41" ]] || { echo "FAIL: 워크트리 잔존"; exit 1; }
+
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
