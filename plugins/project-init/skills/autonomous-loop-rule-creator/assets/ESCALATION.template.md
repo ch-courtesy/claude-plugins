@@ -4,6 +4,7 @@
 
 **작업**: <task-id>
 **이터레이션**: <현재 회차 / 상한>
+**카테고리**: <config-gap | spec-gap | architecture-gap | environment-gap | other>
 **트리거**: <어느 조건에 해당하는지 — 헌법 §5.1 참조>
 
 ## 현재 상태
@@ -25,3 +26,13 @@
 ## 필요한 결정
 
 <인간이 결정해야 할 사항을 명확한 질문 형태로>
+
+---
+
+## 카테고리 선택 가이드
+
+- `config-gap` — 환경 설정·도구 버전·자격증명 부재. 사람이 환경 조정.
+- `spec-gap` — `.loop/PROMPT.md` 자체 결함. 사람이 명세 수정.
+- `architecture-gap` — 현재 코드 구조로 해결 불가. 사람의 architecture 결정.
+- `environment-gap` — 외부 시스템 일시적 문제. 사람의 환경 점검.
+- `other` — 위에 안 맞을 때.

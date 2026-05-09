@@ -2018,6 +2018,20 @@ PR 생성은 사용자 승인이 있을 때만 실행. 본 task는 사용자에�
 
 ---
 
+## Post-Execution Adjustment 2 (2026-05-09)
+
+외부 파이프라인(Forge·AGX·OpenHands·Aider 등) 벤치마크 결과 3가지 패턴을 차용:
+
+1. **Forge 4-Level Verifier** (헌법 §3.4 + PROMPT.template 종료 전 + ESCALATION verify 실패 카테고리화) — "테스트 통과 dead code" 시나리오 차단. existence·substantive·wired·runtime 4 단계 모두 통과해야 DONE 인정
+2. **ESCALATION 카테고리화** (헌법 §5.2 + ESCALATION.template.md 양식 확장) — config-gap/spec-gap/architecture-gap/environment-gap/other 5종. 사람의 처리 시간 단축 + 향후 같은 종류 막힘 식별
+3. **AGX durable wake** (loop.sh `--watch` 플래그 + loops-README 안내) — ESCALATION 발생 시 정지 대신 polling으로 ESCALATION.md 사라짐 감지해 자동 재시작. 사용자 부담 ↓
+
+이 변경은 단일 commit으로 적용. 본 plan에 새 task로 추가하지 않고 retrospective로 기록.
+
+검증: 통합 테스트 두 종이 변경 후에도 통과해야 한다.
+
+---
+
 ## Execution Handoff
 
 **Plan complete and saved to `docs/superpowers/plans/2026-05-09-autonomous-loop-rule-creator.md`. Two execution options:**

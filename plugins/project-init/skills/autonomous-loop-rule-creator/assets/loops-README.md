@@ -74,6 +74,8 @@ archive 메타 파일은 `.loops/archive/auth-refactor/`에 보관됩니다 — 
 
 ## ESCALATION 처리
 
+**카테고리**: ESCALATION.md에 카테고리(config-gap/spec-gap/architecture-gap/environment-gap/other)가 표시되어 처리 방향을 빠르게 식별 가능
+
 ```bash
 cat ../<project>-loops/<task-id>/.loop/ESCALATION.md
 cd ../<project>-loops/<task-id>
@@ -82,6 +84,12 @@ $EDITOR .loop/NOTES.md            # 학습 보강
 rm .loop/ESCALATION.md            # 보고 해제
 cd <project>
 ./.loops/loop.sh <task-id>        # 재시작
+```
+
+```bash
+# --watch 모드면 사용자는 ESCALATION.md 정리만 하면 자동 재시작:
+./.loops/loop.sh <task-id> --watch         # 처음 시작 시 watch 모드
+# (ESCALATION 발생 시 driver는 60초마다 polling. 사용자가 ESCALATION.md 정리하면 즉시 재개)
 ```
 
 ## 동시 실행
@@ -106,6 +114,12 @@ ls .loops/locks/                                # 모든 RUNNING 락
 - `MAX_CONCURRENT` — 동시 실행 task 수. 기본 3
 - `MAX_ITERATIONS` — 한 task의 이터 상한. 기본 30
 - `WALL_CLOCK_MINUTES` — 한 task의 시계 캡. 기본 120
+
+## CLI 플래그
+
+- `--max-iterations N` — 이터 상한 (기본 30, 환경 변수 우선)
+- `--wall-clock-minutes N` — 시계 캡 (기본 120, 환경 변수 우선)
+- `--watch` — durable wake 모드. ESCALATION.md 감지 시 정지 대신 polling으로 재개 신호 대기. 사용자가 워크트리에서 ESCALATION.md 정리하면 자동 재시작
 
 ## 객관 게이트
 

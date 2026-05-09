@@ -669,3 +669,6 @@ cd <project>
 15. 헌법 §4.2 조기 정지 조건에 "3회 이상의 fix 실패"가 포함된다
 16. 헌법 §6.1에 다층 시스템 진단 로깅 항목이 있다
 17. 헌법 §8이 4 phase로 구조화된다 (Root Cause → Pattern → Hypothesis → Implementation)
+18. 헌법 §3.4 완료 판정이 4-Level Verifier (existence·substantive·wired·runtime)로 명시된다
+19. 헌법 §5.2 ESCALATION 양식에 카테고리 필드 (5종)이 있고 ESCALATION.template.md에 카테고리 가이드가 포함된다
+20. loop.sh가 `--watch` 플래그를 지원하며 ESCALATION.md 감지 시 polling으로 재개 신호를 대기하는 durable wake 모드를 제공한다

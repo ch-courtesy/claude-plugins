@@ -69,7 +69,11 @@ verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이�
 4. **실패·발견 시 `.loop/NOTES.md` 갱신** (실패 접근 또는 새 제약 추가)
 5. **git commit** — 자기 분류 prefix로 시작:
    `fix:root` / `fix:symptom` / `feat` / `refactor` / `test` / `chore`
-6. **완료 판정 (헌법 §3.4) 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료**
+6. **완료 판정 — 4-Level Verifier (헌법 §3.4) 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료**
+   - Existence: 수용 기준의 모든 항목이 코드로 다뤄짐
+   - Substantive: 변경 코드가 stub/placeholder가 아님
+   - Wired: 새 함수·모듈이 실제 사용처에 import됨
+   - Runtime: `verify` 명령 0 exit
 7. **진전 불가능 → `.loop/ESCALATION.md` 작성·종료** (양식: 헌법 §5.2 참조)
 
 ## 절대 안 됨
@@ -81,6 +85,7 @@ verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이�
 - 작업 범위(scope) 밖 파일 수정
 - 자기 분류 prefix 누락한 채 commit
 - `.loop/NOTES.md`의 "실패한 접근" 재시도 (정당한 사유 없이)
+- 4-Level Verifier 모든 단계 통과하지 않은 채 `DONE` 작성 (existence/substantive/wired/runtime 4가지 모두 확인)
 
 ## 응답 형식
 

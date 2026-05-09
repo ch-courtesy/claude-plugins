@@ -39,7 +39,7 @@ require_tool claude
 # ----- 인자 파싱 -----
 
 if [[ $# -lt 1 ]]; then
-  die "사용: $0 <task-id> [--max-iterations N] [--wall-clock-minutes N]"
+  die "사용: $0 <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]"
 fi
 
 TASK_ID="$1"
@@ -55,11 +55,17 @@ while [[ $# -gt 0 ]]; do
       WALL_CLOCK_MINUTES_OVERRIDE="$2"
       shift 2
       ;;
+    --watch)
+      WATCH_MODE=1
+      shift
+      ;;
     *)
       die "알 수 없는 옵션: $1"
       ;;
   esac
 done
+
+WATCH_MODE="${WATCH_MODE:-0}"
 
 # ----- 경로 계산 -----
 
@@ -442,7 +448,15 @@ while true; do
     exit 0
   fi
   if [[ $iter_status -eq 101 ]]; then
-    echo "[$(now_iso)] ESCALATION.md 감지. 정지 (사람 처리 대기)."
+    echo "[$(now_iso)] ESCALATION.md 감지. 사람 처리 대기."
+    if [[ $WATCH_MODE -eq 1 ]]; then
+      echo "[$(now_iso)] --watch 모드: ESCALATION.md 사라짐 polling 중 (60초 간격, Ctrl+C로 종료)..."
+      while [[ -f "$WT/.loop/ESCALATION.md" ]]; do
+        sleep 60
+      done
+      echo "[$(now_iso)] ESCALATION.md 해제 감지. 루프 재개."
+      continue
+    fi
     exit 1
   fi
   if [[ $iter_status -ne 0 ]]; then
