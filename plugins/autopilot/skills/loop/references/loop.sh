@@ -47,6 +47,42 @@ require_tool git
 require_tool yq
 require_tool claude
 
+# 해시 유틸 — macOS 기본 환경은 sha256sum·md5sum 미지원, shasum이 표준
+if command -v sha256sum >/dev/null 2>&1; then
+  HASH_BIN="sha256sum"
+  HASH_ARGS=()
+elif command -v shasum >/dev/null 2>&1; then
+  HASH_BIN="shasum"
+  HASH_ARGS=(-a 256)
+else
+  die "sha256sum 또는 shasum이 필요합니다 (macOS: shasum 기본 제공)"
+fi
+
+# ----- 첫 호출 setup (.loops/locks/ + .gitignore) -----
+
+ensure_loops_setup() {
+  # compute_paths 호출 후 PROJECT_ROOT 설정 상태에서 호출
+  mkdir -p "$PROJECT_ROOT/.loops/locks"
+
+  local gitignore="$PROJECT_ROOT/.gitignore"
+  local entry='.loops/locks/'
+
+  # 이미 entry가 있으면 idempotent
+  if [[ -f "$gitignore" ]] && grep -qxF "$entry" "$gitignore"; then
+    return 0
+  fi
+
+  # 기존 .gitignore가 newline으로 끝나지 않으면 먼저 newline 추가 (파서 호환)
+  if [[ -s "$gitignore" ]]; then
+    local last_byte
+    last_byte=$(tail -c1 "$gitignore" 2>/dev/null)
+    [[ "$last_byte" != "" ]] && echo "" >> "$gitignore"
+  fi
+
+  echo "$entry" >> "$gitignore"
+  echo "[$(now_iso)] .gitignore에 $entry 추가됨" >&2
+}
+
 # ----- 경로 계산 헬퍼 -----
 
 compute_paths() {
@@ -70,17 +106,29 @@ compute_paths() {
 acquire_lock() {
   mkdir -p "$LOCK_DIR"
 
+  # 우리 task에 stale lock(죽은/무효 PID)이 있으면 자동 정리
+  if [[ -f "$LOCK_FILE" ]]; then
+    local stale_pid
+    stale_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+    if [[ -z "$stale_pid" ]] || ! [[ "$stale_pid" =~ ^[0-9]+$ ]] \
+       || ! kill -0 "$stale_pid" 2>/dev/null; then
+      echo "[$(now_iso)] WARN: stale lock 자동 정리: $LOCK_FILE (PID '$stale_pid' 무효)" >&2
+      rm -f "$LOCK_FILE"
+    fi
+    # else: PID 살아있음 — 아래 atomic create가 실패하며 die (정상 거부)
+  fi
+
   local running
   running=$(find "$LOCK_DIR" -name "*.lock" -type f 2>/dev/null | wc -l | tr -d ' ')
   if [[ $running -ge $MAX_CONCURRENT ]]; then
-    die "이미 $running개 loop이 동작 중 (최대: $MAX_CONCURRENT). 새 loop 거부."
+    die "이미 ${running}개 loop이 동작 중 (최대: $MAX_CONCURRENT). 새 loop 거부."
   fi
 
   # 원자적 락 생성 (noclobber로 race 방지)
   if ! ( set -C; echo $$ > "$LOCK_FILE" ) 2>/dev/null; then
     local existing_pid
     existing_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "?")
-    die "task ${TASK_ID}가 이미 동작 중 (PID: $existing_pid). 종료 후 재실행. 프로세스가 없으면: rm $LOCK_FILE"
+    die "task ${TASK_ID}가 이미 동작 중 (PID: $existing_pid). 종료 후 재실행."
   fi
 
   # shellcheck disable=SC2064  # $LOCK_FILE은 trap-set 시점에 확정된 값으로 고정 의도
@@ -90,15 +138,39 @@ acquire_lock() {
 # ----- 게이트 헬퍼 -----
 
 hash_tests() {
-  if [[ -d "$WT/tests" ]]; then
-    find "$WT/tests" -type f \( -name '*.test.*' -o -name 'test_*.*' -o -name '*_test.*' \) 2>/dev/null \
-      | sort \
-      | xargs -I{} sha256sum {} 2>/dev/null \
-      | sha256sum \
-      | awk '{print $1}'
+  # SPEC.md frontmatter test_paths가 있으면 override
+  local override_paths
+  override_paths=$(read_scope_yaml | yq '.test_paths[]' 2>/dev/null || true)
+
+  local pathspecs=()
+  if [[ -n "${override_paths// }" ]]; then
+    while IFS= read -r p; do
+      [[ -z "$p" ]] && continue
+      pathspecs+=("$p")
+    done <<< "$override_paths"
   else
-    echo "no-tests-dir"
+    # 기본: 일반 컨벤션 디렉토리 + co-located 파일명 패턴
+    pathspecs=(
+      'tests/**' 'test/**' '__tests__/**' 'src/**/__tests__/**' 'spec/**' 'src/test/**'
+      '**/*.test.js' '**/*.test.ts' '**/*.test.jsx' '**/*.test.tsx' '**/*.test.py'
+      '**/*.spec.js' '**/*.spec.ts' '**/*.spec.rb'
+      '**/*_test.go' '**/*_test.py' '**/*_test.rb'
+      '**/test_*.py' '**/*_spec.rb'
+    )
   fi
+
+  local files
+  files=$(cd "$WT" 2>/dev/null && git ls-files -- "${pathspecs[@]}" 2>/dev/null | sort -u)
+
+  if [[ -z "$files" ]]; then
+    echo "no-tests"
+    return
+  fi
+
+  echo "$files" \
+    | xargs -I{} "$HASH_BIN" "${HASH_ARGS[@]}" "$WT/{}" 2>/dev/null \
+    | "$HASH_BIN" "${HASH_ARGS[@]}" \
+    | awk '{print $1}'
 }
 
 hash_deps() {
@@ -110,36 +182,28 @@ hash_deps() {
   if [[ -z "$manifests" ]]; then
     echo "no-manifests"
   else
-    echo "$manifests" | xargs -I{} sha256sum {} 2>/dev/null \
-      | sha256sum | awk '{print $1}'
+    echo "$manifests" | xargs -I{} "$HASH_BIN" "${HASH_ARGS[@]}" {} 2>/dev/null \
+      | "$HASH_BIN" "${HASH_ARGS[@]}" | awk '{print $1}'
   fi
 }
 
-read_scope_include() {
+read_scope_yaml() {
   sed -n '1,/^---$/{
     1d
     /^---$/d
     p
-  }' "$WT/.loop/SPEC.md" 2>/dev/null \
-    | yq '.scope.include[]' 2>/dev/null \
-    || true
-}
-
-read_scope_exclude() {
-  sed -n '1,/^---$/{
-    1d
-    /^---$/d
-    p
-  }' "$WT/.loop/SPEC.md" 2>/dev/null \
-    | yq '.scope.exclude[]' 2>/dev/null \
-    || true
+  }' "$WT/.loop/SPEC.md" 2>/dev/null
 }
 
 diff_vs_scope() {
-  local include_patterns exclude_patterns changed
-  include_patterns=$(read_scope_include)
-  exclude_patterns=$(read_scope_exclude)
-  changed=$(cd "$WT" && git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+  local scope_yaml include_patterns exclude_patterns committed working changed
+  scope_yaml=$(read_scope_yaml)
+  include_patterns=$(echo "$scope_yaml" | yq '.scope.include[]' 2>/dev/null || true)
+  exclude_patterns=$(echo "$scope_yaml" | yq '.scope.exclude[]' 2>/dev/null || true)
+  # 커밋된 diff + working tree 변경 양쪽 검사 (claude 비정상 종료로 미커밋 변경이 남는 경우 차단)
+  committed=$(cd "$WT" && git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+  working=$(cd "$WT" && git diff --name-only HEAD 2>/dev/null || true)
+  changed=$(printf '%s\n%s\n' "$committed" "$working" | sort -u | grep -v '^$' || true)
 
   [[ -z "$changed" ]] && return 0
 
@@ -187,7 +251,12 @@ diff_vs_scope() {
 }
 
 grep_new_suppressors() {
-  cd "$WT" && git diff HEAD~1 HEAD 2>/dev/null \
+  # 커밋된 diff + working tree 변경 양쪽 검사 (미커밋 suppressor도 catch)
+  cd "$WT" || return
+  {
+    git diff HEAD~1 HEAD 2>/dev/null
+    git diff HEAD 2>/dev/null
+  } \
     | grep -E '^\+' \
     | grep -E '#[[:space:]]*noqa|@ts-ignore|eslint-disable|#pragma[[:space:]]+warning[[:space:]]+disable' \
     || true
@@ -195,7 +264,14 @@ grep_new_suppressors() {
 
 check_secrets() {
   command -v gitleaks >/dev/null 2>&1 || return 0
-  cd "$WT" && gitleaks detect --staged --no-banner 2>&1 || true
+  # 이번 이터 커밋(HEAD~1..HEAD) + 미커밋 staged 양쪽 검사
+  # 비고: gitleaks는 unstaged-tracked 변경의 직접 스캔 옵션이 없음 (--no-git은 워크트리
+  #       전체 스캔이라 노이즈 큼) → unstaged-tracked는 본 게이트의 의도된 미커버.
+  #       헌법이 매 이터 commit 강제하므로 일반 흐름에선 gap 없음.
+  {
+    cd "$WT" && gitleaks detect --log-opts="HEAD~1..HEAD" --no-banner 2>&1 || true
+    cd "$WT" && gitleaks detect --staged --no-banner 2>&1 || true
+  }
 }
 
 count_fix_symptom_streak() {
@@ -211,7 +287,7 @@ detect_oscillation() {
   local sets=()
   while IFS= read -r commit; do
     [[ -z "$commit" ]] && continue
-    sets+=("$(cd "$WT" && git diff-tree --no-commit-id --name-only -r "$commit" 2>/dev/null | sort | md5sum | awk '{print $1}')")
+    sets+=("$(cd "$WT" && git diff-tree --no-commit-id --name-only -r "$commit" 2>/dev/null | sort | "$HASH_BIN" "${HASH_ARGS[@]}" | awk '{print $1}')")
   done <<< "$commits"
 
   if [[ ${#sets[@]} -eq 4 ]] \
@@ -232,10 +308,12 @@ halt() {
   local reason="$1"
   echo "[$(now_iso)] HALT: $reason" >&2
 
-  # 진행 중 변경을 stash (있으면)
-  local stash_msg
-  stash_msg=$( (cd "$WT" && git add -A && git stash push -m "auto-stash by loop.sh halt: $reason" 2>&1) || true )
-  if echo "$stash_msg" | grep -q "Saved working directory"; then
+  # 진행 중 변경을 stash (있으면) — stash list 카운트 비교로 성공 판정 (git locale 독립)
+  local stash_before stash_after
+  stash_before=$(cd "$WT" && git stash list 2>/dev/null | wc -l | tr -d ' ')
+  (cd "$WT" && git add -A && git stash push -m "auto-stash by loop.sh halt: $reason" >/dev/null 2>&1) || true
+  stash_after=$(cd "$WT" && git stash list 2>/dev/null | wc -l | tr -d ' ')
+  if [[ $stash_after -gt $stash_before ]]; then
     echo "[$(now_iso)] WARN: 미커밋 변경이 stash에 보관됨" >&2
     echo "  복구: cd $WT && git stash list / git stash pop" >&2
   fi
@@ -299,7 +377,13 @@ iterate() {
   echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 게이트 검사..."
 
   if [[ $exit_code -ne 0 ]]; then
-    echo "WARN: claude 호출이 0이 아닌 exit code 반환. iterations/$n.log 확인 권장."
+    CLAUDE_FAIL_STREAK=$((CLAUDE_FAIL_STREAK + 1))
+    echo "WARN: claude 호출이 0이 아닌 exit code 반환 (연속 실패: $CLAUDE_FAIL_STREAK). iterations/$n.log 확인 권장."
+    if [[ $CLAUDE_FAIL_STREAK -ge ${CLAUDE_FAIL_STREAK_LIMIT:-3} ]]; then
+      halt "claude 비정상 exit ${CLAUDE_FAIL_STREAK}회 연속 (rate limit·네트워크·인증 의심). iterations/$n.log 확인."
+    fi
+  else
+    CLAUDE_FAIL_STREAK=0
   fi
 
   # 종료 신호 검사 (먼저)
@@ -311,7 +395,7 @@ iterate() {
   fi
 
   # 객관 게이트 9종
-  if [[ "$start_hash_tests" != "no-tests-dir" ]] \
+  if [[ "$start_hash_tests" != "no-tests" ]] \
      && [[ "$(hash_tests)" != "$start_hash_tests" ]]; then
     halt "테스트 약화 — tests/** 해시 변경"
   fi
@@ -349,6 +433,7 @@ cmd_prepare() {
   [[ -z "$task_id" ]] && die "사용: $0 prepare <task-id>"
 
   compute_paths "$task_id"
+  ensure_loops_setup
 
   local spec_dst="$LOOPS_DIR/SPEC.md"
   if [[ -f "$spec_dst" ]]; then
@@ -402,6 +487,7 @@ cmd_start() {
 
   compute_paths "$task_id"
   TASK_ID="$task_id"
+  ensure_loops_setup
 
   MAX_ITERATIONS="${max_iterations_override:-${MAX_ITERATIONS:-30}}"
   WALL_CLOCK_MINUTES="${wall_clock_minutes_override:-${WALL_CLOCK_MINUTES:-120}}"
@@ -481,6 +567,7 @@ cmd_start() {
 
   # 7. 이터레이션 루프
   START_TIME=$(date +%s)
+  CLAUDE_FAIL_STREAK=0
   local n=0
 
   while true; do
@@ -545,6 +632,9 @@ cmd_start() {
 
 cmd_status() {
   local filter_task_id="${1:-}"
+
+  # path traversal 방지 (filter 지정 시)
+  [[ "$filter_task_id" == *..* ]] && die "task-id에 '..' 사용 불가 (path traversal 방지)"
 
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
@@ -632,7 +722,15 @@ cmd_status() {
       ref_file="$loops_dir/RUN_LOG.md"
     fi
     if [[ -n "$ref_file" ]] && [[ -f "$ref_file" ]]; then
-      last_update=$(date -r "$ref_file" -u +%Y-%m-%dT%H:%MZ 2>/dev/null || stat -c %y "$ref_file" 2>/dev/null | cut -c1-16 || echo "-")
+      local epoch=""
+      # macOS BSD: stat -f %m, Linux GNU: stat -c %Y
+      epoch=$(stat -f %m "$ref_file" 2>/dev/null || stat -c %Y "$ref_file" 2>/dev/null || echo "")
+      if [[ -n "$epoch" ]]; then
+        # macOS BSD: date -u -r <epoch>, Linux GNU: date -u -d "@<epoch>"
+        last_update=$(date -u -r "$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
+          || date -u -d "@$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
+          || echo "-")
+      fi
     fi
 
     printf "%-20s %-12s %-12s %s\n" "$tid" "$state" "$iterations" "$last_update"
@@ -648,7 +746,7 @@ cmd_stop() {
   compute_paths "$task_id"
 
   if [[ ! -f "$LOCK_FILE" ]]; then
-    die "task $task_id에 활성 락 없음"
+    die "task ${task_id}에 활성 락 없음"
   fi
 
   local pid
@@ -657,7 +755,7 @@ cmd_stop() {
 
   # PID 유효성 검사
   if ! kill -0 "$pid" 2>/dev/null; then
-    echo "[$(now_iso)] WARN: 락 PID $pid가 살아있지 않음 (stale lock). 락만 정리." >&2
+    echo "[$(now_iso)] WARN: 락 PID ${pid}가 살아있지 않음 (stale lock). 락만 정리." >&2
     rm -f "$LOCK_FILE"
     return 0
   fi
@@ -794,7 +892,7 @@ cmd_logs() {
 
 usage() {
   cat >&2 <<'EOF'
-사용법이 바뀌었습니다.
+autopilot loop 드라이버
 
 Subcommands:
   prepare <task-id>       SPEC.md 시드 생성

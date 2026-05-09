@@ -9,6 +9,16 @@ autopilot `loop` 스킬의 sibling 워크트리 기반 외부 셸 드라이버 �
 - 격리: 워크트리는 프로젝트 트리 밖에 있어 프로젝트 `CLAUDE.md`·hooks가 자동 차단됩니다.
 - 사용자 레벨 `~/.claude/CLAUDE.md`·`~/.claude/settings.json`은 차단 불가 — **루프 시작 전 본인 환경을 검토**하시는 것을 권장합니다.
 
+## 보안 경계
+
+자율 루프는 워커가 무인 동작하기 위해 `claude --dangerously-skip-permissions`로 호출됩니다. 이는 워커가 sibling 워크트리(`--add-dir .`로 부여) 내의 모든 파일을 자유롭게 읽고 쓸 수 있다는 의미입니다.
+
+**주의:**
+- 워크트리에 `.env`·credentials·SSH 키 등 secrets 파일을 두지 마세요. 워커가 의도치 않게 읽어 commit 메시지·로그·HANDOFF.md에 노출할 수 있습니다.
+- SPEC.md에 secrets 값을 인라인으로 적지 마세요. 워커가 그 내용을 다른 파일에 그대로 복사할 수 있습니다.
+- 워크트리는 사용자 본인 권한으로 동작합니다. 시스템 디렉토리(`/etc`·`/usr` 등)에 대한 영향은 워크트리 부모 격리(`<project>/../`)와 `--add-dir .` 범위로 제한됩니다 — 외부 경로 쓰기는 일반적으로 발생하지 않으나, 워커가 명시적으로 호출한 명령(예: `npm install`)은 사용자 홈에 부수효과를 만들 수 있습니다.
+- 권장: 외부 SPEC(`--spec`)을 사용할 때 신뢰하지 못한 출처의 SPEC을 그대로 받지 마세요. SPEC은 워커의 행동을 직접 지시합니다.
+
 ## 디렉토리 구조
 
 ```
@@ -141,11 +151,11 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 |---|---|
 | 이터 상한 | `MAX_ITERATIONS` (기본 30) |
 | 시계 캡 | `WALL_CLOCK_MINUTES` (기본 120) |
-| 테스트 약화 | `tests/**` 해시 변경 감지 — **Note:** 게이트는 워크트리의 `tests/` 디렉토리(하위 포함) 안의 `*.test.*`·`test_*.*`·`*_test.*` 파일만 추적. 다른 디렉토리(`test/`·`spec/`·`__tests__/`)는 게이트 비활성. 다른 컨벤션 프로젝트는 향후 SPEC.md frontmatter에 `test_dir` 필드 추가 예정. |
+| 테스트 약화 | 추적 대상 파일의 sha256 해시 변경 감지. 기본 추적: `tests/`·`test/`·`__tests__/`·`spec/`·`src/test/` 디렉토리 + co-located 파일명 (`*.test.{js,ts,jsx,tsx,py}`·`*.spec.{js,ts,rb}`·`*_test.{go,py,rb}`·`test_*.py`·`*_spec.rb`). 비표준 컨벤션은 SPEC.md frontmatter `test_paths` (git pathspec 배열)로 override. `git ls-files`로 추적 파일만 검사 (gitignored 제외). |
 | 의존성 동결 | `package.json`·`requirements.txt`·`Cargo.toml` 등 매니페스트 해시 |
-| Scope 위반 | git diff vs SPEC.md frontmatter의 scope.include·exclude |
-| Suppressor 신규 | `noqa`·`@ts-ignore`·`eslint-disable`·`#pragma warning disable` 신규 추가 |
-| Secrets | `gitleaks detect --staged` (gitleaks 설치 시) |
+| Scope 위반 | git diff (커밋된 + working tree 미커밋) vs SPEC.md frontmatter의 scope.include·exclude. 미커밋 변경도 검사해 claude 비정상 종료 gap 차단. 미추적 신규 파일은 미커버 — halt 시 `git add -A && git stash`로 보호. |
+| Suppressor 신규 | `noqa`·`@ts-ignore`·`eslint-disable`·`#pragma warning disable` 신규 추가 (커밋된 diff + working tree 미커밋 양쪽). |
+| Secrets | `gitleaks detect --log-opts="HEAD~1..HEAD"` (이번 이터 커밋) + `--staged` (staged 미커밋), gitleaks 설치 시. unstaged-tracked 변경은 gitleaks API 한계로 미커버 — 헌법의 매-이터 commit 강제로 보완. |
 | fix:symptom streak | git log의 최근 2 커밋이 모두 `fix:symptom` |
 | 진동 | 최근 4 커밋의 변경 파일 셋 토글 |
 
@@ -155,13 +165,11 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 - `git` (worktree 지원)
 - `yq` ([mikefarah/yq](https://github.com/mikefarah/yq))
 - `claude` CLI
+- `sha256sum` 또는 `shasum` (해시 게이트용 — macOS는 `shasum` 기본 제공, Linux는 보통 `sha256sum`)
 - `gitleaks` (선택, secrets 게이트용)
 
 ## 안전 정지 / stale 락 정리
 
 정지: Ctrl+C (이터 완료 후 락 해제), `stop <task-id>` (SIGTERM), `kill <PID>` (trap으로 락 자동 정리).
 
-크래시로 락이 남은 경우:
-```bash
-kill -0 <pid> 2>/dev/null || rm .loops/locks/<task-id>.lock
-```
+크래시로 stale 락이 남은 경우 별도 작업 불필요 — 다음 `start`/`stop` 호출이 PID 유효성을 검사해 자동 정리합니다 (PID 무효·빈 파일·비숫자 모두 stale로 인식).
