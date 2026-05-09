@@ -45,4 +45,15 @@
 - 마일스톤이 너무 커서 분할이 필요한가?
 - 의존 순서를 재배치해야 하는가?
 
+재검토 결과별 처리 (헌법 §3.3 표 참조):
+
+| 판단 | commit 처리 | PLAN 처리 |
+|---|---|---|
+| 우회 패치 수용 | 유지 | NOTES.md에 workaround·재조사 필요 명시 |
+| 마일스톤 재정밀 | 유지 | 마일스톤 정의·검증 엄밀화 |
+| 잘못된 가정 | `git revert HEAD` | 영향 마일스톤·위험 갱신 |
+| 마일스톤 무효 | `git revert HEAD` | PLAN 재구성 |
+
+revert 시 message: `chore: revert <짧은 SHA> — fix:symptom 자체 교정 (사유)`. 드라이버 streak 검사는 `^fix:symptom`만 grep하므로 `chore:` prefix는 streak에 포함 안 됨.
+
 자체 교정으로 다음 이터의 가정 오류를 차단. 이 단계 없이 fix:symptom이 누적되면 §4.2 조기 정지 (streak)로 강제 정지된다.
