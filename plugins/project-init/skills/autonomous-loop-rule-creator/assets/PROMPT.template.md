@@ -57,6 +57,7 @@ verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이�
 - `scope.include` 밖 파일은 수정하지 않음
 - **3회 fix 시도 후에도 미해결이면 정지·에스컬레이션** — architecture 의심 신호. 더 fix 추가 금지
 - **버그 디버깅 시 헌법 §8의 4 phase 절차** 따름 — Root Cause → Pattern → Hypothesis → Implementation
+- **이터 내 큰 탐색·독립 검증·병렬 가설은 `Agent` 도구로 위임** (헌법 §11.6 가이드 따름). 핵심 결정·합성은 메인이 수행.
 
 ## 종료 전 (이 순서로)
 
@@ -67,14 +68,15 @@ verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이�
 2. **`.loop/RUN_LOG.md`에 한 줄 추가** — 형식: `[<ISO timestamp>] <시도·결과·다음 단계>`
 3. **`.loop/PLAN.md` 체크박스 갱신** (진전 있을 때)
 4. **실패·발견 시 `.loop/NOTES.md` 갱신** (실패 접근 또는 새 제약 추가)
-5. **git commit** — 자기 분류 prefix로 시작:
+5. **Self-Review (4축, 헌법 §3.5)** — Completeness·Quality·Discipline·Testing. 한 축이라도 의심 남으면 HANDOFF.md에 `## 의심점` 추가하고 6단계의 DONE 작성 보류
+6. **git commit** — 자기 분류 prefix로 시작:
    `fix:root` / `fix:symptom` / `feat` / `refactor` / `test` / `chore`
-6. **완료 판정 — 4-Level Verifier (헌법 §3.4) 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료**
+7. **완료 판정 — 4-Level Verifier (헌법 §3.4) + Self-Review 4축 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료**
    - Existence: 수용 기준의 모든 항목이 코드로 다뤄짐
    - Substantive: 변경 코드가 stub/placeholder가 아님
    - Wired: 새 함수·모듈이 실제 사용처에 import됨
    - Runtime: `verify` 명령 0 exit
-7. **진전 불가능 → `.loop/ESCALATION.md` 작성·종료** (양식: 헌법 §5.2 참조)
+8. **진전 불가능 → `.loop/ESCALATION.md` 작성·종료** (양식: 헌법 §5.2, 카테고리 명시)
 
 ## 절대 안 됨
 
@@ -86,6 +88,7 @@ verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이�
 - 자기 분류 prefix 누락한 채 commit
 - `.loop/NOTES.md`의 "실패한 접근" 재시도 (정당한 사유 없이)
 - 4-Level Verifier 모든 단계 통과하지 않은 채 `DONE` 작성 (existence/substantive/wired/runtime 4가지 모두 확인)
+- Self-Review에서 의심점이 있는데 HANDOFF.md `## 의심점`에 기록하지 않고 DONE 작성 (정직성 위반)
 
 ## 응답 형식
 

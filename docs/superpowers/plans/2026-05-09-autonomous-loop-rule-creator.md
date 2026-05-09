@@ -2032,6 +2032,18 @@ PR 생성은 사용자 승인이 있을 때만 실행. 본 task는 사용자에�
 
 ---
 
+## Post-Execution Adjustment 3 (2026-05-09)
+
+superpowers `subagent-driven-development` 분석 후 3가지 패턴 차용 (메타 orchestration 패턴은 레이어 중복으로 미채택):
+
+1. **Self-Review 4축** (헌법 §3.5 신설) — Completeness·Quality·Discipline·Testing. DONE 작성 직전 self-eval 표준화
+2. **DONE_WITH_CONCERNS 신호** (헌법 §12 + HANDOFF.template `## 의심점` 섹션) — verify 통과·self-review 의심 케이스의 별도 표현. 다음 이터가 의심점 검증
+3. **이터 내 Agent 도구 위임 가이드** (헌법 §11.6 신설 + PROMPT.template 한 이터 규칙) — 큰 탐색·독립 검증·병렬 가설을 위한 Agent 사용 권장·금지 케이스
+
+검증: 통합 테스트 두 종이 변경 후에도 통과해야 한다.
+
+---
+
 ## Execution Handoff
 
 **Plan complete and saved to `docs/superpowers/plans/2026-05-09-autonomous-loop-rule-creator.md`. Two execution options:**

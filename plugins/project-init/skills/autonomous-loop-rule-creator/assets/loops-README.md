@@ -72,6 +72,14 @@ git branch -d autonomous-loop/auth-refactor
 
 archive 메타 파일은 `.loops/archive/auth-refactor/`에 보관됩니다 — 회고·재학습용.
 
+## DONE_WITH_CONCERNS 처리
+
+이터가 verify는 통과했으나 self-review에서 의심점을 발견하면 `DONE` 대신 HANDOFF.md의 `## 의심점` 섹션을 작성하고 정상 종료합니다. 사용자 개입은 보통 불필요 — 다음 이터가 의심점을 읽고 검증·해소한 후 깨끗한 `DONE`을 작성합니다.
+
+다음 이터가 의심점을 해소하지 못하면:
+- 의심점이 NOTES.md의 "확정된 사실"·"실패한 접근"으로 옮겨가 누적
+- 의심이 fix:symptom 누적이나 architecture-gap ESCALATION으로 발전 가능
+
 ## ESCALATION 처리
 
 **카테고리**: ESCALATION.md에 카테고리(config-gap/spec-gap/architecture-gap/environment-gap/other)가 표시되어 처리 방향을 빠르게 식별 가능
