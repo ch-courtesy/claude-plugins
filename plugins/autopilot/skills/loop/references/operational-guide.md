@@ -131,6 +131,7 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 | `MAX_ITERATIONS` | `--max-iterations N` | 30 | 이터 상한 |
 | `WALL_CLOCK_MINUTES` | `--wall-clock-minutes N` | 120 | 시계 캡(분) |
 | — | `--watch` | off | ESCALATION 감지 시 정지 대신 polling 재개 대기 |
+| `WATCH_TIMEOUT_HOURS` | — | 24 | --watch 모드에서 polling 최대 시간(시간 단위). 초과 시 exit 1 |
 
 ## 객관 게이트
 

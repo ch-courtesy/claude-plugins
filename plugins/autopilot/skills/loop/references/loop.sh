@@ -74,13 +74,13 @@ acquire_lock() {
     die "이미 $running개 loop이 동작 중 (최대: $MAX_CONCURRENT). 새 loop 거부."
   fi
 
-  if [[ -f "$LOCK_FILE" ]]; then
+  # 원자적 락 생성 (noclobber로 race 방지)
+  if ! ( set -C; echo $$ > "$LOCK_FILE" ) 2>/dev/null; then
     local existing_pid
     existing_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "?")
     die "task ${TASK_ID}가 이미 동작 중 (PID: $existing_pid). 종료 후 재실행. 프로세스가 없으면: rm $LOCK_FILE"
   fi
 
-  echo $$ > "$LOCK_FILE"
   # shellcheck disable=SC2064  # $LOCK_FILE은 trap-set 시점에 확정된 값으로 고정 의도
   trap "rm -f $LOCK_FILE" EXIT
 }
@@ -231,7 +231,12 @@ halt() {
   echo "[$(now_iso)] HALT: $reason" >&2
 
   # 진행 중 변경을 stash (있으면)
-  (cd "$WT" && git add -A && git stash push -m "auto-stash by loop.sh halt" 2>/dev/null) || true
+  local stash_msg
+  stash_msg=$( (cd "$WT" && git add -A && git stash push -m "auto-stash by loop.sh halt: $reason" 2>&1) || true )
+  if echo "$stash_msg" | grep -q "Saved working directory"; then
+    echo "[$(now_iso)] WARN: 미커밋 변경이 stash에 보관됨" >&2
+    echo "  복구: cd $WT && git stash list / git stash pop" >&2
+  fi
 
   # 자동 ESCALATION 작성
   mkdir -p "$WT/.loop"
@@ -485,9 +490,24 @@ cmd_start() {
     if [[ $iter_status -eq 101 ]]; then
       echo "[$(now_iso)] ESCALATION.md 감지. 사람 처리 대기."
       if [[ $WATCH_MODE -eq 1 ]]; then
-        echo "[$(now_iso)] --watch 모드: ESCALATION.md 사라짐 polling 중 (60초 간격, Ctrl+C로 종료)..."
+        local watch_timeout_hours="${WATCH_TIMEOUT_HOURS:-24}"
+        local poll_interval=60
+        local poll_count=0
+        local max_polls=$(( watch_timeout_hours * 3600 / poll_interval ))
+
+        echo "[$(now_iso)] --watch 모드: ESCALATION.md 사라짐 polling 중 (60초 간격, 최대 ${watch_timeout_hours}시간, Ctrl+C로 종료)..."
         while [[ -f "$WT/.loop/ESCALATION.md" ]]; do
-          sleep 60
+          sleep $poll_interval
+          poll_count=$((poll_count + 1))
+          # 매 5분(5 polls)마다 진행 표시
+          if (( poll_count % 5 == 0 )); then
+            echo "[$(now_iso)] --watch: ESCALATION.md 대기 중 ($((poll_count * poll_interval / 60))분 경과)..."
+          fi
+          # timeout 검사
+          if [[ $poll_count -ge $max_polls ]]; then
+            echo "[$(now_iso)] --watch timeout (${watch_timeout_hours}시간 경과). 정지." >&2
+            exit 1
+          fi
         done
         echo "[$(now_iso)] ESCALATION.md 해제 감지. 루프 재개."
         continue
@@ -692,10 +712,8 @@ cmd_cleanup() {
 
   # 4. 메타 파일 archive (.loops/<task-id>/ 로 이동)
   mkdir -p "$LOOPS_DIR"
-  for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md; do
-    if [[ -f "$WT/.loop/$f" ]]; then
-      cp "$WT/.loop/$f" "$LOOPS_DIR/" 2>/dev/null || true
-    fi
+  for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
+    cp "$WT/.loop/$f" "$LOOPS_DIR/$f" 2>/dev/null || true
   done
   echo "메타 파일 보관: $LOOPS_DIR"
 
