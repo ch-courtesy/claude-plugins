@@ -141,7 +141,7 @@ acquire_lock() {
   if [[ -f "$LOCK_FILE" ]]; then
     local existing_pid
     existing_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "?")
-    die "task $TASK_ID가 이미 동작 중 (PID: $existing_pid). 종료 후 재실행. 프로세스가 없으면: rm $LOCK_FILE"
+    die "task ${TASK_ID}가 이미 동작 중 (PID: $existing_pid). 종료 후 재실행. 프로세스가 없으면: rm $LOCK_FILE"
   fi
 
   echo $$ > "$LOCK_FILE"
@@ -256,8 +256,7 @@ check_secrets() {
 
 count_fix_symptom_streak() {
   cd "$WT" && git log --pretty=format:%s -2 2>/dev/null \
-    | grep -c '^fix:symptom' \
-    || echo 0
+    | { grep -c '^fix:symptom' || true; }
 }
 
 detect_oscillation() {
