@@ -1,13 +1,6 @@
 # 이터 내 Agent dispatch 브리프 양식
 
-본 파일은 헌법 §11.6 "이터 내 서브 도구 위임"의 보조 자료로, **자율 루프의 한 이터레이션 안에서** `Agent` 도구로 위임할 때 사용할 브리프 양식 3종을 제공한다. 양식은 superpowers의 `subagent-driven-development` 패턴을 자율 루프 컨텍스트로 적응한 것.
-
-**원본 출처:** `superpowers/skills/subagent-driven-development/{implementer,spec-reviewer,code-quality-reviewer}-prompt.md`
-
-**적응 핵심 변경:**
-- 원본의 "controller dispatching implementer per plan task" 흐름 → 우리의 "iteration dispatching for sub-task within current iteration" 흐름
-- 원본의 "BASE_SHA/HEAD_SHA" → 우리의 "현재 이터의 직전 commit과 working tree"
-- 원본의 plan 참조 → 우리의 `<worktree>/.loop/PROMPT.md` 참조
+본 파일은 헌법 §11.6 "이터 내 서브 도구 위임"의 보조 자료로, **자율 루프의 한 이터레이션 안에서** `Agent` 도구로 위임할 때 사용할 브리프 양식 3종을 제공한다.
 
 세 양식 중 어느 것을 쓸지는 §11.6의 권장 케이스에 따라 결정:
 - **spec-compliance-reviewer**: 변경 후 PROMPT.md 수용 기준 대비 독립 검증
