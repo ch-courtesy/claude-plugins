@@ -66,6 +66,7 @@ verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이�
 - **3회 fix 시도 후에도 미해결이면 정지·에스컬레이션** — architecture 의심 신호. 더 fix 추가 금지
 - **버그 디버깅 시 헌법 §8의 4 phase 절차** 따름 — Root Cause → Pattern → Hypothesis → Implementation
 - **이터 내 큰 탐색·독립 검증·병렬 가설은 `Agent` 도구로 위임** (헌법 §11.6 가이드 따름). 핵심 결정·합성은 메인이 수행.
+- **첫 이터(PLAN.md가 비어있거나 `<한 줄 제목>` placeholder 상태)에 PLAN.md의 마일스톤 초안 작성** — PROMPT.md의 작업 정의·수용 기준을 분석해 마일스톤 도출. 처음엔 정의·검증만 채우고 영향 영역은 "TBD" 가능. 진행하며 갱신.
 
 ## 종료 전 (이 순서로)
 
@@ -76,15 +77,16 @@ verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이�
 2. **`.loop/RUN_LOG.md`에 한 줄 추가** — 형식: `[<ISO timestamp>] <시도·결과·다음 단계>`
 3. **`.loop/PLAN.md` 체크박스 갱신** (진전 있을 때)
 4. **실패·발견 시 `.loop/NOTES.md` 갱신** (실패 접근 또는 새 제약 추가)
-5. **Self-Review (4축, 헌법 §3.5)** — Completeness·Quality·Discipline·Testing. 한 축이라도 의심 남으면 HANDOFF.md에 `## 의심점` 추가하고 6단계의 DONE 작성 보류
-6. **git commit** — 자기 분류 prefix로 시작:
+5. **이번 이터가 `fix:symptom`이면 `.loop/PLAN.md` 재검토** (헌법 §3.3 자체 교정 게이트) — 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신
+6. **Self-Review (4축, 헌법 §3.5)** — Completeness·Quality·Discipline·Testing. 한 축이라도 의심 남으면 HANDOFF.md에 `## 의심점` 추가하고 7단계의 DONE 작성 보류
+7. **git commit** — 자기 분류 prefix로 시작:
    `fix:root` / `fix:symptom` / `feat` / `refactor` / `test` / `chore`
-7. **완료 판정 — 4-Level Verifier (헌법 §3.4) + Self-Review 4축 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료**
+8. **완료 판정 — 4-Level Verifier (헌법 §3.4) + Self-Review 4축 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료**
    - Existence: 수용 기준의 모든 항목이 코드로 다뤄짐
    - Substantive: 변경 코드가 stub/placeholder가 아님
    - Wired: 새 함수·모듈이 실제 사용처에 import됨
    - Runtime: `verify` 명령 0 exit
-8. **진전 불가능 → `.loop/ESCALATION.md` 작성·종료** (양식: 헌법 §5.2, 카테고리 명시)
+9. **진전 불가능 → `.loop/ESCALATION.md` 작성·종료** (양식: 헌법 §5.2, 카테고리 명시)
 
 ## 절대 안 됨
 
