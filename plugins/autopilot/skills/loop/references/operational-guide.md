@@ -11,43 +11,22 @@ autopilot `loop` 스킬의 sibling 워크트리 기반 외부 셸 드라이버 �
 
 ## 디렉토리 구조
 
-target 프로젝트 런타임 상태 (스킬이 생성):
 ```
+# target 프로젝트 (스킬이 생성)
 .loops/
 ├── locks/                     # 동시 실행 락 (gitignored)
-└── <task-id>/                 # task별 통합 디렉토리
-    ├── SPEC.md                # prepare 생성, start 후 워크트리로 복사
-    └── (cleanup 후) PLAN/NOTES/HANDOFF/RUN_LOG.md  # 아카이브
-```
+└── <task-id>/SPEC.md          # prepare 생성, cleanup 후 아카이브
 
-스킬 패키지 (변경 불요):
-```
-autopilot/skills/loop/references/
-├── constitution.md            # 워커 헌법 (워크트리 CLAUDE.md로 복사)
-├── loop.sh                    # 외부 드라이버 (subcommand 기반)
-├── spec-template.md           # 새 task SPEC.md 시드
-├── plan-template.md           # 메모리 파일 스텁
-├── notes-template.md
-├── handoff-template.md
-├── runlog-template.md
-├── escalation-template.md
-└── operational-guide.md       # 본 문서
-```
-
-런타임 워크트리:
-```
+# 런타임 워크트리 (start가 생성)
 <project>/../<project-name>-loops/<task-id>/
-├── CLAUDE.md                  # 헌법 (references/constitution.md 복사본)
-├── .loop/                     # 메타 파일 (워크트리 .git/info/exclude로 비추적)
-│   ├── SPEC.md                # 작업 정의 (prepare에서 복사)
-│   ├── PLAN.md                # 마일스톤 (모델 갱신)
-│   ├── NOTES.md               # 학습 누적 (모델 갱신)
-│   ├── HANDOFF.md             # 직전 → 다음 편지 (모델 매 이터 덮어쓰기)
-│   ├── RUN_LOG.md             # 한 줄 요약 누적
-│   ├── iterations/<n>.log     # 매 이터 stdout 캡처
-│   └── ESCALATION.md          # 정지 사유 (있을 때만)
-└── (프로젝트 파일들 — autonomous-loop/<task-id> 브랜치 체크아웃)
+├── CLAUDE.md                  # 헌법 복사본
+└── .loop/
+    ├── SPEC.md / PLAN.md / NOTES.md / HANDOFF.md / RUN_LOG.md
+    ├── iterations/<n>.log     # 매 이터 stdout 캡처
+    └── ESCALATION.md          # 정지 사유 (있을 때만)
 ```
+
+스킬 패키지 파일 목록: `SKILL.md`의 모듈 구성 표 참조.
 
 ## Subcommand 일람
 
@@ -68,54 +47,22 @@ loop.sh logs    <task-id> [옵션]      # 로그 조회
 ```bash
 LOOP_SH="$HOME/.claude/plugins/autopilot/skills/loop/references/loop.sh"
 
-# 1. SPEC.md 시드 생성 (인터랙티브 prepare는 loop 스킬 호출 권장)
-bash "$LOOP_SH" prepare auth-refactor
-# 출력: "준비 완료. 다음 파일을 편집하세요: .loops/auth-refactor/SPEC.md"
-
-# 2. SPEC.md에 작업 정의 채움
-$EDITOR .loops/auth-refactor/SPEC.md
-# - YAML frontmatter: scope.include / scope.exclude / verify
-# - 본문 placeholder: {{task_title}}, {{task_description}}, {{acceptance_criteria}}, ...
-
-# 3. 루프 시작
-bash "$LOOP_SH" start auth-refactor
-
-# 4. 진행 모니터링 (별도 터미널)
-bash "$LOOP_SH" logs auth-refactor --tail
-
-# 5. 정지: Ctrl+C, 또는 DONE/ESCALATION.md가 생기면 자동 종료
+bash "$LOOP_SH" prepare auth-refactor   # SPEC.md 시드 생성
+$EDITOR .loops/auth-refactor/SPEC.md    # 작업 정의 채움 (frontmatter: scope/verify, 본문: 수용 기준)
+bash "$LOOP_SH" start auth-refactor     # 루프 시작
+bash "$LOOP_SH" logs auth-refactor --tail  # 별도 터미널에서 모니터링
+# 정지: Ctrl+C 또는 DONE/ESCALATION.md 생성 시 자동 종료
 ```
 
 ## 외부 SPEC 파일 전달 (--spec 플래그)
 
+prepare 없이 외부에서 만든 SPEC.md를 start에 직접 넘길 수 있습니다.
+
 ```bash
-# 외부에서 SPEC.md 작성 후 전달
-cat > /tmp/my-spec.md <<'EOF'
----
-scope:
-  include:
-    - src/**
-    - tests/**
-  exclude:
-    - rules/**
-    - .loops/**
-    - CLAUDE.md
-verify: "pnpm test"
----
-
-# auth-refactor: JWT 갱신 흐름 개선
-
-## 무엇을 만들 것인가
-...
-EOF
 bash "$LOOP_SH" start auth-refactor --spec /tmp/my-spec.md
-
-# 또는 다른 도구가 SPEC.md를 만들고 전달
-some-spec-generator > /tmp/spec.md
-bash "$LOOP_SH" start my-task --spec /tmp/spec.md
 ```
 
-`--spec`을 쓰면 prepare 단계 없이 start만으로 시작할 수 있습니다. 지정한 파일이 `.loops/<task-id>/SPEC.md`로 복사된 후 일반 start 흐름(placeholder 검사·워크트리 생성·루프)으로 진행됩니다.
+지정한 파일이 `.loops/<task-id>/SPEC.md`로 복사된 후 일반 start 흐름으로 진행됩니다. SPEC.md 형식: frontmatter에 `scope.include`·`scope.exclude`·`verify` 포함, 본문에 작업 정의.
 
 ## 상태 조회
 
@@ -124,13 +71,7 @@ bash "$LOOP_SH" status               # 모든 task 상태 테이블
 bash "$LOOP_SH" status auth-refactor # 단일 task 상태
 ```
 
-상태 값:
-- `prepared`: SPEC.md 준비됨, start 전
-- `running`: 루프 실행 중 (락 파일 있음)
-- `idle`: 워크트리 있음, 락 없음 (일시 정지)
-- `escalated`: ESCALATION.md 있음 (사람 개입 필요)
-- `done`: DONE 파일 있음 (cleanup 대기)
-- `archived`: 워크트리 정리됨, 메타 파일 보관됨
+출력 형식 상세는 `references/status-format.md` 참조.
 
 ## 정지
 
@@ -141,26 +82,16 @@ bash "$LOOP_SH" stop auth-refactor   # SIGTERM + 5초 대기 + 락 해제
 ## DONE 후 머지 및 정리
 
 ```bash
-# 워크트리에서 검토
-cd ../<project>-loops/auth-refactor
-git log autonomous-loop/auth-refactor
-
-# 메인 프로젝트로 돌아와 머지 (또는 PR 생성)
-cd <project>
-git merge autonomous-loop/auth-refactor    # 또는 PR 생성
-
-# 정리 (메타 파일 아카이브 + 워크트리 제거 + 브랜치 삭제)
-bash "$LOOP_SH" cleanup auth-refactor
+git -C ../<project>-loops/auth-refactor log autonomous-loop/auth-refactor
+git merge autonomous-loop/auth-refactor        # 메인에서 머지 (또는 PR 생성)
+bash "$LOOP_SH" cleanup auth-refactor          # 아카이브 + 워크트리 제거
+# cleanup 후 메타 파일은 .loops/auth-refactor/ 보관
 ```
-
-cleanup 후 메타 파일은 `.loops/auth-refactor/`에 보관됩니다 — 회고·재학습용.
 
 ## 로그 조회
 
 ```bash
-bash "$LOOP_SH" logs auth-refactor             # RUN_LOG.md 출력
-bash "$LOOP_SH" logs auth-refactor --tail      # RUN_LOG.md 실시간 스트림
-bash "$LOOP_SH" logs auth-refactor --iter 3    # 이터 #3 로그 출력
+bash "$LOOP_SH" logs auth-refactor [--tail | --iter N]
 ```
 
 ## DONE_WITH_CONCERNS 처리
@@ -169,22 +100,15 @@ bash "$LOOP_SH" logs auth-refactor --iter 3    # 이터 #3 로그 출력
 
 ## ESCALATION 처리
 
-**카테고리**: ESCALATION.md에 카테고리(config-gap/spec-gap/architecture-gap/environment-gap/other)가 표시되어 처리 방향을 빠르게 식별 가능
+카테고리별 처리 흐름: `references/troubleshooting.md` 참조.
 
 ```bash
-cat ../<project>-loops/<task-id>/.loop/ESCALATION.md
+cat ../<project>-loops/<task-id>/.loop/ESCALATION.md  # 사유 확인
 cd ../<project>-loops/<task-id>
-$EDITOR .loop/SPEC.md             # 명세 조정
-$EDITOR .loop/NOTES.md            # 학습 보강
-rm .loop/ESCALATION.md            # 보고 해제
-cd <project>
-bash "$LOOP_SH" start <task-id>  # 재시작
-```
-
-```bash
-# --watch 모드면 사용자는 ESCALATION.md 정리만 하면 자동 재시작:
-bash "$LOOP_SH" start <task-id> --watch
-# (ESCALATION 발생 시 driver는 60초마다 polling. 사용자가 ESCALATION.md 정리하면 즉시 재개)
+$EDITOR .loop/SPEC.md && $EDITOR .loop/NOTES.md        # 명세·학습 조정
+rm .loop/ESCALATION.md                                 # 보고 해제
+cd <project> && bash "$LOOP_SH" start <task-id>        # 재시작
+# --watch 모드면 ESCALATION.md 정리만으로 자동 재개 (60초 polling)
 ```
 
 ## 동시 실행
@@ -192,27 +116,21 @@ bash "$LOOP_SH" start <task-id> --watch
 ```bash
 bash "$LOOP_SH" start auth-refactor &
 bash "$LOOP_SH" start schema-migration &
-
-bash "$LOOP_SH" status                        # 모든 task 상태
-git worktree list                              # 모든 워크트리
-
+bash "$LOOP_SH" status          # 모든 task 상태
 MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 ```
 
-`MAX_CONCURRENT` 환경 변수 (기본 3)로 동시 실행 캡 조정. 같은 task-id 이중 실행은 락으로 차단됩니다.
+같은 task-id 이중 실행은 락으로 차단됩니다.
 
-## 환경 변수
+## 환경 변수 / CLI 플래그
 
-- `LOOP_WORKTREE_BASE` — 워크트리 부모 디렉토리. 기본 `<project>/../<project-name>-loops/`. 외부 위치(`~/.claude-loops/<project>/` 등)로 변경 가능
-- `MAX_CONCURRENT` — 동시 실행 task 수. 기본 3
-- `MAX_ITERATIONS` — 한 task의 이터 상한. 기본 30
-- `WALL_CLOCK_MINUTES` — 한 task의 시계 캡. 기본 120
-
-## start CLI 플래그
-
-- `--max-iterations N` — 이터 상한 (기본 30, 환경 변수 우선)
-- `--wall-clock-minutes N` — 시계 캡 (기본 120, 환경 변수 우선)
-- `--watch` — durable wake 모드. ESCALATION.md 감지 시 정지 대신 polling으로 재개 신호 대기. 사용자가 워크트리에서 ESCALATION.md 정리하면 자동 재시작
+| 환경 변수 | CLI 플래그 | 기본값 | 설명 |
+|---|---|---|---|
+| `LOOP_WORKTREE_BASE` | — | `<project>/../<project-name>-loops/` | 워크트리 부모 디렉토리 |
+| `MAX_CONCURRENT` | — | 3 | 동시 실행 task 수 |
+| `MAX_ITERATIONS` | `--max-iterations N` | 30 | 이터 상한 |
+| `WALL_CLOCK_MINUTES` | `--wall-clock-minutes N` | 120 | 시계 캡(분) |
+| — | `--watch` | off | ESCALATION 감지 시 정지 대신 polling 재개 대기 |
 
 ## 객관 게이트
 
@@ -238,19 +156,11 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 - `claude` CLI
 - `gitleaks` (선택, secrets 게이트용)
 
-## 안전 정지
+## 안전 정지 / stale 락 정리
 
-- Ctrl+C: 진행 중 이터까지 완료 후 락 해제
-- `bash "$LOOP_SH" stop <task-id>`: SIGTERM + 락 해제
-- `kill <PID>`: SIGTERM. 락은 trap으로 해제됨
-- 모든 `loop.sh` 종료: 각자의 락 파일이 자동 정리
-
-## stale 락 정리
+정지: Ctrl+C (이터 완료 후 락 해제), `stop <task-id>` (SIGTERM), `kill <PID>` (trap으로 락 자동 정리).
 
 크래시로 락이 남은 경우:
-
 ```bash
-ls .loops/locks/                                 # 남은 락 확인
-cat .loops/locks/<task-id>.lock                  # PID 확인
-kill -0 <pid> 2>/dev/null || rm .loops/locks/<task-id>.lock   # 프로세스 없으면 제거
+kill -0 <pid> 2>/dev/null || rm .loops/locks/<task-id>.lock
 ```
