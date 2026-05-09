@@ -1,5 +1,11 @@
 # `autonomous-loop-rule-creator` 설계 스펙
 
+> **⚠️ SUPERSEDED (본문 §1~§13) — 구 아키텍처**
+>
+> 본 spec의 §1~§13은 `plugins/project-init/skills/autonomous-loop-rule-creator/` rule-creator 패턴 기반이지만, **최종 구현은 `plugins/autopilot/skills/loop/`** 자기완결 스킬로 통합되었습니다 (commit `4357e45`, 2026-05-09). 재구조 배경·새 위치 매핑·검증 기준 보강은 §14 (Final Restructure) 참조.
+>
+> 본문 경로 `plugins/project-init/skills/autonomous-loop-rule-creator/`·`assets/`·`templates/`는 현재 PR에 존재하지 않습니다. 최신 구조: `plugins/autopilot/skills/loop/{SKILL.md, references/}`.
+
 작성일: 2026-05-08
 대상 플러그인: `plugins/project-init/`
 신규 스킬 위치: `plugins/project-init/skills/autonomous-loop-rule-creator/`

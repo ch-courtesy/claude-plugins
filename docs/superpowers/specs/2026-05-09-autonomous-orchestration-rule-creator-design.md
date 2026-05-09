@@ -1,5 +1,11 @@
 # `autonomous-orchestration-rule-creator` 설계 스펙
 
+> **⚠️ SUPERSEDED — 구 아키텍처 + 미구현**
+>
+> 본 spec은 Layer 2(멀티 task 오케스트레이션)를 다루며, 전제 Layer 1로 `plugins/project-init/skills/autonomous-loop-rule-creator/`를 가정합니다. **Layer 1은 `plugins/autopilot/skills/loop/`로 통합**되었고 (commit `4357e45`, 2026-05-09), **Layer 2는 미구현**입니다.
+>
+> 본문 경로 `plugins/project-init/skills/autonomous-loop-rule-creator/`·`plugins/project-init/skills/autonomous-orchestration-rule-creator/`는 현재 PR에 존재하지 않습니다. Layer 1 최신 구조: `plugins/autopilot/skills/loop/{SKILL.md, references/}`. Layer 2를 추후 구현할 때는 본 spec을 그대로 따르지 말고 autopilot 플러그인 컨벤션에 맞춰 재설계하세요.
+
 작성일: 2026-05-09
 대상 플러그인: `plugins/project-init/`
 신규 스킬 위치: `plugins/project-init/skills/autonomous-orchestration-rule-creator/`
