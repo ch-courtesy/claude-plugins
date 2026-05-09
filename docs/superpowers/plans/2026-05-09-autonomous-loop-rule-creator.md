@@ -2058,6 +2058,32 @@ superpowers `subagent-driven-development` 분석 후 3가지 패턴 차용 (메�
 
 ---
 
+## Post-Execution Adjustment 5 (2026-05-09): autopilot 플러그인 재구성
+
+본 plan은 `plugins/project-init/skills/autonomous-loop-rule-creator/` (rule-creator 패턴)을 가정해 작성되었으나, 최종적으로 다른 아키텍처로 재구성:
+
+1. **새 플러그인 신설**: `plugins/autopilot/` (자율 수행 운영 전담 플러그인)
+2. **자기완결 스킬**: `plugins/autopilot/skills/loop/` — 헌법·드라이버·템플릿·운영 인터페이스가 모두 한 스킬 안에
+3. **rule-creator 폐기**: `plugins/project-init/skills/autonomous-loop-rule-creator/` 삭제
+4. **target 프로젝트의 정적 파일 제거**: `rules/autonomous-loop.md`·`.loops/loop.sh`·`.loops/templates/`·`.loops/PROMPT.template.md`·`.loops/README.md` 모두 스킬 references/ 안으로 이동. target에는 런타임 상태(`.loops/<task-id>/`, `.loops/locks/`)만 생성.
+5. **테스트 위치 이동**: `tests/autonomous-loop-rule-creator/` → `tests/autopilot/`. test-loop-sh.sh와 test-skill-install.sh 모두 새 경로 기준으로 갱신.
+
+### 변경 사유
+
+- 자율 수행 운영 인터페이스(subcommand·인터랙티브 prepare 등)는 단순 파일 생성을 넘어선 동작이 필요 — rule-creator 패턴과 부합하지 않음
+- 자기완결 패키지는 헌법·드라이버·템플릿이 함께 진화할 때 더 자연스러운 단위
+- project-init은 "메타 setup", autopilot은 "자율 수행 운영" — 다른 평면이라 별 플러그인이 적합
+
+### 검증
+
+- `bash -n plugins/autopilot/skills/loop/references/loop.sh` 통과
+- `tests/autopilot/test-skill-install.sh` 모두 OK (스킬 산출물 13종·plugin.json·실행 권한·SCRIPT_DIR 패턴·헌법 자체완결성·old 디렉토리 부재 검증)
+- `tests/autopilot/test-loop-sh.sh` 8종 모두 통과 (워크트리 생성·이터레이션·락·슬래시 task-id·status·cleanup 등)
+
+상세는 spec §14 "Final Restructure" 참조.
+
+---
+
 ## Execution Handoff
 
 **Plan complete and saved to `docs/superpowers/plans/2026-05-09-autonomous-loop-rule-creator.md`. Two execution options:**

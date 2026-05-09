@@ -663,3 +663,83 @@ cd <project>
 24. `loop.sh prepare <task-id>`가 `.loops/<task-id>/PROMPT.md`를 생성하고, 이미 존재하면 abort한다
 25. `loop.sh start <task-id>`가 PROMPT.md 존재 확인 + placeholder 검증 후 워크트리 생성 + 락 획득 + 이터레이션을 수행한다
 26. `loop.sh cleanup <task-id>`가 DONE 파일 없이는 abort하고(--force 없이), DONE 확인 후 메타 파일을 `.loops/<task-id>/`로 archive한 뒤 워크트리와 브랜치를 제거한다
+
+---
+
+## 14. Final Restructure (2026-05-09): autopilot 플러그인으로 이동
+
+본 스펙은 `autonomous-loop-rule-creator` (project-init 플러그인의 형제 스킬, rule-creator 패턴)로 시작했으나, **최종 구현은 새 `autopilot` 플러그인의 자기완결 `loop` 스킬**로 통합되었다.
+
+### 14.1 변경 사유
+
+`rule-creator` 패턴은 target 프로젝트에 정적 파일(`rules/autonomous-loop.md`·`.loops/loop.sh`·`.loops/templates/` 등)을 생성한다. 자율 수행 운영은 다음과 같은 특성을 가져 rule-creator 패턴과 맞지 않음:
+- **운영 인터페이스가 필요** — subcommand·인터랙티브 prepare 등 단순 파일 생성 이상의 동작
+- **자기완결 패키지가 더 자연스러움** — 헌법·드라이버·템플릿이 한 단위로 변하는 경우가 많음
+- **운영 책임은 메타 setup과 다른 레이어** — project-init은 메타(다른 프로젝트 setup), 운영은 다른 평면
+
+### 14.2 새 구조
+
+```
+plugins/
+├── project-init/                    # 메타 (다른 프로젝트 setup)
+│   └── skills/
+│       ├── bootstrap/
+│       └── context-rule-creator/
+│       (autonomous-loop-rule-creator 폐기·삭제)
+│
+└── autopilot/                       # 신규 — 자율 수행 운영
+    ├── .claude-plugin/plugin.json
+    └── skills/
+        └── loop/                    # 자기완결: 헌법·드라이버·템플릿·운영 인터페이스 모두 포함
+            ├── SKILL.md             # subcommand dispatcher (prepare/start/status/stop/list/cleanup/logs)
+            └── references/
+                ├── constitution.md      # 워커 헌법 (전 ralph-loop.md)
+                ├── loop.sh              # 외부 셸 드라이버 (SCRIPT_DIR로 자기 위치 식별)
+                ├── prompt-template.md
+                ├── plan-template.md
+                ├── notes-template.md
+                ├── handoff-template.md
+                ├── runlog-template.md
+                ├── escalation-template.md
+                ├── operational-guide.md  # 사용자 운영 가이드
+                ├── prepare.md            # 인터랙티브 prepare 절차
+                ├── status-format.md      # status 출력 형식
+                └── troubleshooting.md    # ESCALATION 카테고리별 처리 가이드
+```
+
+### 14.3 target 프로젝트 영향
+
+- **삭제** — `<target>/rules/autonomous-loop.md`, `<target>/.loops/loop.sh`, `<target>/.loops/templates/`, `<target>/.loops/PROMPT.template.md`, `<target>/.loops/README.md`. 모두 스킬 references/로 이동.
+- **유지** — 런타임 상태만 target에 생성: `.loops/<task-id>/PROMPT.md` (prepare 시), `.loops/locks/`, `.loops/<task-id>/{PLAN,NOTES,...}.md` (cleanup 후 archive).
+- **bootstrap 통합 손실** — bootstrap의 `*-rule-creator` enumeration이 더 이상 자율 수행을 다루지 않음. autopilot 플러그인은 별도 설치 흐름.
+
+### 14.4 검증 기준 위치 갱신
+
+§13의 검증 기준은 **autopilot/skills/loop/** 위치를 기준으로 다시 해석:
+- "loop.sh"는 `plugins/autopilot/skills/loop/references/loop.sh`
+- "헌법"은 `plugins/autopilot/skills/loop/references/constitution.md`
+- "PROMPT.template.md"는 `plugins/autopilot/skills/loop/references/prompt-template.md`
+- "ESCALATION.template.md"는 `plugins/autopilot/skills/loop/references/escalation-template.md`
+- "loops-README.md"는 `plugins/autopilot/skills/loop/references/operational-guide.md`
+
+추가 검증 기준 27·28·29:
+
+27. `plugins/autopilot/.claude-plugin/plugin.json`이 존재하고 `name: "autopilot"` 명시
+28. `plugins/autopilot/skills/loop/SKILL.md`가 subcommand dispatcher로 prepare/start/status/stop/list/cleanup/logs 7종 모두 안내
+29. `plugins/autopilot/skills/loop/references/`가 12종 파일 (constitution·loop.sh + 7 templates + 4 사용자 가이드)을 포함
+
+### 14.5 사용자 워크플로 (재구성 후)
+
+```
+1. autopilot 플러그인 설치
+2. target 프로젝트에서 자연어 또는 Skill 호출:
+   Skill(skill: "loop", args: "prepare my-task")
+   ↓ AskUserQuestion으로 task 정보 수집 → .loops/my-task/PROMPT.md 자동 생성
+   Skill(skill: "loop", args: "start my-task")
+   ↓ Bash가 references/loop.sh start my-task 호출 → 워크트리 + 락 + 이터 루프
+   ...
+   Skill(skill: "loop", args: "cleanup my-task")
+   ↓ archive + worktree remove + branch delete
+```
+
+target 프로젝트는 여전히 git 저장소여야 하나, `rules/`·`.loops/loop.sh` 등 정적 파일은 더 이상 필요 없다.
