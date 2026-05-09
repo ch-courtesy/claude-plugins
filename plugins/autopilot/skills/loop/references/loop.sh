@@ -51,6 +51,8 @@ require_tool claude
 
 compute_paths() {
   local task_id="$1"
+  # path traversal 방지 (prepare.md §1 명시 동작)
+  [[ "$task_id" == *..* ]] && die "task-id에 '..' 사용 불가 (path traversal 방지)"
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
@@ -427,10 +429,21 @@ cmd_start() {
     die "채워지지 않은 placeholder가 있습니다: $(echo "$placeholders" | tr '\n' ' ')\n$spec_path_local 를 편집하세요."
   fi
 
-  # 4. 락 획득
+  # 4. scope.include 비어있으면 거부 (start에서)
+  local include_count
+  include_count=$(sed -n '1,/^---$/{
+    1d
+    /^---$/d
+    p
+  }' "$spec_path_local" 2>/dev/null | yq '.scope.include | length' 2>/dev/null)
+  if [[ "${include_count:-0}" -eq 0 ]]; then
+    die "SPEC.md의 scope.include가 비어 있습니다. 최소 한 패턴 명시 필요 (예: 'src/**'·'**/*')"
+  fi
+
+  # 5. 락 획득
   acquire_lock
 
-  # 5. 워크트리 생성 (없는 경우)
+  # 6. 워크트리 생성 (없는 경우)
   if [[ ! -d "$WT" ]]; then
     echo "[$(now_iso)] 워크트리 생성 시작: $WT"
 
@@ -466,7 +479,7 @@ cmd_start() {
     echo "[$(now_iso)] 기존 워크트리 사용: $WT"
   fi
 
-  # 6. 이터레이션 루프
+  # 7. 이터레이션 루프
   START_TIME=$(date +%s)
   local n=0
 
@@ -635,36 +648,36 @@ cmd_stop() {
   compute_paths "$task_id"
 
   if [[ ! -f "$LOCK_FILE" ]]; then
-    die "$task_id 에 대한 실행 중인 loop가 없습니다."
+    die "task $task_id에 활성 락 없음"
   fi
 
   local pid
   pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
-  if [[ -z "$pid" ]]; then
-    die "락 파일에서 PID를 읽을 수 없습니다: $LOCK_FILE"
+  [[ -z "$pid" ]] && die "락 파일에서 PID 읽기 실패"
+
+  # PID 유효성 검사
+  if ! kill -0 "$pid" 2>/dev/null; then
+    echo "[$(now_iso)] WARN: 락 PID $pid가 살아있지 않음 (stale lock). 락만 정리." >&2
+    rm -f "$LOCK_FILE"
+    return 0
   fi
 
-  echo "SIGTERM 전송: PID $pid (task: $task_id)"
-  kill -TERM "$pid" 2>/dev/null || echo "WARN: PID $pid 에 SIGTERM 전송 실패 (이미 종료됐을 수 있음)"
+  echo "[$(now_iso)] task $task_id (PID $pid) 정지 시그널 전송..."
+  kill -TERM "$pid" 2>/dev/null
 
-  # 5초간 종료 대기
-  local waited=0
-  while [[ $waited -lt 5 ]]; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      echo "프로세스 종료 확인."
-      break
-    fi
+  # 5초 대기
+  for _ in 1 2 3 4 5; do
     sleep 1
-    waited=$((waited + 1))
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "[$(now_iso)] task $task_id 정상 정지."
+      rm -f "$LOCK_FILE"
+      return 0
+    fi
   done
 
-  if kill -0 "$pid" 2>/dev/null; then
-    echo "WARN: PID $pid 가 5초 후에도 살아있습니다."
-    echo "강제 종료하려면: kill -9 $pid"
-  fi
-
-  rm -f "$LOCK_FILE"
-  echo "락 파일 제거 완료: $LOCK_FILE"
+  echo "[$(now_iso)] WARN: PID $pid 5초 후에도 응답 없음. SIGKILL이 필요할 수 있음:" >&2
+  echo "  kill -9 $pid && rm $LOCK_FILE" >&2
+  exit 1
 }
 
 # ----- subcommand: list -----
