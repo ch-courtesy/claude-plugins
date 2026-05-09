@@ -44,3 +44,7 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 증상: 위 4종에 안 맞는 케이스.
 
 처리: ESCALATION.md 본문 내용 검토 후 사람의 판단.
+
+## halt 발생 시 stash 확인
+
+drive가 자동 정지(halt)할 때 워크트리의 미커밋 변경은 자동 stash됨. 워크트리 들어가서 `git stash list`로 확인, 필요 시 `git stash pop`으로 복원.

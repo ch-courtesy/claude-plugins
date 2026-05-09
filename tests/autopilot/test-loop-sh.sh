@@ -507,5 +507,262 @@ echo "$output" | grep -q "Scope 위반" && { echo "FAIL: scope 게이트가 fram
 loop cleanup "$SCOPE_TASK" --force >/dev/null 2>&1
 echo "OK"
 
+echo "=== TEST 17: 테스트 약화 게이트 (tests/** 해시 변경 감지) ==="
+TEST17_TASK="gate-test-weakening"
+loop prepare "$TEST17_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$TEST17_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Gate Test — Test Weakening
+EOF
+
+COUNTER17="$WORK_DIR/iter-count-17.txt"
+echo "0" > "$COUNTER17"
+export COUNTER17_PATH="$COUNTER17"
+
+MOCK17="$WORK_DIR/mock17-bin"
+mkdir -p "$MOCK17"
+cat > "$MOCK17/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER17_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER17_PATH}"
+if [[ $n -eq 1 ]]; then
+  # 첫 번째 호출: tests/test_x.py 생성 + commit
+  mkdir -p tests
+  echo "def test_x(): pass" > tests/test_x.py
+  git add tests/test_x.py
+  git commit -q -m "test: add test_x"
+else
+  # 두 번째 호출: tests/test_x.py 삭제 + commit (테스트 약화)
+  git rm -q tests/test_x.py
+  git commit -q -m "remove: test_x"
+fi
+echo '{"result": "mock17", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK17/claude"
+
+set +e
+output17=$(PATH="$MOCK17:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST17_TASK" 2>&1)
+result17=$?
+set -e
+[[ $result17 -ne 0 ]] || { echo "FAIL: 테스트 약화 게이트가 halt하지 않음 (exit 0)"; exit 1; }
+echo "$output17" | grep -q "HALT\|tests modified\|테스트 약화" \
+  || { echo "FAIL: 테스트 약화 halt 메시지 없음. got: $output17"; exit 1; }
+WT17="$WORK_DIR/myproject-loops/$TEST17_TASK"
+[[ -f "$WT17/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+loop cleanup "$TEST17_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 18: 의존성 변경 게이트 (manifest 해시 변경 감지) ==="
+TEST18_TASK="gate-dep-change"
+loop prepare "$TEST18_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$TEST18_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Gate Test — Dependency Change
+EOF
+
+COUNTER18="$WORK_DIR/iter-count-18.txt"
+echo "0" > "$COUNTER18"
+export COUNTER18_PATH="$COUNTER18"
+
+MOCK18="$WORK_DIR/mock18-bin"
+mkdir -p "$MOCK18"
+cat > "$MOCK18/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER18_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER18_PATH}"
+if [[ $n -eq 1 ]]; then
+  # 첫 번째 호출: package.json 생성 + commit (초기 manifest)
+  echo '{"name":"test","version":"1.0.0"}' > package.json
+  git add package.json
+  git commit -q -m "chore: add package.json"
+else
+  # 두 번째 호출: package.json 수정 + commit (의존성 변경)
+  echo '{"name":"test","version":"1.0.0","dependencies":{"lodash":"^4.0.0"}}' > package.json
+  git add package.json
+  git commit -q -m "chore: add lodash dependency"
+fi
+echo '{"result": "mock18", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK18/claude"
+
+set +e
+output18=$(PATH="$MOCK18:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST18_TASK" 2>&1)
+result18=$?
+set -e
+[[ $result18 -ne 0 ]] || { echo "FAIL: 의존성 변경 게이트가 halt하지 않음 (exit 0)"; exit 1; }
+echo "$output18" | grep -q "HALT\|deps modified\|의존성 변경" \
+  || { echo "FAIL: 의존성 변경 halt 메시지 없음. got: $output18"; exit 1; }
+WT18="$WORK_DIR/myproject-loops/$TEST18_TASK"
+[[ -f "$WT18/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+loop cleanup "$TEST18_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 19: suppressor 신규 추가 게이트 ==="
+TEST19_TASK="gate-suppressor"
+loop prepare "$TEST19_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$TEST19_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Gate Test — Suppressor
+EOF
+
+MOCK19="$WORK_DIR/mock19-bin"
+mkdir -p "$MOCK19"
+cat > "$MOCK19/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+# noqa 를 포함한 파일 생성 + commit (위반 즉시)
+mkdir -p src
+echo "x = 1  # noqa" > src/bad.py
+git add src/bad.py
+git commit -q -m "feat: add bad.py with suppressor"
+echo '{"result": "mock19", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK19/claude"
+
+set +e
+output19=$(PATH="$MOCK19:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 loop start "$TEST19_TASK" 2>&1)
+result19=$?
+set -e
+[[ $result19 -ne 0 ]] || { echo "FAIL: suppressor 게이트가 halt하지 않음 (exit 0)"; exit 1; }
+echo "$output19" | grep -q "HALT\|Suppressor" \
+  || { echo "FAIL: suppressor halt 메시지 없음. got: $output19"; exit 1; }
+WT19="$WORK_DIR/myproject-loops/$TEST19_TASK"
+[[ -f "$WT19/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+loop cleanup "$TEST19_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 20: fix:symptom streak 게이트 ==="
+TEST20_TASK="gate-streak"
+loop prepare "$TEST20_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$TEST20_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Gate Test — fix:symptom streak
+EOF
+
+COUNTER20="$WORK_DIR/iter-count-20.txt"
+echo "0" > "$COUNTER20"
+export COUNTER20_PATH="$COUNTER20"
+
+MOCK20="$WORK_DIR/mock20-bin"
+mkdir -p "$MOCK20"
+cat > "$MOCK20/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER20_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER20_PATH}"
+if [[ $n -eq 1 ]]; then
+  # 첫 번째 호출: fix:symptom commit
+  echo "patch1" > symptom1.txt
+  git add symptom1.txt
+  git commit -q -m "fix:symptom patch 1"
+else
+  # 두 번째 호출: 또 fix:symptom commit → streak 2회
+  echo "patch2" > symptom2.txt
+  git add symptom2.txt
+  git commit -q -m "fix:symptom patch 2"
+fi
+echo '{"result": "mock20", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK20/claude"
+
+set +e
+output20=$(PATH="$MOCK20:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST20_TASK" 2>&1)
+result20=$?
+set -e
+[[ $result20 -ne 0 ]] || { echo "FAIL: fix:symptom streak 게이트가 halt하지 않음 (exit 0)"; exit 1; }
+echo "$output20" | grep -q "HALT\|fix:symptom streak" \
+  || { echo "FAIL: fix:symptom streak halt 메시지 없음. got: $output20"; exit 1; }
+WT20="$WORK_DIR/myproject-loops/$TEST20_TASK"
+[[ -f "$WT20/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+loop cleanup "$TEST20_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 21: 진동 패턴 게이트 ==="
+TEST21_TASK="gate-oscillation"
+loop prepare "$TEST21_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$TEST21_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Gate Test — Oscillation
+EOF
+
+COUNTER21="$WORK_DIR/iter-count-21.txt"
+echo "0" > "$COUNTER21"
+export COUNTER21_PATH="$COUNTER21"
+
+MOCK21="$WORK_DIR/mock21-bin"
+mkdir -p "$MOCK21"
+cat > "$MOCK21/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER21_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER21_PATH}"
+if (( n % 2 == 1 )); then
+  # 홀수 이터: file_x.txt 변경
+  echo "state-$n" > file_x.txt
+  git add file_x.txt
+  git commit -q -m "chore: update file_x iter $n"
+else
+  # 짝수 이터: file_y.txt 변경 (다른 파일 셋 → 토글)
+  echo "state-$n" > file_y.txt
+  git add file_y.txt
+  git commit -q -m "chore: update file_y iter $n"
+fi
+echo '{"result": "mock21", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK21/claude"
+
+set +e
+output21=$(PATH="$MOCK21:$PATH" MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=5 loop start "$TEST21_TASK" 2>&1)
+result21=$?
+set -e
+[[ $result21 -ne 0 ]] || { echo "FAIL: 진동 패턴 게이트가 halt하지 않음 (exit 0)"; exit 1; }
+echo "$output21" | grep -q "HALT\|진동 패턴" \
+  || { echo "FAIL: 진동 패턴 halt 메시지 없음. got: $output21"; exit 1; }
+WT21="$WORK_DIR/myproject-loops/$TEST21_TASK"
+[[ -f "$WT21/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+loop cleanup "$TEST21_TASK" --force > /dev/null 2>&1
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
