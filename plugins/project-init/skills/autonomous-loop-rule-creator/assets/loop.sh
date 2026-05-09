@@ -178,13 +178,22 @@ hash_deps() {
 
 read_scope_include() {
   # PROMPT.md frontmatter 분리 후 yq 파싱 (markdown body의 angle bracket이 yq를 깨지 않도록)
-  sed -n '1,/^---$/{1d; /^---$/d; p}' "$WT/.loop/PROMPT.md" 2>/dev/null \
+  # multi-line sed 블록: macOS BSD sed는 {1d; ...} 세미콜론 구문을 거부하므로 newline 사용
+  sed -n '1,/^---$/{
+    1d
+    /^---$/d
+    p
+  }' "$WT/.loop/PROMPT.md" 2>/dev/null \
     | yq '.scope.include[]' 2>/dev/null \
     || true
 }
 
 read_scope_exclude() {
-  sed -n '1,/^---$/{1d; /^---$/d; p}' "$WT/.loop/PROMPT.md" 2>/dev/null \
+  sed -n '1,/^---$/{
+    1d
+    /^---$/d
+    p
+  }' "$WT/.loop/PROMPT.md" 2>/dev/null \
     | yq '.scope.exclude[]' 2>/dev/null \
     || true
 }
@@ -254,7 +263,7 @@ count_fix_symptom_streak() {
 detect_oscillation() {
   # 최근 4 커밋의 변경 파일 셋이 두 상태로 토글되는지 검사
   local commits
-  commits=$(cd "$WT" && git log --pretty=format:%H -4 2>/dev/null || true)
+  commits=$(cd "$WT" && git log --pretty=tformat:%H -4 2>/dev/null || true)
   [[ $(echo "$commits" | wc -l | tr -d ' ') -lt 4 ]] && return 0
 
   local sets=()
@@ -360,8 +369,15 @@ iterate() {
   fi
 
   # 객관 게이트 9종
-  [[ "$(hash_tests)" != "$start_hash_tests" ]] && halt "테스트 약화 — tests/** 해시 변경"
-  [[ "$(hash_deps)" != "$start_hash_deps" ]] && halt "의존성 변경 — 매니페스트 해시 변경"
+  # sentinel-aware: 처음에 디렉토리/매니페스트가 없었으면 최초 생성은 위반이 아님
+  if [[ "$start_hash_tests" != "no-tests-dir" ]] \
+     && [[ "$(hash_tests)" != "$start_hash_tests" ]]; then
+    halt "테스트 약화 — tests/** 해시 변경"
+  fi
+  if [[ "$start_hash_deps" != "no-manifests" ]] \
+     && [[ "$(hash_deps)" != "$start_hash_deps" ]]; then
+    halt "의존성 변경 — 매니페스트 해시 변경"
+  fi
 
   local out_of_scope new_supp streak osc
   out_of_scope=$(diff_vs_scope)
