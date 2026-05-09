@@ -17,7 +17,7 @@
 
 ```
 Agent({
-  description: "Spec compliance review for current iteration",
+  description: "현재 이터의 명세 준수 검증",
   subagent_type: "general-purpose",
   prompt: <아래 양식>
 })
@@ -26,51 +26,51 @@ Agent({
 **브리프 양식:**
 
 ```
-You are reviewing whether changes made in the current autonomous loop iteration comply with the task specification.
+당신은 자율 루프의 현재 이터레이션에서 만든 변경이 작업 명세에 부합하는지 검증합니다.
 
-## What Was Requested (from .loop/PROMPT.md)
+## 요구사항 (.loop/PROMPT.md에서)
 
-[FULL TEXT of the task definition section from `<worktree>/.loop/PROMPT.md` — 작업 정의·수용 기준·범위·검증 명령. 전체 텍스트를 paste, 파일을 다시 읽게 하지 말 것]
+[`<worktree>/.loop/PROMPT.md`의 작업 정의 섹션 전체 텍스트 — 작업 정의·수용 기준·범위·검증 명령을 그대로 paste. 파일을 다시 읽게 하지 말 것]
 
-## What This Iteration Claims to Have Done
+## 이번 이터가 한 작업 (자기 보고)
 
 [현재 이터의 작업 요약 — git diff HEAD~1 HEAD 결과 요약 + 어떤 의도였는지]
 
-## Your Job
+## 임무
 
-Read the actual code changed in this iteration and verify against §3.4의 4-Level Verifier:
+이번 이터에서 실제로 변경된 코드를 읽고 헌법 §3.4의 4-Level Verifier에 대해 검증한다:
 
-**Existence:**
+**Existence (존재):**
 - 수용 기준의 모든 항목에 대응하는 코드 변경이 있는가? 미구현 항목은?
 
-**Substantive:**
+**Substantive (실체):**
 - 변경된 코드가 stub·mock·"TODO" placeholder가 아닌가? `pass`·`return None`·NotImplementedError만 있는 함수는 미완.
 
-**Wired:**
+**Wired (배선):**
 - 새 함수·모듈이 실제 호출처에 import·사용되는가? dead code는 미완.
 
-**Runtime:**
+**Runtime (실행):**
 - verify 명령이 통과한다고 주장한다면 직접 실행해 확인하라.
 
-## CRITICAL
+## 중요
 
-The iteration's commit message and self-report may be optimistic. **Read the actual code** changed (use `git diff HEAD~1 HEAD` and `Read` tool on changed files).
+이터의 commit message와 자기 보고는 낙관적일 수 있다. **실제 코드를 읽어라** (`git diff HEAD~1 HEAD`와 `Read` 도구로 변경 파일을 검토).
 
-DO NOT:
+하지 마라:
 - 변경 보고만 보고 통과 판정
 - "Test 통과한다"는 주장을 직접 verify 안 하고 인정
 - 작은 변경이라며 깊은 검토 생략
 
-DO:
+해라:
 - 실제 변경 코드를 line-by-line 검토
 - 4-Level Verifier 4 단계를 명시적으로 점검
 - 누락·이상 모두 보고
 
-## Working Directory
+## 작업 디렉토리
 
 `<worktree path>` — 이터가 동작 중인 워크트리. 모든 도구 호출은 이 디렉토리 기준.
 
-## Report Format
+## 응답 양식
 
 ✅ Spec compliant — 4 단계 모두 통과
 ❌ Issues found:
@@ -94,7 +94,7 @@ DO:
 
 ```
 Agent({
-  description: "Code quality review for current iteration",
+  description: "현재 이터의 코드 품질 검토",
   subagent_type: "general-purpose",
   prompt: <아래 양식>
 })
@@ -103,56 +103,56 @@ Agent({
 **브리프 양식:**
 
 ```
-You are a senior code reviewer. Review the changes made in the current autonomous loop iteration for code quality.
+당신은 시니어 코드 리뷰어다. 자율 루프의 현재 이터레이션에서 만든 변경을 코드 품질 관점에서 검토하라.
 
-## What Was Implemented
+## 무엇을 구현했는가
 
 [이터의 변경 요약 — 무엇을, 왜]
 
-## Plan / Requirements
+## 작업 정의 / 평가 기준
 
-이터의 작업 정의는 `<worktree>/.loop/PROMPT.md`에 있음. 지표는 헌법(`<worktree>/CLAUDE.md`) §3.5 Self-Review 4축.
+이터의 작업 정의는 `<worktree>/.loop/PROMPT.md`에 있음. 평가 기준은 헌법(`<worktree>/CLAUDE.md`) §3.5 Self-Review 4축.
 
-## Git Range
+## Git 범위
 
 **Base:** [직전 이터의 commit SHA, 또는 HEAD~1]
 **Head:** [현재 이터가 commit했다면 그 SHA, 아니면 working tree]
 
-## What to Check
+## 점검 항목
 
-**Quality:**
+**Quality (품질):**
 - 이름이 동작을 정확히 표현하는가? (구현 방식이 아니라)
 - 코드가 명료·유지보수 가능?
 - 새 파일이 이미 큼·기존 파일이 크게 늘어남? (이번 변경이 기여한 부분만, 사전 크기는 무시)
 
-**Discipline (YAGNI):**
+**Discipline (절제 — YAGNI):**
 - 요청되지 않은 기능을 추가하지 않았는가?
 - 기존 코드 패턴을 따랐는가?
 - 본 task 범위 밖 "이왕 손댄 김에" 변경이 없는가?
 
-**Testing:**
+**Testing (검증):**
 - 테스트가 mock 동작이 아닌 실제 동작을 검증하는가?
 - TDD 순서를 따랐는가 (RED 먼저)?
 - 엣지·에러 케이스가 다뤄졌는가?
 
-**Architecture:**
+**Architecture (구조):**
 - 변경이 기존 구조와 정합?
 - 단일 책임 원칙 위반?
 - 결합도·복잡도 증가가 정당한가?
 
-## Calibration
+## 심각도 분류 (Calibration)
 
 심각도를 정확히 분류하라. 모든 게 Critical은 아님.
 - **Critical**: 버그·보안·데이터 손실·기능 깨짐
 - **Important**: 아키텍처 문제·테스트 갭·error handling 누락
 - **Minor**: 스타일·이름·polish
 
-## Report Format
+## 응답 양식
 
-### Strengths
+### 강점
 [잘 된 부분 — 구체적으로]
 
-### Issues
+### 발견 사항
 
 #### Critical
 [file:line - 무엇이 잘못 - 왜 중요 - 어떻게 fix]
@@ -163,17 +163,17 @@ You are a senior code reviewer. Review the changes made in the current autonomou
 #### Minor
 ...
 
-### Assessment
+### 판정
 
-**Ready to proceed?** Yes | No | With fixes
+**진행 가능한가?** 예 | 아니오 | 수정 후 진행
 
-**Reasoning:** [1-2 sentences]
+**근거:** [1~2 문장]
 ```
 
 **메인 이터의 후속 처리:**
-- Yes → §3.5 Self-Review 4축 통과로 인정
-- With fixes → Critical/Important 항목을 fix·재검토. fix 누적은 §4.2 조기 정지 조건 (3+ fix) 대상
-- No → DONE_WITH_CONCERNS 신호로 HANDOFF.md에 의심점 기록 후 종료
+- 예 → §3.5 Self-Review 4축 통과로 인정
+- 수정 후 진행 → Critical/Important 항목을 fix·재검토. fix 누적은 §4.2 조기 정지 조건 (3+ fix) 대상
+- 아니오 → DONE_WITH_CONCERNS 신호로 HANDOFF.md에 의심점 기록 후 종료
 
 ---
 
@@ -189,12 +189,12 @@ You are a senior code reviewer. Review the changes made in the current autonomou
 
 ```
 Agent({
-  description: "Test hypothesis A: <가설 A 한 줄>",
+  description: "가설 A 검증: <가설 A 한 줄>",
   subagent_type: "general-purpose",
   prompt: <hypothesis A 양식>
 }),
 Agent({
-  description: "Test hypothesis B: <가설 B 한 줄>",
+  description: "가설 B 검증: <가설 B 한 줄>",
   subagent_type: "general-purpose",
   prompt: <hypothesis B 양식>
 })
@@ -203,29 +203,29 @@ Agent({
 **브리프 양식 (각 hypothesis별):**
 
 ```
-You are testing a single hypothesis as part of an autonomous loop iteration's debugging Phase 3.
+당신은 자율 루프 이터레이션의 디버깅 Phase 3에서 단일 가설을 테스트한다.
 
-## Hypothesis Being Tested
+## 검증할 가설
 
-<가설 한 줄. 예: "X is the root cause because Y">
+<가설 한 줄. 예: "X가 root cause다 — 근거는 Y">
 
-## Test Setup
+## 테스트 셋업
 
 [이 가설을 검증하기 위해 무엇을 변경/관찰해야 하는지 — 메인 이터가 명시]
 
-## What You Should Do
+## 할 일
 
 1. 워크트리(`<worktree path>`)에서 가설을 검증할 수 있는 **최소 변경**만 적용 또는 **읽기만으로 관찰** (변경 없이 검증 가능하면 read-only)
 2. 결과를 관찰하고 가설이 지지되는지 반박되는지 판단
 3. 변경했다면 stash·revert로 깨끗한 상태로 복원 (메인 이터가 합성 후 결정)
 
-## CRITICAL
+## 중요
 
 - 다른 가설을 추측·테스트하지 마라. 본 가설만.
 - 메인 이터의 결정을 대신 내리지 마라.
 - 워크트리 git history에 commit 남기지 마라 (stash·revert).
 
-## Report
+## 응답
 
 ```
 가설: <가설 한 줄 재진술>
@@ -247,7 +247,7 @@ You are testing a single hypothesis as part of an autonomous loop iteration's de
 
 ### 브리프 품질 (헌법 §11.6 핵심 원칙)
 
-세 양식 모두 "self-contained brief" 원칙을 따른다. Agent는 메인 이터의 컨텍스트를 보지 못하므로 브리프에:
+세 양식 모두 "자기완결 브리프" 원칙을 따른다. Agent는 메인 이터의 컨텍스트를 보지 못하므로 브리프에:
 - **무엇을** — 정확한 작업·결과 형식
 - **왜** — 상위 작업 맥락 (Agent가 판단할 수 있게)
 - **이미 시도한 것** — 반복 방지
