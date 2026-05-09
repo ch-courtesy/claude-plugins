@@ -1347,5 +1347,114 @@ MOCKEOF
   echo "OK ($LOCALE_FOUND)"
 fi
 
+echo "=== TEST 38: 새 테스트 추가는 weakening 게이트 통과 (TDD RED 보호) ==="
+TDD_PROJECT="$WORK_DIR/tdd-add-project"
+mkdir -p "$TDD_PROJECT/tests"
+git -C "$TDD_PROJECT" init -q
+git -C "$TDD_PROJECT" config user.email "test@example.com"
+git -C "$TDD_PROJECT" config user.name "Test"
+echo "def test_existing(): assert True" > "$TDD_PROJECT/tests/test_existing.py"
+git -C "$TDD_PROJECT" add tests/test_existing.py
+git -C "$TDD_PROJECT" commit -q -m "init with existing test"
+
+COUNTER38="$WORK_DIR/iter-count-38.txt"
+echo "0" > "$COUNTER38"
+export COUNTER38_PATH="$COUNTER38"
+
+MOCK38="$WORK_DIR/mock38-bin"
+mkdir -p "$MOCK38"
+cat > "$MOCK38/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER38_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER38_PATH}"
+# 새 test 파일 추가 (RED 단계 시뮬레이션) — 기존 test_existing.py는 손대지 않음
+echo "def test_new_$n(): assert False" > "tests/test_new_$n.py"
+git add "tests/test_new_$n.py"
+git commit -q -m "test: add new test_$n (RED)"
+if [[ $n -ge 2 ]]; then touch DONE; fi
+echo '{"result": "mock38", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK38/claude"
+
+(
+  cd "$TDD_PROJECT"
+  bash "$LOOP_SH_SRC" prepare "tdd-add" > /dev/null 2>&1
+  cat > ".loops/tdd-add/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# TDD RED — Adding New Test
+EOF
+  set +e
+  output38=$(PATH="$MOCK38:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "tdd-add" 2>&1)
+  result38=$?
+  set -e
+  [[ $result38 -eq 0 ]] || { echo "FAIL: 새 test 추가가 weakening halt 트리거 (regression). exit=$result38"; echo "$output38"; exit 1; }
+  if echo "$output38" | grep -q "테스트 약화"; then
+    echo "FAIL: '테스트 약화' 메시지 발생 — 신규 추가가 weakening으로 잘못 분류됨"
+    echo "$output38"
+    exit 1
+  fi
+  WT38="$WORK_DIR/tdd-add-project-loops/tdd-add"
+  [[ -f "$WT38/DONE" ]] || { echo "FAIL: DONE 파일 없음"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 39: 기존 테스트 수정/삭제는 여전히 weakening halt ==="
+TDD_MOD_PROJECT="$WORK_DIR/tdd-mod-project"
+mkdir -p "$TDD_MOD_PROJECT/tests"
+git -C "$TDD_MOD_PROJECT" init -q
+git -C "$TDD_MOD_PROJECT" config user.email "t@e.com"
+git -C "$TDD_MOD_PROJECT" config user.name "Test"
+echo "def test_existing(): assert True" > "$TDD_MOD_PROJECT/tests/test_existing.py"
+git -C "$TDD_MOD_PROJECT" add tests/test_existing.py
+git -C "$TDD_MOD_PROJECT" commit -q -m "init"
+
+MOCK39="$WORK_DIR/mock39-bin"
+mkdir -p "$MOCK39"
+cat > "$MOCK39/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+# 기존 test_existing.py 수정 (약화)
+echo "def test_existing(): assert False  # weakened" > tests/test_existing.py
+git add tests/test_existing.py
+git commit -q -m "weaken: test_existing"
+echo '{"result": "mock39", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK39/claude"
+
+(
+  cd "$TDD_MOD_PROJECT"
+  bash "$LOOP_SH_SRC" prepare "tdd-mod" > /dev/null 2>&1
+  cat > ".loops/tdd-mod/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# TDD — Existing Test Modified (must halt)
+EOF
+  set +e
+  output39=$(PATH="$MOCK39:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "tdd-mod" 2>&1)
+  result39=$?
+  set -e
+  [[ $result39 -ne 0 ]] || { echo "FAIL: 기존 test 수정이 halt 트리거 안 됨 (exit 0)"; echo "$output39"; exit 1; }
+  echo "$output39" | grep -q "테스트 약화" \
+    || { echo "FAIL: weakening halt 메시지 없음. got: $output39"; exit 1; }
+)
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
