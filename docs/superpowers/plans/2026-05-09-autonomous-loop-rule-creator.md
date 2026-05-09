@@ -2002,6 +2002,22 @@ PR 생성은 사용자 승인이 있을 때만 실행. 본 task는 사용자에�
 
 ---
 
+## Post-Execution Adjustment (2026-05-09)
+
+구현 완료 후 superpowers 파이프라인 벤치마크 결과를 받아 6개 패턴을 헌법·PROMPT.template에 임베드:
+1. TDD Iron Law (헌법 §0 Iron Laws + §3.2 6단계 RED-GREEN)
+2. Watch fail 단계 (§3.2의 RED 후 검증)
+3. systematic-debugging 4 phase (§8 확장)
+4. 3+ fix → architecture (§4.2 추가 항목)
+5. Diagnostic Instrumentation (§6.1 추가 항목)
+6. Iron Law 톤 강화 (§0 신설)
+
+이 변경은 단일 commit `feat(autonomous-loop-rule-creator): superpowers 패턴 6개 헌법 임베드`로 적용. 본 plan에 새 task로 추가하지 않고 retrospective로 기록 — task 그래프를 잠그면서도 계보를 드러내기 위함.
+
+검증: 통합 테스트 두 종이 변경 후에도 통과해야 한다 (헌법 본문 변경은 frontmatter 외 — 테스트의 "자율-루프-지침 미참조" 검사를 깨지 않음).
+
+---
+
 ## Execution Handoff
 
 **Plan complete and saved to `docs/superpowers/plans/2026-05-09-autonomous-loop-rule-creator.md`. Two execution options:**
