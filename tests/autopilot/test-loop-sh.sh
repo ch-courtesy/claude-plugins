@@ -15,6 +15,7 @@ CONSTITUTION_SRC="$SKILL_REFS/constitution.md"
 
 # 임시 작업공간 (테스트 격리)
 WORK_DIR="$(mktemp -d)"
+# shellcheck disable=SC2064  # $WORK_DIR은 trap-set 시점에 확정된 값으로 고정 의도
 trap "rm -rf $WORK_DIR" EXIT
 
 # 가짜 프로젝트 git init
@@ -267,6 +268,178 @@ MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$SPEC_TASK_ID" --spec "$EXTE
 # 워크트리에도 .loop/SPEC.md 복사 확인
 WT_SPEC="$WORK_DIR/myproject-loops/$SPEC_TASK_ID"
 [[ -f "$WT_SPEC/.loop/SPEC.md" ]] || { echo "FAIL: 워크트리 .loop/SPEC.md 미복사"; exit 1; }
+echo "OK"
+
+echo "=== TEST 10: 빈 SPEC.md (placeholder 그대로) → start 거부 ==="
+loop prepare "placeholder-task" > /dev/null 2>&1
+# placeholder를 채우지 않은 채 start 호출
+set +e
+output=$(MAX_ITERATIONS=1 loop start "placeholder-task" 2>&1)
+result=$?
+set -e
+[[ $result -ne 0 ]] || { echo "FAIL: placeholder가 남은 SPEC.md로 start가 성공하면 안 됨"; exit 1; }
+echo "$output" | grep -qE '\{\{[^}]+\}\}|placeholder' \
+  || { echo "FAIL: placeholder 이름이 에러 메시지에 없음. got: $output"; exit 1; }
+echo "OK"
+
+echo "=== TEST 11: frontmatter에 placeholder 잔존 → start 거부 ==="
+# frontmatter 안의 verify 값도 placeholder로 남기면 placeholder 검사가 거부해야 함
+loop prepare "bad-yaml-task" > /dev/null 2>&1
+BAD_SPEC="$PROJECT/.loops/bad-yaml-task/SPEC.md"
+cat > "$BAD_SPEC" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: '{{verify_command}}'
+---
+
+# Bad YAML Task
+
+## 무엇을 만들 것인가
+Test
+
+## 수용 기준
+Pass
+
+## 범위
+포함:
+src/
+
+비-목표 / 제외:
+none
+
+## 검증
+{{verify_command}}
+EOF
+set +e
+output=$(MAX_ITERATIONS=1 loop start "bad-yaml-task" 2>&1)
+result=$?
+set -e
+[[ $result -ne 0 ]] || { echo "FAIL: frontmatter에 placeholder가 남은 SPEC.md로 start가 성공하면 안 됨"; exit 1; }
+echo "$output" | grep -qE '\{\{[^}]+\}\}|placeholder' \
+  || { echo "FAIL: 에러 메시지에 placeholder 이름 없음. got: $output"; exit 1; }
+echo "OK"
+
+echo "=== TEST 12: status 빈 .loops/ → 정상 출력 (안내 또는 빈 테이블) ==="
+# 별도 격리 git repo 사용
+EMPTY_PROJECT="$WORK_DIR/emptyproject"
+mkdir -p "$EMPTY_PROJECT"
+git -C "$EMPTY_PROJECT" init -q
+git -C "$EMPTY_PROJECT" config user.email "test@example.com"
+git -C "$EMPTY_PROJECT" config user.name "Test"
+git -C "$EMPTY_PROJECT" commit --allow-empty -m "initial" -q
+mkdir -p "$EMPTY_PROJECT/.loops/locks"
+touch "$EMPTY_PROJECT/.loops/locks/.gitkeep"
+
+set +e
+output=$(cd "$EMPTY_PROJECT" && bash "$LOOP_SH_SRC" status 2>&1)
+result=$?
+set -e
+[[ $result -eq 0 ]] || { echo "FAIL: 빈 .loops/에서 status가 0이 아닌 코드를 반환함 (got: $result). output: $output"; exit 1; }
+echo "$output" | grep -qiE 'task|없습니다|No' \
+  || { echo "FAIL: 빈 .loops/에서 status 출력에 안내 문구 없음. got: $output"; exit 1; }
+echo "OK"
+
+echo "=== TEST 13: cleanup 워크트리 부재 → 적절한 에러 ==="
+# task 디렉토리는 있지만 워크트리가 없는 상태 (prepare만 한 경우)
+loop prepare "no-wt-task" > /dev/null 2>&1
+NO_WT_SPEC="$PROJECT/.loops/no-wt-task/SPEC.md"
+cat > "$NO_WT_SPEC" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# No Worktree Task
+EOF
+# worktree를 만들지 않고 바로 cleanup 호출
+set +e
+output=$(loop cleanup "no-wt-task" 2>&1)
+result=$?
+set -e
+[[ $result -ne 0 ]] || { echo "FAIL: 워크트리가 없는데 cleanup이 성공하면 안 됨"; exit 1; }
+echo "$output" | grep -qiE '워크트리|worktree' \
+  || { echo "FAIL: 워크트리 부재 에러 메시지 없음. got: $output"; exit 1; }
+echo "OK"
+
+echo "=== TEST 14: 매우 긴 task-id (50자) → 워크트리 경로 안전 ==="
+LONG_ID="abcdefghij1234567890abcdefghij1234567890abcdefghij"  # 50자
+loop prepare "$LONG_ID" > /dev/null 2>&1
+LONG_SPEC="$PROJECT/.loops/$LONG_ID/SPEC.md"
+cat > "$LONG_SPEC" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Long Task-ID Task
+EOF
+MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "$LONG_ID" > /dev/null 2>&1
+WT_LONG="$WORK_DIR/myproject-loops/$LONG_ID"
+[[ -d "$WT_LONG" ]] || { echo "FAIL: 긴 task-id 워크트리 미생성"; exit 1; }
+[[ -f "$WT_LONG/.loop/iterations/1.log" ]] || { echo "FAIL: 긴 task-id 이터 로그 미생성"; exit 1; }
+loop cleanup "$LONG_ID" --force > /dev/null 2>&1
+[[ ! -d "$WT_LONG" ]] || { echo "FAIL: 긴 task-id cleanup 후 워크트리가 남아있음"; exit 1; }
+echo "OK"
+
+echo "=== TEST 15: Multi-iteration mock — 3회 이터 후 DONE ==="
+MULTI_TASK="multi-iter-task"
+loop prepare "$MULTI_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$MULTI_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Multi-Iteration Task
+EOF
+
+# 카운터 파일 초기화
+COUNTER_FILE="$WORK_DIR/iter-count.txt"
+echo "0" > "$COUNTER_FILE"
+export COUNTER_FILE_PATH="$COUNTER_FILE"
+
+# multi-iter mock: 호출 횟수를 파일에 기록하고 3회째에 DONE 생성
+MULTI_MOCK_BIN="$WORK_DIR/multi-mock-bin"
+mkdir -p "$MULTI_MOCK_BIN"
+cat > "$MULTI_MOCK_BIN/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null  # stdin 소비
+COUNTER_FILE="${COUNTER_FILE_PATH:-/tmp/iter-count.txt}"
+n=$(cat "$COUNTER_FILE")
+n=$((n + 1))
+echo "$n" > "$COUNTER_FILE"
+if [[ $n -ge 3 ]]; then
+  touch DONE
+fi
+echo '{"result": "mock iter '"$n"'", "usage": {"input_tokens": 100, "output_tokens": 50}}'
+MOCKEOF
+chmod +x "$MULTI_MOCK_BIN/claude"
+
+WT_MULTI="$WORK_DIR/myproject-loops/$MULTI_TASK"
+PATH="$MULTI_MOCK_BIN:$PATH" MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$MULTI_TASK"
+# 3회 이터 로그 확인
+[[ -f "$WT_MULTI/.loop/iterations/1.log" ]] || { echo "FAIL: iter 1.log 없음"; exit 1; }
+[[ -f "$WT_MULTI/.loop/iterations/2.log" ]] || { echo "FAIL: iter 2.log 없음"; exit 1; }
+[[ -f "$WT_MULTI/.loop/iterations/3.log" ]] || { echo "FAIL: iter 3.log 없음"; exit 1; }
+# DONE 파일 확인
+[[ -f "$WT_MULTI/DONE" ]] || { echo "FAIL: DONE 파일 없음"; exit 1; }
+# cleanup 후 archive 메타 파일 확인 (mock이 커밋하지 않으므로 --force 사용)
+loop cleanup "$MULTI_TASK" --force
+MULTI_LOOPS_DIR="$PROJECT/.loops/$MULTI_TASK"
+[[ -d "$MULTI_LOOPS_DIR" ]] || { echo "FAIL: archive 디렉토리 없음"; exit 1; }
+[[ -f "$MULTI_LOOPS_DIR/PLAN.md" ]] || { echo "FAIL: archive PLAN.md 없음"; exit 1; }
 echo "OK"
 
 echo ""
