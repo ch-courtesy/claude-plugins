@@ -57,11 +57,11 @@ loop() {
   bash "$LOOP_SH_SRC" "$@"
 }
 
-echo "=== TEST 1: prepare 명령으로 PROMPT.md 생성 ==="
+echo "=== TEST 1: prepare 명령으로 SPEC.md 생성 ==="
 loop prepare test-task-1
 LOOPS_TASK_DIR="$PROJECT/.loops/test-task-1"
 [[ -d "$LOOPS_TASK_DIR" ]] || { echo "FAIL: .loops/test-task-1/ 디렉토리 미생성"; exit 1; }
-[[ -f "$LOOPS_TASK_DIR/PROMPT.md" ]] || { echo "FAIL: .loops/test-task-1/PROMPT.md 미생성"; exit 1; }
+[[ -f "$LOOPS_TASK_DIR/SPEC.md" ]] || { echo "FAIL: .loops/test-task-1/SPEC.md 미생성"; exit 1; }
 # 이미 준비된 상태에서 재실행하면 오류
 set +e
 output=$(loop prepare test-task-1 2>&1)
@@ -77,13 +77,13 @@ output=$(loop start test-task-unprepared 2>&1)
 result=$?
 set -e
 [[ $result -ne 0 ]] || { echo "FAIL: prepare 없이 start가 성공하면 안 됨"; exit 1; }
-echo "$output" | grep -q "PROMPT.md가 없습니다\|prepare" || { echo "FAIL: prepare 안내 메시지 없음. got: $output"; exit 1; }
+echo "$output" | grep -q "SPEC.md가 없습니다\|prepare" || { echo "FAIL: prepare 안내 메시지 없음. got: $output"; exit 1; }
 echo "OK"
 
 echo "=== TEST 3: start로 워크트리 생성 + 1 이터 (mock claude로 즉시 DONE) ==="
-# PROMPT.md의 placeholder를 채움 (frontmatter의 verify도 실행 가능한 명령으로)
-PROMPT_FILE="$LOOPS_TASK_DIR/PROMPT.md"
-cat > "$PROMPT_FILE" <<'EOF'
+# SPEC.md의 placeholder를 채움 (frontmatter의 verify도 실행 가능한 명령으로)
+SPEC_FILE="$LOOPS_TASK_DIR/SPEC.md"
+cat > "$SPEC_FILE" <<'EOF'
 ---
 scope:
   include:
@@ -92,24 +92,22 @@ scope:
 verify: 'true'
 ---
 
-# Test PROMPT
+# Test SPEC
 
-## 작업 정의 (불변)
-
-### 무엇을 만들 것인가
+## 무엇을 만들 것인가
 Test task
 
-### 수용 기준
+## 수용 기준
 All tests pass
 
-### 범위
+## 범위
 포함:
 src/
 
 비-목표 / 제외:
 none
 
-### 검증
+## 검증
 true
 EOF
 
@@ -117,7 +115,7 @@ WT="$WORK_DIR/myproject-loops/test-task-1"
 MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start test-task-1
 [[ -d "$WT" ]] || { echo "FAIL: 워크트리 미생성"; exit 1; }
 [[ -f "$WT/CLAUDE.md" ]] || { echo "FAIL: CLAUDE.md 미복사"; exit 1; }
-[[ -f "$WT/.loop/PROMPT.md" ]] || { echo "FAIL: PROMPT.md 미복사"; exit 1; }
+[[ -f "$WT/.loop/SPEC.md" ]] || { echo "FAIL: SPEC.md 미복사"; exit 1; }
 [[ -f "$WT/.loop/PLAN.md" ]] || { echo "FAIL: PLAN.md 미시드"; exit 1; }
 [[ -f "$WT/.loop/iterations/1.log" ]] || { echo "FAIL: 이터 로그 미생성"; exit 1; }
 
@@ -146,11 +144,11 @@ echo "OK"
 echo "=== TEST 5: 슬래시 task-id (Layer 2 호환) ==="
 # prepare 후 start
 loop prepare "goal-x/sub-task" > /dev/null 2>&1
-SLASH_PROMPT="$PROJECT/.loops/goal-x/sub-task/PROMPT.md"
-[[ -f "$SLASH_PROMPT" ]] || { echo "FAIL: 슬래시 task-id prepare 실패"; exit 1; }
+SLASH_SPEC="$PROJECT/.loops/goal-x/sub-task/SPEC.md"
+[[ -f "$SLASH_SPEC" ]] || { echo "FAIL: 슬래시 task-id prepare 실패"; exit 1; }
 
 # placeholder 채움
-cat > "$SLASH_PROMPT" <<'EOF'
+cat > "$SLASH_SPEC" <<'EOF'
 ---
 scope:
   include:
@@ -179,7 +177,7 @@ echo "OK"
 echo "=== TEST 7: cleanup이 DONE 없으면 거부 (--force 없이) ==="
 # DONE 없는 워크트리를 명시적으로 준비
 loop prepare "no-done-task" > /dev/null 2>&1
-cat > "$PROJECT/.loops/no-done-task/PROMPT.md" <<'EOF'
+cat > "$PROJECT/.loops/no-done-task/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -227,6 +225,48 @@ ARCHIVED_DIR="$PROJECT/.loops/goal-x/sub-task"
 # no-done-task도 --force로 정리
 loop cleanup "no-done-task" --force
 [[ ! -d "$WT3" ]] || { echo "FAIL: no-done-task cleanup 후 워크트리가 남아있음"; exit 1; }
+echo "OK"
+
+echo "=== TEST 9: --spec 외부 파일 전달 ==="
+# 임시 외부 SPEC 파일 생성
+EXTERNAL_SPEC="$WORK_DIR/external-spec.md"
+cat > "$EXTERNAL_SPEC" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# External SPEC Task
+
+## 무엇을 만들 것인가
+External spec test
+
+## 수용 기준
+All pass
+
+## 범위
+포함:
+src/
+
+비-목표 / 제외:
+none
+
+## 검증
+true
+EOF
+
+# --spec 플래그로 start (prepare 없이)
+SPEC_TASK_ID="spec-flag-task"
+MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$SPEC_TASK_ID" --spec "$EXTERNAL_SPEC"
+
+# .loops/<id>/SPEC.md로 복사 확인
+[[ -f "$PROJECT/.loops/$SPEC_TASK_ID/SPEC.md" ]] || { echo "FAIL: --spec 복사 후 .loops/<id>/SPEC.md 미생성"; exit 1; }
+# 워크트리에도 .loop/SPEC.md 복사 확인
+WT_SPEC="$WORK_DIR/myproject-loops/$SPEC_TASK_ID"
+[[ -f "$WT_SPEC/.loop/SPEC.md" ]] || { echo "FAIL: 워크트리 .loop/SPEC.md 미복사"; exit 1; }
 echo "OK"
 
 echo ""

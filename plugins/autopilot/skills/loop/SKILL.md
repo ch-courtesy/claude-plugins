@@ -7,7 +7,7 @@ description: 자율 수행 루프(랄프 루프) 운영 인터페이스. prepare
 
 자율 수행 루프의 통합 운영 인터페이스. 인자로 subcommand와 sub args를 받아 자율 task lifecycle을 관리합니다.
 
-본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`), 외부 셸 드라이버(`references/loop.sh`), PROMPT·메모리 파일 템플릿이 모두 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태(`.loops/<task-id>/`, `.loops/locks/`)만 생성됩니다.
+본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`), 외부 셸 드라이버(`references/loop.sh`), SPEC·메모리 파일 템플릿이 모두 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태(`.loops/<task-id>/`, `.loops/locks/`)만 생성됩니다.
 
 ## 호출 방법
 
@@ -19,23 +19,24 @@ description: 자율 수행 루프(랄프 루프) 운영 인터페이스. prepare
 
 ### prepare <task-id>
 
-새 task를 위한 PROMPT.md를 인터랙티브하게 생성.
+새 task를 위한 SPEC.md를 인터랙티브하게 생성.
 
 자세한 절차는 `references/prepare.md` 참조.
 
 요약:
 1. `.loops/<task-id>/` 이미 있으면 abort
 2. `mkdir -p .loops/<task-id>`
-3. `AskUserQuestion`으로 task 정보 수집 (task description, acceptance criteria, scope.include/exclude, verify 명령)
-4. 수집된 값으로 `references/prompt-template.md` placeholder 치환 후 `.loops/<task-id>/PROMPT.md` 작성
+3. `AskUserQuestion`으로 task 정보 수집 (task title, task description, acceptance criteria, scope.include/exclude, verify 명령)
+4. 수집된 값으로 `references/spec-template.md` placeholder 치환 후 `.loops/<task-id>/SPEC.md` 작성
 5. 사용자에게 다음 단계(start) 안내
 
-### start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]
+### start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>]
 
 검증 후 워크트리·락 생성 + 이터레이션 루프 시작.
 
 `Bash(bash $SKILL_DIR/references/loop.sh start <task-id> [...flags])` 호출. loop.sh는 다음을 검증·수행:
-- `.loops/<task-id>/PROMPT.md` 존재 + placeholder 모두 치환됨
+- `--spec <path>` 지정 시 외부 파일을 `.loops/<task-id>/SPEC.md`로 복사 (prepare 대체)
+- `.loops/<task-id>/SPEC.md` 존재 + placeholder 모두 치환됨
 - 락 미보유
 - 워크트리 없으면 생성 (sibling 위치 `<project>/../<project-name>-loops/<task-id>/`)
 - 헌법(`references/constitution.md`)을 워크트리의 CLAUDE.md로 복사
@@ -66,7 +67,7 @@ target 프로젝트에 `.loops/locks/` 부재 시 prepare/start 첫 호출에 �
 |---|---|
 | `constitution.md` | 워커 헌법. start 시점에 워크트리 CLAUDE.md로 복사 |
 | `loop.sh` | 외부 셸 드라이버. 모든 subcommand의 핵심 로직 |
-| `prompt-template.md` | 새 task PROMPT.md 시드 (placeholder 5종) |
+| `spec-template.md` | 새 task SPEC.md 시드 (placeholder 7종) |
 | `plan-template.md`, `notes-template.md`, `handoff-template.md`, `runlog-template.md`, `escalation-template.md` | 메모리 파일 스텁 |
 | `operational-guide.md` | 사용자용 운영 가이드 (워크플로·환경 변수·객관 게이트 표·의존성) |
 | `prepare.md` | prepare 인터랙티브 절차 상세 |

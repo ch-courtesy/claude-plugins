@@ -16,7 +16,7 @@ target 프로젝트 런타임 상태 (스킬이 생성):
 .loops/
 ├── locks/                     # 동시 실행 락 (gitignored)
 └── <task-id>/                 # task별 통합 디렉토리
-    ├── PROMPT.md              # prepare 생성, start 후 워크트리로 복사
+    ├── SPEC.md                # prepare 생성, start 후 워크트리로 복사
     └── (cleanup 후) PLAN/NOTES/HANDOFF/RUN_LOG.md  # 아카이브
 ```
 
@@ -25,7 +25,7 @@ target 프로젝트 런타임 상태 (스킬이 생성):
 autopilot/skills/loop/references/
 ├── constitution.md            # 워커 헌법 (워크트리 CLAUDE.md로 복사)
 ├── loop.sh                    # 외부 드라이버 (subcommand 기반)
-├── prompt-template.md         # 새 task PROMPT.md 시드
+├── spec-template.md           # 새 task SPEC.md 시드
 ├── plan-template.md           # 메모리 파일 스텁
 ├── notes-template.md
 ├── handoff-template.md
@@ -39,7 +39,7 @@ autopilot/skills/loop/references/
 <project>/../<project-name>-loops/<task-id>/
 ├── CLAUDE.md                  # 헌법 (references/constitution.md 복사본)
 ├── .loop/                     # 메타 파일 (워크트리 .git/info/exclude로 비추적)
-│   ├── PROMPT.md              # 작업 정의 (prepare에서 복사)
+│   ├── SPEC.md                # 작업 정의 (prepare에서 복사)
 │   ├── PLAN.md                # 마일스톤 (모델 갱신)
 │   ├── NOTES.md               # 학습 누적 (모델 갱신)
 │   ├── HANDOFF.md             # 직전 → 다음 편지 (모델 매 이터 덮어쓰기)
@@ -54,7 +54,7 @@ autopilot/skills/loop/references/
 LOOP_SH는 `$SKILL_DIR/references/loop.sh` 경로로 호출합니다. 아래에서는 `loop.sh`로 줄여씁니다.
 
 ```
-loop.sh prepare <task-id>             # PROMPT.md 시드 생성
+loop.sh prepare <task-id>             # SPEC.md 시드 생성
 loop.sh start   <task-id> [옵션]      # 검증 후 워크트리·락 생성 + 루프 시작
 loop.sh status  [<task-id>]           # 상태 조회 (전체 또는 단일)
 loop.sh stop    <task-id>             # 실행 중 정지 (SIGTERM)
@@ -68,14 +68,14 @@ loop.sh logs    <task-id> [옵션]      # 로그 조회
 ```bash
 LOOP_SH="$HOME/.claude/plugins/autopilot/skills/loop/references/loop.sh"
 
-# 1. PROMPT.md 시드 생성 (인터랙티브 prepare는 loop 스킬 호출 권장)
+# 1. SPEC.md 시드 생성 (인터랙티브 prepare는 loop 스킬 호출 권장)
 bash "$LOOP_SH" prepare auth-refactor
-# 출력: "준비 완료. 다음 파일을 편집하세요: .loops/auth-refactor/PROMPT.md"
+# 출력: "준비 완료. 다음 파일을 편집하세요: .loops/auth-refactor/SPEC.md"
 
-# 2. PROMPT.md에 작업 정의 채움
-$EDITOR .loops/auth-refactor/PROMPT.md
+# 2. SPEC.md에 작업 정의 채움
+$EDITOR .loops/auth-refactor/SPEC.md
 # - YAML frontmatter: scope.include / scope.exclude / verify
-# - 본문 placeholder: {{task_description}}, {{acceptance_criteria}}, ...
+# - 본문 placeholder: {{task_title}}, {{task_description}}, {{acceptance_criteria}}, ...
 
 # 3. 루프 시작
 bash "$LOOP_SH" start auth-refactor
@@ -86,6 +86,37 @@ bash "$LOOP_SH" logs auth-refactor --tail
 # 5. 정지: Ctrl+C, 또는 DONE/ESCALATION.md가 생기면 자동 종료
 ```
 
+## 외부 SPEC 파일 전달 (--spec 플래그)
+
+```bash
+# 외부에서 SPEC.md 작성 후 전달
+cat > /tmp/my-spec.md <<'EOF'
+---
+scope:
+  include:
+    - src/**
+    - tests/**
+  exclude:
+    - rules/**
+    - .loops/**
+    - CLAUDE.md
+verify: "pnpm test"
+---
+
+# auth-refactor: JWT 갱신 흐름 개선
+
+## 무엇을 만들 것인가
+...
+EOF
+bash "$LOOP_SH" start auth-refactor --spec /tmp/my-spec.md
+
+# 또는 다른 도구가 SPEC.md를 만들고 전달
+some-spec-generator > /tmp/spec.md
+bash "$LOOP_SH" start my-task --spec /tmp/spec.md
+```
+
+`--spec`을 쓰면 prepare 단계 없이 start만으로 시작할 수 있습니다. 지정한 파일이 `.loops/<task-id>/SPEC.md`로 복사된 후 일반 start 흐름(placeholder 검사·워크트리 생성·루프)으로 진행됩니다.
+
 ## 상태 조회
 
 ```bash
@@ -94,7 +125,7 @@ bash "$LOOP_SH" status auth-refactor # 단일 task 상태
 ```
 
 상태 값:
-- `prepared`: PROMPT.md 준비됨, start 전
+- `prepared`: SPEC.md 준비됨, start 전
 - `running`: 루프 실행 중 (락 파일 있음)
 - `idle`: 워크트리 있음, 락 없음 (일시 정지)
 - `escalated`: ESCALATION.md 있음 (사람 개입 필요)
@@ -143,7 +174,7 @@ bash "$LOOP_SH" logs auth-refactor --iter 3    # 이터 #3 로그 출력
 ```bash
 cat ../<project>-loops/<task-id>/.loop/ESCALATION.md
 cd ../<project>-loops/<task-id>
-$EDITOR .loop/PROMPT.md           # 명세 조정
+$EDITOR .loop/SPEC.md             # 명세 조정
 $EDITOR .loop/NOTES.md            # 학습 보강
 rm .loop/ESCALATION.md            # 보고 해제
 cd <project>
@@ -193,7 +224,7 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 | 시계 캡 | `WALL_CLOCK_MINUTES` (기본 120) |
 | 테스트 약화 | `tests/**` 해시 변경 감지 |
 | 의존성 동결 | `package.json`·`requirements.txt`·`Cargo.toml` 등 매니페스트 해시 |
-| Scope 위반 | git diff vs PROMPT.md frontmatter의 scope.include·exclude |
+| Scope 위반 | git diff vs SPEC.md frontmatter의 scope.include·exclude |
 | Suppressor 신규 | `noqa`·`@ts-ignore`·`eslint-disable`·`#pragma warning disable` 신규 추가 |
 | Secrets | `gitleaks detect --staged` (gitleaks 설치 시) |
 | fix:symptom streak | git log의 최근 2 커밋이 모두 `fix:symptom` |

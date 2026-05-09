@@ -1,6 +1,6 @@
 # prepare 인터랙티브 절차 상세
 
-`Skill(skill: "loop", args: "prepare <task-id>")` 호출 시 다음 절차로 PROMPT.md 생성.
+`Skill(skill: "loop", args: "prepare <task-id>")` 호출 시 다음 절차로 SPEC.md 생성.
 
 ## 1. 사전 검사
 
@@ -12,6 +12,10 @@
 `AskUserQuestion`을 두 라운드로 호출 (한 번의 호출에 최대 4문항).
 
 **라운드 1 — 필수 4문항** (한 번의 호출에 묶음):
+
+### Q0. task_title (한 줄 제목)
+- "task의 한 줄 제목을 입력하세요 (예: 'auth-refactor: JWT 갱신 흐름 개선')"
+- "Other"로 자유 텍스트 받음. 비어있으면 task-id 그대로 사용.
 
 ### Q1. task_description (무엇을 만들 것인가)
 - "한 줄 설명을 입력하세요"
@@ -37,7 +41,7 @@
 
 ### Q5. constraints (제약, 선택)
 - 옵션:
-  - **없음 / 건너뛰기** — 알려진 환경·도구·호환성·성능 제약이 없거나 PROMPT.md에 안 적어도 됨
+  - **없음 / 건너뛰기** — 알려진 환경·도구·호환성·성능 제약이 없거나 SPEC.md에 안 적어도 됨
   - **간단 입력** — Other로 자유 텍스트 (예: "Node 18 / DB 마이그레이션 기존 스키마 호환 / 1000 RPS 유지")
 - "Other"로 직접 입력
 
@@ -47,24 +51,25 @@
   - **간단 입력** — Other로 자유 텍스트 (예: "X 라이브러리 시도 실패 / 이 모듈은 다른 팀 소유")
 - "Other"로 직접 입력
 
-## 3. PROMPT.md 작성
+## 3. SPEC.md 작성
 
-`references/prompt-template.md`를 읽어 placeholder 치환:
+`references/spec-template.md`를 읽어 placeholder 치환:
+- `{{task_title}}` → Q0 값 (비어있으면 task-id 사용)
 - `{{task_description}}` → Q1 값
 - `{{acceptance_criteria}}` → Q2 값
 - `{{scope_in}}` → Q3 값 (frontmatter scope.include에도 동일 적용)
 - `{{scope_out}}` → 기본 `["rules/**", ".loops/**", "CLAUDE.md"]`
 - `{{verify_command}}` → Q4 값
-- `{{constraints}}` → Q5 값. "건너뛰기"면 빈 줄 한 줄로 치환 (섹션 자체는 남기되 내용 비움 — 필요 시 사용자가 PROMPT.md에서 직접 채울 수 있게)
+- `{{constraints}}` → Q5 값. "건너뛰기"면 빈 줄 한 줄로 치환 (섹션 자체는 남기되 내용 비움 — 필요 시 사용자가 SPEC.md에서 직접 채울 수 있게)
 - `{{risks}}` → Q6 값. "건너뛰기"면 동일 처리
 
 frontmatter도 Q3·Q4 동일 치환 (scope.include·verify).
 
-치환된 본문을 `.loops/<task-id>/PROMPT.md`로 작성.
+치환된 본문을 `.loops/<task-id>/SPEC.md`로 작성.
 
 ## 4. 안내
 
 ```
-prepared: .loops/<task-id>/PROMPT.md
+prepared: .loops/<task-id>/SPEC.md
 다음 단계: Skill(skill: "loop", args: "start <task-id>")
 ```

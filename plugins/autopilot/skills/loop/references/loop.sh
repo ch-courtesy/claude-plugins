@@ -3,7 +3,7 @@
 #
 # 사용:
 #   bash /path/to/autopilot/skills/loop/references/loop.sh prepare <task-id>
-#   bash /path/to/autopilot/skills/loop/references/loop.sh start   <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]
+#   bash /path/to/autopilot/skills/loop/references/loop.sh start   <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>]
 #   bash /path/to/autopilot/skills/loop/references/loop.sh status  [<task-id>]
 #   bash /path/to/autopilot/skills/loop/references/loop.sh stop    <task-id>
 #   bash /path/to/autopilot/skills/loop/references/loop.sh list
@@ -117,7 +117,7 @@ read_scope_include() {
     1d
     /^---$/d
     p
-  }' "$WT/.loop/PROMPT.md" 2>/dev/null \
+  }' "$WT/.loop/SPEC.md" 2>/dev/null \
     | yq '.scope.include[]' 2>/dev/null \
     || true
 }
@@ -127,7 +127,7 @@ read_scope_exclude() {
     1d
     /^---$/d
     p
-  }' "$WT/.loop/PROMPT.md" 2>/dev/null \
+  }' "$WT/.loop/SPEC.md" 2>/dev/null \
     | yq '.scope.exclude[]' 2>/dev/null \
     || true
 }
@@ -277,7 +277,7 @@ iterate() {
       --system-prompt-file CLAUDE.md \
       --add-dir . \
       --output-format json \
-      < .loop/PROMPT.md \
+      < .loop/SPEC.md \
       > ".loop/iterations/$n.log" 2>&1
   ) || exit_code=$?
 
@@ -335,19 +335,19 @@ cmd_prepare() {
 
   compute_paths "$task_id"
 
-  local prompt_dst="$LOOPS_DIR/PROMPT.md"
-  if [[ -f "$prompt_dst" ]]; then
-    die "이미 준비되어 있습니다: $prompt_dst\n재준비하려면 먼저 삭제하세요: rm $prompt_dst"
+  local spec_dst="$LOOPS_DIR/SPEC.md"
+  if [[ -f "$spec_dst" ]]; then
+    die "이미 준비되어 있습니다: $spec_dst\n재준비하려면 먼저 삭제하세요: rm $spec_dst"
   fi
 
-  local prompt_src="$SCRIPT_DIR/prompt-template.md"
-  [[ -f "$prompt_src" ]] || die "prompt-template.md를 찾을 수 없습니다: $prompt_src"
+  local spec_src="$SCRIPT_DIR/spec-template.md"
+  [[ -f "$spec_src" ]] || die "spec-template.md를 찾을 수 없습니다: $spec_src"
 
   mkdir -p "$LOOPS_DIR"
-  cp "$prompt_src" "$prompt_dst"
+  cp "$spec_src" "$spec_dst"
 
   echo "준비 완료. 다음 파일을 편집하세요:"
-  echo "  $prompt_dst"
+  echo "  $spec_dst"
   echo ""
   echo "편집 후 루프를 시작하려면:"
   echo "  $0 start $task_id"
@@ -358,9 +358,9 @@ cmd_prepare() {
 cmd_start() {
   local task_id="$1"
   shift || true
-  [[ -z "$task_id" ]] && die "사용: $0 start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]"
+  [[ -z "$task_id" ]] && die "사용: $0 start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>]"
 
-  local max_iterations_override="" wall_clock_minutes_override="" watch_mode=0
+  local max_iterations_override="" wall_clock_minutes_override="" watch_mode=0 spec_path=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --max-iterations)
@@ -374,6 +374,10 @@ cmd_start() {
       --watch)
         watch_mode=1
         shift
+        ;;
+      --spec)
+        spec_path="$2"
+        shift 2
         ;;
       *)
         die "알 수 없는 옵션: $1"
@@ -389,23 +393,31 @@ cmd_start() {
   MAX_CONCURRENT="${MAX_CONCURRENT:-3}"
   WATCH_MODE="$watch_mode"
 
-  # 1. PROMPT.md 존재 확인
-  local prompt_path="$LOOPS_DIR/PROMPT.md"
-  if [[ ! -f "$prompt_path" ]]; then
-    die "PROMPT.md가 없습니다. 먼저 실행하세요: $0 prepare $task_id"
+  # 1. --spec 외부 SPEC 전달 처리
+  if [[ -n "$spec_path" ]]; then
+    [[ -f "$spec_path" ]] || die "외부 SPEC 파일을 찾을 수 없음: $spec_path"
+    mkdir -p "$LOOPS_DIR"
+    cp "$spec_path" "$LOOPS_DIR/SPEC.md"
+    echo "외부 SPEC 파일 복사: $spec_path → $LOOPS_DIR/SPEC.md"
   fi
 
-  # 2. placeholder 검사
+  # 2. SPEC.md 존재 확인
+  local spec_path_local="$LOOPS_DIR/SPEC.md"
+  if [[ ! -f "$spec_path_local" ]]; then
+    die "SPEC.md가 없습니다. 먼저 실행하세요: $0 prepare $task_id"
+  fi
+
+  # 3. placeholder 검사
   local placeholders
-  placeholders=$(grep -oE '\{\{[^}]+\}\}' "$prompt_path" 2>/dev/null || true)
+  placeholders=$(grep -oE '\{\{[^}]+\}\}' "$spec_path_local" 2>/dev/null || true)
   if [[ -n "$placeholders" ]]; then
-    die "채워지지 않은 placeholder가 있습니다: $(echo "$placeholders" | tr '\n' ' ')\n$prompt_path 를 편집하세요."
+    die "채워지지 않은 placeholder가 있습니다: $(echo "$placeholders" | tr '\n' ' ')\n$spec_path_local 를 편집하세요."
   fi
 
-  # 3. 락 획득
+  # 4. 락 획득
   acquire_lock
 
-  # 4. 워크트리 생성 (없는 경우)
+  # 5. 워크트리 생성 (없는 경우)
   if [[ ! -d "$WT" ]]; then
     echo "[$(now_iso)] 워크트리 생성 시작: $WT"
 
@@ -419,7 +431,7 @@ cmd_start() {
 
     # 메타 파일 시드
     mkdir -p "$WT/.loop/iterations"
-    cp "$LOOPS_DIR/PROMPT.md" "$WT/.loop/PROMPT.md"
+    cp "$LOOPS_DIR/SPEC.md" "$WT/.loop/SPEC.md"
     cp "$SCRIPT_DIR/plan-template.md" "$WT/.loop/PLAN.md"
     cp "$SCRIPT_DIR/notes-template.md" "$WT/.loop/NOTES.md"
     cp "$SCRIPT_DIR/handoff-template.md" "$WT/.loop/HANDOFF.md"
@@ -441,7 +453,7 @@ cmd_start() {
     echo "[$(now_iso)] 기존 워크트리 사용: $WT"
   fi
 
-  # 5. 이터레이션 루프
+  # 6. 이터레이션 루프
   START_TIME=$(date +%s)
   local n=0
 
@@ -549,10 +561,10 @@ cmd_status() {
         state="idle"
       fi
     elif [[ -d "$loops_dir" ]]; then
-      # PROMPT.md만 있으면 prepared, 메모리 파일이 있으면 archived
+      # SPEC.md만 있으면 prepared, 메모리 파일이 있으면 archived
       if [[ -f "$loops_dir/PLAN.md" ]] || [[ -f "$loops_dir/NOTES.md" ]]; then
         state="archived"
-      elif [[ -f "$loops_dir/PROMPT.md" ]]; then
+      elif [[ -f "$loops_dir/SPEC.md" ]]; then
         state="prepared"
       fi
     fi
@@ -746,8 +758,8 @@ usage() {
 사용법이 바뀌었습니다.
 
 Subcommands:
-  prepare <task-id>       PROMPT.md 시드 생성
-  start <task-id>         검증 후 워크트리·락 생성 + 루프 시작
+  prepare <task-id>       SPEC.md 시드 생성
+  start <task-id>         검증 후 워크트리·락 생성 + 루프 시작 [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>]
   status [<task-id>]      상태 조회
   stop <task-id>          실행 중 정지
   list                    전체 task 상태

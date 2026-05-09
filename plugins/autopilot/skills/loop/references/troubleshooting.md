@@ -12,13 +12,13 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 3. `rm .loops/<task-id>/.../ESCALATION.md` 또는 워크트리 안으로 들어가서 정리
 4. `start <task-id>` 또는 watch 모드면 자동 재개
 
-## spec-gap (PROMPT.md 결함)
+## spec-gap (SPEC.md 결함)
 
 증상: 모호한 수용 기준, 검증 명령 부적합, scope 정의 미흡 등.
 
 처리:
 1. ESCALATION.md의 "필요한 결정" 섹션 검토
-2. `<worktree>/.loop/PROMPT.md` 직접 수정 (또는 prepare 재실행은 안 됨 — 워크트리 이미 있음)
+2. `<worktree>/.loop/SPEC.md` 직접 수정 (또는 prepare 재실행은 안 됨 — 워크트리 이미 있음)
 3. ESCALATION.md 정리 후 재시작
 
 ## architecture-gap (코드 구조 변경 필요)
@@ -27,7 +27,7 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 
 처리:
 1. 본 task는 정지하고 사람이 architecture 작업 (별도 task로 분리)
-2. architecture 작업 완료 후 본 task의 PROMPT.md scope 조정
+2. architecture 작업 완료 후 본 task의 SPEC.md scope 조정
 3. 또는 본 task를 cleanup하고 새 task로 재시작
 
 ## environment-gap (외부 시스템 일시 문제)
