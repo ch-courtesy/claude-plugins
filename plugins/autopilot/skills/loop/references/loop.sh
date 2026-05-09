@@ -137,7 +137,7 @@ acquire_lock() {
 
 # ----- 게이트 헬퍼 -----
 
-hash_tests() {
+list_test_files() {
   # SPEC.md frontmatter test_paths가 있으면 override
   local override_paths
   override_paths=$(read_scope_yaml | yq '.test_paths[]' 2>/dev/null || true)
@@ -159,17 +159,22 @@ hash_tests() {
     )
   fi
 
-  local files
-  files=$(cd "$WT" 2>/dev/null && git ls-files -- "${pathspecs[@]}" 2>/dev/null | sort -u)
+  cd "$WT" 2>/dev/null && git ls-files -- "${pathspecs[@]}" 2>/dev/null | sort -u
+}
 
+# 주어진 파일 목록의 결합 해시. 누락된 파일은 sha256sum이 silent 실패하므로 자연스레
+# 결합 해시가 변함 → 삭제 감지. 헌법 §0 TDD Iron Law(RED→GREEN)를 깨뜨리지 않기 위해
+# "이터 시작 시점에 존재한 파일들"의 해시만 비교 — 새 테스트 추가는 weakening 아님.
+hash_listed_files() {
+  local files="$1"
   if [[ -z "$files" ]]; then
-    echo "no-tests"
+    echo "no-files"
     return
   fi
-
+  # bash 3.2: 빈 배열 "${arr[@]}"는 set -u에서 unbound 에러 → ${arr[@]+"${arr[@]}"}로 우회
   echo "$files" \
-    | xargs -I{} "$HASH_BIN" "${HASH_ARGS[@]}" "$WT/{}" 2>/dev/null \
-    | "$HASH_BIN" "${HASH_ARGS[@]}" \
+    | xargs -I{} "$HASH_BIN" ${HASH_ARGS[@]+"${HASH_ARGS[@]}"} "$WT/{}" 2>/dev/null \
+    | "$HASH_BIN" ${HASH_ARGS[@]+"${HASH_ARGS[@]}"} \
     | awk '{print $1}'
 }
 
@@ -182,8 +187,9 @@ hash_deps() {
   if [[ -z "$manifests" ]]; then
     echo "no-manifests"
   else
-    echo "$manifests" | xargs -I{} "$HASH_BIN" "${HASH_ARGS[@]}" {} 2>/dev/null \
-      | "$HASH_BIN" "${HASH_ARGS[@]}" | awk '{print $1}'
+    # bash 3.2 빈 배열 우회 (hash_listed_files 동일 패턴)
+    echo "$manifests" | xargs -I{} "$HASH_BIN" ${HASH_ARGS[@]+"${HASH_ARGS[@]}"} {} 2>/dev/null \
+      | "$HASH_BIN" ${HASH_ARGS[@]+"${HASH_ARGS[@]}"} | awk '{print $1}'
   fi
 }
 
@@ -287,7 +293,7 @@ detect_oscillation() {
   local sets=()
   while IFS= read -r commit; do
     [[ -z "$commit" ]] && continue
-    sets+=("$(cd "$WT" && git diff-tree --no-commit-id --name-only -r "$commit" 2>/dev/null | sort | "$HASH_BIN" "${HASH_ARGS[@]}" | awk '{print $1}')")
+    sets+=("$(cd "$WT" && git diff-tree --no-commit-id --name-only -r "$commit" 2>/dev/null | sort | "$HASH_BIN" ${HASH_ARGS[@]+"${HASH_ARGS[@]}"} | awk '{print $1}')")
   done <<< "$commits"
 
   if [[ ${#sets[@]} -eq 4 ]] \
@@ -356,8 +362,11 @@ iterate() {
 
   echo "[$(now_iso)] 이터 #$n 시작"
 
-  local start_hash_tests start_hash_deps
-  start_hash_tests=$(hash_tests)
+  # 시작 시점의 테스트 파일 set 캡처. 종료 시점에 같은 set만 다시 해시해 비교 →
+  # 삭제·수정만 감지, 신규 추가는 통과 (TDD RED 단계 보호).
+  local start_test_files start_hash_tests start_hash_deps
+  start_test_files=$(list_test_files)
+  start_hash_tests=$(hash_listed_files "$start_test_files")
   start_hash_deps=$(hash_deps)
 
   local exit_code=0
@@ -395,9 +404,10 @@ iterate() {
   fi
 
   # 객관 게이트 9종
-  if [[ "$start_hash_tests" != "no-tests" ]] \
-     && [[ "$(hash_tests)" != "$start_hash_tests" ]]; then
-    halt "테스트 약화 — tests/** 해시 변경"
+  # 테스트 약화: 시작 시점의 파일 set만 다시 해시. 신규 추가는 무시 (TDD RED 보호).
+  if [[ "$start_hash_tests" != "no-files" ]] \
+     && [[ "$(hash_listed_files "$start_test_files")" != "$start_hash_tests" ]]; then
+    halt "테스트 약화 — 기존 테스트 파일 변경 감지 (삭제·수정 의심)"
   fi
   if [[ "$start_hash_deps" != "no-manifests" ]] \
      && [[ "$(hash_deps)" != "$start_hash_deps" ]]; then
