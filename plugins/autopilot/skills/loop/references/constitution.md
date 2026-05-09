@@ -1,29 +1,3 @@
----
-label: 랄프 루프 (sibling 워크트리, 객관 게이트, 동시 실행 지원)
-description: 매 이터 콜드 스타트 + 4대 메모리 파일 + git commit 자기 분류 + 워크트리 격리
-recommended: true
-on_create: |
-  1. assets/PROMPT.template.md를 .loops/PROMPT.template.md로 복사
-  2. assets/loop.sh를 .loops/loop.sh로 복사하고 chmod +x
-  3. assets/loops-README.md를 .loops/README.md로 복사
-  4. assets/{PLAN,NOTES,HANDOFF,RUN_LOG,ESCALATION}.template.md를 .loops/templates/ 아래로 복사
-  5. .loops/locks/.gitkeep 생성
-  6. .gitignore에 다음 라인 추가 (이미 있으면 skip):
-     - .loops/locks/
-     - ../<project-name>-loops/   # sibling 워크트리. 부모 git에서 무시 — 일반적으로 git은 ../ 패턴을 추적하지 않으나 실수 방지를 위한 명시적 신호. 사용자가 LOOP_WORKTREE_BASE로 변경 시 조정 필요
-  7. 사용자에게 다음 안내 메시지 출력:
-     "자율 루프가 설치되었습니다.
-      sibling 워크트리는 ../<project-name>-loops/<task-id>/ 에 생성됩니다.
-      LOOP_WORKTREE_BASE 환경 변수로 위치 변경 가능.
-
-      새 task 시작:
-        ./.loops/loop.sh prepare <task-id>   # PROMPT.md 시드 생성
-        \$EDITOR .loops/<task-id>/PROMPT.md  # 작업 정의 채움
-        ./.loops/loop.sh start <task-id>     # 루프 시작
-
-      동시 실행: MAX_CONCURRENT 환경 변수로 조정 (기본 3).
-      자세한 내용은 .loops/README.md 참조."
----
 
 # autonomous-loop — 자율 루프 운영 규칙
 
