@@ -2,13 +2,13 @@
 # loop.sh — 자율 루프 외부 셸 드라이버 (subcommand 기반)
 #
 # 사용:
-#   ./.loops/loop.sh prepare <task-id>
-#   ./.loops/loop.sh start   <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]
-#   ./.loops/loop.sh status  [<task-id>]
-#   ./.loops/loop.sh stop    <task-id>
-#   ./.loops/loop.sh list
-#   ./.loops/loop.sh cleanup <task-id> [--force]
-#   ./.loops/loop.sh logs    <task-id> [--tail] [--iter N]
+#   bash /path/to/autopilot/skills/loop/references/loop.sh prepare <task-id>
+#   bash /path/to/autopilot/skills/loop/references/loop.sh start   <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]
+#   bash /path/to/autopilot/skills/loop/references/loop.sh status  [<task-id>]
+#   bash /path/to/autopilot/skills/loop/references/loop.sh stop    <task-id>
+#   bash /path/to/autopilot/skills/loop/references/loop.sh list
+#   bash /path/to/autopilot/skills/loop/references/loop.sh cleanup <task-id> [--force]
+#   bash /path/to/autopilot/skills/loop/references/loop.sh logs    <task-id> [--tail] [--iter N]
 #
 # 환경 변수:
 #   LOOP_WORKTREE_BASE     워크트리 부모 디렉토리 (기본: <project>/../<project-name>-loops)
@@ -17,6 +17,9 @@
 #   WALL_CLOCK_MINUTES     시계 캡 (기본: 120)
 
 set -euo pipefail
+
+# ----- 스크립트 자신의 디렉토리 (references/) -----
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ----- 헬퍼 -----
 
@@ -337,8 +340,8 @@ cmd_prepare() {
     die "이미 준비되어 있습니다: $prompt_dst\n재준비하려면 먼저 삭제하세요: rm $prompt_dst"
   fi
 
-  local prompt_src="$PROJECT_ROOT/.loops/PROMPT.template.md"
-  [[ -f "$prompt_src" ]] || die ".loops/PROMPT.template.md를 찾을 수 없습니다. autonomous-loop-rule-creator 스킬을 먼저 실행하세요."
+  local prompt_src="$SCRIPT_DIR/prompt-template.md"
+  [[ -f "$prompt_src" ]] || die "prompt-template.md를 찾을 수 없습니다: $prompt_src"
 
   mkdir -p "$LOOPS_DIR"
   cp "$prompt_src" "$prompt_dst"
@@ -411,20 +414,16 @@ cmd_start() {
       || die "git worktree add 실패: $WT"
 
     # 헌법을 워크트리 CLAUDE.md로 복사
-    cp "$PROJECT_ROOT/rules/autonomous-loop.md" "$WT/CLAUDE.md" \
-      || die "rules/autonomous-loop.md를 찾을 수 없음. 스킬이 정상 설치됐는지 확인하세요."
-
-    # 템플릿 디렉토리 존재 확인
-    [[ -d "$PROJECT_ROOT/.loops/templates" ]] \
-      || die ".loops/templates/가 없습니다. autonomous-loop-rule-creator 스킬을 먼저 실행하세요."
+    cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
+      || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
 
     # 메타 파일 시드
     mkdir -p "$WT/.loop/iterations"
     cp "$LOOPS_DIR/PROMPT.md" "$WT/.loop/PROMPT.md"
-    cp "$PROJECT_ROOT/.loops/templates/PLAN.template.md" "$WT/.loop/PLAN.md"
-    cp "$PROJECT_ROOT/.loops/templates/NOTES.template.md" "$WT/.loop/NOTES.md"
-    cp "$PROJECT_ROOT/.loops/templates/HANDOFF.template.md" "$WT/.loop/HANDOFF.md"
-    cp "$PROJECT_ROOT/.loops/templates/RUN_LOG.template.md" "$WT/.loop/RUN_LOG.md"
+    cp "$SCRIPT_DIR/plan-template.md" "$WT/.loop/PLAN.md"
+    cp "$SCRIPT_DIR/notes-template.md" "$WT/.loop/NOTES.md"
+    cp "$SCRIPT_DIR/handoff-template.md" "$WT/.loop/HANDOFF.md"
+    cp "$SCRIPT_DIR/runlog-template.md" "$WT/.loop/RUN_LOG.md"
 
     # 워크트리 로컬 비추적 등록
     local wt_gitdir
@@ -755,7 +754,7 @@ Subcommands:
   cleanup <task-id>       DONE 후 정리
   logs <task-id>          로그 조회
 
-자세한 내용: ./.loops/README.md
+자세한 내용: references/operational-guide.md (autopilot/skills/loop/)
 EOF
   exit 1
 }
