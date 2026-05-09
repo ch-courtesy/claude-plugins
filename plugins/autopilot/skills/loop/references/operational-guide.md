@@ -170,6 +170,6 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 
 ## 안전 정지 / stale 락 정리
 
-정지: Ctrl+C (이터 완료 후 락 해제), `stop <task-id>` (SIGTERM), `kill <PID>` (trap으로 락 자동 정리).
+정지: Ctrl+C, `stop <task-id>` (SIGTERM), `kill <PID>`. SIGTERM/SIGINT 수신 시 드라이버는 자식 프로세스 트리(subshell·claude)를 모두 종료한 후 lock을 해제합니다 (orphan 방지). SIGKILL(`kill -9`)은 trap을 우회하므로 자식이 orphan으로 남을 수 있습니다 — 가급적 `stop` subcommand 사용.
 
 크래시로 stale 락이 남은 경우 별도 작업 불필요 — 다음 `start`/`stop` 호출이 PID 유효성을 검사해 자동 정리합니다 (PID 무효·빈 파일·비숫자 모두 stale로 인식).

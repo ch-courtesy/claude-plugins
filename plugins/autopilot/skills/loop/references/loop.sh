@@ -47,6 +47,31 @@ require_tool git
 require_tool yq
 require_tool claude
 
+# ----- 시그널 처리: SIGTERM/SIGINT 시 자식 트리 정리 (orphan 방지) -----
+# bash가 종료되면 EXIT trap으로 lock은 즉시 삭제되지만 subshell 내 claude는 orphan이 됨.
+# 두 번째 start가 새 lock·새 워크트리 동시 수정 시도 → race. 이를 막기 위해 시그널을
+# 받으면 descendants 전체 종료 후 exit. SIGKILL은 trap이 안 통하므로 미커버.
+
+kill_descendants() {
+  local parent="$1"
+  # pgrep -P는 macOS·Linux 양쪽 동작
+  local children
+  children=$(pgrep -P "$parent" 2>/dev/null || true)
+  local child
+  # shellcheck disable=SC2086 # $children은 PID 공백 분리 — 의도적 word splitting
+  for child in $children; do
+    kill_descendants "$child"
+    kill -TERM "$child" 2>/dev/null || true
+  done
+}
+
+on_signal_exit() {
+  kill_descendants "$$"
+  exit 143  # 128 + SIGTERM(15) — EXIT trap이 lock 정리
+}
+
+trap 'on_signal_exit' TERM INT
+
 # 해시 유틸 — macOS 기본 환경은 sha256sum·md5sum 미지원, shasum이 표준
 if command -v sha256sum >/dev/null 2>&1; then
   HASH_BIN="sha256sum"
@@ -369,10 +394,12 @@ iterate() {
   start_hash_tests=$(hash_listed_files "$start_test_files")
   start_hash_deps=$(hash_deps)
 
+  # 비동기 실행 + wait — bash trap은 동기 명령 안에서 deferred되므로 wait를 써야
+  # SIGTERM/SIGINT가 즉시 처리돼 자식 트리 정리 가능 (orphan 방지)
   local exit_code=0
   (
     cd "$WT"
-    claude \
+    exec claude \
       --print \
       --no-session-persistence \
       --dangerously-skip-permissions \
@@ -381,7 +408,9 @@ iterate() {
       --output-format json \
       < .loop/SPEC.md \
       > ".loop/iterations/$n.log" 2>&1
-  ) || exit_code=$?
+  ) &
+  local claude_pid=$!
+  wait "$claude_pid" || exit_code=$?
 
   echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 게이트 검사..."
 
