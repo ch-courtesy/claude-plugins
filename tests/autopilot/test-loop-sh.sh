@@ -164,7 +164,7 @@ EOF
 MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "goal-x/sub-task" > /dev/null 2>&1 || true
 WT2="$WORK_DIR/myproject-loops/goal-x/sub-task"
 [[ -d "$WT2" ]] || { echo "FAIL: 슬래시 task-id 워크트리 미생성"; exit 1; }
-# 락 파일명 sanitize 확인 (슬래시가 -로 치환)
+# 락 파일명 sanitize 확인 (슬래시가 __로 인코딩되어 lock 디렉토리에 'goal-x' 하위 없음)
 [[ ! -d ".loops/locks/goal-x" ]] || { echo "FAIL: 락 디렉토리에 슬래시 잔존"; exit 1; }
 echo "OK"
 
@@ -1684,6 +1684,18 @@ fi
 
 # 정리 (워크트리 없으니 .loops/ 디렉토리만 직접 제거)
 rm -rf "$PROJECT/.loops/ns-foo"
+echo "OK"
+
+echo "=== TEST 46: task-id에 '.' 단독 컴포넌트 거부 ==="
+for invalid in "." "./foo" "foo/." "a/./b"; do
+  set +e
+  output=$(loop prepare "$invalid" 2>&1)
+  result=$?
+  set -e
+  [[ $result -ne 0 ]] || { echo "FAIL: prepare가 '$invalid' task-id를 받아들임"; exit 1; }
+  echo "$output" | grep -qE "'\\.'" \
+    || { echo "FAIL: '$invalid'에 대해 '.' 거부 메시지 없음. got: $output"; exit 1; }
+done
 echo "OK"
 
 echo ""
