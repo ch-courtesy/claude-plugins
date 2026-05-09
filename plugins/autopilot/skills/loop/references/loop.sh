@@ -846,7 +846,36 @@ cmd_cleanup() {
     if [[ $force -eq 0 ]]; then
       die "task $task_id 가 실행 중입니다. 먼저 정지하세요: $0 stop $task_id\n강제 실행: $0 cleanup $task_id --force"
     fi
-    echo "WARN: 락 파일이 있지만 --force로 진행합니다."
+
+    # --force: 실행 중 프로세스를 SIGTERM으로 먼저 정지 (race 방지)
+    # 단순히 lock만 지우면 bash·claude는 계속 실행되며, 그 사이 새 start가
+    # 새 lock을 획득해 두 claude가 동시에 같은 워크트리를 수정할 수 있음.
+    local lock_pid
+    lock_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+    if [[ -n "$lock_pid" ]] && [[ "$lock_pid" =~ ^[0-9]+$ ]] \
+       && kill -0 "$lock_pid" 2>/dev/null; then
+      echo "WARN: --force cleanup — 실행 중 task ${task_id} (PID $lock_pid) SIGTERM 후 종료 대기..."
+      kill -TERM "$lock_pid" 2>/dev/null || true
+
+      # 5초 grace
+      for _ in 1 2 3 4 5; do
+        sleep 1
+        if ! kill -0 "$lock_pid" 2>/dev/null; then
+          break
+        fi
+      done
+
+      # 여전히 살아있으면 SIGKILL (--force 명시이므로 escalate)
+      if kill -0 "$lock_pid" 2>/dev/null; then
+        echo "WARN: PID $lock_pid SIGTERM 무응답 — SIGKILL 전송" >&2
+        kill -KILL "$lock_pid" 2>/dev/null || true
+        sleep 1
+      fi
+    else
+      echo "WARN: lock 파일에 활성 PID 없음 (stale)."
+    fi
+
+    # bash가 EXIT trap으로 lock을 이미 제거했을 수 있으나 안전하게 다시 정리
     rm -f "$LOCK_FILE"
   fi
 

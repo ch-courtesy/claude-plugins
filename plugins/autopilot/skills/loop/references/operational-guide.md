@@ -98,6 +98,8 @@ bash "$LOOP_SH" cleanup auth-refactor          # 아카이브 + 워크트리 제
 # cleanup 후 메타 파일은 .loops/auth-refactor/ 보관
 ```
 
+`cleanup --force`는 실행 중 프로세스가 있으면 SIGTERM 후 5초 대기 → 무응답 시 SIGKILL → lock·워크트리 제거. 정상 종료를 원할 때는 먼저 `stop <task-id>`로 정지 후 `cleanup` (without --force).
+
 ## 로그 조회
 
 ```bash
