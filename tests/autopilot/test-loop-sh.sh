@@ -764,5 +764,588 @@ WT21="$WORK_DIR/myproject-loops/$TEST21_TASK"
 loop cleanup "$TEST21_TASK" --force > /dev/null 2>&1
 echo "OK"
 
+echo "=== TEST 22: M1 — task-id에 '..' 포함 시 거부 (path traversal) ==="
+for sub in prepare start status stop cleanup logs; do
+  set +e
+  output=$(loop "$sub" "../escape-task" 2>&1)
+  result=$?
+  set -e
+  [[ $result -ne 0 ]] || { echo "FAIL: ${sub}가 '..' task-id를 받아들임"; exit 1; }
+  echo "$output" | grep -q "path traversal\|'\\.\\.'" \
+    || { echo "FAIL: ${sub}의 path traversal 거부 메시지 없음. got: $output"; exit 1; }
+done
+echo "OK"
+
+echo "=== TEST 23: M4 — scope.include 빈 배열이면 start 거부 ==="
+loop prepare "empty-scope-task" > /dev/null 2>&1
+cat > "$PROJECT/.loops/empty-scope-task/SPEC.md" <<'EOF'
+---
+scope:
+  include: []
+  exclude: []
+verify: 'true'
+---
+
+# Empty Scope Task
+EOF
+set +e
+output=$(MAX_ITERATIONS=1 loop start "empty-scope-task" 2>&1)
+result=$?
+set -e
+[[ $result -ne 0 ]] || { echo "FAIL: 빈 scope.include로 start가 성공하면 안 됨"; exit 1; }
+echo "$output" | grep -q "scope.include.*비어\|최소 한 패턴" \
+  || { echo "FAIL: 빈 scope 거부 메시지 없음. got: $output"; exit 1; }
+echo "OK"
+
+echo "=== TEST 24: M5 — stop on stale lock (PID 죽음) ==="
+STALE_TASK="stale-lock-task"
+mkdir -p "$PROJECT/.loops/locks"
+# 존재하지 않을 PID 사용 (sentinel — 절대 동작하지 않을 큰 PID)
+echo "999999" > "$PROJECT/.loops/locks/$STALE_TASK.lock"
+set +e
+output=$(loop stop "$STALE_TASK" 2>&1)
+result=$?
+set -e
+[[ $result -eq 0 ]] || { echo "FAIL: stale lock 정리에 실패 (exit $result). got: $output"; exit 1; }
+echo "$output" | grep -q "stale lock\|살아있지 않음" \
+  || { echo "FAIL: stale lock 경고 메시지 없음. got: $output"; exit 1; }
+[[ ! -f "$PROJECT/.loops/locks/$STALE_TASK.lock" ]] \
+  || { echo "FAIL: stale lock 파일이 정리되지 않음"; exit 1; }
+echo "OK"
+
+echo "=== TEST 25: M5 — stop on live PID (SIGTERM 처리) ==="
+LIVE_TASK="live-pid-task"
+# 잠시 자는 백그라운드 프로세스를 시작해 그 PID를 락 파일에 기록
+sleep 30 &
+LIVE_PID=$!
+mkdir -p "$PROJECT/.loops/locks"
+echo "$LIVE_PID" > "$PROJECT/.loops/locks/$LIVE_TASK.lock"
+
+set +e
+output=$(loop stop "$LIVE_TASK" 2>&1)
+result=$?
+set -e
+# SIGTERM이 sleep을 즉시 종료시키므로 5초 대기 안에 정리 완료 → exit 0
+[[ $result -eq 0 ]] || { echo "FAIL: live PID stop이 실패 (exit $result). got: $output"; exit 1; }
+echo "$output" | grep -q "정상 정지\|시그널 전송" \
+  || { echo "FAIL: stop 진행 메시지 없음. got: $output"; exit 1; }
+[[ ! -f "$PROJECT/.loops/locks/$LIVE_TASK.lock" ]] \
+  || { echo "FAIL: lock 파일이 정리되지 않음"; exit 1; }
+# 프로세스가 실제로 죽었는지 확인 (이미 죽었으면 0 반환)
+kill -0 "$LIVE_PID" 2>/dev/null && { echo "FAIL: PID ${LIVE_PID}가 아직 살아있음"; kill -9 "$LIVE_PID" 2>/dev/null; exit 1; }
+echo "OK"
+
+echo "=== TEST 26: I2 — halt 시 미커밋 변경이 stash로 보관되면 WARN 출력 ==="
+STASH_TASK="stash-warn-task"
+loop prepare "$STASH_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$STASH_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Stash Warn Task
+EOF
+
+# mock: iter 1·2 모두 fix:symptom + 미커밋 변경 남김 → iter 2 후 streak halt → stash 발생
+COUNTER26="$WORK_DIR/iter-count-26.txt"
+echo "0" > "$COUNTER26"
+export COUNTER26_PATH="$COUNTER26"
+MOCK26="$WORK_DIR/mock26-bin"
+mkdir -p "$MOCK26"
+cat > "$MOCK26/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER26_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER26_PATH}"
+# fix:symptom commit
+echo "patch-$n" > "stash_committed_$n.txt"
+git add "stash_committed_$n.txt"
+git commit -q -m "fix:symptom stash test $n"
+# 미커밋 변경 추가 (stash 트리거)
+echo "uncommitted-$n" > "stash_uncommitted_$n.txt"
+echo '{"result": "mock26", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK26/claude"
+
+set +e
+output26=$(PATH="$MOCK26:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$STASH_TASK" 2>&1)
+result26=$?
+set -e
+[[ $result26 -ne 0 ]] || { echo "FAIL: streak halt 안 됨 (exit 0)"; exit 1; }
+echo "$output26" | grep -q "stash에 보관됨\|미커밋 변경" \
+  || { echo "FAIL: stash WARN 메시지 없음. got: $output26"; exit 1; }
+loop cleanup "$STASH_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 27: 테스트 약화 게이트가 __tests__/ 같은 비-tests/ 컨벤션 감지 ==="
+TEST27_TASK="gate-tests-jest"
+loop prepare "$TEST27_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$TEST27_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Gate Test — __tests__/ Detection
+EOF
+
+COUNTER27="$WORK_DIR/iter-count-27.txt"
+echo "0" > "$COUNTER27"
+export COUNTER27_PATH="$COUNTER27"
+
+MOCK27="$WORK_DIR/mock27-bin"
+mkdir -p "$MOCK27"
+cat > "$MOCK27/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER27_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER27_PATH}"
+if [[ $n -eq 1 ]]; then
+  # iter 1: __tests__/foo.test.js 생성 + commit (jest 컨벤션)
+  mkdir -p __tests__
+  echo "test('a', () => {})" > __tests__/foo.test.js
+  git add __tests__/foo.test.js
+  git commit -q -m "test: add jest test"
+else
+  # iter 2: 삭제 (테스트 약화)
+  git rm -q __tests__/foo.test.js
+  git commit -q -m "remove: foo.test.js"
+fi
+echo '{"result": "mock27", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK27/claude"
+
+set +e
+output27=$(PATH="$MOCK27:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST27_TASK" 2>&1)
+result27=$?
+set -e
+[[ $result27 -ne 0 ]] || { echo "FAIL: __tests__/ 게이트가 halt하지 않음 (exit 0)"; exit 1; }
+echo "$output27" | grep -q "HALT\|테스트 약화" \
+  || { echo "FAIL: 테스트 약화 halt 메시지 없음. got: $output27"; exit 1; }
+WT27="$WORK_DIR/myproject-loops/$TEST27_TASK"
+[[ -f "$WT27/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+loop cleanup "$TEST27_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 28: SPEC.md test_paths override가 기본 컨벤션 대체 ==="
+TEST28_TASK="gate-tests-override"
+loop prepare "$TEST28_TASK" > /dev/null 2>&1
+# test_paths를 비표준 경로 'qa/**' 로 override
+cat > "$PROJECT/.loops/$TEST28_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+test_paths:
+  - "qa/**"
+---
+
+# Gate Test — test_paths Override
+EOF
+
+COUNTER28="$WORK_DIR/iter-count-28.txt"
+echo "0" > "$COUNTER28"
+export COUNTER28_PATH="$COUNTER28"
+
+MOCK28="$WORK_DIR/mock28-bin"
+mkdir -p "$MOCK28"
+cat > "$MOCK28/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER28_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER28_PATH}"
+if [[ $n -eq 1 ]]; then
+  # iter 1: qa/check.sh 생성 (override 경로)
+  mkdir -p qa
+  echo "echo ok" > qa/check.sh
+  git add qa/check.sh
+  git commit -q -m "test: add qa check"
+else
+  # iter 2: qa/check.sh 수정 → halt
+  echo "echo modified" > qa/check.sh
+  git add qa/check.sh
+  git commit -q -m "weaken: qa check"
+fi
+echo '{"result": "mock28", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK28/claude"
+
+set +e
+output28=$(PATH="$MOCK28:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST28_TASK" 2>&1)
+result28=$?
+set -e
+[[ $result28 -ne 0 ]] || { echo "FAIL: test_paths override 게이트가 halt하지 않음 (exit 0)"; exit 1; }
+echo "$output28" | grep -q "HALT\|테스트 약화" \
+  || { echo "FAIL: override halt 메시지 없음. got: $output28"; exit 1; }
+loop cleanup "$TEST28_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 29: shasum fallback (sha256sum 부재 환경에서 동작) ==="
+# vanilla macOS 시뮬레이션: PATH에서 sha256sum 디렉토리 제거하고 shasum만 남김
+SHA256_BIN_PATH=$(command -v sha256sum 2>/dev/null || echo "")
+SHASUM_BIN_PATH=$(command -v shasum 2>/dev/null || echo "")
+
+if [[ -z "$SHASUM_BIN_PATH" ]]; then
+  echo "SKIP: shasum 미설치 — fallback 시나리오 검증 불가"
+else
+  ISOLATED_PATH="$PATH"
+  if [[ -n "$SHA256_BIN_PATH" ]]; then
+    SHA256_DIR=$(dirname "$SHA256_BIN_PATH")
+    ISOLATED_PATH=$(echo "$PATH" | tr ':' '\n' | grep -v "^${SHA256_DIR}$" | tr '\n' ':' | sed 's/:$//')
+  fi
+
+  if PATH="$ISOLATED_PATH" command -v sha256sum >/dev/null 2>&1; then
+    echo "SKIP: sha256sum이 다른 디렉토리에도 존재 — 격리 불가능"
+  else
+    PATH="$ISOLATED_PATH" command -v shasum >/dev/null \
+      || { echo "FAIL: 격리된 PATH에서 shasum도 사라짐"; exit 1; }
+
+    loop prepare "shasum-fallback" > /dev/null 2>&1
+    cat > "$PROJECT/.loops/shasum-fallback/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Shasum Fallback Task
+EOF
+    set +e
+    output29=$(PATH="$ISOLATED_PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+      bash "$LOOP_SH_SRC" start "shasum-fallback" 2>&1)
+    result29=$?
+    set -e
+    [[ $result29 -eq 0 ]] \
+      || { echo "FAIL: shasum fallback 환경 실행 실패 (exit $result29). got: $output29"; exit 1; }
+    WT29="$WORK_DIR/myproject-loops/shasum-fallback"
+    [[ -f "$WT29/DONE" ]] || { echo "FAIL: DONE 파일 미생성 (해시 함수 미동작 의심)"; exit 1; }
+    # 해시 함수가 빈 값이 아니어야 — iterations 로그 존재 확인
+    [[ -f "$WT29/.loop/iterations/1.log" ]] || { echo "FAIL: 이터 로그 미생성"; exit 1; }
+    loop cleanup "shasum-fallback" --force > /dev/null 2>&1
+    echo "OK"
+  fi
+fi
+
+echo "=== TEST 30: suppressor 게이트가 미커밋(working tree) 변경도 감지 ==="
+TEST30_TASK="gate-suppressor-uncommitted"
+loop prepare "$TEST30_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$TEST30_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Gate Test — Uncommitted Suppressor
+EOF
+
+COUNTER30="$WORK_DIR/iter-count-30.txt"
+echo "0" > "$COUNTER30"
+export COUNTER30_PATH="$COUNTER30"
+
+MOCK30="$WORK_DIR/mock30-bin"
+mkdir -p "$MOCK30"
+cat > "$MOCK30/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER30_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER30_PATH}"
+if [[ $n -eq 1 ]]; then
+  # iter 1: 클린 코드 commit (suppressor 없음)
+  mkdir -p src
+  echo "x = 1" > src/clean.py
+  git add src/clean.py
+  git commit -q -m "feat: add clean code"
+else
+  # iter 2: 같은 파일에 suppressor 추가, NO commit (working tree만 변경)
+  echo "x = 1  # noqa" > src/clean.py
+  # commit 없음 — claude 비정상 종료 시나리오 시뮬레이션
+fi
+echo '{"result": "mock30", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK30/claude"
+
+set +e
+output30=$(PATH="$MOCK30:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST30_TASK" 2>&1)
+result30=$?
+set -e
+[[ $result30 -ne 0 ]] || { echo "FAIL: 미커밋 suppressor가 halt하지 않음 (exit 0)"; exit 1; }
+echo "$output30" | grep -q "HALT\|Suppressor" \
+  || { echo "FAIL: suppressor halt 메시지 없음. got: $output30"; exit 1; }
+WT30="$WORK_DIR/myproject-loops/$TEST30_TASK"
+[[ -f "$WT30/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+loop cleanup "$TEST30_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 31: acquire_lock이 stale lock(죽은 PID)을 자동 정리 ==="
+STALE_ACQUIRE_TASK="stale-acquire-task"
+loop prepare "$STALE_ACQUIRE_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$STALE_ACQUIRE_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Stale Acquire Task
+EOF
+
+# 죽은 PID로 락 미리 생성 (크래시 시뮬레이션)
+mkdir -p "$PROJECT/.loops/locks"
+echo "999999" > "$PROJECT/.loops/locks/$STALE_ACQUIRE_TASK.lock"
+
+# loop start: 자동 정리 후 정상 진행되어야
+set +e
+output31=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 loop start "$STALE_ACQUIRE_TASK" 2>&1)
+result31=$?
+set -e
+[[ $result31 -eq 0 ]] || { echo "FAIL: stale lock 자동 정리 실패 (exit $result31). got: $output31"; exit 1; }
+echo "$output31" | grep -q "stale lock 자동 정리" \
+  || { echo "FAIL: stale lock 정리 메시지 없음. got: $output31"; exit 1; }
+WT31="$WORK_DIR/myproject-loops/$STALE_ACQUIRE_TASK"
+[[ -d "$WT31" ]] || { echo "FAIL: 자동 정리 후 워크트리 미생성"; exit 1; }
+loop cleanup "$STALE_ACQUIRE_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 32: acquire_lock이 빈/비숫자 PID도 stale로 인식 ==="
+EMPTY_LOCK_TASK="empty-lock-task"
+loop prepare "$EMPTY_LOCK_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$EMPTY_LOCK_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Empty Lock Task
+EOF
+
+# 빈 락 파일 생성 (corrupted state 시뮬레이션)
+mkdir -p "$PROJECT/.loops/locks"
+: > "$PROJECT/.loops/locks/$EMPTY_LOCK_TASK.lock"
+
+set +e
+output32=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 loop start "$EMPTY_LOCK_TASK" 2>&1)
+result32=$?
+set -e
+[[ $result32 -eq 0 ]] || { echo "FAIL: 빈 lock 정리 실패 (exit $result32). got: $output32"; exit 1; }
+echo "$output32" | grep -q "stale lock 자동 정리" \
+  || { echo "FAIL: 정리 메시지 없음. got: $output32"; exit 1; }
+loop cleanup "$EMPTY_LOCK_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 33: secrets 게이트가 커밋된 변경에서 비밀 감지 (HEAD~1..HEAD) ==="
+TEST33_TASK="gate-secrets-committed"
+loop prepare "$TEST33_TASK" > /dev/null 2>&1
+cat > "$PROJECT/.loops/$TEST33_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Gate Test — Secrets in Commit
+EOF
+
+# gitleaks mock: --log-opts=<range>로 git log -p 후 SECRET_KEY 매칭 검사
+GITLEAKS_MOCK="$WORK_DIR/gitleaks-mock-bin"
+mkdir -p "$GITLEAKS_MOCK"
+cat > "$GITLEAKS_MOCK/gitleaks" <<'MOCKEOF'
+#!/usr/bin/env bash
+# Mock: detect 서브커맨드, --log-opts 또는 --staged 처리
+shift  # 'detect'
+log_opts=""
+staged=0
+for a in "$@"; do
+  case "$a" in
+    --log-opts=*) log_opts="${a#--log-opts=}" ;;
+    --staged) staged=1 ;;
+  esac
+done
+
+if [[ -n "$log_opts" ]]; then
+  # shellcheck disable=SC2086 # rev range는 단일 토큰
+  if git log -p $log_opts 2>/dev/null | grep -q "SECRET_KEY="; then
+    echo "leak: SECRET_KEY exposed in commit"
+    exit 1
+  fi
+fi
+
+if [[ $staged -eq 1 ]]; then
+  if git diff --cached 2>/dev/null | grep -q "SECRET_KEY="; then
+    echo "leak: SECRET_KEY exposed in staged"
+    exit 1
+  fi
+fi
+exit 0
+MOCKEOF
+chmod +x "$GITLEAKS_MOCK/gitleaks"
+
+# claude mock: SECRET_KEY 포함 파일 commit
+COUNTER33="$WORK_DIR/iter-count-33.txt"
+echo "0" > "$COUNTER33"
+export COUNTER33_PATH="$COUNTER33"
+MOCK33="$WORK_DIR/mock33-bin"
+mkdir -p "$MOCK33"
+cat > "$MOCK33/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER33_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER33_PATH}"
+mkdir -p config
+echo "API_TOKEN=foo SECRET_KEY=abc123def456" > config/leak.env
+git add config/leak.env
+git commit -q -m "feat: add config (with leak)"
+echo '{"result": "mock33", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK33/claude"
+
+set +e
+output33=$(PATH="$GITLEAKS_MOCK:$MOCK33:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
+  loop start "$TEST33_TASK" 2>&1)
+result33=$?
+set -e
+[[ $result33 -ne 0 ]] || { echo "FAIL: secrets 게이트가 halt하지 않음 (exit 0). got: $output33"; exit 1; }
+echo "$output33" | grep -q "HALT.*Secrets\|Secrets 의심" \
+  || { echo "FAIL: secrets halt 메시지 없음. got: $output33"; exit 1; }
+WT33="$WORK_DIR/myproject-loops/$TEST33_TASK"
+[[ -f "$WT33/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+loop cleanup "$TEST33_TASK" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 34: 첫 prepare가 .gitignore와 .loops/locks/ 자동 setup ==="
+GITIGN_PROJECT="$WORK_DIR/gitign-project"
+mkdir -p "$GITIGN_PROJECT"
+git -C "$GITIGN_PROJECT" init -q
+git -C "$GITIGN_PROJECT" config user.email "test@example.com"
+git -C "$GITIGN_PROJECT" config user.name "Test"
+git -C "$GITIGN_PROJECT" commit --allow-empty -m "initial" -q
+
+# clean state 확인
+[[ ! -f "$GITIGN_PROJECT/.gitignore" ]] || { echo "FAIL: pre-state .gitignore 존재"; exit 1; }
+[[ ! -d "$GITIGN_PROJECT/.loops" ]] || { echo "FAIL: pre-state .loops 존재"; exit 1; }
+
+(cd "$GITIGN_PROJECT" && bash "$LOOP_SH_SRC" prepare "first-task" > /dev/null 2>&1)
+
+[[ -f "$GITIGN_PROJECT/.gitignore" ]] || { echo "FAIL: .gitignore 미생성"; exit 1; }
+grep -qxF '.loops/locks/' "$GITIGN_PROJECT/.gitignore" \
+  || { echo "FAIL: .gitignore에 .loops/locks/ 없음. content: $(cat "$GITIGN_PROJECT/.gitignore")"; exit 1; }
+[[ -d "$GITIGN_PROJECT/.loops/locks" ]] || { echo "FAIL: .loops/locks/ 미생성"; exit 1; }
+echo "OK"
+
+echo "=== TEST 35: 재호출 시 .gitignore 중복 추가 안 함 (idempotent) ==="
+(cd "$GITIGN_PROJECT" && bash "$LOOP_SH_SRC" prepare "second-task" > /dev/null 2>&1)
+COUNT35=$(grep -cxF '.loops/locks/' "$GITIGN_PROJECT/.gitignore")
+[[ $COUNT35 -eq 1 ]] \
+  || { echo "FAIL: .gitignore entry 중복 (${COUNT35}개). content: $(cat "$GITIGN_PROJECT/.gitignore")"; exit 1; }
+echo "OK"
+
+echo "=== TEST 36: 끝 newline 부재 .gitignore에 안전 추가 ==="
+NL_PROJECT="$WORK_DIR/no-nl-project"
+mkdir -p "$NL_PROJECT"
+git -C "$NL_PROJECT" init -q
+git -C "$NL_PROJECT" config user.email "t@e.com"
+git -C "$NL_PROJECT" config user.name "Test"
+git -C "$NL_PROJECT" commit --allow-empty -m "initial" -q
+
+# 끝에 newline 없는 .gitignore 생성
+printf 'node_modules' > "$NL_PROJECT/.gitignore"
+[[ "$(tail -c1 "$NL_PROJECT/.gitignore")" != "" ]] \
+  || { echo "FAIL: pre-state newline이 이미 있음 (테스트 setup 오류)"; exit 1; }
+
+(cd "$NL_PROJECT" && bash "$LOOP_SH_SRC" prepare "task-x" > /dev/null 2>&1)
+
+# 두 라인이 정확히 분리됐는지 (붙어버리면 'node_modules.loops/locks/'가 됨)
+grep -qx 'node_modules' "$NL_PROJECT/.gitignore" \
+  || { echo "FAIL: node_modules 사라짐/병합. content: $(cat "$NL_PROJECT/.gitignore")"; exit 1; }
+grep -qx '.loops/locks/' "$NL_PROJECT/.gitignore" \
+  || { echo "FAIL: .loops/locks/ 부재"; exit 1; }
+echo "OK"
+
+echo "=== TEST 37: stash 감지가 비-영어 locale에서도 동작 (locale 독립) ==="
+LOCALE_FOUND=""
+LOCALE_LIST=$(locale -a 2>/dev/null || echo "")
+for loc in ko_KR.UTF-8 ko_KR.utf8 ja_JP.UTF-8 zh_CN.UTF-8 de_DE.UTF-8 fr_FR.UTF-8; do
+  # here-string으로 grep 호출 — `cmd | grep -q`는 pipefail에서 조기 종료 시 SIGPIPE로 false negative
+  if grep -qxF "$loc" <<< "$LOCALE_LIST"; then
+    LOCALE_FOUND="$loc"
+    break
+  fi
+done
+
+if [[ -z "$LOCALE_FOUND" ]]; then
+  echo "SKIP: 비-영어 locale 미설치 — locale 독립 시나리오 검증 불가"
+else
+  TEST37_TASK="locale-stash"
+  loop prepare "$TEST37_TASK" > /dev/null 2>&1
+  cat > "$PROJECT/.loops/$TEST37_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Locale Stash Test
+EOF
+
+  COUNTER37="$WORK_DIR/iter-count-37.txt"
+  echo "0" > "$COUNTER37"
+  export COUNTER37_PATH="$COUNTER37"
+  MOCK37="$WORK_DIR/mock37-bin"
+  mkdir -p "$MOCK37"
+  cat > "$MOCK37/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER37_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER37_PATH}"
+# fix:symptom commit + 미커밋 변경 (TEST 26과 동일 패턴, streak halt 트리거)
+echo "p$n" > "lc_$n.txt"
+git add "lc_$n.txt"
+git commit -q -m "fix:symptom locale $n"
+echo "u$n" > "lcu_$n.txt"
+echo '{"result": "mock37", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+  chmod +x "$MOCK37/claude"
+
+  set +e
+  output37=$(LANG="$LOCALE_FOUND" LC_ALL="$LOCALE_FOUND" \
+    PATH="$MOCK37:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 \
+    loop start "$TEST37_TASK" 2>&1)
+  result37=$?
+  set -e
+  [[ $result37 -ne 0 ]] || { echo "FAIL: streak halt 안 됨 (exit 0)"; exit 1; }
+  echo "$output37" | grep -q "stash에 보관됨" \
+    || { echo "FAIL: $LOCALE_FOUND locale에서 stash WARN 누락 — locale 의존 회귀. got: $output37"; exit 1; }
+  loop cleanup "$TEST37_TASK" --force > /dev/null 2>&1
+  echo "OK ($LOCALE_FOUND)"
+fi
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
