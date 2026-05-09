@@ -141,7 +141,7 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 |---|---|
 | 이터 상한 | `MAX_ITERATIONS` (기본 30) |
 | 시계 캡 | `WALL_CLOCK_MINUTES` (기본 120) |
-| 테스트 약화 | `tests/**` 해시 변경 감지 |
+| 테스트 약화 | `tests/**` 해시 변경 감지 — **Note:** 게이트는 워크트리의 `tests/` 디렉토리(하위 포함) 안의 `*.test.*`·`test_*.*`·`*_test.*` 파일만 추적. 다른 디렉토리(`test/`·`spec/`·`__tests__/`)는 게이트 비활성. 다른 컨벤션 프로젝트는 향후 SPEC.md frontmatter에 `test_dir` 필드 추가 예정. |
 | 의존성 동결 | `package.json`·`requirements.txt`·`Cargo.toml` 등 매니페스트 해시 |
 | Scope 위반 | git diff vs SPEC.md frontmatter의 scope.include·exclude |
 | Suppressor 신규 | `noqa`·`@ts-ignore`·`eslint-disable`·`#pragma warning disable` 신규 추가 |

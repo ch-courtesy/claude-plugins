@@ -92,7 +92,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 
 1. **Existence (존재)**: 수용 기준의 모든 항목에 대응하는 코드 변경이 있는가? 미구현 항목이 한 개라도 있으면 미완.
 2. **Substantive (실체)**: 변경된 코드가 stub·mock·"TODO 구현 필요" 같은 placeholder가 아닌 실제 동작 코드인가? `pass`·`return None`·`throw new NotImplementedError()`만으로 채운 함수는 미완.
-3. **Wired (배선)**: 새 함수·모듈이 실제 호출처에 import·use되는가? 정의됐으나 어디서도 사용 안 되면 dead code — 미완.
+3. **Wired (배선)**: 새 함수·모듈이 실제 호출처에 import·use되는가? 정의됐으나 어디서도 사용 안 되면 dead code — 미완. **이 검사는 워커의 self-eval에 의존하며 드라이버가 자동 검증하지 않는다** — 의심 시 Agent dispatch (`spec-compliance-reviewer`, references/agent-prompts.md)로 독립 검증.
 4. **Runtime (실행)**: `verify` 명령이 0 exit으로 통과하는가? 다차원 회귀 지표(성능·품질·크기 등) 모두 허용 범위 안인가?
 
 추가 조건:
