@@ -33,8 +33,19 @@ require_tool() {
 }
 
 sanitize_for_filename() {
-  # 슬래시·공백 등을 -로 치환 (락 파일명용)
-  echo "$1" | tr '/ ' '--'
+  # 슬래시는 __로 인코딩 (lock 파일명에서 디렉토리 분리자 회피).
+  # 'a/b'와 'a-b'가 같은 lock으로 충돌하던 버그 수정. 공백·'__' raw는
+  # validate_task_id가 거부하므로 여기선 / 만 처리.
+  echo "${1//\//__}"
+}
+
+# task-id 유효성 검사 (공통). compute_paths·cmd_status filter에서 호출.
+validate_task_id() {
+  local task_id="$1"
+  [[ "$task_id" == *..* ]] && die "task-id에 '..' 사용 불가 (path traversal 방지)"
+  [[ "$task_id" == *__* ]] && die "task-id에 '__' 사용 불가 (slash 인코딩 예약 시퀀스 — lock 파일명 충돌 방지)"
+  [[ "$task_id" == *' '* ]] && die "task-id에 공백 사용 불가"
+  return 0  # set -e: 마지막 [[ ... ]] && die가 false일 때 함수 exit 1 방지
 }
 
 now_iso() {
@@ -112,8 +123,7 @@ ensure_loops_setup() {
 
 compute_paths() {
   local task_id="$1"
-  # path traversal 방지 (prepare.md §1 명시 동작)
-  [[ "$task_id" == *..* ]] && die "task-id에 '..' 사용 불가 (path traversal 방지)"
+  validate_task_id "$task_id"
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
@@ -672,8 +682,8 @@ cmd_start() {
 cmd_status() {
   local filter_task_id="${1:-}"
 
-  # path traversal 방지 (filter 지정 시)
-  [[ "$filter_task_id" == *..* ]] && die "task-id에 '..' 사용 불가 (path traversal 방지)"
+  # filter 지정 시 task-id 검증
+  [[ -n "$filter_task_id" ]] && validate_task_id "$filter_task_id"
 
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
@@ -688,16 +698,17 @@ cmd_status() {
   if [[ -n "$filter_task_id" ]]; then
     task_ids=("$filter_task_id")
   else
-    while IFS= read -r dir; do
-      local basename_dir
-      basename_dir="$(basename "$dir")"
-      # 시스템 디렉토리 제외
-      case "$basename_dir" in
-        locks|templates|archive) continue ;;
-      esac
-      [[ -d "$dir" ]] || continue
-      task_ids+=("$basename_dir")
-    done < <(find "$loops_base" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+    # SPEC.md 존재로 task 디렉토리 탐지 — slash task-id(goal-x/sub-task) 포함, 임의 깊이 지원
+    # locks/·archive/·.gitkeep 등 시스템 파일은 SPEC.md 부재로 자연스레 제외
+    while IFS= read -r spec_file; do
+      [[ -z "$spec_file" ]] && continue
+      local task_dir tid
+      task_dir=$(dirname "$spec_file")
+      tid="${task_dir#"$loops_base"/}"
+      # prefix 제거 안 됐으면(loops_base 자체가 task_dir) 건너뛰기 — 이상 상태
+      [[ "$tid" == "$task_dir" ]] && continue
+      task_ids+=("$tid")
+    done < <(find "$loops_base" -name 'SPEC.md' -type f 2>/dev/null | sort)
   fi
 
   if [[ ${#task_ids[@]} -eq 0 ]]; then

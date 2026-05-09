@@ -1602,5 +1602,89 @@ WT_41="$WORK_DIR/myproject-loops/$FORCE_TASK"
 
 echo "OK"
 
+echo "=== TEST 42: slash task-id의 lock이 hyphen task와 충돌 안 함 ==="
+# 'col-fake' lock(살아있는 PID)을 미리 만든 뒤 'col/fake' start 시도 →
+# 옛 동작에선 둘 다 sanitize 결과 'col-fake.lock'이라 die. 새 동작에선
+# 'col/fake'가 'col__fake.lock'을 만들어 충돌 없이 통과해야.
+mkdir -p "$PROJECT/.loops/locks"
+echo "$$" > "$PROJECT/.loops/locks/col-fake.lock"
+
+loop prepare "col/fake" > /dev/null 2>&1
+cat > "$PROJECT/.loops/col/fake/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Slash vs Hyphen Collision Test
+EOF
+
+set +e
+output42=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "col/fake" 2>&1)
+result42=$?
+set -e
+[[ $result42 -eq 0 ]] || { echo "FAIL: slash task가 hyphen lock과 충돌 (false collision). exit=$result42, got: $output42"; exit 1; }
+
+# 정리
+rm -f "$PROJECT/.loops/locks/col-fake.lock"
+loop cleanup "col/fake" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 43: task-id에 '__' 포함 거부 (slash 인코딩 예약) ==="
+for sub in prepare start status stop cleanup logs; do
+  set +e
+  output=$(loop "$sub" "task__double" 2>&1)
+  result=$?
+  set -e
+  [[ $result -ne 0 ]] || { echo "FAIL: ${sub}가 '__' task-id를 받아들임"; exit 1; }
+  echo "$output" | grep -q "예약\|'__'" \
+    || { echo "FAIL: ${sub}의 '__' 거부 메시지 없음. got: $output"; exit 1; }
+done
+echo "OK"
+
+echo "=== TEST 44: task-id에 공백 포함 거부 ==="
+for sub in prepare start status stop cleanup logs; do
+  set +e
+  output=$(loop "$sub" "task with space" 2>&1)
+  result=$?
+  set -e
+  [[ $result -ne 0 ]] || { echo "FAIL: ${sub}가 공백 task-id를 받아들임"; exit 1; }
+  echo "$output" | grep -q "공백" \
+    || { echo "FAIL: ${sub}의 공백 거부 메시지 없음. got: $output"; exit 1; }
+done
+echo "OK"
+
+echo "=== TEST 45: slash task-id가 status 목록에 정확히 표시 (오인식 방지) ==="
+# 기존 TEST 5에서 'goal-x/sub-task'가 prepare됐다 cleanup된 상태일 수 있음.
+# 새로 깨끗한 slash task-id로 검증.
+loop prepare "ns-foo/sub-bar" > /dev/null 2>&1
+cat > "$PROJECT/.loops/ns-foo/sub-bar/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Slash status test
+EOF
+
+output45=$(loop status 2>&1)
+echo "$output45" | grep -q 'ns-foo/sub-bar' \
+  || { echo "FAIL: status에 'ns-foo/sub-bar' 없음. got: $output45"; exit 1; }
+# 'ns-foo'만 별개 task로 오인식되면 안 됨 — '^ns-foo<space>' 패턴 없어야
+if echo "$output45" | grep -qE '^ns-foo[[:space:]]'; then
+  echo "FAIL: 'ns-foo'가 별개 task로 오인식. got: $output45"
+  exit 1
+fi
+
+# 정리 (워크트리 없으니 .loops/ 디렉토리만 직접 제거)
+rm -rf "$PROJECT/.loops/ns-foo"
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
