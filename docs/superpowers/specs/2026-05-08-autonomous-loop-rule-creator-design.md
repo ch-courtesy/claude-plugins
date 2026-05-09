@@ -158,7 +158,7 @@ JSON 사이드카는 사용하지 않는다. 자기 분류 신호는 git commit 
 0. **Iron Laws** — TDD·verification·root cause 3대 강제 원칙. 위반 시 즉시 정지
 1. 제1 원칙 (절대 규칙) — 평가 기준·테스트·아키텍처·작업 범위·의존성·보안 6대 불가침. **워크트리 안에서 동작하나, 메인 브랜치 머지 시점의 변경 책임도 동일**
 2. 이터레이션 모델 — 콜드 스타트, 디스크 상태가 진실, 워크트리 안에서 모든 작업 수행
-3. 작업 흐름 — 수용 기준 확인·계획·**6단계** 이터레이션 (RED-GREEN 포함)·자기 분류·완료 판정
+3. 작업 흐름 — 수용 기준 확인·계획·**6단계** 이터레이션 (RED-GREEN 포함)·자기 분류·완료 판정·**Self-Review 4축**
 4. 이터레이션 상한·조기 정지 — 상한 N회·동일 에러 3회·진동·fix:symptom 누적·**3+ fix 실패→architecture 재검토**·예산 임계치
 5. 에스컬레이션 — 트리거·보고 양식·후 정지
 6. 관찰성·로깅 — 매 이터 기록·의사결정 근거 명시·불확실성 표시·**다층 시스템 진단 로깅**
@@ -166,8 +166,8 @@ JSON 사이드카는 사용하지 않는다. 자기 분류 신호는 git commit 
 8. **근본 원인 추구 (4 Phase)** — Root Cause Investigation → Pattern Analysis → Hypothesis & Testing → Implementation
 9. 의사소통 — 정직·간결·완료 정의 준수
 10. 하네스 자체에 대한 태도 — 우회 대신 보고
-11. 메모리 파일 운영 — PLAN/NOTES/HANDOFF/RUN_LOG 큐레이션 의무. 모두 `.loop/` 아래에 위치
-12. 종료 신호 — DONE / ESCALATION.md 진실성 의무. 워크트리 루트의 `DONE` 또는 `.loop/ESCALATION.md`만 인정
+11. 메모리 파일 운영 — PLAN/NOTES/HANDOFF/RUN_LOG 큐레이션 의무. 모두 `.loop/` 아래에 위치 + **이터 내 Agent 도구 위임 가이드**
+12. 종료 신호 — DONE / **DONE_WITH_CONCERNS** / ESCALATION.md (카테고리). 진실성 의무. 워크트리 루트의 `DONE` 또는 `.loop/ESCALATION.md`만 인정
 13. 체크리스트 — 시작·이터 후·완료 전
 
 ### 6.2 객관 게이트 표시
@@ -672,3 +672,6 @@ cd <project>
 18. 헌법 §3.4 완료 판정이 4-Level Verifier (existence·substantive·wired·runtime)로 명시된다
 19. 헌법 §5.2 ESCALATION 양식에 카테고리 필드 (5종)이 있고 ESCALATION.template.md에 카테고리 가이드가 포함된다
 20. loop.sh가 `--watch` 플래그를 지원하며 ESCALATION.md 감지 시 polling으로 재개 신호를 대기하는 durable wake 모드를 제공한다
+21. 헌법 §3.5에 Self-Review 4축 체크리스트 (Completeness·Quality·Discipline·Testing)가 있다
+22. 헌법 §12에 DONE_WITH_CONCERNS 신호(HANDOFF.md `## 의심점` 섹션) 매커니즘이 명시되고 HANDOFF.template.md에 해당 섹션이 포함된다
+23. 헌법 §11.6에 이터 내 Agent 도구 위임 가이드(권장·금지 케이스, 브리프 품질)가 있다
