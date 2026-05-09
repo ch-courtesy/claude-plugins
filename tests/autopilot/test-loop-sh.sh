@@ -442,5 +442,70 @@ MULTI_LOOPS_DIR="$PROJECT/.loops/$MULTI_TASK"
 [[ -f "$MULTI_LOOPS_DIR/PLAN.md" ]] || { echo "FAIL: archive PLAN.md 없음"; exit 1; }
 echo "OK"
 
+echo "=== TEST 16: scope 게이트가 framework 파일(.loop/*·CLAUDE.md·DONE) 무시 ==="
+# 회귀 테스트: 모델이 메모리 파일과 함께 commit해도 scope 게이트가 발동 안 해야
+# (autopilot-smoke-STREAK 시나리오에서 발견된 버그의 regression 보호)
+
+SCOPE_TASK="scope-framework-test"
+loop prepare "$SCOPE_TASK" > /dev/null 2>&1
+SCOPE_TASK_DIR="$PROJECT/.loops/$SCOPE_TASK"
+
+# 좁은 scope.include — app/만 (.loop/는 명시 안 함)
+cat > "$SCOPE_TASK_DIR/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "app/**"
+  exclude:
+    - "rules/**"
+    - "tests/**"
+    - "vendor/**"
+verify: 'true'
+---
+
+# Scope Framework Test
+
+## 무엇을 만들 것인가
+scope.include = ["app/**"] 만 — framework 파일은 명시 안 함.
+
+## 수용 기준
+- app/main.py 생성
+EOF
+
+# scope 게이트가 framework 파일을 무시하는지 검증하는 mock
+# mock이: 1) app/main.py 생성+commit, 2) .loop/PLAN.md 변경+commit (framework 파일도 함께)
+# 그 후 scope 게이트가 .loop/PLAN.md를 위반으로 잡지 않아야
+SCOPE_MOCK="$WORK_DIR/scope-mock-bin"
+mkdir -p "$SCOPE_MOCK"
+cat > "$SCOPE_MOCK/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+# 1. app/main.py 생성
+mkdir -p app
+echo "print('hello')" > app/main.py
+# 2. 메모리 파일도 변경 (시나리오 재현)
+echo "# updated" >> .loop/PLAN.md
+# 3. 모두 stage + commit (memory file 포함, .git/info/exclude를 -f로 우회)
+git add -f .loop/PLAN.md
+git add app/main.py
+git commit -q -m "feat: hello + plan update" --no-verify 2>/dev/null
+# DONE 작성해 단일 이터 종료
+touch DONE
+echo '{"result": "scope test mock", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$SCOPE_MOCK/claude"
+
+WT_SCOPE="$WORK_DIR/myproject-loops/$SCOPE_TASK"
+set +e
+output=$(PATH="$SCOPE_MOCK:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start "$SCOPE_TASK" 2>&1)
+result=$?
+set -e
+# 게이트가 .loop/PLAN.md를 잡지 않아 정상 진행 → DONE 신호로 정상 종료(exit 0)
+[[ $result -eq 0 ]] || { echo "FAIL: scope 게이트가 framework 파일을 위반으로 잡음 (regression). exit=$result"; echo "$output" | tail -10; exit 1; }
+[[ -f "$WT_SCOPE/DONE" ]] || { echo "FAIL: DONE 파일 미생성 (정상 종료 안 됨)"; exit 1; }
+echo "$output" | grep -q "Scope 위반" && { echo "FAIL: scope 게이트가 framework 파일을 잡음 (regression)"; exit 1; }
+loop cleanup "$SCOPE_TASK" --force >/dev/null 2>&1
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="

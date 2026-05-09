@@ -81,6 +81,7 @@ acquire_lock() {
   fi
 
   echo $$ > "$LOCK_FILE"
+  # shellcheck disable=SC2064  # $LOCK_FILE은 trap-set 시점에 확정된 값으로 고정 의도
   trap "rm -f $LOCK_FILE" EXIT
 }
 
@@ -144,10 +145,16 @@ diff_vs_scope() {
   while IFS= read -r file; do
     [[ -z "$file" ]] && continue
 
+    # 프레임워크 파일은 항상 scope 검사에서 제외 (워커 프레임워크 메타파일)
+    case "$file" in
+      .loop/*|.loop|CLAUDE.md|DONE) continue ;;
+    esac
+
     # exclude 패턴 매칭 → 위반
     local excluded=0
     while IFS= read -r exc; do
       [[ -z "$exc" ]] && continue
+      # shellcheck disable=SC2053  # 의도적 glob 매칭: scope 패턴은 src/** 같은 와일드카드
       if [[ "$file" == $exc ]]; then
         out_of_scope+="$file (excluded by $exc)\n"
         excluded=1
@@ -160,6 +167,7 @@ diff_vs_scope() {
     local matched=0
     while IFS= read -r inc; do
       [[ -z "$inc" ]] && continue
+      # shellcheck disable=SC2053  # 의도적 glob 매칭
       if [[ "$file" == $inc ]]; then
         matched=1
         break
