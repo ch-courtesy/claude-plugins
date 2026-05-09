@@ -323,9 +323,24 @@ EOF
   exit 1
 }
 
-# Task 9에서 본격 구현될 placeholder
+# ----- DONE 처리: 메타 파일 archive -----
+
 archive_meta_files() {
-  echo "[$(now_iso)] (placeholder: archive_meta_files — Task 9에서 구현)"
+  mkdir -p "$ARCHIVE_DIR"
+  cp "$WT/.loop/PLAN.md" "$ARCHIVE_DIR/" 2>/dev/null || true
+  cp "$WT/.loop/NOTES.md" "$ARCHIVE_DIR/" 2>/dev/null || true
+  cp "$WT/.loop/HANDOFF.md" "$ARCHIVE_DIR/" 2>/dev/null || true
+  cp "$WT/.loop/RUN_LOG.md" "$ARCHIVE_DIR/" 2>/dev/null || true
+
+  echo ""
+  echo "task $TASK_ID 완료. 메타 파일 보관: $ARCHIVE_DIR"
+  echo ""
+  echo "머지 검토:"
+  echo "  cd $PROJECT_ROOT"
+  echo "  git log $BRANCH"
+  echo "  git merge $BRANCH"
+  echo "  git worktree remove $WT"
+  echo "  git branch -d $BRANCH"
 }
 
 # ----- 이터레이션 호출 -----
