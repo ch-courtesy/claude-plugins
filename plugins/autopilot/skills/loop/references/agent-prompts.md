@@ -3,7 +3,7 @@
 본 파일은 헌법 §11.6 "이터 내 서브 도구 위임"의 보조 자료로, **자율 루프의 한 이터레이션 안에서** `Agent` 도구로 위임할 때 사용할 브리프 양식 3종을 제공한다.
 
 세 양식 중 어느 것을 쓸지는 §11.6의 권장 케이스에 따라 결정:
-- **spec-compliance-reviewer**: 변경 후 PROMPT.md 수용 기준 대비 독립 검증
+- **spec-compliance-reviewer**: 변경 후 SPEC.md 수용 기준 대비 독립 검증
 - **code-quality-reviewer**: 변경 후 코드 품질 관점에서 독립 검증
 - **parallel-hypothesis-tester**: 두 이상의 독립 가설을 동시 테스트 (병렬)
 
@@ -11,7 +11,7 @@
 
 ## 1. spec-compliance-reviewer
 
-**언제 쓰나:** 한 이터에서 코드를 변경한 후 그 변경이 PROMPT.md의 수용 기준과 4-Level Verifier (existence/substantive/wired/runtime)에 부합하는지 **독립 시각으로** 검증하고 싶을 때.
+**언제 쓰나:** 한 이터에서 코드를 변경한 후 그 변경이 SPEC.md의 수용 기준과 4-Level Verifier (existence/substantive/wired/runtime)에 부합하는지 **독립 시각으로** 검증하고 싶을 때.
 
 **호출 패턴:**
 
@@ -28,9 +28,9 @@ Agent({
 ```
 당신은 자율 루프의 현재 이터레이션에서 만든 변경이 작업 명세에 부합하는지 검증합니다.
 
-## 요구사항 (.loop/PROMPT.md에서)
+## 요구사항 (.loop/SPEC.md에서)
 
-[`<worktree>/.loop/PROMPT.md`의 작업 정의 섹션 전체 텍스트 — 작업 정의·수용 기준·범위·검증 명령을 그대로 paste. 파일을 다시 읽게 하지 말 것]
+[`<worktree>/.loop/SPEC.md`의 작업 정의 섹션 전체 텍스트 — 작업 정의·수용 기준·범위·검증 명령을 그대로 paste. 파일을 다시 읽게 하지 말 것]
 
 ## 이번 이터가 한 작업 (자기 보고)
 
@@ -111,7 +111,7 @@ Agent({
 
 ## 작업 정의 / 평가 기준
 
-이터의 작업 정의는 `<worktree>/.loop/PROMPT.md`에 있음. 평가 기준은 헌법(`<worktree>/CLAUDE.md`) §3.5 Self-Review 4축.
+이터의 작업 정의는 `<worktree>/.loop/SPEC.md`에 있음. 평가 기준은 헌법(`<worktree>/CLAUDE.md`) §3.5 Self-Review 4축.
 
 ## Git 범위
 

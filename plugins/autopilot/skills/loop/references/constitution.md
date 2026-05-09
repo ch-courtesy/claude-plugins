@@ -32,14 +32,14 @@
 
 - **콜드 스타트**: 매 이터레이션은 새 프로세스다. 직전 이터의 추론 과정·중간 상태는 다음 이터가 보지 못한다 — 결과물(코드·테스트·메모리 파일)만 본다.
 - **워크트리 격리**: 모든 작업은 워크트리 안(`<project>-loops/<task-id>/` 또는 `<goal-id>/<task-id>/`)에서 일어난다. 워크트리 밖 파일은 수정 대상이 아니다.
-- **입력**: `<worktree>/CLAUDE.md`(헌법), `.loop/PROMPT.md`(작업 정의), 디스크 상태(코드·git 히스토리), `.loop/{PLAN,NOTES,HANDOFF,RUN_LOG}.md`(메모리 파일).
+- **입력**: `<worktree>/CLAUDE.md`(헌법), `.loop/SPEC.md`(작업 정의), 디스크 상태(코드·git 히스토리), `.loop/{PLAN,NOTES,HANDOFF,RUN_LOG}.md`(메모리 파일).
 - **출력**: 코드 변경 + 자기 분류 prefix를 가진 git commit + `.loop/` 메모리 파일 갱신 + (선택) `DONE` 또는 `.loop/ESCALATION.md` 신호 파일.
 
 ## 3. 작업 흐름
 
 ### 3.1 수용 기준 확인
 
-작업 시작 시점에 `.loop/PROMPT.md`의 작업 정의·수용 기준을 먼저 읽는다. 수용 기준이 모호하면 즉시 에스컬레이션한다 — 추측으로 진행하지 않는다.
+작업 시작 시점에 `.loop/SPEC.md`의 작업 정의·수용 기준을 먼저 읽는다. 수용 기준이 모호하면 즉시 에스컬레이션한다 — 추측으로 진행하지 않는다.
 
 ### 3.2 한 이터레이션의 6단계
 
@@ -194,7 +194,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 
 **카테고리 5종:**
 - `config-gap` — 환경 설정·도구 버전·자격증명 부재 (사람이 환경 조정으로 해결)
-- `spec-gap` — 작업 명세(`PROMPT.md`·수용 기준) 자체의 결함이 노출됨 (사람이 명세 수정 필요)
+- `spec-gap` — 작업 명세(`SPEC.md`·수용 기준) 자체의 결함이 노출됨 (사람이 명세 수정 필요)
 - `architecture-gap` — 현재 코드 구조로는 해결 불가, design 변경 필요 (사람의 architecture 결정 필요)
 - `environment-gap` — 외부 시스템(API·DB·네트워크) 일시적 문제 (사람의 환경 점검 필요)
 - `other` — 위 4종에 안 맞는 케이스
@@ -241,7 +241,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 - 비밀키·토큰·자격증명의 코드 내 하드코딩 또는 로그 출력
 - "작동하는 것처럼 보이게 하는" 모든 종류의 위장
 - 워크트리 밖 파일 수정 (모든 작업은 워크트리 안에서)
-- 워크트리 루트의 `CLAUDE.md`(헌법), `.loop/PROMPT.md` 수정
+- 워크트리 루트의 `CLAUDE.md`(헌법), `.loop/SPEC.md` 수정
 - 거짓 `DONE` 또는 거짓 `.loop/ESCALATION.md` 작성
 
 다음 항목은 드라이버가 객관 검증한다 — 위반 시 자동 halt + 에스컬레이션:
@@ -335,9 +335,14 @@ fix 시도 전에 다음을 모두 수행한다.
    - 이번에 무엇을 했는지
    - 무엇이 막혔거나 막힐 수 있는지
    - 다음 단계 추천 (구체적으로)
-2. `.loop/RUN_LOG.md`에 한 줄 추가 — 시각·시도·결과·다음 단계
+2. `.loop/RUN_LOG.md`에 한 줄 추가 — 형식: `[<ISO timestamp>] <시도·결과·다음 단계>`
 3. `.loop/PLAN.md` 체크박스 갱신 (진전 있을 때)
 4. 실패·발견 시 `.loop/NOTES.md` 갱신 (실패 접근 또는 새 제약 추가)
+5. 이번 이터가 `fix:symptom`이면 `.loop/PLAN.md` 재검토 (§3.3 자체 교정 게이트) — 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신
+6. Self-Review (4축, §3.5) — Completeness·Quality·Discipline·Testing. 한 축이라도 의심 남으면 HANDOFF.md에 `## 의심점` 추가하고 7단계의 DONE 작성 보류
+7. git commit — 자기 분류 prefix로 시작
+8. 완료 판정 — 4-Level Verifier (§3.4) + Self-Review 4축 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료
+9. 진전 불가능 → `.loop/ESCALATION.md` 작성·종료 (양식: §5.2, 카테고리 명시)
 
 ### 11.3 NOTES.md의 "실패한 접근"
 
@@ -371,6 +376,10 @@ NOTES.md가 100줄 넘으면 큰 실패는 `.loop/failures/<n>-<short-name>.md`�
 
 **브리프 양식 표준:** 위 권장 케이스 중 "독립 시각 검증"·"병렬 가설 테스트"는 `references/agent-prompts.md`의 3종 양식(spec-compliance-reviewer·code-quality-reviewer·parallel-hypothesis-tester)을 따른다. 자기완결 브리프·status enum·결과 후속 처리가 표준화돼 있다.
 
+### 11.7 응답 형식
+
+이터 안에서의 모델 출력은 도구 호출 위주. 변경·실행·로깅을 도구로 수행하고 텍스트 응답은 짧은 결정 요약으로 충분하다 — `claude --print --output-format json` 모드라 stdout이 결과물 자체가 아니라 요약 채널.
+
 ## 12. 종료 신호
 
 루프의 종료·진행 의도는 다음 신호로 표현한다.
@@ -387,7 +396,7 @@ NOTES.md가 100줄 넘으면 큰 실패는 `.loop/failures/<n>-<short-name>.md`�
 ## 13. 체크리스트
 
 ### 매 task 시작 전
-- [ ] PROMPT.md의 작업 정의·수용 기준을 읽고 이해했는가
+- [ ] SPEC.md의 작업 정의·수용 기준을 읽고 이해했는가
 - [ ] 작업 범위(scope)가 명확한가
 - [ ] 이터 상한·시계 캡을 인지하고 있는가
 - [ ] 에스컬레이션 트리거를 기억하고 있는가
