@@ -7,7 +7,7 @@ on_create: |
   2. assets/loop.sh를 .loops/loop.sh로 복사하고 chmod +x
   3. assets/loops-README.md를 .loops/README.md로 복사
   4. assets/{PLAN,NOTES,HANDOFF,RUN_LOG,ESCALATION}.template.md를 .loops/templates/ 아래로 복사
-  5. .loops/locks/.gitkeep, .loops/archive/.gitkeep 생성
+  5. .loops/locks/.gitkeep 생성
   6. .gitignore에 다음 라인 추가 (이미 있으면 skip):
      - .loops/locks/
      - ../<project-name>-loops/   # sibling 워크트리. 부모 git에서 무시 — 일반적으로 git은 ../ 패턴을 추적하지 않으나 실수 방지를 위한 명시적 신호. 사용자가 LOOP_WORKTREE_BASE로 변경 시 조정 필요
@@ -17,9 +17,9 @@ on_create: |
       LOOP_WORKTREE_BASE 환경 변수로 위치 변경 가능.
 
       새 task 시작:
-        ./.loops/loop.sh <task-id>           # 첫 호출: 워크트리 + 메타 파일 생성
-        \$EDITOR ../<project-name>-loops/<task-id>/.loop/PROMPT.md   # 작업 정의 채움
-        ./.loops/loop.sh <task-id>           # 두 번째 호출: 루프 시작
+        ./.loops/loop.sh prepare <task-id>   # PROMPT.md 시드 생성
+        \$EDITOR .loops/<task-id>/PROMPT.md  # 작업 정의 채움
+        ./.loops/loop.sh start <task-id>     # 루프 시작
 
       동시 실행: MAX_CONCURRENT 환경 변수로 조정 (기본 3).
       자세한 내용은 .loops/README.md 참조."

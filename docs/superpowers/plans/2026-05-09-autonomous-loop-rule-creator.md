@@ -2044,6 +2044,20 @@ superpowers `subagent-driven-development` 분석 후 3가지 패턴 차용 (메�
 
 ---
 
+## Post-Execution Adjustment 4 (2026-05-09)
+
+`loop.sh`를 단일 stateful 명령에서 subcommand 기반 CLI로 리팩토링:
+
+1. **subcommand 구조 도입** — `prepare / start / status / stop / list / cleanup / logs` 7개 subcommand. 인자 없는 호출은 사용법 안내 후 exit 1.
+2. **`.loops/<task-id>/` 통합 디렉토리** — prepare가 `.loops/<task-id>/PROMPT.md`를 생성하고, cleanup이 메타 파일을 동일 위치에 archive. `archive/` 디렉토리 폐기.
+3. **prepare → start 분리** — 워크트리 생성이 start 내부로 이동. prepare는 PROMPT.md 시드만 담당. start는 PROMPT.md 존재·placeholder 검증 후 워크트리 생성 + 락 + 이터레이션.
+4. **cleanup subcommand** — DONE 확인 → 메타 파일 archive → `git worktree remove` → `git branch -d`. --force 플래그로 DONE 없이도 강제 실행 가능.
+5. **통합 테스트 8종** — 기존 4종에서 8종으로 확장 (prepare·start 거부·이터·이중 락·슬래시 task-id·status·cleanup 거부·cleanup --force).
+
+검증: `bash -n loop.sh` + 두 통합 테스트 모두 통과 (2026-05-09 확인).
+
+---
+
 ## Execution Handoff
 
 **Plan complete and saved to `docs/superpowers/plans/2026-05-09-autonomous-loop-rule-creator.md`. Two execution options:**

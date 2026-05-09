@@ -50,7 +50,7 @@ Layer 2 호환을 위해 Layer 1이 충족해야 하는 요구사항:
 └── .loops/
     ├── README.md                     # 새 task 생성·워크트리 라이프사이클·동시 실행 가이드
     ├── PROMPT.template.md            # 새 task의 PROMPT.md 시드 (YAML frontmatter 포함)
-    ├── loop.sh                       # 외부 드라이버 — 워크트리 라이프사이클·동시성 제어
+    ├── loop.sh                       # 외부 드라이버 — subcommand 기반 (prepare/start/status/stop/list/cleanup/logs)
     ├── templates/                    # 워크트리 메모리 파일 스텁
     │   ├── PLAN.template.md
     │   ├── NOTES.template.md
@@ -59,13 +59,13 @@ Layer 2 호환을 위해 Layer 1이 충족해야 하는 요구사항:
     │   └── ESCALATION.template.md
     ├── locks/                        # 워크트리별 RUNNING 락 (gitignored)
     │   └── .gitkeep
-    └── archive/                       # DONE된 task의 메타 파일 보관
-        └── <task-id>/                # PLAN·NOTES·RUN_LOG·HANDOFF의 최종 상태
+    └── <task-id>/                    # task별 통합 디렉토리 (prepare에서 생성, cleanup 후 아카이브)
+        ├── PROMPT.md                 # prepare가 생성, start가 워크트리로 복사
+        └── (cleanup 후) PLAN/NOTES/HANDOFF/RUN_LOG.md  # 아카이브
 ```
 
 추가로 `.gitignore`에 다음 라인이 추가된다:
 - `.loops/locks/` (런타임 락파일 비추적)
-- `.loops/archive/` (선택, 사용자 정책에 따라)
 
 ### 3.2 드라이버가 런타임 생성 (sibling 위치, 프로젝트 트리 밖)
 
@@ -263,85 +263,70 @@ verify: <실행 가능한 명령. 예: pnpm test --filter=auth. 0 exit이면 검
 
 ## 8. 드라이버 (`loop.sh`)
 
-### 8.1 호출 인터페이스
+### 8.1 subcommand 인터페이스
 
 ```bash
-./.loops/loop.sh <task-id> [--max-iterations N] [--wall-clock-minutes N]
+./.loops/loop.sh prepare <task-id>
+./.loops/loop.sh start   <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch]
+./.loops/loop.sh status  [<task-id>]
+./.loops/loop.sh stop    <task-id>
+./.loops/loop.sh list
+./.loops/loop.sh cleanup <task-id> [--force]
+./.loops/loop.sh logs    <task-id> [--tail] [--iter N]
 ```
 
 환경 변수:
 - `LOOP_WORKTREE_BASE` — 워크트리 부모 디렉토리. 기본 `<project>/../<project-name>-loops/`
 - `MAX_CONCURRENT` — 동시 실행 가능한 loop 수. 기본 3
 
-`<task-id>`는 워크트리 디렉토리 이름. 워크트리가 없으면 첫 호출 시 생성하고 사용자에게 PROMPT.md 작성을 안내한 후 종료. 두 번째 호출부터 실제 loop 시작.
+subcommand 없이 호출하면 사용법 안내 후 exit 1.
 
 ### 8.2 워크트리 라이프사이클
 
-**8.2.1 워크트리 부재 시 (첫 호출):**
+**8.2.1 prepare (PROMPT.md 시드 생성):**
 
 ```bash
-PROJECT_ROOT="$(git rev-parse --show-toplevel)"
-PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
-WT="$WT_BASE/$TASK_ID"
-BRANCH="autonomous-loop/$TASK_ID"
-
-mkdir -p "$WT_BASE"
-git -C "$PROJECT_ROOT" worktree add "$WT" -b "$BRANCH"
-
-# 헌법을 워크트리 CLAUDE.md로 복사
-cp "$PROJECT_ROOT/rules/autonomous-loop.md" "$WT/CLAUDE.md"
-
-# 메타 파일 시드
-mkdir -p "$WT/.loop/iterations"
-cp "$PROJECT_ROOT/.loops/PROMPT.template.md" "$WT/.loop/PROMPT.md"
-cp "$PROJECT_ROOT/.loops/templates/PLAN.template.md" "$WT/.loop/PLAN.md"
-cp "$PROJECT_ROOT/.loops/templates/NOTES.template.md" "$WT/.loop/NOTES.md"
-cp "$PROJECT_ROOT/.loops/templates/HANDOFF.template.md" "$WT/.loop/HANDOFF.md"
-cp "$PROJECT_ROOT/.loops/templates/RUN_LOG.template.md" "$WT/.loop/RUN_LOG.md"
-
-# 워크트리 로컬 비추적 등록
-{
-  echo "CLAUDE.md"
-  echo ".loop/"
-} >> "$WT/.git/info/exclude"
-
-echo "워크트리 생성: $WT"
-echo "다음 파일을 채워 주세요: $WT/.loop/PROMPT.md"
-echo "채운 후 다시 실행: ./.loops/loop.sh $TASK_ID"
-exit 0
+# .loops/<task-id>/PROMPT.md 생성 (이미 있으면 abort)
+mkdir -p ".loops/$TASK_ID"
+cp ".loops/PROMPT.template.md" ".loops/$TASK_ID/PROMPT.md"
 ```
 
-**8.2.2 워크트리 존재 시 (이터레이션 루프):**
+사용자는 이 파일의 placeholder를 채운 뒤 `start`를 실행한다.
 
-동시성 락 확인 후 실제 루프 진입.
+**8.2.2 start (검증 후 워크트리·락 생성 + 이터레이션 루프):**
+
+1. `.loops/<task-id>/PROMPT.md` 존재 확인 → 없으면 `prepare`를 먼저 실행하도록 안내
+2. PROMPT.md의 `{{...}}` placeholder 미채움 확인 → 있으면 편집 요청 후 abort
+3. 동시성 락 획득 (`LOCK_DIR/$TASK_ID_SAFE.lock`)
+4. 워크트리 없으면 생성:
+   - `git worktree add` + 브랜치 생성
+   - 헌법·메모리 파일 시드 (`.loops/<task-id>/PROMPT.md`를 워크트리로 복사)
+   - `.git/info/exclude` 갱신
+5. 이터레이션 루프 진입 (이미 워크트리가 있으면 생성 단계 스킵)
 
 **8.2.3 DONE 처리:**
 
-```bash
-# 메타 파일 영속화
-mkdir -p "$PROJECT_ROOT/.loops/archive/$TASK_ID"
-cp "$WT/.loop/"{PLAN,NOTES,HANDOFF,RUN_LOG}.md "$PROJECT_ROOT/.loops/archive/$TASK_ID/"
-
-echo "task $TASK_ID 완료. 머지 검토:"
-echo "  cd $PROJECT_ROOT"
-echo "  git log $BRANCH"
-echo "  git merge $BRANCH         # 또는 PR 생성"
-echo "  git worktree remove $WT"
-```
-드라이버는 자동 머지하지 않는다 — 사람이 PR로 검토하거나 직접 머지.
+DONE 신호 감지 시 사용자에게 `cleanup` 실행 안내 후 종료. 메타 파일 archive는 `cleanup`이 담당.
 
 **8.2.4 ESCALATION 처리:**
 
 워크트리는 그대로 유지. 사람이 들어가서 수정·재시작 가능. 메타 파일 archive 복사 안 함 (작업 진행 중).
 
+**8.2.5 cleanup (DONE 후 정리):**
+
+1. 실행 중 확인 (락 파일 검사) → 실행 중이면 abort (--force 없이)
+2. 워크트리 존재 확인
+3. DONE 파일 확인 → 없으면 abort (--force 없이)
+4. 메타 파일 archive: `<worktree>/.loop/{PLAN,NOTES,HANDOFF,RUN_LOG}.md` → `.loops/<task-id>/`
+5. `git worktree remove` + `git branch -d`
+
 ### 8.3 동시성 제어
 
-매 호출 시작 시:
+`start` 실행 시:
 
 ```bash
 LOCK_DIR="$PROJECT_ROOT/.loops/locks"
-mkdir -p "$LOCK_DIR"
+TASK_ID_SAFE="$(echo "$TASK_ID" | tr '/ ' '--')"
 
 running=$(find "$LOCK_DIR" -name "*.lock" -type f 2>/dev/null | wc -l)
 if [[ $running -ge ${MAX_CONCURRENT:-3} ]]; then
@@ -349,7 +334,7 @@ if [[ $running -ge ${MAX_CONCURRENT:-3} ]]; then
   exit 2
 fi
 
-LOCK="$LOCK_DIR/$TASK_ID.lock"
+LOCK="$LOCK_DIR/$TASK_ID_SAFE.lock"
 if [[ -f "$LOCK" ]]; then
   echo "task $TASK_ID가 이미 동작 중. 기존 종료 후 재실행."
   exit 3
@@ -358,7 +343,7 @@ echo $$ > "$LOCK"
 trap "rm -f $LOCK" EXIT
 ```
 
-락 파일은 PID 보관. crashed 프로세스의 stale 락은 `kill -0 <pid>` 검사로 정리 가능 (선택).
+락 파일은 PID 보관. crashed 프로세스의 stale 락은 `stop` 또는 수동 rm으로 정리.
 
 ### 8.4 매 이터 호출 (cwd = `<worktree>/`)
 
@@ -675,3 +660,6 @@ cd <project>
 21. 헌법 §3.5에 Self-Review 4축 체크리스트 (Completeness·Quality·Discipline·Testing)가 있다
 22. 헌법 §12에 DONE_WITH_CONCERNS 신호(HANDOFF.md `## 의심점` 섹션) 매커니즘이 명시되고 HANDOFF.template.md에 해당 섹션이 포함된다
 23. 헌법 §11.6에 이터 내 Agent 도구 위임 가이드(권장·금지 케이스, 브리프 품질)가 있다
+24. `loop.sh prepare <task-id>`가 `.loops/<task-id>/PROMPT.md`를 생성하고, 이미 존재하면 abort한다
+25. `loop.sh start <task-id>`가 PROMPT.md 존재 확인 + placeholder 검증 후 워크트리 생성 + 락 획득 + 이터레이션을 수행한다
+26. `loop.sh cleanup <task-id>`가 DONE 파일 없이는 abort하고(--force 없이), DONE 확인 후 메타 파일을 `.loops/<task-id>/`로 archive한 뒤 워크트리와 브랜치를 제거한다
