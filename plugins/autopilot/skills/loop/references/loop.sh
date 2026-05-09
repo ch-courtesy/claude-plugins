@@ -43,6 +43,11 @@ sanitize_for_filename() {
 validate_task_id() {
   local task_id="$1"
   [[ "$task_id" == *..* ]] && die "task-id에 '..' 사용 불가 (path traversal 방지)"
+  # '.' 단독 컴포넌트 거부 — '.', './foo', 'foo/.', 'a/./b' 모두 워크트리 경로
+  # 또는 git 브랜치명에 부적절 (예: WT_BASE/. = WT_BASE 자체)
+  case "$task_id" in
+    .|./*|*/.|*/./*) die "task-id에 '.' 단독 컴포넌트 사용 불가" ;;
+  esac
   [[ "$task_id" == *__* ]] && die "task-id에 '__' 사용 불가 (slash 인코딩 예약 시퀀스 — lock 파일명 충돌 방지)"
   [[ "$task_id" == *' '* ]] && die "task-id에 공백 사용 불가"
   return 0  # set -e: 마지막 [[ ... ]] && die가 false일 때 함수 exit 1 방지
