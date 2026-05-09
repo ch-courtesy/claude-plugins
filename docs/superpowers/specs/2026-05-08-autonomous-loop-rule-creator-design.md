@@ -155,14 +155,15 @@ JSON 사이드카는 사용하지 않는다. 자기 분류 신호는 git commit 
 
 ### 6.1 절 구성
 
+0. **Iron Laws** — TDD·verification·root cause 3대 강제 원칙. 위반 시 즉시 정지
 1. 제1 원칙 (절대 규칙) — 평가 기준·테스트·아키텍처·작업 범위·의존성·보안 6대 불가침. **워크트리 안에서 동작하나, 메인 브랜치 머지 시점의 변경 책임도 동일**
 2. 이터레이션 모델 — 콜드 스타트, 디스크 상태가 진실, 워크트리 안에서 모든 작업 수행
-3. 작업 흐름 — 수용 기준 확인·계획·5단계 이터레이션·자기 분류·완료 판정
-4. 이터레이션 상한·조기 정지 — 상한 N회·동일 에러 3회·진동·fix:symptom 누적·예산 임계치
+3. 작업 흐름 — 수용 기준 확인·계획·**6단계** 이터레이션 (RED-GREEN 포함)·자기 분류·완료 판정
+4. 이터레이션 상한·조기 정지 — 상한 N회·동일 에러 3회·진동·fix:symptom 누적·**3+ fix 실패→architecture 재검토**·예산 임계치
 5. 에스컬레이션 — 트리거·보고 양식·후 정지
-6. 관찰성·로깅 — 매 이터 기록·의사결정 근거 명시·불확실성 표시
+6. 관찰성·로깅 — 매 이터 기록·의사결정 근거 명시·불확실성 표시·**다층 시스템 진단 로깅**
 7. 금지 행동 — 12가지 (테스트 약화·suppressor 신규·force push·secrets·위장 등) + 워크트리 밖 파일 수정 금지·`CLAUDE.md`/`.loop/` 수정 금지
-8. 근본 원인 추구 — 표면 vs 근본·증상 우회는 명시적·"일단 동작" 부정
+8. **근본 원인 추구 (4 Phase)** — Root Cause Investigation → Pattern Analysis → Hypothesis & Testing → Implementation
 9. 의사소통 — 정직·간결·완료 정의 준수
 10. 하네스 자체에 대한 태도 — 우회 대신 보고
 11. 메모리 파일 운영 — PLAN/NOTES/HANDOFF/RUN_LOG 큐레이션 의무. 모두 `.loop/` 아래에 위치
@@ -663,3 +664,8 @@ cd <project>
 10. 두 task가 동시에 실행될 때 각자의 워크트리·브랜치·메타 파일·iteration 카운터가 격리되어 race가 발생하지 않는다
 11. 같은 task-id 이중 실행이 락으로 차단된다
 12. 사용자 레벨 CLAUDE.md/settings 잔여 위험이 README에 명시된다
+13. 헌법에 Iron Laws 절(§0)이 있고 TDD/verification/root cause 3대 명령이 명시된다
+14. 헌법 §3.2가 6단계로 RED-GREEN 명시한다
+15. 헌법 §4.2 조기 정지 조건에 "3회 이상의 fix 실패"가 포함된다
+16. 헌법 §6.1에 다층 시스템 진단 로깅 항목이 있다
+17. 헌법 §8이 4 phase로 구조화된다 (Root Cause → Pattern → Hypothesis → Implementation)

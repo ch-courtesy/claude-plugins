@@ -45,11 +45,18 @@ verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이�
 ## 한 이터레이션 규칙
 
 - 완료를 향한 가장 작은 유용한 단계 하나만 수행
+- **새 동작 추가·버그 수정은 RED-GREEN 순서로**:
+  1. 실패하는 테스트 먼저 작성 (RED)
+  2. 그 테스트를 실행해 의도한 이유로 실패하는지 확인 (Watch RED)
+  3. 통과할 만큼의 최소 코드 작성 (GREEN)
+  4. 다시 실행해 통과 확인 (Watch GREEN)
 - `.loop/NOTES.md`의 "실패한 접근"을 반복하지 않음 — 같은 가설을 다시 시도하려면 왜 이번엔 다른지 NOTES에 명시
 - 변경 후 `verify` 명령을 실행하고, 실패 시 그 원인을 `.loop/NOTES.md`에 추가
 - 진전이 있으면 `.loop/PLAN.md` 체크박스 갱신
 - 워크트리 밖 파일은 수정하지 않음
 - `scope.include` 밖 파일은 수정하지 않음
+- **3회 fix 시도 후에도 미해결이면 정지·에스컬레이션** — architecture 의심 신호. 더 fix 추가 금지
+- **버그 디버깅 시 헌법 §8의 4 phase 절차** 따름 — Root Cause → Pattern → Hypothesis → Implementation
 
 ## 종료 전 (이 순서로)
 
