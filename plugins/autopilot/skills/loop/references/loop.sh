@@ -483,28 +483,19 @@ iterate() {
 # ----- subcommand: prepare -----
 
 cmd_prepare() {
-  local task_id="$1"
-  [[ -z "$task_id" ]] && die "사용: $0 prepare <task-id>"
+  local task_id="${1:-}"
+  # task-id 유효성 검사는 유지 (validate 오류는 기존 메시지로 표시)
+  [[ -n "$task_id" ]] && validate_task_id "$task_id"
+  cat >&2 <<'EOF'
+prepare 서브커맨드는 제거되었습니다.
+새 spec 스킬을 사용하세요:
 
-  compute_paths "$task_id"
-  ensure_loops_setup
+  Skill(skill: "spec", args: "<task-id>")
 
-  local spec_dst="$LOOPS_DIR/SPEC.md"
-  if [[ -f "$spec_dst" ]]; then
-    die "이미 준비되어 있습니다: $spec_dst\n재준비하려면 먼저 삭제하세요: rm $spec_dst"
-  fi
-
-  local spec_src="$SCRIPT_DIR/spec-template.md"
-  [[ -f "$spec_src" ]] || die "spec-template.md를 찾을 수 없습니다: $spec_src"
-
-  mkdir -p "$LOOPS_DIR"
-  cp "$spec_src" "$spec_dst"
-
-  echo "준비 완료. 다음 파일을 편집하세요:"
-  echo "  $spec_dst"
-  echo ""
-  echo "편집 후 루프를 시작하려면:"
-  echo "  $0 start $task_id"
+대화형으로 SPEC.md를 생성합니다. 자세한 내용:
+  plugins/autopilot/skills/spec/SKILL.md
+EOF
+  exit 2
 }
 
 # ----- subcommand: start -----

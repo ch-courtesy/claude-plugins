@@ -58,18 +58,16 @@ loop() {
   bash "$LOOP_SH_SRC" "$@"
 }
 
-echo "=== TEST 1: prepare 명령으로 SPEC.md 생성 ==="
-loop prepare test-task-1
-LOOPS_TASK_DIR="$PROJECT/.loops/test-task-1"
-[[ -d "$LOOPS_TASK_DIR" ]] || { echo "FAIL: .loops/test-task-1/ 디렉토리 미생성"; exit 1; }
-[[ -f "$LOOPS_TASK_DIR/SPEC.md" ]] || { echo "FAIL: .loops/test-task-1/SPEC.md 미생성"; exit 1; }
-# 이미 준비된 상태에서 재실행하면 오류
+echo "=== TEST 1: prepare는 spec 스킬로 안내하는 스텁 ==="
 set +e
 output=$(loop prepare test-task-1 2>&1)
 result=$?
 set -e
-[[ $result -ne 0 ]] || { echo "FAIL: 이미 준비된 task에 prepare가 성공하면 안 됨"; exit 1; }
-echo "$output" | grep -q "이미 준비되어 있습니다" || { echo "FAIL: 이미 준비 메시지 없음. got: $output"; exit 1; }
+# 스텁이므로 0이 아닌 exit + 안내 메시지
+[[ $result -ne 0 ]] || { echo "FAIL: 스텁이 0 exit으로 끝남 (사용자가 sp 스킬로 가도록 유도해야)"; exit 1; }
+echo "$output" | grep -q "spec\|이전" || { echo "FAIL: spec 스킬 안내 없음. got: $output"; exit 1; }
+# .loops 디렉터리·SPEC.md 미생성 확인
+[[ ! -d "$PROJECT/.loops/test-task-1" ]] || { echo "FAIL: 스텁이 디렉터리 만들면 안 됨"; exit 1; }
 echo "OK"
 
 echo "=== TEST 2: start 전 prepare 안 하면 거부 ==="
@@ -81,6 +79,8 @@ set -e
 echo "$output" | grep -q "SPEC.md가 없습니다\|prepare" || { echo "FAIL: prepare 안내 메시지 없음. got: $output"; exit 1; }
 echo "OK"
 
+LOOPS_TASK_DIR="$PROJECT/.loops/test-task-1"
+mkdir -p "$LOOPS_TASK_DIR"
 echo "=== TEST 3: start로 워크트리 생성 + 1 이터 (mock claude로 즉시 DONE) ==="
 # SPEC.md의 placeholder를 채움 (frontmatter의 verify도 실행 가능한 명령으로)
 SPEC_FILE="$LOOPS_TASK_DIR/SPEC.md"
@@ -143,10 +143,9 @@ echo "$output" | grep -q "이미 동작 중" || { echo "FAIL: 락 메시지 누�
 echo "OK"
 
 echo "=== TEST 5: 슬래시 task-id (Layer 2 호환) ==="
-# prepare 후 start
-loop prepare "goal-x/sub-task" > /dev/null 2>&1
+# 디렉터리 명시적 생성 (prepare 스텁화 이후)
+mkdir -p "$PROJECT/.loops/goal-x/sub-task"
 SLASH_SPEC="$PROJECT/.loops/goal-x/sub-task/SPEC.md"
-[[ -f "$SLASH_SPEC" ]] || { echo "FAIL: 슬래시 task-id prepare 실패"; exit 1; }
 
 # placeholder 채움
 cat > "$SLASH_SPEC" <<'EOF'
@@ -176,8 +175,8 @@ echo "$output" | grep -q "done\|idle\|running\|prepared\|archived\|escalated" ||
 echo "OK"
 
 echo "=== TEST 7: cleanup이 DONE 없으면 거부 (--force 없이) ==="
-# DONE 없는 워크트리를 명시적으로 준비
-loop prepare "no-done-task" > /dev/null 2>&1
+# DONE 없는 워크트리를 명시적으로 준비 (prepare 스텁화 이후)
+mkdir -p "$PROJECT/.loops/no-done-task"
 cat > "$PROJECT/.loops/no-done-task/SPEC.md" <<'EOF'
 ---
 scope:
@@ -271,7 +270,9 @@ WT_SPEC="$WORK_DIR/myproject-loops/$SPEC_TASK_ID"
 echo "OK"
 
 echo "=== TEST 10: 빈 SPEC.md (placeholder 그대로) → start 거부 ==="
-loop prepare "placeholder-task" > /dev/null 2>&1
+# prepare 스텁화 이후: 디렉터리 생성 + spec-template 복사로 동일 환경 구성
+mkdir -p "$PROJECT/.loops/placeholder-task"
+cp "$SKILL_REFS/spec-template.md" "$PROJECT/.loops/placeholder-task/SPEC.md"
 # placeholder를 채우지 않은 채 start 호출
 set +e
 output=$(MAX_ITERATIONS=1 loop start "placeholder-task" 2>&1)
@@ -284,7 +285,8 @@ echo "OK"
 
 echo "=== TEST 11: frontmatter에 placeholder 잔존 → start 거부 ==="
 # frontmatter 안의 verify 값도 placeholder로 남기면 placeholder 검사가 거부해야 함
-loop prepare "bad-yaml-task" > /dev/null 2>&1
+# prepare 스텁화 이후: 디렉터리 명시적 생성
+mkdir -p "$PROJECT/.loops/bad-yaml-task"
 BAD_SPEC="$PROJECT/.loops/bad-yaml-task/SPEC.md"
 cat > "$BAD_SPEC" <<'EOF'
 ---
@@ -343,8 +345,8 @@ echo "$output" | grep -qiE 'task|없습니다|No' \
 echo "OK"
 
 echo "=== TEST 13: cleanup 워크트리 부재 → 적절한 에러 ==="
-# task 디렉토리는 있지만 워크트리가 없는 상태 (prepare만 한 경우)
-loop prepare "no-wt-task" > /dev/null 2>&1
+# task 디렉토리는 있지만 워크트리가 없는 상태 (prepare 스텁화 이후: 명시적 생성)
+mkdir -p "$PROJECT/.loops/no-wt-task"
 NO_WT_SPEC="$PROJECT/.loops/no-wt-task/SPEC.md"
 cat > "$NO_WT_SPEC" <<'EOF'
 ---
@@ -369,7 +371,7 @@ echo "OK"
 
 echo "=== TEST 14: 매우 긴 task-id (50자) → 워크트리 경로 안전 ==="
 LONG_ID="abcdefghij1234567890abcdefghij1234567890abcdefghij"  # 50자
-loop prepare "$LONG_ID" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$LONG_ID"
 LONG_SPEC="$PROJECT/.loops/$LONG_ID/SPEC.md"
 cat > "$LONG_SPEC" <<'EOF'
 ---
@@ -392,7 +394,7 @@ echo "OK"
 
 echo "=== TEST 15: Multi-iteration mock — 3회 이터 후 DONE ==="
 MULTI_TASK="multi-iter-task"
-loop prepare "$MULTI_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$MULTI_TASK"
 cat > "$PROJECT/.loops/$MULTI_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -447,7 +449,7 @@ echo "=== TEST 16: scope 게이트가 framework 파일(.loop/*·CLAUDE.md·DONE)
 # (autopilot-smoke-STREAK 시나리오에서 발견된 버그의 regression 보호)
 
 SCOPE_TASK="scope-framework-test"
-loop prepare "$SCOPE_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$SCOPE_TASK"
 SCOPE_TASK_DIR="$PROJECT/.loops/$SCOPE_TASK"
 
 # 좁은 scope.include — app/만 (.loop/는 명시 안 함)
@@ -509,7 +511,7 @@ echo "OK"
 
 echo "=== TEST 17: 테스트 약화 게이트 (tests/** 해시 변경 감지) ==="
 TEST17_TASK="gate-test-weakening"
-loop prepare "$TEST17_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$TEST17_TASK"
 cat > "$PROJECT/.loops/$TEST17_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -563,7 +565,7 @@ echo "OK"
 
 echo "=== TEST 18: 의존성 변경 게이트 (manifest 해시 변경 감지) ==="
 TEST18_TASK="gate-dep-change"
-loop prepare "$TEST18_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$TEST18_TASK"
 cat > "$PROJECT/.loops/$TEST18_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -617,7 +619,7 @@ echo "OK"
 
 echo "=== TEST 19: suppressor 신규 추가 게이트 ==="
 TEST19_TASK="gate-suppressor"
-loop prepare "$TEST19_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$TEST19_TASK"
 cat > "$PROJECT/.loops/$TEST19_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -658,7 +660,7 @@ echo "OK"
 
 echo "=== TEST 20: fix:symptom streak 게이트 ==="
 TEST20_TASK="gate-streak"
-loop prepare "$TEST20_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$TEST20_TASK"
 cat > "$PROJECT/.loops/$TEST20_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -712,7 +714,7 @@ echo "OK"
 
 echo "=== TEST 21: 진동 패턴 게이트 ==="
 TEST21_TASK="gate-oscillation"
-loop prepare "$TEST21_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$TEST21_TASK"
 cat > "$PROJECT/.loops/$TEST21_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -777,7 +779,7 @@ done
 echo "OK"
 
 echo "=== TEST 23: M4 — scope.include 빈 배열이면 start 거부 ==="
-loop prepare "empty-scope-task" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/empty-scope-task"
 cat > "$PROJECT/.loops/empty-scope-task/SPEC.md" <<'EOF'
 ---
 scope:
@@ -837,7 +839,7 @@ echo "OK"
 
 echo "=== TEST 26: I2 — halt 시 미커밋 변경이 stash로 보관되면 WARN 출력 ==="
 STASH_TASK="stash-warn-task"
-loop prepare "$STASH_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$STASH_TASK"
 cat > "$PROJECT/.loops/$STASH_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -884,7 +886,7 @@ echo "OK"
 
 echo "=== TEST 27: 테스트 약화 게이트가 __tests__/ 같은 비-tests/ 컨벤션 감지 ==="
 TEST27_TASK="gate-tests-jest"
-loop prepare "$TEST27_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$TEST27_TASK"
 cat > "$PROJECT/.loops/$TEST27_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -938,7 +940,7 @@ echo "OK"
 
 echo "=== TEST 28: SPEC.md test_paths override가 기본 컨벤션 대체 ==="
 TEST28_TASK="gate-tests-override"
-loop prepare "$TEST28_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$TEST28_TASK"
 # test_paths를 비표준 경로 'qa/**' 로 override
 cat > "$PROJECT/.loops/$TEST28_TASK/SPEC.md" <<'EOF'
 ---
@@ -1012,7 +1014,7 @@ else
     PATH="$ISOLATED_PATH" command -v shasum >/dev/null \
       || { echo "FAIL: 격리된 PATH에서 shasum도 사라짐"; exit 1; }
 
-    loop prepare "shasum-fallback" > /dev/null 2>&1
+    mkdir -p "$PROJECT/.loops/shasum-fallback"
     cat > "$PROJECT/.loops/shasum-fallback/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1042,7 +1044,7 @@ fi
 
 echo "=== TEST 30: suppressor 게이트가 미커밋(working tree) 변경도 감지 ==="
 TEST30_TASK="gate-suppressor-uncommitted"
-loop prepare "$TEST30_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$TEST30_TASK"
 cat > "$PROJECT/.loops/$TEST30_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1096,7 +1098,7 @@ echo "OK"
 
 echo "=== TEST 31: acquire_lock이 stale lock(죽은 PID)을 자동 정리 ==="
 STALE_ACQUIRE_TASK="stale-acquire-task"
-loop prepare "$STALE_ACQUIRE_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$STALE_ACQUIRE_TASK"
 cat > "$PROJECT/.loops/$STALE_ACQUIRE_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1128,7 +1130,7 @@ echo "OK"
 
 echo "=== TEST 32: acquire_lock이 빈/비숫자 PID도 stale로 인식 ==="
 EMPTY_LOCK_TASK="empty-lock-task"
-loop prepare "$EMPTY_LOCK_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$EMPTY_LOCK_TASK"
 cat > "$PROJECT/.loops/$EMPTY_LOCK_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1157,7 +1159,7 @@ echo "OK"
 
 echo "=== TEST 33: secrets 게이트가 커밋된 변경에서 비밀 감지 (HEAD~1..HEAD) ==="
 TEST33_TASK="gate-secrets-committed"
-loop prepare "$TEST33_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$TEST33_TASK"
 cat > "$PROJECT/.loops/$TEST33_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1237,7 +1239,8 @@ WT33="$WORK_DIR/myproject-loops/$TEST33_TASK"
 loop cleanup "$TEST33_TASK" --force > /dev/null 2>&1
 echo "OK"
 
-echo "=== TEST 34: 첫 prepare가 .gitignore와 .loops/locks/ 자동 setup ==="
+echo "=== TEST 34: 첫 start가 .gitignore와 .loops/locks/ 자동 setup ==="
+# prepare가 stub이 됨 → ensure_loops_setup은 이제 start에서도 동작
 GITIGN_PROJECT="$WORK_DIR/gitign-project"
 mkdir -p "$GITIGN_PROJECT"
 git -C "$GITIGN_PROJECT" init -q
@@ -1249,7 +1252,18 @@ git -C "$GITIGN_PROJECT" commit --allow-empty -m "initial" -q
 [[ ! -f "$GITIGN_PROJECT/.gitignore" ]] || { echo "FAIL: pre-state .gitignore 존재"; exit 1; }
 [[ ! -d "$GITIGN_PROJECT/.loops" ]] || { echo "FAIL: pre-state .loops 존재"; exit 1; }
 
-(cd "$GITIGN_PROJECT" && bash "$LOOP_SH_SRC" prepare "first-task" > /dev/null 2>&1)
+GITIGN_SPEC34="$WORK_DIR/gitign-spec-34.md"
+cat > "$GITIGN_SPEC34" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+# First Task
+EOF
+(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "first-task" --spec "$GITIGN_SPEC34" > /dev/null 2>&1)
 
 [[ -f "$GITIGN_PROJECT/.gitignore" ]] || { echo "FAIL: .gitignore 미생성"; exit 1; }
 grep -qxF '.loops/locks/' "$GITIGN_PROJECT/.gitignore" \
@@ -1258,7 +1272,18 @@ grep -qxF '.loops/locks/' "$GITIGN_PROJECT/.gitignore" \
 echo "OK"
 
 echo "=== TEST 35: 재호출 시 .gitignore 중복 추가 안 함 (idempotent) ==="
-(cd "$GITIGN_PROJECT" && bash "$LOOP_SH_SRC" prepare "second-task" > /dev/null 2>&1)
+GITIGN_SPEC35="$WORK_DIR/gitign-spec-35.md"
+cat > "$GITIGN_SPEC35" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+# Second Task
+EOF
+(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "second-task" --spec "$GITIGN_SPEC35" > /dev/null 2>&1)
 COUNT35=$(grep -cxF '.loops/locks/' "$GITIGN_PROJECT/.gitignore")
 [[ $COUNT35 -eq 1 ]] \
   || { echo "FAIL: .gitignore entry 중복 (${COUNT35}개). content: $(cat "$GITIGN_PROJECT/.gitignore")"; exit 1; }
@@ -1277,7 +1302,18 @@ printf 'node_modules' > "$NL_PROJECT/.gitignore"
 [[ "$(tail -c1 "$NL_PROJECT/.gitignore")" != "" ]] \
   || { echo "FAIL: pre-state newline이 이미 있음 (테스트 setup 오류)"; exit 1; }
 
-(cd "$NL_PROJECT" && bash "$LOOP_SH_SRC" prepare "task-x" > /dev/null 2>&1)
+GITIGN_SPEC36="$WORK_DIR/gitign-spec-36.md"
+cat > "$GITIGN_SPEC36" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+# Task X
+EOF
+(cd "$NL_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "task-x" --spec "$GITIGN_SPEC36" > /dev/null 2>&1)
 
 # 두 라인이 정확히 분리됐는지 (붙어버리면 'node_modules.loops/locks/'가 됨)
 grep -qx 'node_modules' "$NL_PROJECT/.gitignore" \
@@ -1301,7 +1337,7 @@ if [[ -z "$LOCALE_FOUND" ]]; then
   echo "SKIP: 비-영어 locale 미설치 — locale 독립 시나리오 검증 불가"
 else
   TEST37_TASK="locale-stash"
-  loop prepare "$TEST37_TASK" > /dev/null 2>&1
+  mkdir -p "$PROJECT/.loops/$TEST37_TASK"
   cat > "$PROJECT/.loops/$TEST37_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1380,7 +1416,7 @@ chmod +x "$MOCK38/claude"
 
 (
   cd "$TDD_PROJECT"
-  bash "$LOOP_SH_SRC" prepare "tdd-add" > /dev/null 2>&1
+  mkdir -p ".loops/tdd-add"
   cat > ".loops/tdd-add/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1433,7 +1469,7 @@ chmod +x "$MOCK39/claude"
 
 (
   cd "$TDD_MOD_PROJECT"
-  bash "$LOOP_SH_SRC" prepare "tdd-mod" > /dev/null 2>&1
+  mkdir -p ".loops/tdd-mod"
   cat > ".loops/tdd-mod/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1458,7 +1494,7 @@ echo "OK"
 
 echo "=== TEST 40: stop이 claude 자식 프로세스도 종료 (orphan 방지) ==="
 ORPHAN_TASK="orphan-prevent"
-loop prepare "$ORPHAN_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$ORPHAN_TASK"
 cat > "$PROJECT/.loops/$ORPHAN_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1530,7 +1566,7 @@ echo "OK"
 
 echo "=== TEST 41: --force cleanup이 실행 중 프로세스를 먼저 SIGTERM (race 방지) ==="
 FORCE_TASK="force-cleanup-running"
-loop prepare "$FORCE_TASK" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/$FORCE_TASK"
 cat > "$PROJECT/.loops/$FORCE_TASK/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1609,7 +1645,7 @@ echo "=== TEST 42: slash task-id의 lock이 hyphen task와 충돌 안 함 ==="
 mkdir -p "$PROJECT/.loops/locks"
 echo "$$" > "$PROJECT/.loops/locks/col-fake.lock"
 
-loop prepare "col/fake" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/col/fake"
 cat > "$PROJECT/.loops/col/fake/SPEC.md" <<'EOF'
 ---
 scope:
@@ -1660,7 +1696,7 @@ echo "OK"
 echo "=== TEST 45: slash task-id가 status 목록에 정확히 표시 (오인식 방지) ==="
 # 기존 TEST 5에서 'goal-x/sub-task'가 prepare됐다 cleanup된 상태일 수 있음.
 # 새로 깨끗한 slash task-id로 검증.
-loop prepare "ns-foo/sub-bar" > /dev/null 2>&1
+mkdir -p "$PROJECT/.loops/ns-foo/sub-bar"
 cat > "$PROJECT/.loops/ns-foo/sub-bar/SPEC.md" <<'EOF'
 ---
 scope:
