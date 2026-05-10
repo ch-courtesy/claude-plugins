@@ -125,5 +125,5 @@ SPEC.md 경로·요약 안내 + `AskUserQuestion`으로 검토 결과 수집:
 
 - 본 스킬은 target 프로젝트의 `.loops/<task-id>/SPEC.md`만 작성한다. 다른 파일 생성·수정 안 함.
 - 모든 결정·선택·확인은 `AskUserQuestion`으로. 자유 텍스트 끝에 질문 종결구 다는 방식 금지 (CLAUDE.md 규칙).
-- 한 번에 한 질문. 여러 질문 묶어 묻지 않는다 (단, `AskUserQuestion` 호출은 최대 4문항까지 가능).
+- 한 주제씩 (한 `AskUserQuestion` 호출에 관련 소문항 최대 4개 허용).
 - `[NEEDS CLARIFICATION` 마커는 `loop start`에서 차단됨. 사용자에게 명시적으로 마커가 박혔음을 알리고 `--resume`으로 해결하도록 안내.
