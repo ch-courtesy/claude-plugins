@@ -781,7 +781,8 @@ loop cleanup "$TEST21_TASK" --force > /dev/null 2>&1
 echo "OK"
 
 echo "=== TEST 22: M1 — task-id에 '..' 포함 시 거부 (path traversal) ==="
-for sub in prepare start status stop cleanup logs; do
+# prepare는 deprecated stub이므로 task-id 검증을 안 함 — 실제 진입점만 검사
+for sub in start status stop cleanup logs; do
   set +e
   output=$(loop "$sub" "../escape-task" 2>&1)
   result=$?
@@ -1684,7 +1685,8 @@ loop cleanup "col/fake" --force > /dev/null 2>&1
 echo "OK"
 
 echo "=== TEST 43: task-id에 '__' 포함 거부 (slash 인코딩 예약) ==="
-for sub in prepare start status stop cleanup logs; do
+# prepare는 deprecated stub이므로 task-id 검증을 안 함 — 실제 진입점만 검사
+for sub in start status stop cleanup logs; do
   set +e
   output=$(loop "$sub" "task__double" 2>&1)
   result=$?
@@ -1696,7 +1698,7 @@ done
 echo "OK"
 
 echo "=== TEST 44: task-id에 공백 포함 거부 ==="
-for sub in prepare start status stop cleanup logs; do
+for sub in start status stop cleanup logs; do
   set +e
   output=$(loop "$sub" "task with space" 2>&1)
   result=$?
@@ -1737,12 +1739,14 @@ rm -rf "$PROJECT/.loops/ns-foo"
 echo "OK"
 
 echo "=== TEST 46: task-id에 '.' 단독 컴포넌트 거부 ==="
+# compute_paths→validate_task_id 경로로 거부됨. start 진입점으로 검증
+# (prepare는 stub이라 task-id를 검증하지 않음)
 for invalid in "." "./foo" "foo/." "a/./b"; do
   set +e
-  output=$(loop prepare "$invalid" 2>&1)
+  output=$(loop start "$invalid" 2>&1)
   result=$?
   set -e
-  [[ $result -ne 0 ]] || { echo "FAIL: prepare가 '$invalid' task-id를 받아들임"; exit 1; }
+  [[ $result -ne 0 ]] || { echo "FAIL: start가 '$invalid' task-id를 받아들임"; exit 1; }
   echo "$output" | grep -qE "'\\.'" \
     || { echo "FAIL: '$invalid'에 대해 '.' 거부 메시지 없음. got: $output"; exit 1; }
 done

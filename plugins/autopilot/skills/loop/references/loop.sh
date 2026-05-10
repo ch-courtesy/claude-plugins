@@ -483,9 +483,6 @@ iterate() {
 # ----- subcommand: prepare -----
 
 cmd_prepare() {
-  local task_id="${1:-}"
-  # task-id 유효성 검사는 유지 (validate 오류는 기존 메시지로 표시)
-  [[ -n "$task_id" ]] && validate_task_id "$task_id"
   cat >&2 <<'EOF'
 prepare 서브커맨드는 제거되었습니다.
 새 spec 스킬을 사용하세요:
