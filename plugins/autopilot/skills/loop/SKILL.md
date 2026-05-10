@@ -33,7 +33,7 @@ Skill(skill: "spec", args: "<task-id>")
 
 `Bash(bash $SKILL_DIR/references/loop.sh start <task-id> [...flags])` 호출. loop.sh는 다음을 검증·수행:
 - `--spec <path>` 지정 시 외부 파일을 `.loops/<task-id>/SPEC.md`로 복사 (prepare 대체)
-- `.loops/<task-id>/SPEC.md` 존재 + placeholder 모두 치환됨
+- `.loops/<task-id>/SPEC.md` 존재 + `[NEEDS CLARIFICATION]` 마커 없음 + placeholder 모두 치환됨
 - 락 미보유
 - 워크트리 없으면 생성 (sibling 위치 `<project>/../<project-name>-loops/<task-id>/`)
 - 헌법(`references/constitution.md`)을 워크트리의 CLAUDE.md로 복사
