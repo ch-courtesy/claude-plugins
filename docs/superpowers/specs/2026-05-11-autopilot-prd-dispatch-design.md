@@ -56,13 +56,12 @@ milestones/<m>/                      # commit 대상
 - 단일 컴포넌트 입력 시 `regular/` 자동 prefix
 - 3+ 컴포넌트 미지원 (분해 깊이 ≤ 2)
 
-**SPEC 경로** — `milestones/<m>/loops/<c>/SPEC.md`가 단일 진실. v0.1의 `.loops/<id>/SPEC.md`는 v0.2부터 deprecated, fallback 1 minor 버전 유지.
+**SPEC 경로** — `milestones/<m>/loops/<c>/SPEC.md`가 유일 진실. legacy `.loops/<id>/SPEC.md`는 제거 (v0.2 cutover).
 
-**경로 결정 순서** (loop.sh 분기)
+**경로 결정 순서** (loop.sh)
 1. task-id 정규화 — 단일 컴포넌트면 `regular/<input>` prefix
-2. 새 경로 시도 — `milestones/<m>/loops/<c>/SPEC.md`
-3. 부재 시 legacy fallback — `.loops/<원본-task-id>/SPEC.md` (deprecated 경고 출력)
-4. 둘 다 부재면 abort
+2. 경로 = `milestones/<m>/loops/<c>/SPEC.md`
+3. 부재 시 abort
 
 ## 4. autopilot:prd 스킬
 
@@ -204,10 +203,10 @@ ESCALATION 시 카테고리(config-gap·spec-gap·architecture-gap·environment-
 
 ## 9. loop.sh 변경 범위
 
-- SPEC 경로 결정: `milestones/<m>/loops/<c>/SPEC.md` 우선, 없으면 기존 `.loops/<task-id>/SPEC.md`로 fallback (legacy)
+- SPEC 경로 단일화: `milestones/<m>/loops/<c>/SPEC.md` (legacy `.loops/` 경로 제거)
 - 단일 컴포넌트 task-id 입력 시 `regular/` 자동 prefix
-- v0.1 → v0.2: legacy 경로 사용 시 deprecated 경고
 - 워크트리 경로 (`<project>-loops/<task-id>/`) 변경 없음
+- 기존 단위 테스트 중 `.loops/` 경로 참조분 일괄 갱신 (§10 참조)
 
 ## 10. 테스트 전략
 
@@ -225,8 +224,9 @@ ESCALATION 시 카테고리(config-gap·spec-gap·architecture-gap·environment-
 - ops 서브커맨드 7종
 
 **`loop.sh`**
-- SPEC 경로 결정 분기 단위 테스트
-- legacy fallback 경고 메시지
+- SPEC 경로 결정 단위 테스트 (`milestones/<m>/loops/<c>/SPEC.md` 단일 경로)
+- 단일 컴포넌트 입력 → `regular/` 자동 prefix 동작
+- 기존 `.loops/` 기반 테스트 일괄 갱신
 
 **통합**
 - `prd → dispatch → spec(mock) → loop(mock)` end-to-end (single happy + 1 fail-fast 시나리오)
@@ -238,8 +238,6 @@ ESCALATION 시 카테고리(config-gap·spec-gap·architecture-gap·environment-
 - **3+ depth nesting 미지원** — 분해 깊이 ≤ 2.
 - **외부 통합(GitHub Issue·branch 자동 생성 등)** — 본 스킬 책임 아님. 프로젝트 룰 영역.
 
-## 12. 마이그레이션 (v0.1 → v0.2)
+## 12. 호환성
 
-- 기존 `.loops/<id>/SPEC.md` 사용자에게 deprecated 경고 + 자동 이주 도움말 (`.loops/<id>/SPEC.md → milestones/regular/loops/<id>/SPEC.md`)
-- 한 minor 버전 동안 fallback 유지, v0.3에서 제거
-- 기존 테스트 스위트 경로 일괄 업데이트
+본 설계는 v0.2 cutover로 적용한다. legacy `.loops/<id>/SPEC.md` 경로는 제거되며 fallback·deprecated 경고도 두지 않는다. 기존 `tests/autopilot/`의 `.loops/` 참조는 일괄 갱신.
