@@ -69,4 +69,32 @@ OLD_SKILL="$REPO_ROOT/plugins/project-init/skills/autonomous-loop-rule-creator"
 echo "OK"
 
 echo ""
+echo "=== spec 스킬 구조 검증 ==="
+SPEC_SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/spec"
+for f in SKILL.md \
+         references/spec-template.md \
+         references/ears-patterns.md \
+         references/self-review.md \
+         references/decomposition-gate.md; do
+  [[ -f "$SPEC_SKILL_DIR/$f" ]] || { echo "FAIL: spec/$f 부재"; exit 1; }
+  echo "OK: spec/$f"
+done
+
+echo ""
+echo "=== spec/SKILL.md frontmatter 검증 ==="
+SPEC_SKILL_MD="$SPEC_SKILL_DIR/SKILL.md"
+grep -q 'name: spec' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md frontmatter에 'name: spec' 없음"; exit 1; }
+echo "OK: name: spec"
+grep -q 'EARS' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md description에 'EARS' 마커 없음"; exit 1; }
+echo "OK: EARS 마커"
+grep -q '\[NEEDS CLARIFICATION\]' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md description에 '[NEEDS CLARIFICATION]' 마커 없음"; exit 1; }
+echo "OK: [NEEDS CLARIFICATION] 마커"
+grep -q -- '--resume' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md description에 '--resume' 마커 없음"; exit 1; }
+echo "OK: --resume 마커"
+
+echo ""
 echo "=== 모든 테스트 통과 ==="
