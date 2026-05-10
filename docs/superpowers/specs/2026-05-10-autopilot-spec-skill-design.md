@@ -173,12 +173,12 @@ fi
 
 이 설계가 의도한 결과를 내는지 검증할 방법:
 
-1. **Happy path E2E**: 빈 task-id로 `Skill(spec, "test-feature-1")` 호출 → 9단계 진행 → 마커 없는 SPEC.md 생성 → `Skill(loop, "start test-feature-1")` 정상 시작
+1. **Happy path E2E**: 빈 task-id로 `Skill(skill: "spec", args: "test-feature-1")` 호출 → 9단계 진행 → 마커 없는 SPEC.md 생성 → `Skill(skill: "loop", args: "start test-feature-1")` 정상 시작
 2. **마커 차단 테스트**: 일부러 `[NEEDS CLARIFICATION]` 박은 SPEC으로 `loop start` → exit 2 + 안내 출력 확인
-3. **재진입 테스트**: 마커 잔존 SPEC에 `Skill(spec, "test-feature-1 --resume")` → 마커 있는 섹션만 묻고 나머지 안 건드림 확인
+3. **재진입 테스트**: 마커 잔존 SPEC에 `Skill(skill: "spec", args: "test-feature-1 --resume")` → 마커 있는 섹션만 묻고 나머지 안 건드림 확인
 4. **EARS 변환 테스트**: 자유 텍스트 수용 기준 입력 → 자동 변환 제안 → 사용자 승인 시 EARS로 작성 확인
 5. **분해 게이트 테스트**: 다중 서브시스템 task ("로그인·결제·메일링 모두") → 분해 제안 표시 확인
-6. **prepare 제거 테스트**: `Skill(loop, "prepare foo")` → 안내 메시지 출력, SPEC.md 미생성 확인
+6. **prepare 제거 테스트**: `Skill(skill: "loop", args: "prepare foo")` → 안내 메시지 출력, SPEC.md 미생성 확인
 7. **WHAT/HOW 방어선 테스트**: "무엇을 만들 것인가"에 "FastAPI로 구현" 같은 기술 스택 등장 → 자체 검토에서 Constraints 이동 권유 확인
 
 ## 구현 순서 (대략)

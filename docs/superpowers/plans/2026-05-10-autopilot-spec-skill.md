@@ -399,8 +399,8 @@ git commit -m "feat(autopilot/spec): 자체 검토 5항목 체크리스트 추�
   ```
   ## 후속 task (분해됨)
   이 SPEC은 분해된 첫 부분입니다. 후속:
-  - <영역 B 요약> — 별도 task-id로 `Skill(spec, args: "<id-b>")` 호출
-  - <영역 C 요약> — `Skill(spec, args: "<id-c>")` 호출
+  - <영역 B 요약> — 별도 task-id로 `Skill(skill: "spec", args: "<id-b>")` 호출
+  - <영역 C 요약> — `Skill(skill: "spec", args: "<id-c>")` 호출
   ```
 - 사용자에게 후속 호출 안내.
 
@@ -962,8 +962,8 @@ grep -q '^### prepare' plugins/autopilot/skills/loop/SKILL.md && echo "FAIL: pre
 
 1. **Happy path**: 빈 task-id로 spec 스킬 호출 → 9단계 진행 → 마커 없는 SPEC.md → `loop start` 정상 동작
 2. **마커 차단**: 마커 박힌 SPEC으로 `loop start` → exit 2 + spec --resume 안내 출력
-3. **--resume**: 마커 잔존 SPEC에 `Skill(spec, "id --resume")` → 마커 섹션만 묻고 나머지 안 건드림
-4. **prepare 호출**: `Skill(loop, args: "prepare foo")` → exit 2 + spec 스킬 안내 출력, SPEC.md 미생성
+3. **--resume**: 마커 잔존 SPEC에 `Skill(skill: "spec", args: "id --resume")` → 마커 섹션만 묻고 나머지 안 건드림
+4. **prepare 호출**: `Skill(skill: "loop", args: "prepare foo")` → exit 2 + spec 스킬 안내 출력, SPEC.md 미생성
 5. **EARS 변환**: 자유 텍스트 acceptance 입력 → 자체 검토에서 자동 변환 제안
 6. **분해 게이트**: 다중 서브시스템 task 입력 → 분해 제안 표시
 7. **WHAT/HOW 방어선**: "무엇을 만들 것인가"에 "FastAPI로 구현" 같은 기술 스택 → 자체 검토에서 Constraints 이동 권유
