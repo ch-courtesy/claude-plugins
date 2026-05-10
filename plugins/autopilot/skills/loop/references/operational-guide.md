@@ -25,7 +25,7 @@ autopilot `loop` 스킬의 sibling 워크트리 기반 외부 셸 드라이버 �
 # target 프로젝트 (스킬이 생성)
 .loops/
 ├── locks/                     # 동시 실행 락 (gitignored)
-└── <task-id>/SPEC.md          # prepare 생성, cleanup 후 아카이브
+└── <task-id>/SPEC.md          # spec 스킬로 생성, cleanup 후 아카이브
 
 # 런타임 워크트리 (start가 생성)
 <project>/../<project-name>-loops/<task-id>/
@@ -43,7 +43,7 @@ autopilot `loop` 스킬의 sibling 워크트리 기반 외부 셸 드라이버 �
 LOOP_SH는 `$SKILL_DIR/references/loop.sh` 경로로 호출합니다. 아래에서는 `loop.sh`로 줄여씁니다.
 
 ```
-loop.sh prepare <task-id>             # SPEC.md 시드 생성
+loop.sh prepare <task-id>             # (deprecated → spec 스킬) Skill(skill: "spec", args: "<task-id>")
 loop.sh start   <task-id> [옵션]      # 검증 후 워크트리·락 생성 + 루프 시작
 loop.sh status  [<task-id>]           # 상태 조회 (전체 또는 단일)
 loop.sh stop    <task-id>             # 실행 중 정지 (SIGTERM)
@@ -57,16 +57,15 @@ loop.sh logs    <task-id> [옵션]      # 로그 조회
 ```bash
 LOOP_SH="$HOME/.claude/plugins/autopilot/skills/loop/references/loop.sh"
 
-bash "$LOOP_SH" prepare auth-refactor   # SPEC.md 시드 생성
-$EDITOR .loops/auth-refactor/SPEC.md    # 작업 정의 채움 (frontmatter: scope/verify, 본문: 수용 기준)
-bash "$LOOP_SH" start auth-refactor     # 루프 시작
+Skill(skill: "spec", args: "auth-refactor")   # 대화형 SPEC.md 생성
+bash "$LOOP_SH" start auth-refactor           # 루프 시작
 bash "$LOOP_SH" logs auth-refactor --tail  # 별도 터미널에서 모니터링
 # 정지: Ctrl+C 또는 DONE/ESCALATION.md 생성 시 자동 종료
 ```
 
 ## 외부 SPEC 파일 전달 (--spec 플래그)
 
-prepare 없이 외부에서 만든 SPEC.md를 start에 직접 넘길 수 있습니다.
+spec 스킬 대신 외부에서 만든 SPEC.md를 start에 직접 넘길 수 있습니다.
 
 ```bash
 bash "$LOOP_SH" start auth-refactor --spec /tmp/my-spec.md

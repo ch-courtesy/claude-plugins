@@ -2,8 +2,8 @@
 # loop.sh — 자율 루프 외부 셸 드라이버 (subcommand 기반)
 #
 # 사용:
-#   bash /path/to/autopilot/skills/loop/references/loop.sh prepare <task-id>
 #   bash /path/to/autopilot/skills/loop/references/loop.sh start   <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>]
+#   (SPEC.md 생성: Skill(skill: "spec", args: "<task-id>")  — prepare 서브커맨드는 deprecated)
 #   bash /path/to/autopilot/skills/loop/references/loop.sh status  [<task-id>]
 #   bash /path/to/autopilot/skills/loop/references/loop.sh stop    <task-id>
 #   bash /path/to/autopilot/skills/loop/references/loop.sh list
@@ -714,7 +714,7 @@ cmd_status() {
 
   if [[ ${#task_ids[@]} -eq 0 ]]; then
     echo "실행 중인 task가 없습니다."
-    echo "새 task를 시작하려면: $0 prepare <task-id>"
+    echo "새 task를 시작하려면 spec 스킬로 SPEC.md 생성: Skill(skill: \"spec\", args: \"<task-id>\")"
     return 0
   fi
 
@@ -975,7 +975,7 @@ usage() {
 autopilot loop 드라이버
 
 Subcommands:
-  prepare <task-id>       SPEC.md 시드 생성
+  prepare <task-id>       (deprecated) spec 스킬로 안내  → Skill(skill: "spec", args: "<task-id>")
   start <task-id>         검증 후 워크트리·락 생성 + 루프 시작 [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>]
   status [<task-id>]      상태 조회
   stop <task-id>          실행 중 정지
