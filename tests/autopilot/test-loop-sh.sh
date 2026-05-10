@@ -64,7 +64,7 @@ output=$(loop prepare test-task-1 2>&1)
 result=$?
 set -e
 # 스텁이므로 0이 아닌 exit + 안내 메시지
-[[ $result -ne 0 ]] || { echo "FAIL: 스텁이 0 exit으로 끝남 (사용자가 sp 스킬로 가도록 유도해야)"; exit 1; }
+[[ $result -ne 0 ]] || { echo "FAIL: 스텁이 0 exit으로 끝남 (사용자가 spec 스킬로 가도록 유도해야)"; exit 1; }
 echo "$output" | grep -q "spec\|이전" || { echo "FAIL: spec 스킬 안내 없음. got: $output"; exit 1; }
 # .loops 디렉터리·SPEC.md 미생성 확인
 [[ ! -d "$PROJECT/.loops/test-task-1" ]] || { echo "FAIL: 스텁이 디렉터리 만들면 안 됨"; exit 1; }
