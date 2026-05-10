@@ -1698,5 +1698,47 @@ for invalid in "." "./foo" "foo/." "a/./b"; do
 done
 echo "OK"
 
+echo "=== TEST 47: SPEC.md에 [NEEDS CLARIFICATION] 잔존 시 start 거부 ==="
+# task 디렉터리·SPEC 시드
+mkdir -p .loops/needs-clar-task
+cat > .loops/needs-clar-task/SPEC.md <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Test SPEC
+
+## 무엇을 만들 것인가
+Test task with unresolved marker
+
+## 수용 기준
+- A1: When the user logs in, the system shall authenticate.
+- [NEEDS CLARIFICATION: 어떤 인증 방식? OAuth/SSO/email-password?]
+
+## 범위
+포함:
+src/
+
+비-목표 / 제외:
+none
+
+## 검증
+true
+EOF
+
+set +e
+output=$(MAX_ITERATIONS=1 loop start needs-clar-task 2>&1)
+result=$?
+set -e
+[[ $result -ne 0 ]] || { echo "FAIL: 마커 잔존 SPEC으로 start가 성공하면 안 됨"; exit 1; }
+echo "$output" | grep -q "NEEDS CLARIFICATION\|spec.*resume" || { echo "FAIL: 마커 안내 메시지 없음. got: $output"; exit 1; }
+# 락 안 잡혀야 함
+[[ ! -f .loops/locks/needs-clar-task.lock ]] || { echo "FAIL: 차단 됐어야 하는데 락 잡힘"; exit 1; }
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="

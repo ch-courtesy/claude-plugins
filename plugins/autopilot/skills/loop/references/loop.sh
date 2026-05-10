@@ -559,7 +559,12 @@ cmd_start() {
   # 2. SPEC.md 존재 확인
   local spec_path_local="$LOOPS_DIR/SPEC.md"
   if [[ ! -f "$spec_path_local" ]]; then
-    die "SPEC.md가 없습니다. 먼저 실행하세요: $0 prepare $task_id"
+    die "SPEC.md가 없습니다. 먼저 실행하세요: Skill(skill: \"spec\", args: \"$task_id\")"
+  fi
+
+  # 2.5. [NEEDS CLARIFICATION] 마커 검사 (락 획득 전)
+  if grep -q '\[NEEDS CLARIFICATION' "$spec_path_local"; then
+    die "SPEC.md에 미해결 [NEEDS CLARIFICATION] 마커가 있습니다.\n해결: Skill(skill: \"spec\", args: \"$task_id --resume\")"
   fi
 
   # 3. placeholder 검사
