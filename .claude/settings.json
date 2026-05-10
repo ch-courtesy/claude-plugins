@@ -1,4 +1,8 @@
 {
+  "enabledPlugins": {
+    "project-init@courtesy-claude-plugins": true,
+    "superpowers@claude-plugins-official": true
+  },
   "extraKnownMarketplaces": {
     "courtesy-claude-plugins": {
       "source": {
@@ -6,8 +10,5 @@
         "repo": "ch-courtesy/claude-plugins"
       }
     }
-  },
-  "enabledPlugins": {
-    "project-init@courtesy-claude-plugins": true
   }
 }
