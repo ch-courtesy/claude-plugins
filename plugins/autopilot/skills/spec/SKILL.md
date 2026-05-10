@@ -85,10 +85,11 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 - `{{task_title}}` → 단계 6에서 합의된 제목 (없으면 task-id 그대로)
 - `{{task_description}}` → 섹션 2 합의 내용
 - `{{acceptance_criteria}}` → 섹션 3 합의 내용 (EARS 포맷)
-- `{{scope_in}}` / `{{scope_out}}` → 섹션 4
-- `{{verify_command}}` → 섹션 5
+- `{{scope_in}}` / `{{scope_out}}` → 본문 섹션 4 (사람이 읽는 형식)
+- `{{scope_include}}` → frontmatter `scope.include` (YAML inline flow list 형식, 예: `["src/**", "tests/**"]`. 본문 `{{scope_in}}`과 같은 내용을 YAML 문법으로)
+- `{{verify_command}}` → 본문 섹션 5 + frontmatter `verify` (둘 다 같은 placeholder)
 - `{{constraints}}` / `{{risks}}` → 섹션 6/7. 빈 값이면 빈 줄 한 줄로 치환 (헤더는 남김)
-- frontmatter `scope.include`·`verify`도 동일 치환
+- frontmatter `scope.exclude`는 고정 default(`rules/**`, `.loops/**`, `CLAUDE.md`) — 치환 대상 아님
 
 미해결 항목은 `[NEEDS CLARIFICATION: <구체 질문>]` 마커로 박은 채 작성.
 

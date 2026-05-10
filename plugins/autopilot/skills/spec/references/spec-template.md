@@ -1,8 +1,6 @@
 ---
 scope:
-  include:
-    - src/**
-    - tests/**
+  include: {{scope_include}}
   exclude:
     - rules/**
     - .loops/**
