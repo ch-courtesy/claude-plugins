@@ -592,10 +592,18 @@ git commit -m "feat(autopilot/spec): 9단계 대화 흐름 + --resume 모드 SKI
 
 - [ ] **Step 1: 실패하는 테스트 추가**
 
-`tests/autopilot/test-loop-sh.sh`의 마지막 `echo "OK"` 다음 (파일 끝)에 추가. 기존 테스트 번호 시퀀스 다음 (현재 마지막 TEST 번호 + 1):
+먼저 현재 마지막 TEST 번호를 확인:
+
+```bash
+grep -n '^echo "=== TEST' tests/autopilot/test-loop-sh.sh | tail -1
+```
+Expected: `TEST 20` 라인이 마지막. 따라서 새 테스트는 `TEST 21`. (만약 다른 task가 새 테스트를 미리 추가했다면 그 번호 + 1로 조정.)
+
+`tests/autopilot/test-loop-sh.sh`의 파일 끝(마지막 `echo "OK"` 다음)에 다음 블록을 그대로 추가:
+
 ```bash
 
-echo "=== TEST N: SPEC.md에 [NEEDS CLARIFICATION] 잔존 시 start 거부 ==="
+echo "=== TEST 21: SPEC.md에 [NEEDS CLARIFICATION] 잔존 시 start 거부 ==="
 # task 디렉터리·SPEC 시드
 mkdir -p .loops/needs-clar-task
 cat > .loops/needs-clar-task/SPEC.md <<'EOF'
@@ -638,8 +646,6 @@ echo "$output" | grep -q "NEEDS CLARIFICATION\|spec.*resume" || { echo "FAIL: �
 echo "OK"
 ```
 
-`TEST N`의 N은 기존 마지막 TEST 번호 + 1. `grep -c '^echo "=== TEST'` 실행해서 확인하고 적절한 숫자로 바꿀 것.
-
 - [ ] **Step 2: 테스트 실패 확인**
 
 ```bash
@@ -649,16 +655,38 @@ Expected: 새 TEST에서 FAIL 출력 (현재 코드는 마커 검사 없음).
 
 - [ ] **Step 3: cmd_start에 마커 검사 추가**
 
-`plugins/autopilot/skills/loop/references/loop.sh`의 `cmd_start` 함수 안, *"# 2. SPEC.md 존재 확인"* 블록 *직후·"# 3. placeholder 검사" 블록 직전*에 추가:
+`plugins/autopilot/skills/loop/references/loop.sh`의 `cmd_start` 함수 안에, "# 2. SPEC.md 존재 확인" 블록 *직후·*"# 3. placeholder 검사" 블록 *직전*에 새 블록을 삽입.
 
-```bash
+Edit으로 이 정확한 텍스트를 매칭해서 교체:
+
+old:
+```
+  # 2. SPEC.md 존재 확인
+  local spec_path_local="$LOOPS_DIR/SPEC.md"
+  if [[ ! -f "$spec_path_local" ]]; then
+    die "SPEC.md가 없습니다. 먼저 실행하세요: $0 prepare $task_id"
+  fi
+
+  # 3. placeholder 검사
+```
+
+new:
+```
+  # 2. SPEC.md 존재 확인
+  local spec_path_local="$LOOPS_DIR/SPEC.md"
+  if [[ ! -f "$spec_path_local" ]]; then
+    die "SPEC.md가 없습니다. 먼저 실행하세요: Skill(skill: \"spec\", args: \"$task_id\")"
+  fi
+
   # 2.5. [NEEDS CLARIFICATION] 마커 검사 (락 획득 전)
   if grep -q '\[NEEDS CLARIFICATION' "$spec_path_local"; then
     die "SPEC.md에 미해결 [NEEDS CLARIFICATION] 마커가 있습니다.\n해결: Skill(skill: \"spec\", args: \"$task_id --resume\")"
   fi
+
+  # 3. placeholder 검사
 ```
 
-(블록 번호는 임의 — 핵심은 "SPEC.md 존재 확인" 다음·"placeholder 검사" 전에 배치하여 락 획득 전에 차단되도록 하는 것.)
+(이 교체로 두 가지가 함께 처리됨: 마커 차단 게이트 추가 + 기존 prepare 안내 메시지를 spec 스킬 안내로 갱신. prepare 서브커맨드는 Task 8에서 스텁화되므로 안내 메시지 정합성을 미리 맞춤.)
 
 - [ ] **Step 4: 테스트 통과 확인**
 
@@ -684,7 +712,9 @@ git commit -m "feat(autopilot/loop): start에 [NEEDS CLARIFICATION] 차단 게�
 
 - [ ] **Step 1: TEST 1을 "스텁 동작 검증"으로 재작성**
 
-`tests/autopilot/test-loop-sh.sh`의 기존 TEST 1 블록 (line 61-73) 전체를 다음으로 교체:
+`tests/autopilot/test-loop-sh.sh`의 기존 TEST 1 블록 전체를 다음 블록으로 Edit 교체. 매칭 anchor는 `echo "=== TEST 1:`로 시작해서 다음 `echo "=== TEST 2:` 직전까지 (사이의 `echo "OK"` 포함). Edit으로 old 블록 전체를 인용 → new 블록으로 치환.
+
+new 블록:
 ```bash
 echo "=== TEST 1: prepare는 spec 스킬로 안내하는 스텁 ==="
 set +e
@@ -699,22 +729,25 @@ echo "$output" | grep -q "spec\|이전" || { echo "FAIL: spec 스킬 안내 없�
 echo "OK"
 ```
 
-- [ ] **Step 2: TEST 3·10·11의 setup 갱신 (prepare로 만들어졌던 것을 직접 작성)**
+- [ ] **Step 2: prepare 의존 setup을 명시적 mkdir로 갱신**
 
-기존 TEST 3은 line 84-130 사이. TEST 3은 `LOOPS_TASK_DIR="$PROJECT/.loops/test-task-1"`을 가정하고 `SPEC_FILE="$LOOPS_TASK_DIR/SPEC.md"`에 직접 cat하므로 — `mkdir -p $LOOPS_TASK_DIR`만 추가하면 됨. TEST 1에서 prepare가 더 이상 디렉터리를 만들지 않기 때문.
+먼저 prepare에 의존하는 모든 위치를 스캔:
 
-TEST 3 시작 직전 (line 84 직전, "echo \"=== TEST 3: ...\"" 줄 위)에 한 줄 추가:
 ```bash
-mkdir -p "$LOOPS_TASK_DIR"
+grep -n 'loop prepare\|LOOPS_TASK_DIR=' tests/autopilot/test-loop-sh.sh
 ```
 
-또한 TEST 1이 더 이상 `LOOPS_TASK_DIR` 변수를 set하지 않으므로 TEST 3 직전에 변수 정의 필요:
-```bash
-LOOPS_TASK_DIR="$PROJECT/.loops/test-task-1"
-mkdir -p "$LOOPS_TASK_DIR"
-```
+TEST 1이 더 이상 `.loops/<id>/` 디렉터리·SPEC.md를 만들어 두지 않으므로, 그 결과물에 의존하던 후속 TEST에 명시적 setup을 추가. 영향받는 위치 (현재 파일 기준):
 
-TEST 10·11도 같은 식으로 prepare에 의존하면 비슷하게 갱신. `grep -n 'loop prepare' tests/autopilot/test-loop-sh.sh`로 모든 prepare 호출 위치를 찾고 각각 `mkdir -p .loops/<해당-task-id>`로 대체.
+1. **TEST 3 직전**: 기존엔 TEST 1이 만든 `LOOPS_TASK_DIR` 변수와 디렉터리에 의존. Edit으로 `echo "=== TEST 3: start로 워크트리 생성 + 1 이터 (mock claude로 즉시 DONE) ==="` 라인 *직전*에 다음 두 줄 삽입:
+   ```bash
+   LOOPS_TASK_DIR="$PROJECT/.loops/test-task-1"
+   mkdir -p "$LOOPS_TASK_DIR"
+   ```
+
+2. **TEST 10·11**: `grep -n 'loop prepare' tests/autopilot/test-loop-sh.sh` 결과로 위치 확인. 각 `loop prepare <id>` 호출 라인을 Edit으로 `mkdir -p "$PROJECT/.loops/<id>"` (해당 task-id로 치환)으로 교체. SPEC.md 자체가 필요한 테스트라면 그 다음 `cat > "$PROJECT/.loops/<id>/SPEC.md" <<'EOF' ... EOF` 구문을 추가.
+
+3. **다른 위치 발견 시**: 위 grep이 잡은 모든 라인에 동일 패턴 적용. 변수에 의존하는지(`$LOOPS_TASK_DIR` 등) 확인하고 필요 시 명시적 정의.
 
 - [ ] **Step 3: 테스트 실행 — 일부는 PASS, TEST 1은 FAIL 예상**
 
@@ -725,23 +758,26 @@ Expected: TEST 1에서 FAIL (현재 코드는 prepare가 SPEC.md를 정상 생�
 
 - [ ] **Step 4: cmd_prepare를 help-text 스텁으로 교체**
 
-`plugins/autopilot/skills/loop/references/loop.sh`의 `cmd_prepare()` 함수 (line 485-508) 전체를 다음으로 교체:
+`plugins/autopilot/skills/loop/references/loop.sh`의 `cmd_prepare()` 함수 본문 전체를 스텁으로 교체.
+
+위치 anchor: `cmd_prepare() {` 라인부터 다음 함수 정의 `cmd_start() {` *직전* 닫는 `}` 까지 (그 사이 빈 줄 1줄 포함). Edit으로 그 블록 전체를 인용해 다음 블록으로 치환:
+
 ```bash
 cmd_prepare() {
-  cat <<'EOF' >&2
+  cat >&2 <<'EOF'
 prepare 서브커맨드는 제거되었습니다.
 새 spec 스킬을 사용하세요:
 
   Skill(skill: "spec", args: "<task-id>")
 
 대화형으로 SPEC.md를 생성합니다. 자세한 내용:
-  https://github.com/<your-org>/claude-plugins/blob/main/plugins/autopilot/skills/spec/SKILL.md
+  plugins/autopilot/skills/spec/SKILL.md
 EOF
   exit 2
 }
 ```
 
-(URL은 실제 저장소 경로로 바꿀 수 있음. 또는 단순히 안내 문구만.)
+URL 대신 저장소 내부 상대 경로를 사용해 외부 호스팅 변경에 비의존적으로. 함수 종료 후 빈 줄 1줄을 그대로 두고 `cmd_start() {`로 이어지도록 유지.
 
 - [ ] **Step 5: 테스트 통과 확인**
 
@@ -766,10 +802,10 @@ git commit -m "feat(autopilot/loop): prepare 서브커맨드를 help-text 스텁
 
 - [ ] **Step 1: prepare 서브커맨드 항목 삭제**
 
-`plugins/autopilot/skills/loop/SKILL.md`의 line 20-31 ("### prepare <task-id>" 섹션 전체)를 삭제. 시작 line 20부터 line 31의 "### start <task-id> ..." 직전까지.
+`plugins/autopilot/skills/loop/SKILL.md`에서 "### prepare <task-id>" 섹션 전체를 삭제. Edit으로 다음 정확한 텍스트(끝의 빈 줄 1개 포함)를 매칭해서 빈 문자열로 치환:
 
-삭제 대상:
-```markdown
+old:
+```
 ### prepare <task-id>
 
 새 task를 위한 SPEC.md를 인터랙티브하게 생성.
@@ -784,6 +820,8 @@ git commit -m "feat(autopilot/loop): prepare 서브커맨드를 help-text 스텁
 5. 사용자에게 다음 단계(start) 안내
 
 ```
+
+new (빈 문자열). 이 교체로 그 다음 `### start <task-id>` 섹션이 바로 이어짐.
 
 - [ ] **Step 2: spec 스킬 안내를 "Subcommand" 섹션 위에 추가**
 
@@ -803,11 +841,33 @@ Skill(skill: "spec", args: "<task-id>")
 
 - [ ] **Step 3: 모듈 구성 표에서 prepare.md·spec-template.md 행 삭제**
 
-line 73의 `| `prepare.md` | prepare 인터랙티브 절차 상세 |` 행 삭제. line 70의 `spec-template.md` 행도 삭제 (spec 스킬로 이동했으므로).
+Edit으로 다음 두 행을 각각 빈 문자열로 치환 (한 행씩 정확히 매칭):
+
+old (1):
+```
+| `spec-template.md` | 새 task SPEC.md 시드 (placeholder 7종) |
+```
+→ 삭제 (spec 스킬로 이동).
+
+old (2):
+```
+| `prepare.md` | prepare 인터랙티브 절차 상세 |
+```
+→ 삭제.
 
 - [ ] **Step 4: "첫 호출 시 setup" 섹션의 prepare 언급 제거**
 
-line 58: `target 프로젝트에 .loops/locks/ 부재 시 prepare/start 첫 호출에 자동:` → `target 프로젝트에 .loops/locks/ 부재 시 start 첫 호출에 자동:` (prepare 단어 제거).
+Edit으로:
+
+old:
+```
+target 프로젝트에 `.loops/locks/` 부재 시 prepare/start 첫 호출에 자동:
+```
+
+new:
+```
+target 프로젝트에 `.loops/locks/` 부재 시 start 첫 호출에 자동:
+```
 
 - [ ] **Step 5: 검증**
 
