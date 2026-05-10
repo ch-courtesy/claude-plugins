@@ -76,7 +76,7 @@ output=$(loop start test-task-unprepared 2>&1)
 result=$?
 set -e
 [[ $result -ne 0 ]] || { echo "FAIL: prepare 없이 start가 성공하면 안 됨"; exit 1; }
-echo "$output" | grep -q "SPEC.md가 없습니다\|prepare" || { echo "FAIL: prepare 안내 메시지 없음. got: $output"; exit 1; }
+echo "$output" | grep -q "SPEC.md가 없습니다" || { echo "FAIL: SPEC.md 없음 안내 메시지 없음. got: $output"; exit 1; }
 echo "OK"
 
 LOOPS_TASK_DIR="$PROJECT/.loops/test-task-1"
