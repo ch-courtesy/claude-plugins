@@ -20,7 +20,7 @@ description: autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 �
 
 ### 1. 사전 검사
 
-- task-id 형식 검증: 비어 있거나 `..` / `/` 포함 시 abort
+- task-id 형식 검증 (loop.sh의 `validate_task_id`와 동일 규칙): 비어 있거나, `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 abort. 슬래시(`/`)는 허용 — loop.sh가 lock 파일명에서 `__`로 인코딩하며 nested task-id(`goal-x/sub-task` 등)가 정상 사용 사례. spec 스킬과 loop이 같은 task-id를 받아들여야 `--resume` 라운드트립이 성립.
 - **일반 모드**: `.loops/<task-id>/` 존재 시 abort + `AskUserQuestion`으로 3옵션 (다른 task-id / `--resume` / 백업 후 새로)
 - **--resume 모드**: `.loops/<task-id>/SPEC.md` 부재 시 abort. 잔존 `[NEEDS CLARIFICATION` 마커 0개 시 "해결할 마커 없음" 안내 후 종료
 
