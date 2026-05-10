@@ -15,20 +15,17 @@ description: 자율 수행 루프(랄프 루프) 운영 인터페이스. prepare
 
 또는 사용자가 자연어로 의도 전달 시 모델이 자동 호출.
 
+## SPEC.md 생성
+
+새 task의 SPEC.md는 별도 스킬 `autopilot:spec`에서 대화형으로 생성합니다:
+
+```
+Skill(skill: "spec", args: "<task-id>")
+```
+
+자세한 흐름은 `plugins/autopilot/skills/spec/SKILL.md` 참조. SPEC 작성이 끝나면 본 스킬의 `start` 서브커맨드로 이어 호출.
+
 ## Subcommand
-
-### prepare <task-id>
-
-새 task를 위한 SPEC.md를 인터랙티브하게 생성.
-
-자세한 절차는 `references/prepare.md` 참조.
-
-요약:
-1. `.loops/<task-id>/` 이미 있으면 abort
-2. `mkdir -p .loops/<task-id>`
-3. `AskUserQuestion`으로 task 정보 수집 (task title, task description, acceptance criteria, scope.include/exclude, verify 명령)
-4. 수집된 값으로 `references/spec-template.md` placeholder 치환 후 `.loops/<task-id>/SPEC.md` 작성
-5. 사용자에게 다음 단계(start) 안내
 
 ### start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>]
 
@@ -55,7 +52,7 @@ description: 자율 수행 루프(랄프 루프) 운영 인터페이스. prepare
 
 ## 첫 호출 시 setup
 
-target 프로젝트에 `.loops/locks/` 부재 시 prepare/start 첫 호출에 자동:
+target 프로젝트에 `.loops/locks/` 부재 시 start 첫 호출에 자동:
 - `mkdir -p .loops/locks`
 - `.gitignore`에 `.loops/locks/` 라인 추가 (없으면)
 
@@ -67,10 +64,8 @@ target 프로젝트에 `.loops/locks/` 부재 시 prepare/start 첫 호출에 �
 |---|---|
 | `constitution.md` | 워커 헌법. start 시점에 워크트리 CLAUDE.md로 복사 |
 | `loop.sh` | 외부 셸 드라이버. 모든 subcommand의 핵심 로직 |
-| `spec-template.md` | 새 task SPEC.md 시드 (placeholder 7종) |
 | `plan-template.md`, `notes-template.md`, `handoff-template.md`, `runlog-template.md`, `escalation-template.md` | 메모리 파일 스텁 |
 | `operational-guide.md` | 사용자용 운영 가이드 (워크플로·환경 변수·객관 게이트 표·의존성) |
-| `prepare.md` | prepare 인터랙티브 절차 상세 |
 | `status-format.md` | status 출력 형식 가이드 |
 | `troubleshooting.md` | ESCALATION 카테고리별 처리 가이드 |
 | `agent-prompts.md` | 이터 내 Agent dispatch 브리프 양식 3종 (spec-compliance-reviewer · code-quality-reviewer · parallel-hypothesis-tester). 헌법 §11.6 참조 |
