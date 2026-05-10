@@ -97,7 +97,7 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 ### 8. 자체 검토
 
-`references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 후 SPEC.md 재기록. 재루프 없음.
+`references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 또는 `[NEEDS CLARIFICATION]` 마커만 — 사용자 Q&A 없음(단계 9에서 일괄 해결). 재루프 없음. 수정·마커 후 SPEC.md 재기록.
 
 ### 9. 사용자 최종 검토
 

@@ -61,7 +61,7 @@ EARS = Easy Approach to Requirements Syntax. 5개 패턴으로 모호성 없는 
 | "X 실패 시 Y", "X 안 되면 Y" | Unwanted (If/then) |
 | 위 어디에도 안 맞음 | Ubiquitous (그대로 "shall") |
 
-변환 후 사용자에게 `AskUserQuestion`으로 적용 여부 확인. 거절 시 `[NEEDS CLARIFICATION: EARS 패턴으로 재작성 필요 — 원문: "<원문>"]` 마커 박음.
+변환은 spec 스킬이 자체 검토 단계(단계 8)에서 자동으로 시도 — 사용자에게 묻지 않음. 변환 결과의 의미 보존이 모호하거나 자동 변환이 불가능하면 `[NEEDS CLARIFICATION: EARS 변환 — 원문: "<원문>" → 제안: "<변환>"]` 마커. 단계 9 사용자 최종 검토에서 변환 수용·거절 결정.
 
 ## Independent-Test 규칙
 
