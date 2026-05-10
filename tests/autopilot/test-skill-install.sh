@@ -11,14 +11,12 @@ echo "=== 스킬 디렉토리 구조 ==="
 for f in SKILL.md \
          references/constitution.md \
          references/loop.sh \
-         references/spec-template.md \
          references/plan-template.md \
          references/notes-template.md \
          references/handoff-template.md \
          references/runlog-template.md \
          references/escalation-template.md \
          references/operational-guide.md \
-         references/prepare.md \
          references/status-format.md \
          references/troubleshooting.md \
          references/agent-prompts.md; do
@@ -56,24 +54,6 @@ echo "=== constitution.md 본문 시작 확인 (frontmatter 없음) ==="
 FIRST_LINE=$(head -1 "$SKILL_REFS/constitution.md")
 [[ "$FIRST_LINE" == "---" ]] && { echo "FAIL: constitution.md에 frontmatter가 남아있음"; exit 1; }
 [[ -s "$SKILL_REFS/constitution.md" ]] || { echo "FAIL: constitution.md 비어있음"; exit 1; }
-echo "OK"
-
-echo ""
-echo "=== spec-template.md frontmatter 파싱 ==="
-command -v yq >/dev/null 2>&1 || { echo "SKIP: yq 미설치"; echo ""; echo "=== 모든 테스트 통과 (yq 테스트 제외) ==="; exit 0; }
-
-TMP_FM=$(mktemp)
-sed -n '1,/^---$/{
-  1d
-  /^---$/d
-  p
-}' "$SKILL_REFS/spec-template.md" > "$TMP_FM"
-
-yq '.scope.include[]' "$TMP_FM" >/dev/null \
-  || { echo "FAIL: scope.include 파싱 실패"; rm -f "$TMP_FM"; exit 1; }
-yq '.verify' "$TMP_FM" >/dev/null \
-  || { echo "FAIL: verify 파싱 실패"; rm -f "$TMP_FM"; exit 1; }
-rm -f "$TMP_FM"
 echo "OK"
 
 echo ""

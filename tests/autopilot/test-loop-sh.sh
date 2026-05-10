@@ -270,9 +270,23 @@ WT_SPEC="$WORK_DIR/myproject-loops/$SPEC_TASK_ID"
 echo "OK"
 
 echo "=== TEST 10: 빈 SPEC.md (placeholder 그대로) → start 거부 ==="
-# prepare 스텁화 이후: 디렉터리 생성 + spec-template 복사로 동일 환경 구성
+# spec-template.md는 삭제됨(spec 스킬로 이관). 인라인으로 placeholder가 남은 SPEC.md 생성
 mkdir -p "$PROJECT/.loops/placeholder-task"
-cp "$SKILL_REFS/spec-template.md" "$PROJECT/.loops/placeholder-task/SPEC.md"
+cat > "$PROJECT/.loops/placeholder-task/SPEC.md" <<'SPEC_EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: '{{verify_command}}'
+---
+
+# {{task_title}}
+
+## 목표
+
+{{goal_description}}
+SPEC_EOF
 # placeholder를 채우지 않은 채 start 호출
 set +e
 output=$(MAX_ITERATIONS=1 loop start "placeholder-task" 2>&1)
