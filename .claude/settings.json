@@ -1,7 +1,8 @@
 {
   "enabledPlugins": {
     "project-init@courtesy-claude-plugins": true,
-    "superpowers@claude-plugins-official": true
+    "superpowers@claude-plugins-official": true,
+    "autopilot@courtesy-claude-plugins": true
   },
   "extraKnownMarketplaces": {
     "courtesy-claude-plugins": {
