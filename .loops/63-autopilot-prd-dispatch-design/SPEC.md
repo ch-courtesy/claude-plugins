@@ -13,6 +13,11 @@ scope:
     - CLAUDE.md
     - docs/superpowers/**
 verify: "for t in tests/autopilot/test-*.sh; do bash \"$t\" || exit 1; done"
+# 본 task는 명시적으로 tests/autopilot/ 내 기존 테스트 sweep (path migration)을 요구.
+# 헌법 §7 weakening 게이트는 tests/** 해시 비교라 legitimate refactor와 약화를 구분 못함.
+# 사용자 결정으로 본 task에 한해 guard 비활성: test_paths를 매칭되지 않는 패턴으로 override.
+test_paths:
+  - "__nonexistent__"
 ---
 
 # autopilot:prd · dispatch 다중 task 자율 분해·실행 스킬 구현
