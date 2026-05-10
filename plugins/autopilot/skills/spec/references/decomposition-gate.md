@@ -44,8 +44,8 @@
   ```
   ## 후속 task (분해됨)
   이 SPEC은 분해된 첫 부분입니다. 후속:
-  - <영역 B 요약> — 별도 task-id로 `Skill(spec, args: "<id-b>")` 호출
-  - <영역 C 요약> — `Skill(spec, args: "<id-c>")` 호출
+  - <영역 B 요약> — 별도 task-id로 `Skill(skill: "spec", args: "<id-b>")` 호출
+  - <영역 C 요약> — `Skill(skill: "spec", args: "<id-c>")` 호출
   ```
 - 사용자에게 후속 호출 안내.
 
