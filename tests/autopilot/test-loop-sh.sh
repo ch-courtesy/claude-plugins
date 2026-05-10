@@ -70,7 +70,7 @@ echo "$output" | grep -q "spec\|이전" || { echo "FAIL: spec 스킬 안내 없�
 [[ ! -d "$PROJECT/.loops/test-task-1" ]] || { echo "FAIL: 스텁이 디렉터리 만들면 안 됨"; exit 1; }
 echo "OK"
 
-echo "=== TEST 2: start 전 prepare 안 하면 거부 ==="
+echo "=== TEST 2: SPEC.md가 없으면 start 거부 ==="
 set +e
 output=$(loop start test-task-unprepared 2>&1)
 result=$?
