@@ -7,7 +7,7 @@ scope:
     - rules/**
     - .loops/**
     - CLAUDE.md
-verify: "<실행 가능한 명령. 예: pnpm test --filter=feature-x. 0 exit이면 검증 통과>"
+verify: "{{verify_command}}"
 # test_paths (선택): 테스트 약화 게이트가 추적할 경로/파일명 패턴 (git pathspec).
 #   미지정 시 기본 컨벤션(tests/·test/·__tests__/·spec/·src/test/ 디렉토리 +
 #   *.test.{js,ts,jsx,tsx,py}·*.spec.{js,ts,rb}·*_test.{go,py,rb}·test_*.py·*_spec.rb)
