@@ -53,6 +53,18 @@ validate_task_id() {
   return 0  # set -e: 마지막 [[ ... ]] && die가 false일 때 함수 exit 1 방지
 }
 
+# 단일 컴포넌트 task-id에 'regular/' prefix 자동 추가.
+# 이미 슬래시가 있으면(예: 'goal-x/sub-task', 'm1/c1') 그대로.
+# M1 cutover: SPEC은 항상 milestones/<m>/loops/<c>/SPEC.md에서 읽힘.
+normalize_task_id() {
+  local task_id="$1"
+  if [[ "$task_id" == */* ]]; then
+    echo "$task_id"
+  else
+    echo "regular/$task_id"
+  fi
+}
+
 now_iso() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
@@ -127,8 +139,11 @@ ensure_loops_setup() {
 # ----- 경로 계산 헬퍼 -----
 
 compute_paths() {
-  local task_id="$1"
-  validate_task_id "$task_id"
+  local raw_task_id="$1"
+  validate_task_id "$raw_task_id"
+  # 단일 컴포넌트 입력 시 'regular/' prefix 자동 추가. 이미 슬래시 있으면 그대로.
+  local task_id
+  task_id="$(normalize_task_id "$raw_task_id")"
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
@@ -138,7 +153,12 @@ compute_paths() {
   TASK_ID_SAFE="$(sanitize_for_filename "$task_id")"
   LOCK_DIR="$PROJECT_ROOT/.loops/locks"
   LOCK_FILE="$LOCK_DIR/$TASK_ID_SAFE.lock"
-  LOOPS_DIR="$PROJECT_ROOT/.loops/$task_id"
+  # M1 cutover: SPEC·메타 파일은 milestones/<m>/loops/<c>/ 단일 트리. legacy 없음.
+  local milestone="${task_id%%/*}"
+  local child="${task_id#*/}"
+  LOOPS_DIR="$PROJECT_ROOT/milestones/$milestone/loops/$child"
+  # 정규화된 task-id를 caller에게 노출 (cmd_start에서 TASK_ID로 사용)
+  TASK_ID_NORMALIZED="$task_id"
 }
 
 # ----- 동시성 락 -----
@@ -528,6 +548,8 @@ cmd_start() {
   done
 
   compute_paths "$task_id"
+  # 정규화된 task-id를 이후 출력·logging에 사용 (regular/ prefix 포함)
+  task_id="$TASK_ID_NORMALIZED"
   TASK_ID="$task_id"
   ensure_loops_setup
 
@@ -544,10 +566,10 @@ cmd_start() {
     echo "외부 SPEC 파일 복사: $spec_path → $LOOPS_DIR/SPEC.md"
   fi
 
-  # 2. SPEC.md 존재 확인
+  # 2. SPEC.md 존재 확인 (milestones/<m>/loops/<c>/SPEC.md 단일 경로 — legacy fallback 없음)
   local spec_path_local="$LOOPS_DIR/SPEC.md"
   if [[ ! -f "$spec_path_local" ]]; then
-    die "SPEC.md가 없습니다. 먼저 실행하세요: Skill(skill: \"spec\", args: \"$task_id\")"
+    die "SPEC.md가 없습니다 (기대 경로: $spec_path_local).\n먼저 실행하세요: Skill(skill: \"spec\", args: \"$task_id\")"
   fi
 
   # 2.5. [NEEDS CLARIFICATION] 마커 검사 (락 획득 전)
@@ -680,8 +702,11 @@ cmd_start() {
 cmd_status() {
   local filter_task_id="${1:-}"
 
-  # filter 지정 시 task-id 검증
-  [[ -n "$filter_task_id" ]] && validate_task_id "$filter_task_id"
+  # filter 지정 시 task-id 검증 + 정규화 (단일 컴포넌트 → regular/)
+  if [[ -n "$filter_task_id" ]]; then
+    validate_task_id "$filter_task_id"
+    filter_task_id="$(normalize_task_id "$filter_task_id")"
+  fi
 
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
@@ -689,24 +714,32 @@ cmd_status() {
   WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
   LOCK_DIR="$PROJECT_ROOT/.loops/locks"
 
-  # task-id 목록 수집: .loops/<task-id>/ 디렉토리 (시스템 디렉토리 제외)
-  local loops_base="$PROJECT_ROOT/.loops"
+  # task-id 목록 수집: milestones/<m>/loops/<c>/SPEC.md 단일 트리
+  # (M1 cutover: legacy .loops/<id>/SPEC.md 스캔 제거)
+  local milestones_base="$PROJECT_ROOT/milestones"
   local task_ids=()
 
   if [[ -n "$filter_task_id" ]]; then
     task_ids=("$filter_task_id")
   else
-    # SPEC.md 존재로 task 디렉토리 탐지 — slash task-id(goal-x/sub-task) 포함, 임의 깊이 지원
-    # locks/·archive/·.gitkeep 등 시스템 파일은 SPEC.md 부재로 자연스레 제외
+    # milestones/<m>/loops/<c>/SPEC.md 패턴으로 task 디렉토리 탐지
     while IFS= read -r spec_file; do
       [[ -z "$spec_file" ]] && continue
-      local task_dir tid
+      local task_dir tid milestone_part child_part
       task_dir=$(dirname "$spec_file")
-      tid="${task_dir#"$loops_base"/}"
-      # prefix 제거 안 됐으면(loops_base 자체가 task_dir) 건너뛰기 — 이상 상태
-      [[ "$tid" == "$task_dir" ]] && continue
+      # task_dir = $milestones_base/<m>/loops/<c>
+      # 'milestones/<m>/loops/' prefix 제거 → '<c>'를 얻고, milestone 부분도 추출
+      local relative="${task_dir#"$milestones_base"/}"
+      [[ "$relative" == "$task_dir" ]] && continue
+      # relative = '<m>/loops/<c>' → milestone=<m>, child=<c>
+      milestone_part="${relative%%/loops/*}"
+      child_part="${relative#*/loops/}"
+      # /loops/ 패턴 없으면 건너뛰기 (예: milestones/<m>/prd/PRD.md는 매칭 안 됨)
+      [[ "$milestone_part" == "$relative" ]] && continue
+      [[ "$child_part" == "$relative" ]] && continue
+      tid="$milestone_part/$child_part"
       task_ids+=("$tid")
-    done < <(find "$loops_base" -name 'SPEC.md' -type f 2>/dev/null | sort)
+    done < <(find "$milestones_base" -path '*/loops/*' -name 'SPEC.md' -type f 2>/dev/null | sort)
   fi
 
   if [[ ${#task_ids[@]} -eq 0 ]]; then
@@ -715,15 +748,18 @@ cmd_status() {
     return 0
   fi
 
-  printf "%-20s %-12s %-12s %s\n" "TASK-ID" "STATE" "ITERATIONS" "LAST-UPDATE"
-  printf "%-20s %-12s %-12s %s\n" "--------------------" "------------" "------------" "-----------"
+  printf "%-25s %-12s %-12s %s\n" "TASK-ID" "STATE" "ITERATIONS" "LAST-UPDATE"
+  printf "%-25s %-12s %-12s %s\n" "-------------------------" "------------" "------------" "-----------"
 
   for tid in "${task_ids[@]}"; do
     local tid_safe
     tid_safe="$(sanitize_for_filename "$tid")"
     local lock_file="$LOCK_DIR/$tid_safe.lock"
     local wt="$WT_BASE/$tid"
-    local loops_dir="$loops_base/$tid"
+    # M1 cutover: 메타 디렉토리는 milestones/<m>/loops/<c>/
+    local milestone_part="${tid%%/*}"
+    local child_part="${tid#*/}"
+    local loops_dir="$milestones_base/$milestone_part/loops/$child_part"
     local state="-"
     local iterations="-"
     local last_update="-"
@@ -781,7 +817,7 @@ cmd_status() {
       fi
     fi
 
-    printf "%-20s %-12s %-12s %s\n" "$tid" "$state" "$iterations" "$last_update"
+    printf "%-25s %-12s %-12s %s\n" "$tid" "$state" "$iterations" "$last_update"
   done
 }
 
@@ -792,6 +828,8 @@ cmd_stop() {
   [[ -z "$task_id" ]] && die "사용: $0 stop <task-id>"
 
   compute_paths "$task_id"
+  # 정규화된 task-id로 사용자 출력 통일
+  task_id="$TASK_ID_NORMALIZED"
 
   if [[ ! -f "$LOCK_FILE" ]]; then
     die "task ${task_id}에 활성 락 없음"
@@ -848,6 +886,7 @@ cmd_cleanup() {
   done
 
   compute_paths "$task_id"
+  task_id="$TASK_ID_NORMALIZED"
   TASK_ID="$task_id"
 
   # 1. 실행 중 확인
@@ -898,7 +937,7 @@ cmd_cleanup() {
     die "task $task_id 에 DONE 신호가 없습니다.\n--force 없이 cleanup하려면 먼저 DONE 파일이 필요합니다: $0 cleanup $task_id --force"
   fi
 
-  # 4. 메타 파일 archive (.loops/<task-id>/ 로 이동)
+  # 4. 메타 파일 archive (milestones/<m>/loops/<c>/ 로 이동)
   mkdir -p "$LOOPS_DIR"
   for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
     cp "$WT/.loop/$f" "$LOOPS_DIR/$f" 2>/dev/null || true
@@ -939,6 +978,7 @@ cmd_logs() {
   done
 
   compute_paths "$task_id"
+  task_id="$TASK_ID_NORMALIZED"
 
   if [[ -n "$iter_n" ]]; then
     # 이터 로그 출력 (워크트리 우선, fallback 없음)

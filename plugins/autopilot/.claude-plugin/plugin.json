@@ -1,7 +1,7 @@
 {
   "name": "autopilot",
-  "version": "0.1.0",
-  "description": "자율 수행 루프(랄프 루프) 운영 인터페이스. 자기완결적인 loop 스킬로 자율 task lifecycle 관리",
+  "version": "0.2.0",
+  "description": "자율 수행 루프(랄프 루프) 운영 인터페이스. spec/loop(single-task) + prd/dispatch(multi-task) 4-skill family로 자율 task lifecycle 관리",
   "author": {
     "name": "예의상",
     "email": "ch.courtesy@gmail.com"
