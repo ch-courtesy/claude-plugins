@@ -232,8 +232,10 @@ list_test_files() {
     echo "$tracked"
   else
     # subtract sweep_files from tracked. awk associative array로 O(n+m) 비교.
-    awk -v s="$sweep_files" '
-      BEGIN { n = split(s, lines, "\n"); for (i=1; i<=n; i++) if (lines[i] != "") seen[lines[i]] = 1 }
+    # ENVIRON 경유: awk -v는 값의 백슬래시를 이스케이프로 해석(예: '\b'→backspace)해
+    # 백슬래시 포함 경로(Linux 합법)에서 오동작. ENVIRON은 원시 문자열 전달.
+    sweep_files="$sweep_files" awk '
+      BEGIN { n = split(ENVIRON["sweep_files"], lines, "\n"); for (i=1; i<=n; i++) if (lines[i] != "") seen[lines[i]] = 1 }
       !seen[$0]
     ' <<< "$tracked"
   fi
