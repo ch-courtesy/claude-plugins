@@ -174,7 +174,7 @@ for wave in waves:
 
 | 파일 | 역할 |
 |---|---|
-| `dispatch.sh` | 외부 셸 드라이버. ops 서브커맨드(status/stop/list/cleanup/logs/resume) + sentinel watch + DAG 파싱 |
+| `dispatch.sh` | 외부 셸 드라이버. 셸 위임 서브커맨드(status/stop/list/cleanup/logs/watch_wave/log_event) + sentinel watch + DAG 파싱. `resume`은 모델 직접 처리(셸 위임 없음) |
 | `dag-template.md` | DAG.md placeholder 템플릿 (wave 표·의존성 목록) |
 | `decomposition-algorithm.md` | 3 조건 + 하드 캡 + 토포 정렬 + cycle 감지 휴리스틱 |
 

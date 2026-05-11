@@ -220,7 +220,7 @@ loop cleanup "goal-x/sub-task" --force
 [[ ! -d "$WT2" ]] || { echo "FAIL: cleanup 후 워크트리가 남아있음"; exit 1; }
 # 아카이브 확인: .loops/goal-x/sub-task/ 에 디렉토리가 남아있어야 함
 ARCHIVED_DIR="$PROJECT/milestones/goal-x/loops/sub-task"
-[[ -d "$ARCHIVED_DIR" ]] || { echo "FAIL: cleanup 후 .loops/<task-id>/ 디렉토리 없음"; exit 1; }
+[[ -d "$ARCHIVED_DIR" ]] || { echo "FAIL: cleanup 후 milestones/goal-x/loops/sub-task/ 디렉토리 없음"; exit 1; }
 
 # no-done-task도 --force로 정리
 loop cleanup "no-done-task" --force
@@ -262,8 +262,8 @@ EOF
 SPEC_TASK_ID="spec-flag-task"
 MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$SPEC_TASK_ID" --spec "$EXTERNAL_SPEC"
 
-# .loops/<id>/SPEC.md로 복사 확인
-[[ -f "$PROJECT/milestones/regular/loops/$SPEC_TASK_ID/SPEC.md" ]] || { echo "FAIL: --spec 복사 후 .loops/<id>/SPEC.md 미생성"; exit 1; }
+# milestones/regular/loops/<id>/SPEC.md로 복사 확인
+[[ -f "$PROJECT/milestones/regular/loops/$SPEC_TASK_ID/SPEC.md" ]] || { echo "FAIL: --spec 복사 후 milestones/regular/loops/<id>/SPEC.md 미생성"; exit 1; }
 # 워크트리에도 .loop/SPEC.md 복사 확인
 WT_SPEC="$WORK_DIR/myproject-loops/regular/$SPEC_TASK_ID"
 [[ -f "$WT_SPEC/.loop/SPEC.md" ]] || { echo "FAIL: 워크트리 .loop/SPEC.md 미복사"; exit 1; }
