@@ -308,8 +308,16 @@ cmd_cleanup() {
       for child in $(ls "$WT_BASE/$m" 2>/dev/null || true); do
         local wt="$(child_wt_path "$m" "$child")"
         if [[ -f "$wt/DONE" ]]; then
-          echo "[$(now_iso)] cleanup $m/$child (DONE 신호 있음)"
-          # loop.sh의 cleanup을 호출하지 않음 — git worktree 제거는 git만으로
+          echo "[$(now_iso)] cleanup $m/$child (DONE 신호 있음, archival 포함)"
+          # 메타 파일 archival — loop.sh cmd_cleanup의 step 4와 동일 로직.
+          # loop.sh delegation 대신 inline 재구현 — git worktree로 등록되지
+          # 않은 mock·legacy 워크트리에서도 정리가 일관되게 동작하도록.
+          local archive_dir="$PROJECT_ROOT/milestones/$m/loops/$child"
+          mkdir -p "$archive_dir"
+          local f
+          for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
+            cp "$wt/.loop/$f" "$archive_dir/$f" 2>/dev/null || true
+          done
           git -C "$PROJECT_ROOT" worktree remove --force "$wt" 2>/dev/null || true
           rm -rf "$wt" 2>/dev/null || true
           cleaned=$((cleaned + 1))
