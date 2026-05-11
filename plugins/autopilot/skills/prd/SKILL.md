@@ -106,7 +106,7 @@ ls milestones/ # 기존 milestones (참고)
 
 `mkdir -p milestones/<milestone-id>/prd/` 후 PRD.md 기록.
 
-`--import` 모드: 외부 PRD 본문을 그대로 복사 (placeholder 치환 없음).
+`--import` 모드: step 1에서 복사된 본문을 그대로 사용 (placeholder 치환 없음).
 
 ### 7. 자체 검토
 
