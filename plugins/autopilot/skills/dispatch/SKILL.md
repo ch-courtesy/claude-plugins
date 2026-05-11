@@ -27,7 +27,7 @@ description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave
    → DAG.md 작성 (milestones/<m>/dispatch/DAG.md)
    → 게이트 ② spec 위임 (각 child에 대해 Skill(skill: "spec", args: "<m>/<c>"))
    → 게이트 ③ 최종 확인 (SPEC 경로·verify 명령·의존성 표 + 사용자 승인)
-   → wave 단위 병렬 실행 (Bash(dispatch.sh start_wave ...))
+   → wave 단위 병렬 실행 (각 child에 Bash(loop start <m>/<c>) 호출, sentinel은 Bash(dispatch.sh watch_wave ...))
    → sentinel watch (DONE/ESCALATION.md)
    → fail-fast (ESCALATION 시 같은 wave 다른 child들 loop stop)
    → wave 모두 통과 후 최종 보고
