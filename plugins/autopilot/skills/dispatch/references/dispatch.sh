@@ -311,7 +311,10 @@ cmd_cleanup() {
     local cleaned=0
     if [[ -d "$WT_BASE/$m" ]]; then
       local child
-      for child in $(ls "$WT_BASE/$m" 2>/dev/null || true); do
+      # `for child in $(ls ...)` 패턴은 공백·특수문자 포함 파일명에서 word
+      # splitting되어 위험. cmd_stop·cmd_status와 동일하게 while-read로 통일.
+      while IFS= read -r child; do
+        [[ -z "$child" ]] && continue
         local wt="$(child_wt_path "$m" "$child")"
         if [[ -f "$wt/DONE" ]]; then
           echo "[$(now_iso)] cleanup $m/$child (DONE 신호 있음, archival 포함)"
@@ -331,7 +334,7 @@ cmd_cleanup() {
           rm -f "$(child_lock_path "$m" "$child")" 2>/dev/null || true
           cleaned=$((cleaned + 1))
         fi
-      done
+      done < <(ls -1 "$WT_BASE/$m" 2>/dev/null || true)
       # 빈 milestone 디렉토리 제거
       if [[ -d "$WT_BASE/$m" ]] && [[ -z "$(ls "$WT_BASE/$m" 2>/dev/null)" ]]; then
         rmdir "$WT_BASE/$m" 2>/dev/null || true

@@ -106,7 +106,7 @@ echo "OK: dag-template placeholder"
 echo ""
 echo "=== TEST 15: decomposition-algorithm.md에 3 조건 + 하드 캡 명시 ==="
 DECOMP_ALG="$SKILL_DIR/references/decomposition-algorithm.md"
-grep -q '8\|20' "$DECOMP_ALG" \
+grep -qE '8|20' "$DECOMP_ALG" \
   || { echo "FAIL: decomposition-algorithm.md에 하드 캡(8/20) 없음"; exit 1; }
 grep -qE 'fit|폐쇄성|격리|컨텍스트' "$DECOMP_ALG" \
   || { echo "FAIL: decomposition-algorithm.md에 3 조건 신호 없음"; exit 1; }

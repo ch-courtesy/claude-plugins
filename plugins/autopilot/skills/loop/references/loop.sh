@@ -733,7 +733,7 @@ cmd_status() {
       [[ "$relative" == "$task_dir" ]] && continue
       # relative = '<m>/loops/<c>' → milestone=<m>, child=<c>
       milestone_part="${relative%%/loops/*}"
-      child_part="${relative#*/loops/}"
+      child_part="${relative#"$milestone_part/loops/"}"
       # /loops/ 패턴 없으면 건너뛰기 (예: milestones/<m>/prd/PRD.md는 매칭 안 됨)
       [[ "$milestone_part" == "$relative" ]] && continue
       [[ "$child_part" == "$relative" ]] && continue
