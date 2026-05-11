@@ -320,6 +320,9 @@ cmd_cleanup() {
           done
           git -C "$PROJECT_ROOT" worktree remove --force "$wt" 2>/dev/null || true
           rm -rf "$wt" 2>/dev/null || true
+          # lock 파일 제거 (loop.sh cmd_cleanup step 5와 동일)
+          # loop 비정상 종료 시 EXIT trap이 실행 안 돼 stale lock 잔존 가능
+          rm -f "$(child_lock_path "$m" "$child")" 2>/dev/null || true
           cleaned=$((cleaned + 1))
         fi
       done
