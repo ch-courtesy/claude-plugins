@@ -67,7 +67,7 @@ set -e
 [[ $result -ne 0 ]] || { echo "FAIL: 스텁이 0 exit으로 끝남 (사용자가 spec 스킬로 가도록 유도해야)"; exit 1; }
 echo "$output" | grep -q "spec\|이전" || { echo "FAIL: spec 스킬 안내 없음. got: $output"; exit 1; }
 # .loops 디렉터리·SPEC.md 미생성 확인
-[[ ! -d "$PROJECT/.loops/test-task-1" ]] || { echo "FAIL: 스텁이 디렉터리 만들면 안 됨"; exit 1; }
+[[ ! -d "$PROJECT/milestones/regular/loops/test-task-1" ]] || { echo "FAIL: 스텁이 디렉터리 만들면 안 됨"; exit 1; }
 echo "OK"
 
 echo "=== TEST 2: SPEC.md가 없으면 start 거부 ==="
@@ -79,7 +79,7 @@ set -e
 echo "$output" | grep -q "SPEC.md가 없습니다" || { echo "FAIL: SPEC.md 없음 안내 메시지 없음. got: $output"; exit 1; }
 echo "OK"
 
-LOOPS_TASK_DIR="$PROJECT/.loops/test-task-1"
+LOOPS_TASK_DIR="$PROJECT/milestones/regular/loops/test-task-1"
 mkdir -p "$LOOPS_TASK_DIR"
 echo "=== TEST 3: start로 워크트리 생성 + 1 이터 (mock claude로 즉시 DONE) ==="
 # SPEC.md의 placeholder를 채움 (frontmatter의 verify도 실행 가능한 명령으로)
@@ -112,7 +112,7 @@ none
 true
 EOF
 
-WT="$WORK_DIR/myproject-loops/test-task-1"
+WT="$WORK_DIR/myproject-loops/regular/test-task-1"
 MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start test-task-1
 [[ -d "$WT" ]] || { echo "FAIL: 워크트리 미생성"; exit 1; }
 [[ -f "$WT/CLAUDE.md" ]] || { echo "FAIL: CLAUDE.md 미복사"; exit 1; }
@@ -132,20 +132,20 @@ echo "OK"
 echo "=== TEST 4: 같은 task-id 이중 start 차단 (락) ==="
 # 락 파일을 미리 만들어두고 호출
 mkdir -p .loops/locks
-echo $$ > .loops/locks/test-task-1.lock
+echo $$ > .loops/locks/regular__test-task-1.lock
 set +e
 output=$(MAX_ITERATIONS=1 loop start test-task-1 2>&1)
 result=$?
 set -e
-rm -f .loops/locks/test-task-1.lock
+rm -f .loops/locks/regular__test-task-1.lock
 [[ $result -ne 0 ]] || { echo "FAIL: 이중 호출이 차단되지 않음"; exit 1; }
 echo "$output" | grep -q "이미 동작 중" || { echo "FAIL: 락 메시지 누락. got: $output"; exit 1; }
 echo "OK"
 
 echo "=== TEST 5: 슬래시 task-id (Layer 2 호환) ==="
 # 디렉터리 명시적 생성 (prepare 스텁화 이후)
-mkdir -p "$PROJECT/.loops/goal-x/sub-task"
-SLASH_SPEC="$PROJECT/.loops/goal-x/sub-task/SPEC.md"
+mkdir -p "$PROJECT/milestones/goal-x/loops/sub-task"
+SLASH_SPEC="$PROJECT/milestones/goal-x/loops/sub-task/SPEC.md"
 
 # placeholder 채움
 cat > "$SLASH_SPEC" <<'EOF'
@@ -176,8 +176,8 @@ echo "OK"
 
 echo "=== TEST 7: cleanup이 DONE 없으면 거부 (--force 없이) ==="
 # DONE 없는 워크트리를 명시적으로 준비 (prepare 스텁화 이후)
-mkdir -p "$PROJECT/.loops/no-done-task"
-cat > "$PROJECT/.loops/no-done-task/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/no-done-task"
+cat > "$PROJECT/milestones/regular/loops/no-done-task/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -200,7 +200,7 @@ exit 0
 MOCKEOF
 chmod +x "$NO_DONE_MOCK/claude"
 
-WT3="$WORK_DIR/myproject-loops/no-done-task"
+WT3="$WORK_DIR/myproject-loops/regular/no-done-task"
 # no-done mock으로 이터 1회 실행 후 자연 종료 (MAX_ITERATIONS=1)
 PATH="$NO_DONE_MOCK:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "no-done-task" 2>&1 || true
 [[ -d "$WT3" ]] || { echo "FAIL: no-done-task 워크트리 미생성"; exit 1; }
@@ -219,7 +219,7 @@ echo "=== TEST 8: cleanup --force로 정리 ==="
 loop cleanup "goal-x/sub-task" --force
 [[ ! -d "$WT2" ]] || { echo "FAIL: cleanup 후 워크트리가 남아있음"; exit 1; }
 # 아카이브 확인: .loops/goal-x/sub-task/ 에 디렉토리가 남아있어야 함
-ARCHIVED_DIR="$PROJECT/.loops/goal-x/sub-task"
+ARCHIVED_DIR="$PROJECT/milestones/goal-x/loops/sub-task"
 [[ -d "$ARCHIVED_DIR" ]] || { echo "FAIL: cleanup 후 .loops/<task-id>/ 디렉토리 없음"; exit 1; }
 
 # no-done-task도 --force로 정리
@@ -263,16 +263,16 @@ SPEC_TASK_ID="spec-flag-task"
 MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$SPEC_TASK_ID" --spec "$EXTERNAL_SPEC"
 
 # .loops/<id>/SPEC.md로 복사 확인
-[[ -f "$PROJECT/.loops/$SPEC_TASK_ID/SPEC.md" ]] || { echo "FAIL: --spec 복사 후 .loops/<id>/SPEC.md 미생성"; exit 1; }
+[[ -f "$PROJECT/milestones/regular/loops/$SPEC_TASK_ID/SPEC.md" ]] || { echo "FAIL: --spec 복사 후 .loops/<id>/SPEC.md 미생성"; exit 1; }
 # 워크트리에도 .loop/SPEC.md 복사 확인
-WT_SPEC="$WORK_DIR/myproject-loops/$SPEC_TASK_ID"
+WT_SPEC="$WORK_DIR/myproject-loops/regular/$SPEC_TASK_ID"
 [[ -f "$WT_SPEC/.loop/SPEC.md" ]] || { echo "FAIL: 워크트리 .loop/SPEC.md 미복사"; exit 1; }
 echo "OK"
 
 echo "=== TEST 10: 빈 SPEC.md (placeholder 그대로) → start 거부 ==="
 # spec-template.md는 삭제됨(spec 스킬로 이관). 인라인으로 placeholder가 남은 SPEC.md 생성
-mkdir -p "$PROJECT/.loops/placeholder-task"
-cat > "$PROJECT/.loops/placeholder-task/SPEC.md" <<'SPEC_EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/placeholder-task"
+cat > "$PROJECT/milestones/regular/loops/placeholder-task/SPEC.md" <<'SPEC_EOF'
 ---
 scope:
   include:
@@ -300,8 +300,8 @@ echo "OK"
 echo "=== TEST 11: frontmatter에 placeholder 잔존 → start 거부 ==="
 # frontmatter 안의 verify 값도 placeholder로 남기면 placeholder 검사가 거부해야 함
 # prepare 스텁화 이후: 디렉터리 명시적 생성
-mkdir -p "$PROJECT/.loops/bad-yaml-task"
-BAD_SPEC="$PROJECT/.loops/bad-yaml-task/SPEC.md"
+mkdir -p "$PROJECT/milestones/regular/loops/bad-yaml-task"
+BAD_SPEC="$PROJECT/milestones/regular/loops/bad-yaml-task/SPEC.md"
 cat > "$BAD_SPEC" <<'EOF'
 ---
 scope:
@@ -360,8 +360,8 @@ echo "OK"
 
 echo "=== TEST 13: cleanup 워크트리 부재 → 적절한 에러 ==="
 # task 디렉토리는 있지만 워크트리가 없는 상태 (prepare 스텁화 이후: 명시적 생성)
-mkdir -p "$PROJECT/.loops/no-wt-task"
-NO_WT_SPEC="$PROJECT/.loops/no-wt-task/SPEC.md"
+mkdir -p "$PROJECT/milestones/regular/loops/no-wt-task"
+NO_WT_SPEC="$PROJECT/milestones/regular/loops/no-wt-task/SPEC.md"
 cat > "$NO_WT_SPEC" <<'EOF'
 ---
 scope:
@@ -385,8 +385,8 @@ echo "OK"
 
 echo "=== TEST 14: 매우 긴 task-id (50자) → 워크트리 경로 안전 ==="
 LONG_ID="abcdefghij1234567890abcdefghij1234567890abcdefghij"  # 50자
-mkdir -p "$PROJECT/.loops/$LONG_ID"
-LONG_SPEC="$PROJECT/.loops/$LONG_ID/SPEC.md"
+mkdir -p "$PROJECT/milestones/regular/loops/$LONG_ID"
+LONG_SPEC="$PROJECT/milestones/regular/loops/$LONG_ID/SPEC.md"
 cat > "$LONG_SPEC" <<'EOF'
 ---
 scope:
@@ -399,7 +399,7 @@ verify: 'true'
 # Long Task-ID Task
 EOF
 MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "$LONG_ID" > /dev/null 2>&1
-WT_LONG="$WORK_DIR/myproject-loops/$LONG_ID"
+WT_LONG="$WORK_DIR/myproject-loops/regular/$LONG_ID"
 [[ -d "$WT_LONG" ]] || { echo "FAIL: 긴 task-id 워크트리 미생성"; exit 1; }
 [[ -f "$WT_LONG/.loop/iterations/1.log" ]] || { echo "FAIL: 긴 task-id 이터 로그 미생성"; exit 1; }
 loop cleanup "$LONG_ID" --force > /dev/null 2>&1
@@ -408,8 +408,8 @@ echo "OK"
 
 echo "=== TEST 15: Multi-iteration mock — 3회 이터 후 DONE ==="
 MULTI_TASK="multi-iter-task"
-mkdir -p "$PROJECT/.loops/$MULTI_TASK"
-cat > "$PROJECT/.loops/$MULTI_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$MULTI_TASK"
+cat > "$PROJECT/milestones/regular/loops/$MULTI_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -443,7 +443,7 @@ echo '{"result": "mock iter '"$n"'", "usage": {"input_tokens": 100, "output_toke
 MOCKEOF
 chmod +x "$MULTI_MOCK_BIN/claude"
 
-WT_MULTI="$WORK_DIR/myproject-loops/$MULTI_TASK"
+WT_MULTI="$WORK_DIR/myproject-loops/regular/$MULTI_TASK"
 PATH="$MULTI_MOCK_BIN:$PATH" MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$MULTI_TASK"
 # 3회 이터 로그 확인
 [[ -f "$WT_MULTI/.loop/iterations/1.log" ]] || { echo "FAIL: iter 1.log 없음"; exit 1; }
@@ -453,7 +453,7 @@ PATH="$MULTI_MOCK_BIN:$PATH" MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start 
 [[ -f "$WT_MULTI/DONE" ]] || { echo "FAIL: DONE 파일 없음"; exit 1; }
 # cleanup 후 archive 메타 파일 확인 (mock이 커밋하지 않으므로 --force 사용)
 loop cleanup "$MULTI_TASK" --force
-MULTI_LOOPS_DIR="$PROJECT/.loops/$MULTI_TASK"
+MULTI_LOOPS_DIR="$PROJECT/milestones/regular/loops/$MULTI_TASK"
 [[ -d "$MULTI_LOOPS_DIR" ]] || { echo "FAIL: archive 디렉토리 없음"; exit 1; }
 [[ -f "$MULTI_LOOPS_DIR/PLAN.md" ]] || { echo "FAIL: archive PLAN.md 없음"; exit 1; }
 echo "OK"
@@ -463,8 +463,8 @@ echo "=== TEST 16: scope 게이트가 framework 파일(.loop/*·CLAUDE.md·DONE)
 # (autopilot-smoke-STREAK 시나리오에서 발견된 버그의 regression 보호)
 
 SCOPE_TASK="scope-framework-test"
-mkdir -p "$PROJECT/.loops/$SCOPE_TASK"
-SCOPE_TASK_DIR="$PROJECT/.loops/$SCOPE_TASK"
+mkdir -p "$PROJECT/milestones/regular/loops/$SCOPE_TASK"
+SCOPE_TASK_DIR="$PROJECT/milestones/regular/loops/$SCOPE_TASK"
 
 # 좁은 scope.include — app/만 (.loop/는 명시 안 함)
 cat > "$SCOPE_TASK_DIR/SPEC.md" <<'EOF'
@@ -511,7 +511,7 @@ echo '{"result": "scope test mock", "usage": {"input_tokens": 1, "output_tokens"
 MOCKEOF
 chmod +x "$SCOPE_MOCK/claude"
 
-WT_SCOPE="$WORK_DIR/myproject-loops/$SCOPE_TASK"
+WT_SCOPE="$WORK_DIR/myproject-loops/regular/$SCOPE_TASK"
 set +e
 output=$(PATH="$SCOPE_MOCK:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start "$SCOPE_TASK" 2>&1)
 result=$?
@@ -525,8 +525,8 @@ echo "OK"
 
 echo "=== TEST 17: 테스트 약화 게이트 (tests/** 해시 변경 감지) ==="
 TEST17_TASK="gate-test-weakening"
-mkdir -p "$PROJECT/.loops/$TEST17_TASK"
-cat > "$PROJECT/.loops/$TEST17_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST17_TASK"
+cat > "$PROJECT/milestones/regular/loops/$TEST17_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -572,15 +572,15 @@ set -e
 [[ $result17 -ne 0 ]] || { echo "FAIL: 테스트 약화 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output17" | grep -q "HALT\|tests modified\|테스트 약화" \
   || { echo "FAIL: 테스트 약화 halt 메시지 없음. got: $output17"; exit 1; }
-WT17="$WORK_DIR/myproject-loops/$TEST17_TASK"
+WT17="$WORK_DIR/myproject-loops/regular/$TEST17_TASK"
 [[ -f "$WT17/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST17_TASK" --force > /dev/null 2>&1
 echo "OK"
 
 echo "=== TEST 18: 의존성 변경 게이트 (manifest 해시 변경 감지) ==="
 TEST18_TASK="gate-dep-change"
-mkdir -p "$PROJECT/.loops/$TEST18_TASK"
-cat > "$PROJECT/.loops/$TEST18_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST18_TASK"
+cat > "$PROJECT/milestones/regular/loops/$TEST18_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -626,15 +626,15 @@ set -e
 [[ $result18 -ne 0 ]] || { echo "FAIL: 의존성 변경 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output18" | grep -q "HALT\|deps modified\|의존성 변경" \
   || { echo "FAIL: 의존성 변경 halt 메시지 없음. got: $output18"; exit 1; }
-WT18="$WORK_DIR/myproject-loops/$TEST18_TASK"
+WT18="$WORK_DIR/myproject-loops/regular/$TEST18_TASK"
 [[ -f "$WT18/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST18_TASK" --force > /dev/null 2>&1
 echo "OK"
 
 echo "=== TEST 19: suppressor 신규 추가 게이트 ==="
 TEST19_TASK="gate-suppressor"
-mkdir -p "$PROJECT/.loops/$TEST19_TASK"
-cat > "$PROJECT/.loops/$TEST19_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST19_TASK"
+cat > "$PROJECT/milestones/regular/loops/$TEST19_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -667,15 +667,15 @@ set -e
 [[ $result19 -ne 0 ]] || { echo "FAIL: suppressor 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output19" | grep -q "HALT\|Suppressor" \
   || { echo "FAIL: suppressor halt 메시지 없음. got: $output19"; exit 1; }
-WT19="$WORK_DIR/myproject-loops/$TEST19_TASK"
+WT19="$WORK_DIR/myproject-loops/regular/$TEST19_TASK"
 [[ -f "$WT19/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST19_TASK" --force > /dev/null 2>&1
 echo "OK"
 
 echo "=== TEST 20: fix:symptom streak 게이트 ==="
 TEST20_TASK="gate-streak"
-mkdir -p "$PROJECT/.loops/$TEST20_TASK"
-cat > "$PROJECT/.loops/$TEST20_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST20_TASK"
+cat > "$PROJECT/milestones/regular/loops/$TEST20_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -721,15 +721,15 @@ set -e
 [[ $result20 -ne 0 ]] || { echo "FAIL: fix:symptom streak 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output20" | grep -q "HALT\|fix:symptom streak" \
   || { echo "FAIL: fix:symptom streak halt 메시지 없음. got: $output20"; exit 1; }
-WT20="$WORK_DIR/myproject-loops/$TEST20_TASK"
+WT20="$WORK_DIR/myproject-loops/regular/$TEST20_TASK"
 [[ -f "$WT20/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST20_TASK" --force > /dev/null 2>&1
 echo "OK"
 
 echo "=== TEST 21: 진동 패턴 게이트 ==="
 TEST21_TASK="gate-oscillation"
-mkdir -p "$PROJECT/.loops/$TEST21_TASK"
-cat > "$PROJECT/.loops/$TEST21_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST21_TASK"
+cat > "$PROJECT/milestones/regular/loops/$TEST21_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -775,7 +775,7 @@ set -e
 [[ $result21 -ne 0 ]] || { echo "FAIL: 진동 패턴 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output21" | grep -q "HALT\|진동 패턴" \
   || { echo "FAIL: 진동 패턴 halt 메시지 없음. got: $output21"; exit 1; }
-WT21="$WORK_DIR/myproject-loops/$TEST21_TASK"
+WT21="$WORK_DIR/myproject-loops/regular/$TEST21_TASK"
 [[ -f "$WT21/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST21_TASK" --force > /dev/null 2>&1
 echo "OK"
@@ -794,8 +794,8 @@ done
 echo "OK"
 
 echo "=== TEST 23: M4 — scope.include 빈 배열이면 start 거부 ==="
-mkdir -p "$PROJECT/.loops/empty-scope-task"
-cat > "$PROJECT/.loops/empty-scope-task/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/empty-scope-task"
+cat > "$PROJECT/milestones/regular/loops/empty-scope-task/SPEC.md" <<'EOF'
 ---
 scope:
   include: []
@@ -818,7 +818,7 @@ echo "=== TEST 24: M5 — stop on stale lock (PID 죽음) ==="
 STALE_TASK="stale-lock-task"
 mkdir -p "$PROJECT/.loops/locks"
 # 존재하지 않을 PID 사용 (sentinel — 절대 동작하지 않을 큰 PID)
-echo "999999" > "$PROJECT/.loops/locks/$STALE_TASK.lock"
+echo "999999" > "$PROJECT/.loops/locks/regular__$STALE_TASK.lock"
 set +e
 output=$(loop stop "$STALE_TASK" 2>&1)
 result=$?
@@ -826,7 +826,7 @@ set -e
 [[ $result -eq 0 ]] || { echo "FAIL: stale lock 정리에 실패 (exit $result). got: $output"; exit 1; }
 echo "$output" | grep -q "stale lock\|살아있지 않음" \
   || { echo "FAIL: stale lock 경고 메시지 없음. got: $output"; exit 1; }
-[[ ! -f "$PROJECT/.loops/locks/$STALE_TASK.lock" ]] \
+[[ ! -f "$PROJECT/.loops/locks/regular__$STALE_TASK.lock" ]] \
   || { echo "FAIL: stale lock 파일이 정리되지 않음"; exit 1; }
 echo "OK"
 
@@ -836,7 +836,7 @@ LIVE_TASK="live-pid-task"
 sleep 30 &
 LIVE_PID=$!
 mkdir -p "$PROJECT/.loops/locks"
-echo "$LIVE_PID" > "$PROJECT/.loops/locks/$LIVE_TASK.lock"
+echo "$LIVE_PID" > "$PROJECT/.loops/locks/regular__$LIVE_TASK.lock"
 
 set +e
 output=$(loop stop "$LIVE_TASK" 2>&1)
@@ -846,7 +846,7 @@ set -e
 [[ $result -eq 0 ]] || { echo "FAIL: live PID stop이 실패 (exit $result). got: $output"; exit 1; }
 echo "$output" | grep -q "정상 정지\|시그널 전송" \
   || { echo "FAIL: stop 진행 메시지 없음. got: $output"; exit 1; }
-[[ ! -f "$PROJECT/.loops/locks/$LIVE_TASK.lock" ]] \
+[[ ! -f "$PROJECT/.loops/locks/regular__$LIVE_TASK.lock" ]] \
   || { echo "FAIL: lock 파일이 정리되지 않음"; exit 1; }
 # 프로세스가 실제로 죽었는지 확인 (이미 죽었으면 0 반환)
 kill -0 "$LIVE_PID" 2>/dev/null && { echo "FAIL: PID ${LIVE_PID}가 아직 살아있음"; kill -9 "$LIVE_PID" 2>/dev/null; exit 1; }
@@ -854,8 +854,8 @@ echo "OK"
 
 echo "=== TEST 26: I2 — halt 시 미커밋 변경이 stash로 보관되면 WARN 출력 ==="
 STASH_TASK="stash-warn-task"
-mkdir -p "$PROJECT/.loops/$STASH_TASK"
-cat > "$PROJECT/.loops/$STASH_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$STASH_TASK"
+cat > "$PROJECT/milestones/regular/loops/$STASH_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -901,8 +901,8 @@ echo "OK"
 
 echo "=== TEST 27: 테스트 약화 게이트가 __tests__/ 같은 비-tests/ 컨벤션 감지 ==="
 TEST27_TASK="gate-tests-jest"
-mkdir -p "$PROJECT/.loops/$TEST27_TASK"
-cat > "$PROJECT/.loops/$TEST27_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST27_TASK"
+cat > "$PROJECT/milestones/regular/loops/$TEST27_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -948,16 +948,16 @@ set -e
 [[ $result27 -ne 0 ]] || { echo "FAIL: __tests__/ 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output27" | grep -q "HALT\|테스트 약화" \
   || { echo "FAIL: 테스트 약화 halt 메시지 없음. got: $output27"; exit 1; }
-WT27="$WORK_DIR/myproject-loops/$TEST27_TASK"
+WT27="$WORK_DIR/myproject-loops/regular/$TEST27_TASK"
 [[ -f "$WT27/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST27_TASK" --force > /dev/null 2>&1
 echo "OK"
 
 echo "=== TEST 28: SPEC.md test_paths override가 기본 컨벤션 대체 ==="
 TEST28_TASK="gate-tests-override"
-mkdir -p "$PROJECT/.loops/$TEST28_TASK"
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST28_TASK"
 # test_paths를 비표준 경로 'qa/**' 로 override
-cat > "$PROJECT/.loops/$TEST28_TASK/SPEC.md" <<'EOF'
+cat > "$PROJECT/milestones/regular/loops/$TEST28_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1029,8 +1029,8 @@ else
     PATH="$ISOLATED_PATH" command -v shasum >/dev/null \
       || { echo "FAIL: 격리된 PATH에서 shasum도 사라짐"; exit 1; }
 
-    mkdir -p "$PROJECT/.loops/shasum-fallback"
-    cat > "$PROJECT/.loops/shasum-fallback/SPEC.md" <<'EOF'
+    mkdir -p "$PROJECT/milestones/regular/loops/shasum-fallback"
+    cat > "$PROJECT/milestones/regular/loops/shasum-fallback/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1048,7 +1048,7 @@ EOF
     set -e
     [[ $result29 -eq 0 ]] \
       || { echo "FAIL: shasum fallback 환경 실행 실패 (exit $result29). got: $output29"; exit 1; }
-    WT29="$WORK_DIR/myproject-loops/shasum-fallback"
+    WT29="$WORK_DIR/myproject-loops/regular/shasum-fallback"
     [[ -f "$WT29/DONE" ]] || { echo "FAIL: DONE 파일 미생성 (해시 함수 미동작 의심)"; exit 1; }
     # 해시 함수가 빈 값이 아니어야 — iterations 로그 존재 확인
     [[ -f "$WT29/.loop/iterations/1.log" ]] || { echo "FAIL: 이터 로그 미생성"; exit 1; }
@@ -1059,8 +1059,8 @@ fi
 
 echo "=== TEST 30: suppressor 게이트가 미커밋(working tree) 변경도 감지 ==="
 TEST30_TASK="gate-suppressor-uncommitted"
-mkdir -p "$PROJECT/.loops/$TEST30_TASK"
-cat > "$PROJECT/.loops/$TEST30_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST30_TASK"
+cat > "$PROJECT/milestones/regular/loops/$TEST30_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1106,15 +1106,15 @@ set -e
 [[ $result30 -ne 0 ]] || { echo "FAIL: 미커밋 suppressor가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output30" | grep -q "HALT\|Suppressor" \
   || { echo "FAIL: suppressor halt 메시지 없음. got: $output30"; exit 1; }
-WT30="$WORK_DIR/myproject-loops/$TEST30_TASK"
+WT30="$WORK_DIR/myproject-loops/regular/$TEST30_TASK"
 [[ -f "$WT30/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST30_TASK" --force > /dev/null 2>&1
 echo "OK"
 
 echo "=== TEST 31: acquire_lock이 stale lock(죽은 PID)을 자동 정리 ==="
 STALE_ACQUIRE_TASK="stale-acquire-task"
-mkdir -p "$PROJECT/.loops/$STALE_ACQUIRE_TASK"
-cat > "$PROJECT/.loops/$STALE_ACQUIRE_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$STALE_ACQUIRE_TASK"
+cat > "$PROJECT/milestones/regular/loops/$STALE_ACQUIRE_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1128,7 +1128,7 @@ EOF
 
 # 죽은 PID로 락 미리 생성 (크래시 시뮬레이션)
 mkdir -p "$PROJECT/.loops/locks"
-echo "999999" > "$PROJECT/.loops/locks/$STALE_ACQUIRE_TASK.lock"
+echo "999999" > "$PROJECT/.loops/locks/regular__$STALE_ACQUIRE_TASK.lock"
 
 # loop start: 자동 정리 후 정상 진행되어야
 set +e
@@ -1138,15 +1138,15 @@ set -e
 [[ $result31 -eq 0 ]] || { echo "FAIL: stale lock 자동 정리 실패 (exit $result31). got: $output31"; exit 1; }
 echo "$output31" | grep -q "stale lock 자동 정리" \
   || { echo "FAIL: stale lock 정리 메시지 없음. got: $output31"; exit 1; }
-WT31="$WORK_DIR/myproject-loops/$STALE_ACQUIRE_TASK"
+WT31="$WORK_DIR/myproject-loops/regular/$STALE_ACQUIRE_TASK"
 [[ -d "$WT31" ]] || { echo "FAIL: 자동 정리 후 워크트리 미생성"; exit 1; }
 loop cleanup "$STALE_ACQUIRE_TASK" --force > /dev/null 2>&1
 echo "OK"
 
 echo "=== TEST 32: acquire_lock이 빈/비숫자 PID도 stale로 인식 ==="
 EMPTY_LOCK_TASK="empty-lock-task"
-mkdir -p "$PROJECT/.loops/$EMPTY_LOCK_TASK"
-cat > "$PROJECT/.loops/$EMPTY_LOCK_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$EMPTY_LOCK_TASK"
+cat > "$PROJECT/milestones/regular/loops/$EMPTY_LOCK_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1160,7 +1160,7 @@ EOF
 
 # 빈 락 파일 생성 (corrupted state 시뮬레이션)
 mkdir -p "$PROJECT/.loops/locks"
-: > "$PROJECT/.loops/locks/$EMPTY_LOCK_TASK.lock"
+: > "$PROJECT/.loops/locks/regular__$EMPTY_LOCK_TASK.lock"
 
 set +e
 output32=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 loop start "$EMPTY_LOCK_TASK" 2>&1)
@@ -1174,8 +1174,8 @@ echo "OK"
 
 echo "=== TEST 33: secrets 게이트가 커밋된 변경에서 비밀 감지 (HEAD~1..HEAD) ==="
 TEST33_TASK="gate-secrets-committed"
-mkdir -p "$PROJECT/.loops/$TEST33_TASK"
-cat > "$PROJECT/.loops/$TEST33_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST33_TASK"
+cat > "$PROJECT/milestones/regular/loops/$TEST33_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1249,7 +1249,7 @@ set -e
 [[ $result33 -ne 0 ]] || { echo "FAIL: secrets 게이트가 halt하지 않음 (exit 0). got: $output33"; exit 1; }
 echo "$output33" | grep -q "HALT.*Secrets\|Secrets 의심" \
   || { echo "FAIL: secrets halt 메시지 없음. got: $output33"; exit 1; }
-WT33="$WORK_DIR/myproject-loops/$TEST33_TASK"
+WT33="$WORK_DIR/myproject-loops/regular/$TEST33_TASK"
 [[ -f "$WT33/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST33_TASK" --force > /dev/null 2>&1
 echo "OK"
@@ -1352,8 +1352,8 @@ if [[ -z "$LOCALE_FOUND" ]]; then
   echo "SKIP: 비-영어 locale 미설치 — locale 독립 시나리오 검증 불가"
 else
   TEST37_TASK="locale-stash"
-  mkdir -p "$PROJECT/.loops/$TEST37_TASK"
-  cat > "$PROJECT/.loops/$TEST37_TASK/SPEC.md" <<'EOF'
+  mkdir -p "$PROJECT/milestones/regular/loops/$TEST37_TASK"
+  cat > "$PROJECT/milestones/regular/loops/$TEST37_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1431,8 +1431,8 @@ chmod +x "$MOCK38/claude"
 
 (
   cd "$TDD_PROJECT"
-  mkdir -p ".loops/tdd-add"
-  cat > ".loops/tdd-add/SPEC.md" <<'EOF'
+  mkdir -p "milestones/regular/loops/tdd-add"
+  cat > "milestones/regular/loops/tdd-add/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1454,7 +1454,7 @@ EOF
     echo "$output38"
     exit 1
   fi
-  WT38="$WORK_DIR/tdd-add-project-loops/tdd-add"
+  WT38="$WORK_DIR/tdd-add-project-loops/regular/tdd-add"
   [[ -f "$WT38/DONE" ]] || { echo "FAIL: DONE 파일 없음"; exit 1; }
 )
 echo "OK"
@@ -1484,8 +1484,8 @@ chmod +x "$MOCK39/claude"
 
 (
   cd "$TDD_MOD_PROJECT"
-  mkdir -p ".loops/tdd-mod"
-  cat > ".loops/tdd-mod/SPEC.md" <<'EOF'
+  mkdir -p "milestones/regular/loops/tdd-mod"
+  cat > "milestones/regular/loops/tdd-mod/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1509,8 +1509,8 @@ echo "OK"
 
 echo "=== TEST 40: stop이 claude 자식 프로세스도 종료 (orphan 방지) ==="
 ORPHAN_TASK="orphan-prevent"
-mkdir -p "$PROJECT/.loops/$ORPHAN_TASK"
-cat > "$PROJECT/.loops/$ORPHAN_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$ORPHAN_TASK"
+cat > "$PROJECT/milestones/regular/loops/$ORPHAN_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1574,15 +1574,15 @@ if [[ $ORPHAN_DEAD -eq 0 ]]; then
 fi
 
 # lock 파일 정리됐는지
-[[ ! -f "$PROJECT/.loops/locks/$ORPHAN_TASK.lock" ]] \
+[[ ! -f "$PROJECT/.loops/locks/regular__$ORPHAN_TASK.lock" ]] \
   || { echo "FAIL: stop 후 lock 파일 잔존"; exit 1; }
 
 echo "OK"
 
 echo "=== TEST 41: --force cleanup이 실행 중 프로세스를 먼저 SIGTERM (race 방지) ==="
 FORCE_TASK="force-cleanup-running"
-mkdir -p "$PROJECT/.loops/$FORCE_TASK"
-cat > "$PROJECT/.loops/$FORCE_TASK/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/regular/loops/$FORCE_TASK"
+cat > "$PROJECT/milestones/regular/loops/$FORCE_TASK/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1623,7 +1623,7 @@ done
   exit 1
 }
 CLAUDE_PID_41=$(cat "$CLAUDE_PID_FILE_41")
-LOCK_FILE_41="$PROJECT/.loops/locks/$FORCE_TASK.lock"
+LOCK_FILE_41="$PROJECT/.loops/locks/regular__$FORCE_TASK.lock"
 [[ -f "$LOCK_FILE_41" ]] || { echo "FAIL: lock 파일 미생성"; exit 1; }
 
 # --force cleanup
@@ -1648,7 +1648,7 @@ fi
 
 # lock·워크트리 정리
 [[ ! -f "$LOCK_FILE_41" ]] || { echo "FAIL: lock 파일 잔존"; exit 1; }
-WT_41="$WORK_DIR/myproject-loops/$FORCE_TASK"
+WT_41="$WORK_DIR/myproject-loops/regular/$FORCE_TASK"
 [[ ! -d "$WT_41" ]] || { echo "FAIL: 워크트리 잔존"; exit 1; }
 
 echo "OK"
@@ -1658,10 +1658,10 @@ echo "=== TEST 42: slash task-id의 lock이 hyphen task와 충돌 안 함 ==="
 # 옛 동작에선 둘 다 sanitize 결과 'col-fake.lock'이라 die. 새 동작에선
 # 'col/fake'가 'col__fake.lock'을 만들어 충돌 없이 통과해야.
 mkdir -p "$PROJECT/.loops/locks"
-echo "$$" > "$PROJECT/.loops/locks/col-fake.lock"
+echo "$$" > "$PROJECT/.loops/locks/regular__col-fake.lock"
 
-mkdir -p "$PROJECT/.loops/col/fake"
-cat > "$PROJECT/.loops/col/fake/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/col/loops/fake"
+cat > "$PROJECT/milestones/col/loops/fake/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1680,7 +1680,7 @@ set -e
 [[ $result42 -eq 0 ]] || { echo "FAIL: slash task가 hyphen lock과 충돌 (false collision). exit=$result42, got: $output42"; exit 1; }
 
 # 정리
-rm -f "$PROJECT/.loops/locks/col-fake.lock"
+rm -f "$PROJECT/.loops/locks/regular__col-fake.lock"
 loop cleanup "col/fake" --force > /dev/null 2>&1
 echo "OK"
 
@@ -1712,8 +1712,8 @@ echo "OK"
 echo "=== TEST 45: slash task-id가 status 목록에 정확히 표시 (오인식 방지) ==="
 # 기존 TEST 5에서 'goal-x/sub-task'가 prepare됐다 cleanup된 상태일 수 있음.
 # 새로 깨끗한 slash task-id로 검증.
-mkdir -p "$PROJECT/.loops/ns-foo/sub-bar"
-cat > "$PROJECT/.loops/ns-foo/sub-bar/SPEC.md" <<'EOF'
+mkdir -p "$PROJECT/milestones/ns-foo/loops/sub-bar"
+cat > "$PROJECT/milestones/ns-foo/loops/sub-bar/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1735,7 +1735,7 @@ if echo "$output45" | grep -qE '^ns-foo[[:space:]]'; then
 fi
 
 # 정리 (워크트리 없으니 .loops/ 디렉토리만 직접 제거)
-rm -rf "$PROJECT/.loops/ns-foo"
+rm -rf "$PROJECT/milestones/ns-foo"
 echo "OK"
 
 echo "=== TEST 46: task-id에 '.' 단독 컴포넌트 거부 ==="
@@ -1754,8 +1754,8 @@ echo "OK"
 
 echo "=== TEST 47: SPEC.md에 [NEEDS CLARIFICATION] 잔존 시 start 거부 ==="
 # task 디렉터리·SPEC 시드
-mkdir -p .loops/needs-clar-task
-cat > .loops/needs-clar-task/SPEC.md <<'EOF'
+mkdir -p milestones/regular/loops/needs-clar-task
+cat > milestones/regular/loops/needs-clar-task/SPEC.md <<'EOF'
 ---
 scope:
   include:
@@ -1791,7 +1791,87 @@ set -e
 [[ $result -ne 0 ]] || { echo "FAIL: 마커 잔존 SPEC으로 start가 성공하면 안 됨"; exit 1; }
 echo "$output" | grep -q "NEEDS CLARIFICATION\|spec.*resume" || { echo "FAIL: 마커 안내 메시지 없음. got: $output"; exit 1; }
 # 락 안 잡혀야 함
-[[ ! -f .loops/locks/needs-clar-task.lock ]] || { echo "FAIL: 차단 됐어야 하는데 락 잡힘"; exit 1; }
+[[ ! -f .loops/locks/regular__needs-clar-task.lock ]] || { echo "FAIL: 차단 됐어야 하는데 락 잡힘"; exit 1; }
+echo "OK"
+
+echo "=== TEST 48: 단일 컴포넌트 task-id가 regular/<input>으로 정규화 ==="
+# M1: 단일 컴포넌트 task-id 입력 시 'regular/' 자동 prefix.
+# SPEC은 milestones/regular/loops/<child>/SPEC.md 에서 읽음.
+# 워크트리는 myproject-loops/regular/<child>/.
+TEST48_ID="single-comp-task"
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST48_ID"
+cat > "$PROJECT/milestones/regular/loops/$TEST48_ID/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Single Component Normalization Task
+EOF
+
+MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "$TEST48_ID" > /dev/null 2>&1
+WT48="$WORK_DIR/myproject-loops/regular/$TEST48_ID"
+[[ -d "$WT48" ]] || { echo "FAIL: regular/<input> 정규화 후 워크트리 미생성 (expected: $WT48)"; exit 1; }
+[[ -f "$WT48/.loop/SPEC.md" ]] || { echo "FAIL: 워크트리에 .loop/SPEC.md 미복사"; exit 1; }
+# 락 파일 sanitize 확인: 'regular/<id>' → 'regular__<id>.lock' (slash 잔존 NO)
+[[ ! -f "$PROJECT/.loops/locks/regular/$TEST48_ID.lock" ]] \
+  || { echo "FAIL: lock 파일에 slash 잔존 (sanitize 실패)"; exit 1; }
+loop cleanup "$TEST48_ID" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 49: 명시적 milestone/child task-id가 milestones/<m>/loops/<c>/SPEC.md를 읽음 ==="
+mkdir -p "$PROJECT/milestones/m1/loops/c1"
+cat > "$PROJECT/milestones/m1/loops/c1/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Explicit Milestone Task
+EOF
+
+MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "m1/c1" > /dev/null 2>&1
+WT49="$WORK_DIR/myproject-loops/m1/c1"
+[[ -d "$WT49" ]] || { echo "FAIL: m1/c1 워크트리 미생성 (expected: $WT49)"; exit 1; }
+[[ -f "$WT49/.loop/SPEC.md" ]] || { echo "FAIL: m1/c1 워크트리에 .loop/SPEC.md 미복사"; exit 1; }
+loop cleanup "m1/c1" --force > /dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 50: legacy .loops/<id>/SPEC.md fallback 없음 (cutover) ==="
+# 의도: legacy 경로(.loops/<id>/SPEC.md)에만 SPEC을 두고, milestones/ 경로엔 없을 때
+# start가 거부되는지 검증. M1 cutover에서 legacy fallback이 제거됐음.
+LEGACY_ID="legacy-only-task"
+# Legacy 경로에만 시드 (milestones/regular/loops/<id>/ 는 의도적으로 만들지 않음)
+mkdir -p "$PROJECT/.loops/$LEGACY_ID"
+cat > "$PROJECT/.loops/$LEGACY_ID/SPEC.md" <<'LEGACY_EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Legacy Path Only — Should Not Be Read
+LEGACY_EOF
+
+set +e
+output50=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "$LEGACY_ID" 2>&1)
+result50=$?
+set -e
+[[ $result50 -ne 0 ]] || { echo "FAIL: legacy .loops/<id>/SPEC.md fallback이 동작함 (cutover 위반)"; exit 1; }
+echo "$output50" | grep -q "SPEC.md가 없습니다\|milestones/" \
+  || { echo "FAIL: legacy 부재 에러 메시지 없음. got: $output50"; exit 1; }
+# 워크트리·락 잡혀선 안 됨
+[[ ! -d "$WORK_DIR/myproject-loops/regular/$LEGACY_ID" ]] \
+  || { echo "FAIL: legacy fallback이 워크트리 생성"; exit 1; }
+rm -rf "$PROJECT/.loops/$LEGACY_ID"
 echo "OK"
 
 echo ""

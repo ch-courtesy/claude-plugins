@@ -97,4 +97,73 @@ grep -q -- '--resume' "$SPEC_SKILL_MD" \
 echo "OK: --resume 마커"
 
 echo ""
+echo "=== prd 스킬 구조 검증 ==="
+PRD_SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/prd"
+for f in SKILL.md \
+         references/prd-template.md \
+         references/self-review.md; do
+  [[ -f "$PRD_SKILL_DIR/$f" ]] || { echo "FAIL: prd/$f 부재"; exit 1; }
+  echo "OK: prd/$f"
+done
+
+echo ""
+echo "=== prd/SKILL.md frontmatter 검증 ==="
+PRD_SKILL_MD="$PRD_SKILL_DIR/SKILL.md"
+grep -q 'name: prd' "$PRD_SKILL_MD" \
+  || { echo "FAIL: prd/SKILL.md frontmatter에 'name: prd' 없음"; exit 1; }
+echo "OK: name: prd"
+grep -q '\[NEEDS CLARIFICATION\]' "$PRD_SKILL_MD" \
+  || { echo "FAIL: prd/SKILL.md description에 '[NEEDS CLARIFICATION]' 마커 없음"; exit 1; }
+echo "OK: [NEEDS CLARIFICATION] 마커"
+grep -q -- '--resume' "$PRD_SKILL_MD" \
+  || { echo "FAIL: prd/SKILL.md description에 '--resume' 마커 없음"; exit 1; }
+echo "OK: --resume 마커"
+grep -q -- '--import' "$PRD_SKILL_MD" \
+  || { echo "FAIL: prd/SKILL.md description에 '--import' 마커 없음"; exit 1; }
+echo "OK: --import 마커"
+
+echo ""
+echo "=== dispatch 스킬 구조 검증 ==="
+DISPATCH_SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/dispatch"
+for f in SKILL.md \
+         references/dispatch.sh \
+         references/dag-template.md \
+         references/decomposition-algorithm.md; do
+  [[ -f "$DISPATCH_SKILL_DIR/$f" ]] || { echo "FAIL: dispatch/$f 부재"; exit 1; }
+  echo "OK: dispatch/$f"
+done
+
+echo ""
+echo "=== dispatch/SKILL.md frontmatter 검증 ==="
+DISPATCH_SKILL_MD="$DISPATCH_SKILL_DIR/SKILL.md"
+grep -q 'name: dispatch' "$DISPATCH_SKILL_MD" \
+  || { echo "FAIL: dispatch/SKILL.md frontmatter에 'name: dispatch' 없음"; exit 1; }
+echo "OK: name: dispatch"
+grep -qE 'start|status|stop|list|cleanup|logs|resume' "$DISPATCH_SKILL_MD" \
+  || { echo "FAIL: dispatch/SKILL.md description에 서브커맨드 마커 없음"; exit 1; }
+echo "OK: 서브커맨드 마커"
+
+echo ""
+echo "=== dispatch.sh 실행 권한 + syntax 검증 ==="
+DISPATCH_SH="$DISPATCH_SKILL_DIR/references/dispatch.sh"
+[[ -x "$DISPATCH_SH" ]] || { echo "FAIL: dispatch.sh 실행 권한 없음"; exit 1; }
+echo "OK: 실행 권한"
+bash -n "$DISPATCH_SH" || { echo "FAIL: dispatch.sh syntax 오류"; exit 1; }
+echo "OK: syntax"
+
+echo ""
+echo "=== plugin.json version bump (>= 0.2.0) ==="
+# v0.1.0 → 0.2.0 cutover로 multi-task scope 도입. 최소 0.2.0 이상 보장.
+PLUGIN_VERSION=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$PLUGIN_JSON" \
+  | head -1 \
+  | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+[[ -n "$PLUGIN_VERSION" ]] || { echo "FAIL: plugin.json에 version 필드 없음"; exit 1; }
+echo "OK: version=$PLUGIN_VERSION"
+# 0.1.x 또는 그 이하는 거부 (multi-task scope cutover 후)
+case "$PLUGIN_VERSION" in
+  0.0.*|0.1.*) echo "FAIL: plugin.json version $PLUGIN_VERSION < 0.2.0 (cutover 후 minimum)"; exit 1 ;;
+esac
+echo "OK: version $PLUGIN_VERSION >= 0.2.0"
+
+echo ""
 echo "=== 모든 테스트 통과 ==="
