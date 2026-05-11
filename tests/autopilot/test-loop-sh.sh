@@ -1874,5 +1874,175 @@ echo "$output50" | grep -q "SPEC.md가 없습니다\|milestones/" \
 rm -rf "$PROJECT/.loops/$LEGACY_ID"
 echo "OK"
 
+echo "=== TEST 51: test_sweep_paths 선언 시 해당 경로 테스트 수정·삭제는 weakening halt 안 함 ==="
+# AC1+5: sweep 경로 안 파일은 약화 검사에서 제외.
+SWEEP_OK_PROJECT="$WORK_DIR/sweep-ok-project"
+mkdir -p "$SWEEP_OK_PROJECT/tests"
+git -C "$SWEEP_OK_PROJECT" init -q
+git -C "$SWEEP_OK_PROJECT" config user.email "t@e.com"
+git -C "$SWEEP_OK_PROJECT" config user.name "Test"
+# 기본 컨벤션 매칭(tests/**)이지만 sweep으로 선언되므로 수정해도 halt 안 돼야
+echo "def test_sweep(): assert True" > "$SWEEP_OK_PROJECT/tests/test_sweep_target.py"
+git -C "$SWEEP_OK_PROJECT" add tests/test_sweep_target.py
+git -C "$SWEEP_OK_PROJECT" commit -q -m "init sweep target"
+
+COUNTER51="$WORK_DIR/iter-count-51.txt"
+echo "0" > "$COUNTER51"
+export COUNTER51_PATH="$COUNTER51"
+
+MOCK51="$WORK_DIR/mock51-bin"
+mkdir -p "$MOCK51"
+cat > "$MOCK51/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+n=$(cat "${COUNTER51_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER51_PATH}"
+if [[ $n -eq 1 ]]; then
+  # iter 1: 기존 sweep 대상 파일 수정 (sweep 안이므로 weakening halt 없어야)
+  # DONE은 만들지 않음 → 이터 종료 후 weakening 게이트가 반드시 실행됨
+  echo "def test_sweep(): assert True  # sweep modified" > tests/test_sweep_target.py
+  git add tests/test_sweep_target.py
+  git commit -q -m "test: sweep modify"
+else
+  # iter 2: 정상 종료 (weakening 게이트가 iter 1을 통과했음을 입증)
+  touch DONE
+fi
+echo '{"result": "mock51", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK51/claude"
+
+(
+  cd "$SWEEP_OK_PROJECT"
+  mkdir -p "milestones/regular/loops/sweep-ok"
+  cat > "milestones/regular/loops/sweep-ok/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+test_sweep_paths:
+  - "tests/test_sweep_target.py"
+---
+
+# Sweep Allow Test
+EOF
+  set +e
+  output51=$(PATH="$MOCK51:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "sweep-ok" 2>&1)
+  result51=$?
+  set -e
+  [[ $result51 -eq 0 ]] || { echo "FAIL: sweep 경로 수정이 weakening halt 트리거. exit=$result51"; echo "$output51"; exit 1; }
+  if echo "$output51" | grep -q "테스트 약화"; then
+    echo "FAIL: sweep 경로 수정에 '테스트 약화' 메시지 발생"
+    echo "$output51"
+    exit 1
+  fi
+  WT51="$WORK_DIR/sweep-ok-project-loops/regular/sweep-ok"
+  [[ -f "$WT51/DONE" ]] || { echo "FAIL: DONE 미생성"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 52: test_sweep_paths 선언됐으나 매칭 파일 0건 → stderr 경고 + halt 없음 ==="
+# AC2: 패턴 오타·미생성 시 경고만, 진행 차단 안 함.
+SWEEP_WARN_PROJECT="$WORK_DIR/sweep-warn-project"
+mkdir -p "$SWEEP_WARN_PROJECT"
+git -C "$SWEEP_WARN_PROJECT" init -q
+git -C "$SWEEP_WARN_PROJECT" config user.email "t@e.com"
+git -C "$SWEEP_WARN_PROJECT" config user.name "Test"
+git -C "$SWEEP_WARN_PROJECT" commit --allow-empty -q -m "init"
+
+MOCK52="$WORK_DIR/mock52-bin"
+mkdir -p "$MOCK52"
+cat > "$MOCK52/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+touch DONE
+echo '{"result": "mock52", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK52/claude"
+
+(
+  cd "$SWEEP_WARN_PROJECT"
+  mkdir -p "milestones/regular/loops/sweep-warn"
+  cat > "milestones/regular/loops/sweep-warn/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+test_sweep_paths:
+  - "nonexistent-dir/**"
+---
+
+# Sweep Empty Match Test
+EOF
+  set +e
+  output52=$(PATH="$MOCK52:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "sweep-warn" 2>&1)
+  result52=$?
+  set -e
+  [[ $result52 -eq 0 ]] || { echo "FAIL: sweep 매칭 0건이 halt 트리거. exit=$result52"; echo "$output52"; exit 1; }
+  echo "$output52" | grep -q "test_sweep_paths" \
+    || { echo "FAIL: sweep 매칭 0건 경고 없음. got: $output52"; exit 1; }
+  WT52="$WORK_DIR/sweep-warn-project-loops/regular/sweep-warn"
+  [[ -f "$WT52/DONE" ]] || { echo "FAIL: DONE 미생성"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 53: test_sweep_paths 선언 시 sweep 밖 기존 테스트 수정은 여전히 weakening halt ==="
+# AC4: sweep은 화이트리스트 면제 — 밖의 파일은 보호된다.
+SWEEP_BOUND_PROJECT="$WORK_DIR/sweep-bound-project"
+mkdir -p "$SWEEP_BOUND_PROJECT/tests"
+git -C "$SWEEP_BOUND_PROJECT" init -q
+git -C "$SWEEP_BOUND_PROJECT" config user.email "t@e.com"
+git -C "$SWEEP_BOUND_PROJECT" config user.name "Test"
+echo "def test_protected(): assert True" > "$SWEEP_BOUND_PROJECT/tests/test_protected.py"
+echo "def test_sweep(): assert True" > "$SWEEP_BOUND_PROJECT/tests/test_sweep_zone.py"
+git -C "$SWEEP_BOUND_PROJECT" add tests/test_protected.py tests/test_sweep_zone.py
+git -C "$SWEEP_BOUND_PROJECT" commit -q -m "init both"
+
+MOCK53="$WORK_DIR/mock53-bin"
+mkdir -p "$MOCK53"
+cat > "$MOCK53/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+# sweep 밖 파일 수정 (보호되어야 → halt 발생해야)
+echo "def test_protected(): assert False  # weakened" > tests/test_protected.py
+git add tests/test_protected.py
+git commit -q -m "weaken: protected"
+echo '{"result": "mock53", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK53/claude"
+
+(
+  cd "$SWEEP_BOUND_PROJECT"
+  mkdir -p "milestones/regular/loops/sweep-bound"
+  cat > "milestones/regular/loops/sweep-bound/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+test_sweep_paths:
+  - "tests/test_sweep_zone.py"
+---
+
+# Sweep Boundary Test
+EOF
+  set +e
+  output53=$(PATH="$MOCK53:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "sweep-bound" 2>&1)
+  result53=$?
+  set -e
+  [[ $result53 -ne 0 ]] || { echo "FAIL: sweep 밖 파일 수정이 halt 안 됨 (AC4 위반). exit=$result53"; echo "$output53"; exit 1; }
+  echo "$output53" | grep -q "테스트 약화" \
+    || { echo "FAIL: sweep 밖 약화 halt 메시지 없음. got: $output53"; exit 1; }
+)
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="

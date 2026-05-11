@@ -13,6 +13,15 @@ verify: "{{verify_command}}"
 # test_paths:
 #   - "custom/test/**"
 #   - "**/*.t.cpp"
+#
+# test_sweep_paths (선택): 합법적 sweep(대규모 rename·cleanup 등)을 SPEC 작성 시점에
+#   화이트리스트화. 매칭되는 파일은 weakening 해시 비교 셋에서 제외된다 — 수정·삭제해도
+#   "테스트 약화" halt 발생 안 함. 매칭 규칙은 test_paths와 동일한 git pathspec.
+#   선언 후 매칭 파일이 0건이면 stderr 경고만 (halt 없음 — 패턴 오타·미생성 상태 보존).
+#   주의: sweep 밖의 기존 테스트 변경은 여전히 halt — sweep은 화이트리스트 면제.
+# test_sweep_paths:
+#   - "tests/legacy_to_remove/**"
+#   - "tests/test_specific_to_rename.py"
 ---
 
 # {{task_title}}
