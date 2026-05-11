@@ -89,7 +89,7 @@ spec 스킬은 자체적으로 9-step 대화 진행. 사용자가 SPEC 작성에
 ```
 for wave in waves:
   for child in wave:
-    Bash(loop start <m>/<c>)  # 백그라운드 호출, 워크트리·lock은 loop이 처리
+    Bash(loop start <m>/<c>, run_in_background: true)  # 비동기 시작 — watch_wave가 sentinel 폴링. run_in_background 없이는 동기 블로킹이라 wave 병렬 안 됨
 
   while wave 진행 중:
     # references/dispatch.sh watch_wave <m> child1 child2 ...
