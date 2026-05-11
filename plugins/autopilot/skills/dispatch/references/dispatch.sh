@@ -21,9 +21,12 @@
 #   bash dispatch.sh log_event  <milestone> <event-line>
 #
 # 환경 변수:
-#   LOOP_WORKTREE_BASE   loop.sh와 동일 (워크트리 부모)
 #   WATCH_POLL_SECONDS   sentinel 폴링 간격 (기본: 2)
 #   WATCH_TIMEOUT_SECONDS  watch_wave 최대 대기 (기본: 7200 = 2시간)
+#
+# 워크트리·lock 위치: 메인 레포 내부 milestones/<m>/loops/<c>/ 단일 트리 (v0.2 cutover).
+#   - 워크트리:  milestones/<m>/loops/<c>/.worktree/
+#   - lock 파일: milestones/<m>/loops/<c>/.lock
 
 set -euo pipefail
 
@@ -58,38 +61,37 @@ compute_milestone_paths() {
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-  WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
   MILESTONE="$milestone"
   MILESTONE_DIR="$PROJECT_ROOT/milestones/$milestone"
   PRD_PATH="$MILESTONE_DIR/prd/PRD.md"
   DAG_PATH="$MILESTONE_DIR/dispatch/DAG.md"
   LOG_PATH="$MILESTONE_DIR/dispatch/DISPATCH_LOG.md"
-  LOCK_DIR="$PROJECT_ROOT/.loops/locks"
+  LOOPS_BASE="$MILESTONE_DIR/loops"
 }
 
 ensure_dispatch_dir() {
   mkdir -p "$MILESTONE_DIR/dispatch"
 }
 
-# 슬래시를 __로 인코딩 (loop.sh sanitize_for_filename과 일치)
-sanitize_for_filename() {
-  echo "${1//\//__}"
-}
-
-# child 워크트리 경로
+# child 워크트리 경로 (v0.2 nested 정책: milestones/<m>/loops/<c>/.worktree)
 child_wt_path() {
   local milestone="$1"
   local child="$2"
-  echo "$WT_BASE/$milestone/$child"
+  echo "$PROJECT_ROOT/milestones/$milestone/loops/$child/.worktree"
 }
 
 # child의 lock 파일 경로 (loop.sh 명명 규칙과 일치)
 child_lock_path() {
   local milestone="$1"
   local child="$2"
-  local task_id="$milestone/$child"
-  local safe="$(sanitize_for_filename "$task_id")"
-  echo "$LOCK_DIR/$safe.lock"
+  echo "$PROJECT_ROOT/milestones/$milestone/loops/$child/.lock"
+}
+
+# child 메타 디렉터리 (cleanup 후 archive PLAN.md/NOTES.md/... 위치)
+child_archive_path() {
+  local milestone="$1"
+  local child="$2"
+  echo "$PROJECT_ROOT/milestones/$milestone/loops/$child"
 }
 
 # child의 sentinel 상태: done / escalated / running / idle / missing
@@ -116,7 +118,7 @@ child_state() {
     return
   fi
   # 워크트리 없음 — cleanup 후 archive 확인 (PRD/DAG 보존, .loop/* 메타 이주)
-  local archive_dir="$PROJECT_ROOT/milestones/$milestone/loops/$child"
+  local archive_dir="$(child_archive_path "$milestone" "$child")"
   if [[ -d "$archive_dir" ]] && [[ -f "$archive_dir/PLAN.md" ]]; then
     echo "archived"
     return
@@ -167,16 +169,16 @@ cmd_status() {
     fi
   fi
 
-  # child 상태 — DAG에서 추출하거나 worktree 디렉토리 탐색
+  # child 상태 — DAG에서 추출하거나 loops/ 하위 디렉토리 탐색
   echo ""
   echo "Children:"
   local children=""
   if [[ -f "$DAG_PATH" ]]; then
     children=$(list_dag_children "$DAG_PATH")
   fi
-  # DAG 없거나 비어있으면 워크트리 디렉토리 탐색으로 추정
-  if [[ -z "$children" ]] && [[ -d "$WT_BASE/$milestone" ]]; then
-    children=$(ls "$WT_BASE/$milestone" 2>/dev/null | sort -u || true)
+  # DAG 없거나 비어있으면 nested loops/ 하위 디렉토리 탐색으로 추정
+  if [[ -z "$children" ]] && [[ -d "$LOOPS_BASE" ]]; then
+    children=$(ls "$LOOPS_BASE" 2>/dev/null | sort -u || true)
   fi
 
   if [[ -z "$children" ]]; then
@@ -208,8 +210,8 @@ cmd_stop() {
   if [[ -f "$DAG_PATH" ]]; then
     children=$(list_dag_children "$DAG_PATH")
   fi
-  if [[ -z "$children" ]] && [[ -d "$WT_BASE/$milestone" ]]; then
-    children=$(ls "$WT_BASE/$milestone" 2>/dev/null | sort -u || true)
+  if [[ -z "$children" ]] && [[ -d "$LOOPS_BASE" ]]; then
+    children=$(ls "$LOOPS_BASE" 2>/dev/null | sort -u || true)
   fi
 
   if [[ -z "$children" ]]; then
@@ -246,8 +248,6 @@ cmd_list() {
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-  WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
-  LOCK_DIR="$PROJECT_ROOT/.loops/locks"
 
   local milestones_base="$PROJECT_ROOT/milestones"
   if [[ ! -d "$milestones_base" ]]; then
@@ -267,11 +267,11 @@ cmd_list() {
     [[ -f "$entry/prd/PRD.md" ]] && prd_state="yes"
     [[ -f "$entry/dispatch/DAG.md" ]] && dag_state="yes"
 
-    # child 개수 — DAG가 있으면 거기서, 없으면 워크트리 디렉토리 갯수
+    # child 개수 — DAG가 있으면 거기서, 없으면 loops/ 하위 디렉토리 갯수
     if [[ -f "$entry/dispatch/DAG.md" ]]; then
       child_count=$(list_dag_children "$entry/dispatch/DAG.md" | grep -c . || true)
-    elif [[ -d "$WT_BASE/$milestone" ]]; then
-      child_count=$(ls "$WT_BASE/$milestone" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    elif [[ -d "$entry/loops" ]]; then
+      child_count=$(ls "$entry/loops" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
     fi
     printf "%-30s %-10s %-10s %s\n" "$milestone" "$prd_state" "$dag_state" "$child_count"
   done
@@ -284,18 +284,19 @@ cmd_cleanup() {
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
   PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-  WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
+  local milestones_base="$PROJECT_ROOT/milestones"
 
   local milestones_to_clean=()
   if [[ -n "$milestone" ]]; then
     validate_milestone "$milestone"
     milestones_to_clean=("$milestone")
   else
-    # 모든 milestone (regular 포함, 워크트리가 있는 것만)
-    [[ -d "$WT_BASE" ]] || { echo "워크트리 베이스 없음. 정리할 것 없음."; return 0; }
+    # 모든 milestone (regular 포함, loops/ 하위가 있는 것만)
+    [[ -d "$milestones_base" ]] || { echo "milestones/ 디렉토리 없음. 정리할 것 없음."; return 0; }
     local entry
-    for entry in "$WT_BASE"/*/; do
+    for entry in "$milestones_base"/*/; do
       [[ -d "$entry" ]] || continue
+      [[ -d "${entry}loops" ]] || continue
       milestones_to_clean+=("$(basename "$entry")")
     done
   fi
@@ -309,19 +310,27 @@ cmd_cleanup() {
   for m in "${milestones_to_clean[@]}"; do
     compute_milestone_paths "$m"
     local cleaned=0
-    if [[ -d "$WT_BASE/$m" ]]; then
+    if [[ -d "$LOOPS_BASE" ]]; then
       local child
       # `for child in $(ls ...)` 패턴은 공백·특수문자 포함 파일명에서 word
       # splitting되어 위험. cmd_stop·cmd_status와 동일하게 while-read로 통일.
       while IFS= read -r child; do
         [[ -z "$child" ]] && continue
         local wt="$(child_wt_path "$m" "$child")"
+        # Path guard — wt가 메인 레포 안의 예상 nested 경로 형태인지 검증.
+        # 변수 누락·외부 경로 누락을 차단해 rm -rf 사고 방지.
+        [[ -n "$wt" ]] || continue
+        [[ "$wt" == "$PROJECT_ROOT"/* ]] || continue
+        case "$wt" in
+          */milestones/*/loops/*/.worktree) ;;
+          *) continue ;;
+        esac
         if [[ -f "$wt/DONE" ]]; then
           echo "[$(now_iso)] cleanup $m/$child (DONE 신호 있음, archival 포함)"
           # 메타 파일 archival — loop.sh cmd_cleanup의 step 4와 동일 로직.
           # loop.sh delegation 대신 inline 재구현 — git worktree로 등록되지
           # 않은 mock·legacy 워크트리에서도 정리가 일관되게 동작하도록.
-          local archive_dir="$PROJECT_ROOT/milestones/$m/loops/$child"
+          local archive_dir="$(child_archive_path "$m" "$child")"
           mkdir -p "$archive_dir"
           local f
           for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
@@ -334,11 +343,7 @@ cmd_cleanup() {
           rm -f "$(child_lock_path "$m" "$child")" 2>/dev/null || true
           cleaned=$((cleaned + 1))
         fi
-      done < <(ls -1 "$WT_BASE/$m" 2>/dev/null || true)
-      # 빈 milestone 디렉토리 제거
-      if [[ -d "$WT_BASE/$m" ]] && [[ -z "$(ls "$WT_BASE/$m" 2>/dev/null)" ]]; then
-        rmdir "$WT_BASE/$m" 2>/dev/null || true
-      fi
+      done < <(ls -1 "$LOOPS_BASE" 2>/dev/null || true)
     fi
     echo "milestone $m: $cleaned 개 cleanup. PRD/DAG 보존."
   done

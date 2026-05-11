@@ -22,12 +22,22 @@ git config user.email "test@example.com"
 git config user.name "Test"
 git commit --allow-empty -m "initial" -q
 
-mkdir -p .loops/locks
-export LOOP_WORKTREE_BASE="$WORK_DIR/myproject-loops"
-mkdir -p "$LOOP_WORKTREE_BASE"
+# 새 nested 정책: worktree와 lock 모두 milestones/<m>/loops/<c>/ 안에.
+# LOOP_WORKTREE_BASE는 더 이상 사용되지 않음 (계산 시 PROJECT_ROOT/milestones/.../worktree 사용)
 
 dispatch() {
   bash "$DISPATCH_SH" "$@"
+}
+
+# nested worktree·lock 경로 헬퍼
+nested_wt() {
+  local m="$1"; local c="$2"
+  echo "$PROJECT/milestones/$m/loops/$c/.worktree"
+}
+
+nested_lock() {
+  local m="$1"; local c="$2"
+  echo "$PROJECT/milestones/$m/loops/$c/.lock"
 }
 
 # fixture helpers
@@ -60,23 +70,23 @@ EOF
 }
 
 seed_worktree() {
-  # 가짜 워크트리 + 메모리 파일 시드
+  # 가짜 워크트리 + 메모리 파일 시드 (nested 경로)
   local m="$1"; local c="$2"
-  local wt="$LOOP_WORKTREE_BASE/$m/$c"
+  local wt="$(nested_wt "$m" "$c")"
   mkdir -p "$wt/.loop"
   echo "# stub" > "$wt/CLAUDE.md"
 }
 
 mark_done() {
   local m="$1"; local c="$2"
-  local wt="$LOOP_WORKTREE_BASE/$m/$c"
+  local wt="$(nested_wt "$m" "$c")"
   mkdir -p "$wt"
   touch "$wt/DONE"
 }
 
 mark_escalated() {
   local m="$1"; local c="$2"
-  local wt="$LOOP_WORKTREE_BASE/$m/$c"
+  local wt="$(nested_wt "$m" "$c")"
   mkdir -p "$wt/.loop"
   cat > "$wt/.loop/ESCALATION.md" <<'EOF'
 ## 에스컬레이션 보고
@@ -118,7 +128,7 @@ echo "OK"
 
 echo ""
 echo "=== TEST 4: status 명령 — regular milestone catch-all ==="
-mkdir -p "$LOOP_WORKTREE_BASE/regular/ad-hoc-task"
+mkdir -p "$(nested_wt regular ad-hoc-task)"
 output=$(dispatch status regular 2>&1)
 echo "$output" | grep -q 'regular' || { echo "FAIL: status regular 출력 없음. got: $output"; exit 1; }
 echo "$output" | grep -qE 'catch-all|PRD/DAG 없음' \
@@ -214,9 +224,9 @@ mark_done cleanup-test child-clean
 # child-leave는 DONE 없음
 
 dispatch cleanup cleanup-test > /dev/null 2>&1 || true
-[[ ! -d "$LOOP_WORKTREE_BASE/cleanup-test/child-clean" ]] \
+[[ ! -d "$(nested_wt cleanup-test child-clean)" ]] \
   || { echo "FAIL: DONE 있는 child-clean이 정리 안 됨"; exit 1; }
-[[ -d "$LOOP_WORKTREE_BASE/cleanup-test/child-leave" ]] \
+[[ -d "$(nested_wt cleanup-test child-leave)" ]] \
   || { echo "FAIL: DONE 없는 child-leave가 정리됨 (정리되면 안 됨)"; exit 1; }
 # PRD/DAG는 보존
 [[ -f "$PROJECT/milestones/cleanup-test/dispatch/DAG.md" ]] \

@@ -3,7 +3,6 @@ scope:
   include: {{scope_include}}
   exclude:
     - rules/**
-    - .loops/**
     - CLAUDE.md
 verify: "{{verify_command}}"
 # test_paths (선택): 테스트 약화 게이트가 추적할 경로/파일명 패턴 (git pathspec).

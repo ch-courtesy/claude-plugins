@@ -5,7 +5,9 @@ description: "autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 �
 
 # spec
 
-`autopilot:loop` 스킬이 입력으로 받는 `.loops/<task-id>/SPEC.md`를 대화형으로 생성. 자율 loop이 도중 질문 없이 완수할 수 있는 자기완결적 SPEC이 목표.
+`autopilot:loop` 스킬이 입력으로 받는 `milestones/<m>/loops/<c>/SPEC.md`를 대화형으로 생성. 자율 loop이 도중 질문 없이 완수할 수 있는 자기완결적 SPEC이 목표.
+
+단일 task는 `<m>=regular`로 자동 정규화 — `<task-id>` 단일 컴포넌트 입력은 `milestones/regular/loops/<task-id>/SPEC.md`에 저장.
 
 ## 호출 방법
 
@@ -20,9 +22,9 @@ description: "autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 �
 
 ### 1. 사전 검사
 
-- task-id 형식 검증 (loop.sh의 `validate_task_id`와 동일 규칙): 비어 있거나, `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 abort. 슬래시(`/`)는 허용 — loop.sh가 lock 파일명에서 `__`로 인코딩하며 nested task-id(`goal-x/sub-task` 등)가 정상 사용 사례. spec 스킬과 loop이 같은 task-id를 받아들여야 `--resume` 라운드트립이 성립.
-- **일반 모드**: `.loops/<task-id>/` 존재 시 abort + `AskUserQuestion`으로 3옵션 (다른 task-id / `--resume` / 백업 후 새로)
-- **--resume 모드**: `.loops/<task-id>/SPEC.md` 부재 시 abort. 잔존 `[NEEDS CLARIFICATION` 마커 0개 시 "해결할 마커 없음" 안내 후 종료
+- task-id 형식 검증 (loop.sh의 `validate_task_id`와 동일 규칙): 비어 있거나, `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 abort. 슬래시(`/`)는 허용 — nested task-id(`goal-x/sub-task` 등)가 정상 사용 사례이며 자연 디렉터리 구조로 매핑된다. 단일 컴포넌트 task-id는 `regular/<input>`으로 정규화 (예: `auth-refactor` → `regular/auth-refactor`). spec 스킬과 loop이 같은 task-id를 받아들여야 `--resume` 라운드트립이 성립.
+- **일반 모드**: `milestones/<m>/loops/<c>/` 존재 시 abort + `AskUserQuestion`으로 3옵션 (다른 task-id / `--resume` / 백업 후 새로)
+- **--resume 모드**: `milestones/<m>/loops/<c>/SPEC.md` 부재 시 abort. 잔존 `[NEEDS CLARIFICATION` 마커 0개 시 "해결할 마커 없음" 안내 후 종료
 
 ### 2. 컨텍스트 탐색
 
@@ -89,11 +91,11 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 - `{{scope_include}}` → frontmatter `scope.include` (YAML inline flow list 형식, 예: `["src/**", "tests/**"]`. 본문 `{{scope_in}}`과 같은 내용을 YAML 문법으로)
 - `{{verify_command}}` → 본문 섹션 5 + frontmatter `verify` (둘 다 같은 placeholder)
 - `{{constraints}}` / `{{risks}}` → 섹션 6/7. 빈 값이면 빈 줄 한 줄로 치환 (헤더는 남김)
-- frontmatter `scope.exclude`는 고정 default(`rules/**`, `.loops/**`, `CLAUDE.md`) — 치환 대상 아님
+- frontmatter `scope.exclude`는 고정 default(`rules/**`, `CLAUDE.md`) — 치환 대상 아님
 
 미해결 항목은 `[NEEDS CLARIFICATION: <구체 질문>]` 마커로 박은 채 작성.
 
-`mkdir -p .loops/<task-id>` 후 SPEC.md 기록.
+`mkdir -p milestones/<m>/loops/<c>` 후 `milestones/<m>/loops/<c>/SPEC.md`에 기록 (단일 컴포넌트 task-id는 `<m>=regular`로 정규화).
 
 ### 8. 자체 검토
 
@@ -102,7 +104,7 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 ### 9. 사용자 최종 검토
 
 SPEC.md 경로·요약 안내 + `AskUserQuestion`으로 검토 결과 수집:
-- 승인: 다음 단계 안내 출력 — *"SPEC 완성: .loops/<task-id>/SPEC.md\n다음 단계: Skill(skill: \"loop\", args: \"start <task-id>\")"*
+- 승인: 다음 단계 안내 출력 — *"SPEC 완성: milestones/<m>/loops/<c>/SPEC.md\n다음 단계: Skill(skill: \"loop\", args: \"start <task-id>\")"*
 - 변경: 어느 섹션을 변경할지 묻고 단계 6/7 재진입
 
 ## --resume 모드 요약
@@ -125,7 +127,7 @@ SPEC.md 경로·요약 안내 + `AskUserQuestion`으로 검토 결과 수집:
 
 ## 규칙
 
-- 본 스킬은 target 프로젝트의 `.loops/<task-id>/SPEC.md`만 작성한다. 다른 파일 생성·수정 안 함.
+- 본 스킬은 target 프로젝트의 `milestones/<m>/loops/<c>/SPEC.md`만 작성한다. 다른 파일 생성·수정 안 함.
 - 모든 결정·선택·확인은 `AskUserQuestion`으로. 자유 텍스트 끝에 질문 종결구 다는 방식 금지 (CLAUDE.md 규칙).
 - 한 주제씩 (한 `AskUserQuestion` 호출에 관련 소문항 최대 4개 허용).
 - `[NEEDS CLARIFICATION` 마커는 `loop start`에서 차단됨. 사용자에게 명시적으로 마커가 박혔음을 알리고 `--resume`으로 해결하도록 안내.
