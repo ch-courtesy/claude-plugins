@@ -22,7 +22,7 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 ### 1. 사전 검사
 
-- task-id 형식 검증 (loop.sh의 `validate_task_id`와 동일 규칙): 비어 있거나, `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 abort. 슬래시(`/`)는 허용 — milestone이 별도 인자로 분리된 뒤의 nested task-id(`sub-area/child` 등)가 정상 사용 사례. spec 스킬과 loop이 같은 (milestone, task-id) 쌍을 받아들여야 `--resume` 라운드트립이 성립.
+- task-id 형식 검증 (loop.sh의 `validate_task_id`와 동일 규칙): 비어 있거나, `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 abort. 슬래시(`/`)는 `--milestone <m>`이 명시된 경우에만 허용 — milestone이 별도 인자로 분리된 뒤의 nested task-id(`sub-area/child` 등)가 정상 사용 사례. `--milestone` 미지정 + 슬래시 포함 task-id는 abort — loop.sh의 `normalize_task_id`가 슬래시 있는 task-id의 첫 컴포넌트를 milestone으로 해석하므로 spec의 default(`regular`)와 어긋나 `--resume` 라운드트립이 깨짐. 슬래시 포함 task-id를 쓰려면 `--milestone <m>`을 명시. spec 스킬과 loop이 같은 (milestone, task-id) 쌍을 받아들여야 `--resume` 라운드트립이 성립.
 - milestone 인자 파싱: `--milestone <m>` 명시 시 `<m>`을 milestone으로 사용. 미지정 시 `regular`(catch-all)을 default로 적용. milestone 자체에도 task-id와 동일한 형식 검증을 적용 (단, milestone은 단일 컴포넌트 — `/` 미허용).
 - **일반 모드**: `milestones/<m>/loops/<c>/` 존재 시 abort + `AskUserQuestion`으로 3옵션 (다른 task-id / `--resume` / 백업 후 새로). 본 절 이후 `<c>`는 task-id를 지칭.
 - **--resume 모드**: `milestones/<m>/loops/<c>/SPEC.md` 부재 시 abort. 잔존 `[NEEDS CLARIFICATION` 마커 0개 시 "해결할 마커 없음" 안내 후 종료
