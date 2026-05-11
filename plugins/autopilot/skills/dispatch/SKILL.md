@@ -97,17 +97,33 @@ for wave in waves:
       <project>-loops/<m>/<c>/DONE                  → 성공
       <project>-loops/<m>/<c>/.loop/ESCALATION.md   → 실패
 
-    누군가 ESCALATION:
-      나머지 진행 중 child들에 Bash(loop stop <m>/<c>)  # fail-fast
+    누군가 ESCALATION (watch_wave exit 101):
+      watch_wave가 나머지 진행 중 child들에 kill -TERM (fail-fast, 자동)
       milestones/<m>/dispatch/DISPATCH_LOG.md 기록
       ESCALATION 카테고리·보고서 사용자 제시
       다음 wave 차단 + 종료 (재계획은 사용자)
 
-    모두 DONE:
+    모두 DONE (watch_wave exit 100):
       DISPATCH_LOG.md 기록 → 다음 wave
+
+    타임아웃 (watch_wave exit 102):
+      watch_wave가 진행 중 child들에 kill -TERM (orphan 방지, 자동)
+      DISPATCH_LOG.md에 타임아웃 + 진행 단계 기록
+      사용자에게 진행 상황·재개 옵션 보고
+      다음 wave 차단 + 종료
 
 모든 wave 통과: 최종 보고서 + 종료
 ```
+
+### watch_wave exit code 매핑
+
+| exit | 의미 | child stop 처리 | 모델 후속 행동 |
+|---|---|---|---|
+| `100` | wave 내 모든 child DONE | 불필요 | DISPATCH_LOG에 wave 성공 기록 → 다음 wave 진입 |
+| `101` | wave 내 누군가 ESCALATION (fail-fast) | watch_wave가 자동 stop | DISPATCH_LOG에 escalation 기록, ESCALATION.md 본문·카테고리 사용자 제시, **다음 wave 차단**, 재계획은 사용자 책임 |
+| `102` | `WATCH_TIMEOUT_SECONDS` 초과 (기본 7200s) | watch_wave가 자동 stop | DISPATCH_LOG에 timeout 기록, 진행 단계·partial 결과 사용자 제시, **다음 wave 차단**, `dispatch resume <m>`으로 이어갈지 사용자 결정 |
+
+이 외 exit code는 dispatch 자체 결함을 의미하므로 즉시 abort + 사용자에게 stderr·exit code 그대로 보고.
 
 **기존 loop과의 분업** — 워크트리·lock·iteration 상한·헌법 준수는 모두 `loop.sh`가 처리. dispatch는 sentinel 파일(`DONE`·`.loop/ESCALATION.md`) **존재만** 감시. 외부 셸 루프 표준 유지(in-process Stop 훅 미사용).
 

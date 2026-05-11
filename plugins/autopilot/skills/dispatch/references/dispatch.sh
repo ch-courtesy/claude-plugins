@@ -435,7 +435,21 @@ cmd_watch_wave() {
     local now_time
     now_time=$(date +%s)
     if [[ $((now_time - start_time)) -ge $timeout ]]; then
-      log_event_internal "watch_wave TIMEOUT after ${timeout}s"
+      log_event_internal "watch_wave TIMEOUT after ${timeout}s — stopping running children"
+      # 진행 중 child들 stop (ESCALATION 분기와 동일한 실패 격리, orphan 방지)
+      for c in "${children[@]}"; do
+        local state
+        state=$(child_state "$milestone" "$c")
+        if [[ "$state" == "running" ]]; then
+          local lock="$(child_lock_path "$milestone" "$c")"
+          local pid
+          pid=$(cat "$lock" 2>/dev/null || echo "")
+          if [[ -n "$pid" ]] && [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            kill -TERM "$pid" 2>/dev/null || true
+            log_event_internal "watch_wave timeout-stop child=$c pid=$pid"
+          fi
+        fi
+      done
       exit 102
     fi
 
