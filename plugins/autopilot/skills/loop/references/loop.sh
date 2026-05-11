@@ -369,10 +369,11 @@ diff_vs_scope() {
 
 grep_new_suppressors() {
   # 커밋된 diff + working tree 변경 양쪽 검사 (미커밋 suppressor도 catch)
+  # .loop/는 워커 메모리(헌법 인용 등 false positive 발생)이므로 검사 제외
   cd "$WT" || return
   {
-    git diff HEAD~1 HEAD 2>/dev/null
-    git diff HEAD 2>/dev/null
+    git diff HEAD~1 HEAD -- ':(exclude).loop/**' 2>/dev/null
+    git diff HEAD -- ':(exclude).loop/**' 2>/dev/null
   } \
     | grep -E '^\+' \
     | grep -E '#[[:space:]]*noqa|@ts-ignore|eslint-disable|#pragma[[:space:]]+warning[[:space:]]+disable' \
