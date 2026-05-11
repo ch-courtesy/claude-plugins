@@ -36,7 +36,7 @@ echo "OK: 키워드 마커"
 echo ""
 echo "=== TEST 4: SKILL.md에 ops 서브커맨드 7종 명시 ==="
 for sub in 'start' 'status' 'stop' 'list' 'cleanup' 'logs' 'resume'; do
-  grep -qE "^|[ \t]\`?dispatch ${sub}\b|^|[ \t]${sub}[ \t]\|" "$SKILL_MD" \
+  grep -qE "dispatch ${sub}|### ${sub}" "$SKILL_MD" \
     || { echo "FAIL: SKILL.md에 '${sub}' 서브커맨드 안내 없음"; exit 1; }
 done
 echo "OK: 서브커맨드 7종"
@@ -62,7 +62,7 @@ echo "OK: fail-fast"
 
 echo ""
 echo "=== TEST 8: SKILL.md에 분해 하드 캡 명시 ==="
-grep -qE '8|20|2|cap|캡' "$SKILL_MD" \
+grep -qE '≤ 8|≤ 20|하드 캡|hard cap' "$SKILL_MD" \
   || { echo "FAIL: SKILL.md에 분해 하드 캡 명시 없음"; exit 1; }
 echo "OK: 하드 캡"
 
