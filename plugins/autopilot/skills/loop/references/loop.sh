@@ -219,7 +219,56 @@ list_test_files() {
     )
   fi
 
+  local tracked
+  tracked=$(cd "$WT" 2>/dev/null && git ls-files -- "${pathspecs[@]}" 2>/dev/null | sort -u)
+
+  # test_sweep_paths 선언 시 매칭 파일을 weakening 비교 셋에서 제외 (issue #66).
+  # 합법적 sweep(예: 단순 rename, 광범위 cleanup 후 신규 파일 추가)을 SPEC 작성 시점에
+  # 사용자 승인으로 화이트리스트화. 워커가 워크트리의 SPEC.md를 수정하면 scope.exclude
+  # 게이트가 차단(헌법 §7) — 안전.
+  local sweep_files
+  sweep_files=$(list_sweep_files)
+  if [[ -z "$sweep_files" ]]; then
+    echo "$tracked"
+  else
+    # subtract sweep_files from tracked. awk associative array로 O(n+m) 비교.
+    awk -v s="$sweep_files" '
+      BEGIN { n = split(s, lines, "\n"); for (i=1; i<=n; i++) if (lines[i] != "") seen[lines[i]] = 1 }
+      !seen[$0]
+    ' <<< "$tracked"
+  fi
+}
+
+list_sweep_files() {
+  # SPEC.md frontmatter test_sweep_paths에 매칭되는 git-tracked 파일 (sorted unique).
+  # 미선언·매칭 0건 시 빈 출력.
+  local sweep_paths
+  sweep_paths=$(read_scope_yaml | yq '.test_sweep_paths[]' 2>/dev/null || true)
+  [[ -z "${sweep_paths// }" ]] && return 0
+
+  local pathspecs=()
+  while IFS= read -r p; do
+    [[ -z "$p" ]] && continue
+    pathspecs+=("$p")
+  done <<< "$sweep_paths"
+  [[ ${#pathspecs[@]} -eq 0 ]] && return 0
+
+  # bash 3.2: 빈 배열 우회는 위에서 ${#pathspecs[@]} -eq 0 가드로 이미 처리.
   cd "$WT" 2>/dev/null && git ls-files -- "${pathspecs[@]}" 2>/dev/null | sort -u
+}
+
+# test_sweep_paths가 선언됐으나 이터 시작 시점에 매칭 파일이 0건이면 stderr 경고.
+# halt하지 않음 — 패턴 오타·신규 파일 추가 전 상태 등 정당한 케이스 보존.
+warn_sweep_no_match() {
+  local sweep_declared
+  sweep_declared=$(read_scope_yaml | yq 'has("test_sweep_paths")' 2>/dev/null || echo "false")
+  [[ "$sweep_declared" != "true" ]] && return 0
+
+  local sweep_files
+  sweep_files=$(list_sweep_files)
+  if [[ -z "$sweep_files" ]]; then
+    echo "[$(now_iso)] WARN: SPEC.md의 test_sweep_paths가 선언됐으나 매칭 파일 없음 — 패턴 오타 또는 신규 파일 추가 전 상태 가능" >&2
+  fi
 }
 
 # 주어진 파일 목록의 결합 해시. 누락된 파일은 sha256sum이 silent 실패하므로 자연스레
@@ -422,8 +471,13 @@ iterate() {
 
   echo "[$(now_iso)] 이터 #$n 시작"
 
+  # test_sweep_paths 선언됐으나 매칭 0건이면 경고 (issue #66, AC2).
+  warn_sweep_no_match
+
   # 시작 시점의 테스트 파일 set 캡처. 종료 시점에 같은 set만 다시 해시해 비교 →
   # 삭제·수정만 감지, 신규 추가는 통과 (TDD RED 단계 보호).
+  # list_test_files()는 test_sweep_paths 매칭 파일을 결과에서 제외하므로
+  # 자동으로 weakening 비교 셋에서 sweep 영역이 빠진다 (AC1·5).
   local start_test_files start_hash_tests start_hash_deps
   start_test_files=$(list_test_files)
   start_hash_tests=$(hash_listed_files "$start_test_files")

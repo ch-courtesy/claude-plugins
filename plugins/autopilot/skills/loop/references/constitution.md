@@ -237,7 +237,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 - 거짓 `DONE` 또는 거짓 `.loop/ESCALATION.md` 작성
 
 다음 항목은 드라이버가 객관 검증한다 — 위반 시 자동 halt + 에스컬레이션:
-- 테스트 약화 → `tests/**` 해시 비교
+- 테스트 약화 → `tests/**` 해시 비교 (SPEC frontmatter `test_sweep_paths` 선언 경로는 해시 비교에서 제외 — 합법적 sweep을 사용자 승인 시점에 화이트리스트화)
 - 의존성 변경 → 매니페스트 해시
 - scope 위반 → `git diff --name-only` vs `scope.include`
 - suppressor 신규 → `git diff` grep

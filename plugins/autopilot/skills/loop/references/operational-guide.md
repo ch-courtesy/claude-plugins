@@ -152,7 +152,7 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 |---|---|
 | 이터 상한 | `MAX_ITERATIONS` (기본 30) |
 | 시계 캡 | `WALL_CLOCK_MINUTES` (기본 120) |
-| 테스트 약화 | 이터 시작 시점의 테스트 파일 set만 종료 후 다시 해시 비교 — **삭제·수정만 감지, 신규 추가는 통과** (TDD RED 단계 보호, 헌법 §0). 기본 추적: `tests/`·`test/`·`__tests__/`·`spec/`·`src/test/` 디렉토리 + co-located 파일명 (`*.test.{js,ts,jsx,tsx,py}`·`*.spec.{js,ts,rb}`·`*_test.{go,py,rb}`·`test_*.py`·`*_spec.rb`). 비표준 컨벤션은 SPEC.md frontmatter `test_paths` (git pathspec 배열)로 override. `git ls-files`로 추적 파일만 검사 (gitignored 제외). |
+| 테스트 약화 | 이터 시작 시점의 테스트 파일 set만 종료 후 다시 해시 비교 — **삭제·수정만 감지, 신규 추가는 통과** (TDD RED 단계 보호, 헌법 §0). 기본 추적: `tests/`·`test/`·`__tests__/`·`spec/`·`src/test/` 디렉토리 + co-located 파일명 (`*.test.{js,ts,jsx,tsx,py}`·`*.spec.{js,ts,rb}`·`*_test.{go,py,rb}`·`test_*.py`·`*_spec.rb`). 비표준 컨벤션은 SPEC.md frontmatter `test_paths` (git pathspec 배열)로 override. `git ls-files`로 추적 파일만 검사 (gitignored 제외). 합법적 sweep(rename·cleanup 등)은 SPEC frontmatter `test_sweep_paths` (git pathspec 배열) 선언으로 해시 비교 셋에서 제외 — sweep 밖 기존 테스트는 여전히 보호. 선언됐으나 매칭 파일 0건이면 stderr 경고만 (halt 없음). |
 | 의존성 동결 | `package.json`·`requirements.txt`·`Cargo.toml` 등 매니페스트 해시 |
 | Scope 위반 | git diff (커밋된 + working tree 미커밋) vs SPEC.md frontmatter의 scope.include·exclude. 미커밋 변경도 검사해 claude 비정상 종료 gap 차단. 미추적 신규 파일은 미커버 — halt 시 `git add -A && git stash`로 보호. |
 | Suppressor 신규 | `noqa`·`@ts-ignore`·`eslint-disable`·`#pragma warning disable` 신규 추가 (커밋된 diff + working tree 미커밋 양쪽). |
