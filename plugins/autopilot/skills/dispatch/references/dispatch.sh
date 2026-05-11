@@ -116,7 +116,7 @@ child_state() {
     return
   fi
   # 워크트리 없음 — cleanup 후 archive 확인 (PRD/DAG 보존, .loop/* 메타 이주)
-  local archive_dir="${PROJECT_ROOT:-}/milestones/$milestone/loops/$child"
+  local archive_dir="$PROJECT_ROOT/milestones/$milestone/loops/$child"
   if [[ -d "$archive_dir" ]] && [[ -f "$archive_dir/PLAN.md" ]]; then
     echo "archived"
     return

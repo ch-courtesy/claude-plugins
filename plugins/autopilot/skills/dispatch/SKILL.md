@@ -139,7 +139,7 @@ for wave in waves:
 
 `Bash(bash $SKILL_DIR/references/dispatch.sh status <m>)`. 출력:
 - PRD 존재 / DAG 존재 / wave 진행 상태
-- 각 child loop의 state (running/done/escalated/idle/prepared/archived)
+- 각 child loop의 state (running/done/escalated/idle/missing/archived)
 - `regular` milestone의 경우 child loop 상태만 (PRD/DAG 없음)
 
 ### stop <m>
