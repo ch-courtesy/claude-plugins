@@ -7,7 +7,7 @@ description: 자율 수행 루프(랄프 루프) 운영 인터페이스. start/s
 
 자율 수행 루프의 통합 운영 인터페이스. 인자로 subcommand와 sub args를 받아 자율 task lifecycle을 관리합니다.
 
-본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`), 외부 셸 드라이버(`references/loop.sh`), SPEC·메모리 파일 템플릿이 모두 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태(`.loops/<task-id>/`, `.loops/locks/`)만 생성됩니다.
+본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`), 외부 셸 드라이버(`references/loop.sh`), SPEC·메모리 파일 템플릿이 모두 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태(`milestones/<m>/loops/<c>/` 메타 + `.loops/locks/` 락)만 생성됩니다. ad-hoc 단일 task는 `regular` milestone(catch-all)로 자동 정규화됩니다.
 
 ## 호출 방법
 
@@ -31,9 +31,9 @@ Skill(skill: "spec", args: "<task-id>")
 
 검증 후 워크트리·락 생성 + 이터레이션 루프 시작.
 
-`Bash(bash $SKILL_DIR/references/loop.sh start <task-id> [...flags])` 호출. loop.sh는 다음을 검증·수행:
-- `--spec <path>` 지정 시 외부 파일을 `.loops/<task-id>/SPEC.md`로 복사 (prepare 대체)
-- `.loops/<task-id>/SPEC.md` 존재 + `[NEEDS CLARIFICATION]` 마커 없음 + placeholder 모두 치환됨
+`Bash(bash $SKILL_DIR/references/loop.sh start <task-id> [...flags])` 호출. task-id가 단일 컴포넌트면 `regular/<input>`로 자동 정규화. loop.sh는 다음을 검증·수행:
+- `--spec <path>` 지정 시 외부 파일을 `milestones/<m>/loops/<c>/SPEC.md`로 복사 (prepare 대체)
+- `milestones/<m>/loops/<c>/SPEC.md` 존재 + `[NEEDS CLARIFICATION]` 마커 없음 + placeholder 모두 치환됨 (legacy `.loops/<task-id>/SPEC.md` fallback 없음 — v0.2 cutover)
 - 락 미보유
 - 워크트리 없으면 생성 (sibling 위치 `<project>/../<project-name>-loops/<task-id>/`)
 - 헌법(`references/constitution.md`)을 워크트리의 CLAUDE.md로 복사
@@ -80,10 +80,10 @@ target 프로젝트에 `.loops/locks/` 부재 시 start 첫 호출에 자동:
 
 ## 헌법 customization
 
-기본 헌법은 `references/constitution.md`. 프로젝트별 override는 향후 `.loops/constitution.override.md`(target) 메커니즘으로 추가 예정 (현재 미지원).
+기본 헌법은 `references/constitution.md`. 프로젝트별 override는 향후 `milestones/<m>/loops/<c>/constitution.override.md`(target) 메커니즘으로 추가 예정 (현재 미지원).
 
 ## 규칙
 
-- 본 스킬은 target 프로젝트의 `.loops/`만 다룬다. `rules/`나 다른 디렉토리에 파일 생성하지 않음.
+- 본 스킬은 target 프로젝트의 `milestones/<m>/loops/<c>/`(메타) 및 `.loops/locks/`(락)만 다룬다. `rules/`나 다른 디렉토리에 파일 생성하지 않음.
 - subcommand 위임 시 결과 코드를 그대로 사용자에게 보여주지 않고 형식화·요약.
 - 사용자가 명시적 요청한 subcommand만 실행. 다른 subcommand 자동 추론하지 않음.
