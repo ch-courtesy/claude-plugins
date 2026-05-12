@@ -18,7 +18,7 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 
 처리:
 1. ESCALATION.md의 "필요한 결정" 섹션 검토
-2. 워크트리의 SPEC.md 직접 수정 (신규 contract: `milestones/<m>/loops/<c>/.worktree/milestones/<m>/loops/<c>/SPEC.md` / legacy: `milestones/<m>/loops/<c>/.worktree/.loop/SPEC.md`. SPEC 작성은 spec 스킬 사용: Skill(skill: "spec", args: "<task-id>"))
+2. 워크트리의 SPEC.md 직접 수정. 워크트리 루트는 `milestones/<m>/loops/<c>/.worktree`이고 그 안 SPEC 위치는 contract에 따라 다름 — 신규 contract: `milestones/<m>/loops/<c>/SPEC.md`, legacy: `.loop/SPEC.md`. (SPEC 작성은 spec 스킬 사용: Skill(skill: "spec", args: "<task-id>"))
 3. ESCALATION.md 정리 후 재시작
 
 ## architecture-gap (코드 구조 변경 필요)

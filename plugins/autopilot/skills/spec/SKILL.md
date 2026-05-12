@@ -183,7 +183,7 @@ slug=$(printf '%s' "$title" \
    - `branch="feat/<task-id>-<slug>"` (slug 비-empty 시)
    - `branch="feat/<task-id>"` (slug fallback)
 4. `git show-ref --verify --quiet "refs/heads/$branch"`로 충돌 확인. 이미 존재하면 사용자에게 알리고 `AskUserQuestion`으로 (덮어쓰기 / 새 이름 / 종료) 선택.
-5. `git checkout -b "$branch"`로 분기 (main에서). main 작업트리의 다른 변경은 그대로 따라옴 (이를 의도). SPEC.md만 add·commit하므로 다른 파일은 새 commit에 들어가지 않는다.
+5. `git checkout -b "$branch" main`으로 main에서 명시적으로 분기. base를 명시하지 않으면 호출 시점 HEAD에서 분기되어 비-main 브랜치에서 호출 시 엉뚱한 base로 feat 브랜치가 만들어진다. main 작업트리의 다른 변경은 그대로 따라옴 (이를 의도). SPEC.md만 add·commit하므로 다른 파일은 새 commit에 들어가지 않는다.
 6. `git add "milestones/<m>/loops/<c>/SPEC.md"`로 명시적으로 SPEC.md만 staging (`git add .` 절대 금지).
 7. `git commit -m "feat(spec): <task-id> — <title>" -- "milestones/<m>/loops/<c>/SPEC.md"`로 SPEC만 commit. `-- <pathspec>` 형식이 다른 staged 파일을 commit에서 격리.
 8. `git checkout "$orig_branch"`로 원래 브랜치 복귀.

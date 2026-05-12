@@ -216,7 +216,7 @@ find_feat_branch() {
   if [[ -z "$matches" ]]; then
     return 1
   fi
-  count=$(printf '%s\n' "$matches" | grep -c . 2>/dev/null || echo 0)
+  count=$(printf '%s\n' "$matches" | grep -c .)
   if [[ $count -ge 2 ]]; then
     die "여러 feat 브랜치가 task-id '$task_id'와 매칭됨 (모호):\n$matches\n수동으로 하나 남기고 다른 것 정리 후 재시도."
   fi
