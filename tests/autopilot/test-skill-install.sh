@@ -97,6 +97,32 @@ grep -q -- '--resume' "$SPEC_SKILL_MD" \
 echo "OK: --resume 마커"
 
 echo ""
+echo "=== spec/SKILL.md M2 finalize 자동 branch+commit 명세 검증 ==="
+# spec 스킬 단계 9(또는 그 이후)에 SPEC 최종 승인 직후 main에서 feat 브랜치를 분기하고
+# SPEC.md를 commit하는 finalize 자동화가 명시돼야 한다 (M2). M1의 slugify.sh를 호출하고
+# 임시 워크트리에서 git 동작이 일어나 main 작업트리는 변경되지 않아야 한다.
+grep -q 'allowed-tools' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md frontmatter에 'allowed-tools' 키 없음"; exit 1; }
+SPEC_ALLOWED=$(grep '^allowed-tools:' "$SPEC_SKILL_MD")
+for tool in 'git worktree' 'git add' 'git commit'; do
+  echo "$SPEC_ALLOWED" | grep -qF "$tool" \
+    || { echo "FAIL: spec/SKILL.md allowed-tools에 '$tool' 권한 누락 (M2 finalize)"; exit 1; }
+  echo "OK: allowed-tools에 $tool"
+done
+grep -q 'slugify\.sh' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md 본문이 references/slugify.sh를 호출하지 않음 (M2)"; exit 1; }
+echo "OK: 본문이 slugify.sh 호출"
+grep -q 'git worktree add' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md 본문에 'git worktree add' 단계 부재 (M2 임시 워크트리 finalize)"; exit 1; }
+echo "OK: 본문에 'git worktree add'"
+grep -q 'git worktree remove' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md 본문에 'git worktree remove' 정리 단계 부재 (M2)"; exit 1; }
+echo "OK: 본문에 'git worktree remove'"
+grep -qE 'feat/<(task-id|m)' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md 본문에 'feat/<task-id>...' 브랜치 이름 명세 부재 (M2)"; exit 1; }
+echo "OK: 본문에 feat/<task-id> 브랜치 명세"
+
+echo ""
 echo "=== prd 스킬 구조 검증 ==="
 PRD_SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/prd"
 for f in SKILL.md \

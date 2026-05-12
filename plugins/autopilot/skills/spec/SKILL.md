@@ -1,7 +1,7 @@
 ---
 name: spec
 description: "autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 생성. 한 질문씩 명확화·섹션별 승인·EARS 포맷·[NEEDS CLARIFICATION] 마커로 자율 loop이 도중 질문 없이 완수 가능한 자기완결적 SPEC을 만듭니다. 호출 'Skill(skill=\"spec\", args=\"<task-id> [--milestone <m>] [--resume]\")'. milestone 미지정 시 `regular`(catch-all)을 default로 적용."
-allowed-tools: AskUserQuestion, Read, Write, Bash(git log:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*), Bash(gh issue view:*)
+allowed-tools: AskUserQuestion, Read, Write, Bash(git log:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git for-each-ref:*), Bash(git worktree:*), Bash(git add:*), Bash(git commit:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*), Bash(sed:*), Bash(gh issue view:*), Bash(bash:*), Bash(mktemp:*), Bash(cp:*), Bash(rm:*)
 ---
 
 # spec
@@ -17,9 +17,9 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 또는 사용자가 자연어로 의도 전달 시 모델이 자동 호출.
 
-## 9단계 워크플로
+## 10단계 워크플로
 
-호출 시 다음 9단계를 TodoWrite로 등록·실행. 각 단계는 사용자 결정·승인을 `AskUserQuestion`으로 받습니다.
+호출 시 다음 10단계를 TodoWrite로 등록·실행. 각 단계는 사용자 결정·승인을 `AskUserQuestion`으로 받으며, 단계 10(자동 finalize)만 단계 9 승인 직후 자동 실행됩니다.
 
 ### 1. 사전 검사
 
@@ -106,16 +106,51 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 ### 9. 사용자 최종 검토
 
 SPEC.md 경로·요약 안내 + `AskUserQuestion`으로 검토 결과 수집:
-- 승인: 다음 단계 안내 출력 — *"SPEC 완성: milestones/<m>/loops/<c>/SPEC.md\n다음 단계: Skill(skill: \"loop\", args: \"start <m>/<c>\")"* (milestone이 default `regular`이면 `start <c>` 단축형도 동등 — loop.sh가 자동 정규화)
+- 승인: 단계 10(자동 finalize)으로 진행 — 사용자 추가 입력 없이 즉시 feat 브랜치 분기·SPEC commit 실행.
 - 변경: 어느 섹션을 변경할지 묻고 단계 6/7 재진입
+
+### 10. 자동 finalize — feat branch 분기 + SPEC commit
+
+단계 9에서 사용자가 "승인"한 직후 자동 실행. 사용자 입력 없음.
+
+**목표**: SPEC.md를 main에서 분기하는 `feat/<task-id>-<slug>` 브랜치에 commit해 `loop start`가 워크트리에 SPEC을 자연 포함한 채 시작할 수 있게 한다. main 작업트리는 변경 전후 동일 (단계 7에서 작성된 untracked SPEC.md 그대로 보존).
+
+#### 절차
+
+1. **브랜치 이름 도출** (M1의 slugify 헬퍼 사용):
+   - `title=$(grep -m1 '^# ' milestones/<m>/loops/<c>/SPEC.md | sed 's/^# *//')`
+   - `feat_branch=$(bash plugins/autopilot/skills/spec/references/slugify.sh "<m>/<c>" "$title")`
+   - 출력: `feat/<m>/<c>-<slug>` 또는 fallback `feat/<m>/<c>` (slug 빈 경우). milestone이 default `regular`이면 task-id는 `regular/<c>` 형식.
+2. **기존 브랜치 충돌 검사**:
+   - `git for-each-ref --format='%(refname:short)' "refs/heads/$feat_branch"`이 비어있지 않으면 abort + `AskUserQuestion`으로 처리 선택 (수동 정리 후 재호출 / task-id 변경). 자동 덮어쓰기 금지.
+3. **임시 워크트리 생성** (main 격리):
+   - `tmp_wt=$(mktemp -d)`
+   - `git worktree add "$tmp_wt" -b "$feat_branch" main` — main에서 분기하는 격리된 워크트리. main 작업트리는 그대로.
+4. **SPEC.md를 임시 워크트리로 cp + commit**:
+   - `mkdir -p "$tmp_wt/milestones/<m>/loops/<c>"`
+   - `cp "milestones/<m>/loops/<c>/SPEC.md" "$tmp_wt/milestones/<m>/loops/<c>/SPEC.md"`
+   - `git -C "$tmp_wt" add "milestones/<m>/loops/<c>/SPEC.md"`
+   - `git -C "$tmp_wt" commit -m "spec(<m>/<c>): SPEC.md 초안"`
+5. **임시 워크트리 제거** — feat 브랜치는 main repo에 잔존:
+   - `git worktree remove "$tmp_wt"` (실패 시 `--force`)
+   - `rm -rf "$tmp_wt"` (mktemp 잔존물 정리)
+6. **사용자 안내**:
+   - *"SPEC commit됨: `$feat_branch`. main 작업트리의 SPEC.md는 untracked로 보존됩니다 (필요 시 `git clean -f milestones/<m>/loops/<c>/SPEC.md`로 정리).\n다음 단계: Skill(skill: \"loop\", args: \"start <m>/<c>\")"* (milestone이 default `regular`이면 `start <c>` 단축형도 동등 — loop.sh가 자동 정규화)
+
+#### 제약
+
+- 단계 10의 git 동작은 모두 임시 워크트리(`mktemp -d`)에서 일어난다. main 작업트리의 staged/unstaged/untracked 상태는 단계 10 시작·종료 시점 동일해야 한다.
+- 슬러그화 결정성: 같은 SPEC §1 제목은 항상 같은 `feat_branch` 이름을 만든다 (`references/slugify.sh`).
+- 단계 10 실패(branch 충돌·worktree add 실패 등) 시 명확한 에러 메시지로 abort하고 임시 워크트리·브랜치 잔존물을 정리. 부분 실패 상태로 종료하지 않는다.
 
 ## --resume 모드 요약
 
-위 9단계 중:
+위 10단계 중:
 - 1: 마커 0개 시 즉시 종료
 - 3: 생략 (이미 SPEC 존재)
 - 4, 5: 마커 위치 기준으로 좁힘
 - 6: 마커 박힌 섹션만
+- 10: feat 브랜치가 이미 존재할 수 있음 — 충돌 검사 단계에서 사용자에게 처리 선택 (브랜치 덮어쓰기는 자동 금지; 신규 SPEC commit을 기존 브랜치 위에 추가하려면 사용자가 명시적으로 결정)
 - 나머지 동일
 
 ## 모듈 구성 (references/)
