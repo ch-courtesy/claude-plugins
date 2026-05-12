@@ -27,17 +27,9 @@ verify: "bash tests/autopilot/test-loop-pr-phase.sh && bash tests/autopilot/test
 # loop: DONE 이후 PR 생성·재사용 단계 (opt-in)
 
 ## 무엇을 만들 것인가
-<!-- WHAT/HOW 방어선: 이 섹션은 *무엇을* 만드는지만 적습니다. 기술 스택·파일 경로·라이브러리·클래스명 등 구현 결정은 "제약" 섹션으로 옮기세요. loop이 자율적으로 접근법을 조정할 수 있도록 의도를 기술-중립적으로. -->
 `autopilot:loop`이 task를 DONE으로 마친 직후, opt-in으로 활성화되는 새 단계로 진입해 같은 worktree에서 PR 생성(또는 동일 브랜치 open PR 재사용)까지 수행하도록 확장한다. 이 단계는 자동 push, default 브랜치 자동 감지, SPEC + commits 기반 body 합성, 숫자 task-id의 이슈 자동 링크를 책임지며, reviewer·label·assignee 등 메타데이터는 일체 설정하지 않는다. 단계가 끝나도 worktree와 local 브랜치는 보존되어 후속 단계(리뷰 모니터·자동 fix 사이클)가 인계받는다. 리뷰 코멘트 모니터링·코멘트 분류·자동 fix·답글 게시·worktree 정리는 이번 SPEC의 비-목표이며 별도 SPEC으로 다룬다.
 
 ## 수용 기준 (EARS)
-<!-- 5개 EARS 패턴 중 하나로 작성. 자세한 사례는 references/ears-patterns.md 참조.
-  - Ubiquitous: "The system shall <응답>"
-  - Event-driven: "When <트리거>, the system shall <응답>"
-  - State-driven: "While <상태>, the system shall <지속 응답>"
-  - Optional: "Where <조건>, the system shall <응답>"
-  - Unwanted: "If <불가용/오류>, then the system shall <복구·거부>"
-각 기준이 verify 명령 안에서 *어떤 형태로든* fail 가능해야 합니다 (Independent-Test 규칙). 불가능한 기준은 [NEEDS CLARIFICATION: <질문>]으로 표시. -->
 1. request-review 옵션이 비활성 상태인 동안, 루프는 PR 생성 단계를 실행하지 않고 종료한다.
 2. request-review 옵션이 활성 상태이고 task가 DONE에 도달한 경우, 루프는 현재 브랜치를 push하고 동일 브랜치의 open PR이 없으면 default 브랜치를 base로 새 PR을 생성하며, 있으면 기존 PR을 재사용한다.
 3. 동일 브랜치에 이미 open PR이 존재할 때, 루프는 새 PR을 생성하지 않고 기존 PR의 제목과 body를 in-place로 갱신한다.
@@ -73,8 +65,6 @@ verify: "bash tests/autopilot/test-loop-pr-phase.sh && bash tests/autopilot/test
 - e2e 단계의 GitHub 호출은 `gh` CLI stub(mock) 또는 일회용 sandbox 레포 중 워커가 선택하되, 둘 다 verify 안에서 0 exit으로 수렴해야 한다.
 
 ## 제약 (있을 때만)
-<!-- 환경·도구·호환성·성능 등 알려진 제약. 워커가 이를 모르면 잘못된 가정으로 시간 낭비.
-  WHAT/HOW 방어선 결과 "무엇을 만들 것인가"에서 빠진 기술 스택·라이브러리·테스트 스타일 가이드도 여기에. -->
 - `gh` CLI 설치 + OAuth 인증 환경(개인 토큰·CI 토큰 미사용).
 - `loop.sh`는 이미 약 1063줄. 새 phase 로직은 별도 함수 또는 helper script(예: `references/pr-phase.sh`)로 분리해 driver 비대화 회피.
 - base 브랜치 자동 감지는 `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`와 `git symbolic-ref refs/remotes/origin/HEAD` 둘 중 하나로 충분. 둘 다 실패하면 수용 기준 10에 따라 abort.
@@ -85,7 +75,6 @@ verify: "bash tests/autopilot/test-loop-pr-phase.sh && bash tests/autopilot/test
 - 작업 환경: macOS·zsh. driver와 helper는 bash로 작성.
 
 ## 위험 (있을 때만)
-<!-- 이미 알려진 dead-end·함정·금지 영역. 워커의 NOTES.md "실패한 접근"의 사전 시드. -->
 - `gh pr edit`이 사용자의 수기 편집을 덮어쓸 위험. 제약의 marker fence로 격리하지만, 기존 PR body에 fence가 없으면 한 번은 전면 재작성됨 — 첫 갱신 직전 fence 삽입 로직 필요.
 - default 브랜치 자동 감지 실패(신생 fork·shallow clone·`origin/HEAD` 미설정) 환경에서는 자동 fallback 없이 abort — 수용 기준 10의 의도 동작.
 - 동일 task-id가 여러 branch로 분기된 경우 PR이 branch별로 분리됨(드물지만 추적 분산 가능).
