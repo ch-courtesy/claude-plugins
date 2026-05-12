@@ -37,15 +37,16 @@ verify: "{{verify_command}}"
 
 ## 수용 기준 (EARS)
 <!-- 5개 EARS 패턴 중 하나로 작성. 자세한 사례는 references/ears-patterns.md 참조.
-  - Ubiquitous: "The system shall <응답>"
-  - Event-driven: "When <트리거>, the system shall <응답>"
-  - State-driven: "While <상태>, the system shall <지속 응답>"
-  - Optional: "Where <조건>, the system shall <응답>"
-  - Unwanted: "If <불가용/오류>, then the system shall <복구·거부>"
+  작성 언어 default는 `ko`(프로젝트 기본 언어). 아래 형식은 ko 기준 — en·hybrid는
+  references/ears-patterns.md "EARS 작성 언어" 절 참조.
+  - Ubiquitous: "시스템은 <응답>한다"
+  - Event-driven: "<트리거>할 때, 시스템은 <응답>한다"
+  - State-driven: "<상태>인 동안, 시스템은 <지속 응답>한다"
+  - Optional: "<조건>인 경우, 시스템은 <응답>한다"
+  - Unwanted: "<불가용/오류>이면, 시스템은 <복구·거부>한다"
 
-작성 언어 default는 `ko`(프로젝트 기본 언어). frontmatter `ears_language` 키로
-개별 SPEC이 `en`·`ko`·`hybrid` 중 하나를 override할 수 있다. 언어 정책·3모드
-형식·예시는 references/ears-patterns.md "EARS 작성 언어" 절 참조.
+frontmatter `ears_language` 키로 개별 SPEC이 `en`·`ko`·`hybrid` 중 하나를
+override할 수 있다(미명시 시 ko).
 
 각 기준이 verify 명령 안에서 *어떤 형태로든* fail 가능해야 합니다 (Independent-Test 규칙). 불가능한 기준은 [NEEDS CLARIFICATION: <질문>]으로 표시. -->
 {{acceptance_criteria}}

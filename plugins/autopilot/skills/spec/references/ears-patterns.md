@@ -16,7 +16,9 @@ SPEC frontmatter `ears_language` 키로 개별 SPEC이 default를 override할 �
 - `en` — 본문·키워드 모두 영어. 표준 EARS 영어 키워드(`When` · `While` · `Where` · `If` · `shall`).
   예: "When a user submits an empty password, the system shall reject the request with a 400 status."
 - `hybrid` — EARS 영어 키워드(`When` · `While` · `Where` · `If` · `shall`)는 그대로 두고 본문만
-  한국어로 작성. 형식 정의: `<EARS 영어 키워드> <한국어 본문>, the system shall <한국어 응답>한다.`
+  한국어로 작성. 형식 정의:
+  - 트리거·조건·오류가 있는 패턴(Event/State/Optional/Unwanted): `<EARS 영어 키워드> <한국어 본문>, the system shall <한국어 응답>한다.`
+  - Ubiquitous(트리거 없음): `The system shall <한국어 응답>한다.`
   예시 라인: When 사용자가 빈 비밀번호를 제출하면, the system shall 400으로 요청을 거부한다.
 
 자유 텍스트→EARS 변환 시에도 동일 언어 규칙이 적용된다(아래 §변환 가이드).
