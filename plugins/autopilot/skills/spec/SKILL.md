@@ -1,7 +1,7 @@
 ---
 name: spec
 description: "autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 생성. 한 질문씩 명확화·섹션별 승인·EARS 포맷·[NEEDS CLARIFICATION] 마커로 자율 loop이 도중 질문 없이 완수 가능한 자기완결적 SPEC을 만듭니다. SPEC.md 작성 후 결정적 슬러그화 규칙(ASCII 영숫자·하이픈만)으로 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·SPEC.md를 commit해 loop·PR 흐름이 단일 feature 브랜치로 통합되게 합니다. 호출 'Skill(skill=\"spec\", args=\"<task-id> [--milestone <m>] [--resume]\")'. milestone 미지정 시 `regular`(catch-all)을 default로 적용."
-allowed-tools: AskUserQuestion, Read, Write, Skill, Bash(git log:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git checkout:*), Bash(git branch:*), Bash(git add:*), Bash(git commit:*), Bash(git show-ref:*), Bash(git for-each-ref:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*), Bash(echo:*), Bash(head:*), Bash(tr:*), Bash(sed:*), Bash(gh issue view:*)
+allowed-tools: AskUserQuestion, Read, Write, Skill, Bash(git log:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git checkout:*), Bash(git branch:*), Bash(git add:*), Bash(git commit:*), Bash(git show-ref:*), Bash(git for-each-ref:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*), Bash(echo:*), Bash(head:*), Bash(tr:*), Bash(sed:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue create:*), Bash(gh project item-list:*), Bash(gh project item-edit:*), Bash(gh project item-add:*), Bash(gh api:*)
 ---
 
 # spec
@@ -17,9 +17,9 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 또는 사용자가 자연어로 의도 전달 시 모델이 자동 호출.
 
-## 9단계 워크플로
+## 10단계 워크플로
 
-호출 시 다음 9단계를 TodoWrite로 등록·실행. 각 단계는 사용자 결정·승인을 `AskUserQuestion`으로 받습니다.
+호출 시 다음 10단계를 TodoWrite로 등록·실행. 각 단계는 사용자 결정·승인을 `AskUserQuestion`으로 받습니다.
 
 ### 1. 사전 검사
 
@@ -35,14 +35,14 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 task-id 형식 검증 실패 또는 자연어 입력 감지 시, 즉시 종료하지 않고 `AskUserQuestion`으로 사용자 의도를 분류하는 3옵션을 제시한다 (프로젝트 CLAUDE.md의 "사용자에게 결정·승인·선택·해명을 요청할 때는 예외 없이 AskUserQuestion 도구를 사용" 규칙과 동일 정신):
 
 - **(a) 올바른 task-id 재입력 후 검증 재시도** — 사용자가 새 task-id를 입력하면 step 1 검증을 재실행. 통과 시 정상 spec 흐름(일반/--resume 분기)으로 복귀.
-- **(b) 사전 명확화 라운드 진입** — 아직 task-id가 확보되지 않은 상태로 step 4 명확화 라운드 메커니즘을 *앞당겨* 적용 (별도 phase 신설 없음, 동일 메커니즘 재사용). 자세한 흐름은 §1.2.
+- **(b) 사전 명확화 라운드 진입** — 아직 task-id가 확보되지 않은 상태로 step 5 명확화 라운드 메커니즘을 *앞당겨* 적용 (별도 phase 신설 없음, 동일 메커니즘 재사용). 자세한 흐름은 §1.2.
 - **(c) 종료** — SPEC.md를 작성하지 않고 종료. 어떠한 산출물도 남기지 않는다. 라우팅 AskUserQuestion에 응답 없이 종결될 경우도 동일.
 
 옵션 표기는 본문에서 `(a)`/`(b)`/`(c)` 형식을 유지한다. "다음 단계: Skill(...)" 형식의 자유 텍스트 안내는 출력하지 않는다 — 후속 스킬 호출은 항상 AskUserQuestion 확인 후 invoke한다.
 
-#### 1.2 사전 명확화 라운드 (step 4 앞당김)
+#### 1.2 사전 명확화 라운드 (step 5 앞당김)
 
-(b) 선택 시 진입. 핵심 원칙: spec의 기존 step 4 명확화 라운드를 task-id 확보 *전* 단계로 앞당긴 것이다. 별도 phase·신규 모듈을 만들지 않고 같은 인터랙션 규칙을 그대로 적용한다.
+(b) 선택 시 진입. 핵심 원칙: spec의 기존 step 5 명확화 라운드를 task-id 확보 *전* 단계로 앞당긴 것이다. 별도 phase·신규 모듈을 만들지 않고 같은 인터랙션 규칙을 그대로 적용한다.
 
 - 한 번에 한 질문(`AskUserQuestion`, 가능하면 멀티초이스). 답변이 다음 질문 형태를 결정. 한 호출에 관련 소문항 최대 4개.
 - 수집 항목:
@@ -51,7 +51,7 @@ task-id 형식 검증 실패 또는 자연어 입력 감지 시, 즉시 종료�
   - 범위: 포함 영역과 비-목표
   - 제약: 환경·도구·호환성·이미 시도한 dead-end
 
-  (step 4는 task가 이미 정의된 상태에서 `핵심 목적·성공 기준·알려진 제약·알려진 위험`을 묻지만, §1.2는 task 자체를 아직 정의하지 않은 상태이므로 `문제·목표·범위·제약`으로 폭을 넓힌다. 메커니즘은 동일하지만 수집 항목은 단계 목적에 맞춰 달리한다.)
+  (step 5는 task가 이미 정의된 상태에서 `핵심 목적·성공 기준·알려진 제약·알려진 위험`을 묻지만, §1.2는 task 자체를 아직 정의하지 않은 상태이므로 `문제·목표·범위·제약`으로 폭을 넓힌다. 메커니즘은 동일하지만 수집 항목은 단계 목적에 맞춰 달리한다.)
 - 매 라운드 사용자 측 "충분" 종결 옵션을 `AskUserQuestion`에 포함해 무한 Q&A를 방지한다.
 - 사용자가 라운드 중 명시적으로 **취소**를 선택하면 task를 생성하지 않고 어떠한 산출물도 남기지 않고 종료한다 (§1.1 (c)와 동일 안전 종료).
 
@@ -61,7 +61,7 @@ task-id 형식 검증 실패 또는 자연어 입력 감지 시, 즉시 종료�
 
 수집된 문제·목표·범위·제약이 단일 task 규모로 정리되면, **프로젝트의 태스크 관련 지침**(예: `CLAUDE.md`·`rules/`의 issue 생성 컨벤션, GitHub project 운영 규칙 등)에 따라 task를 생성해 task-id를 확보한다. 본 스킬은 그 구조를 재정의하지 않고 프로젝트 지침의 issue body 구조(목표·배경·제안·검증 계획·DoD 등)를 그대로 따른다.
 
-task-id 확보 후 spec의 **step 2(컨텍스트 탐색)부터 그 task-id로 재개**한다. 라운드에서 합의된 문제·목표·범위·제약은 step 2 이후 단계의 섹션 초안으로 손실 없이 이어진다 (step 6 섹션별 SPEC 제시 시 사전 합의 내용을 초안으로 사용).
+task-id 확보 후 spec의 **step 2(task 상태 정합)부터 그 task-id로 재개**한다. 라운드에서 합의된 문제·목표·범위·제약은 step 3 이후 단계의 섹션 초안으로 손실 없이 이어진다 (step 7 섹션별 SPEC 제시 시 사전 합의 내용을 초안으로 사용).
 
 task 생성 자체는 외부 도구(`gh` CLI, GitHub project 접근 등 프로젝트 지침이 정한 경로)에 의존한다. 실패 시 사용자에게 명시적으로 알리고 부분 산출물을 남기지 않고 안전하게 종료한다 — `milestones/<m>/loops/<c>/` 디렉터리도 생성하지 않는다.
 
@@ -73,7 +73,36 @@ PRD 스킬은 `milestone-id`를 요구하므로, spec은 PRD 스킬을 invoke하
 
 승인이 없으면 PRD를 invoke하지 않고 종료. SPEC.md도 작성하지 않는다 — 산출은 단일 경로의 SPEC.md 또는 마일스톤 경로의 PRD.md 하나뿐이다.
 
-### 2. 컨텍스트 탐색
+### 2. task 상태 정합 (일반·--resume 두 모드 공통)
+
+**사전 검사 통과 직후** 실행. task-id로 식별되는 외부 task를 조회하고 4갈래 분기로 상태를 설계 상태(`In Design`)로 정합한다. 본 단계는 일반 모드와 `--resume` 모드 모두에 동일하게 적용된다.
+
+**백킹 시스템 매핑**: 본 프로젝트는 `rules/context.md`에 따라 **GitHub Project + Issue** 백엔드를 사용한다. 추상 상태 → 구체 매핑:
+
+| 추상 상태 (SPEC) | GitHub Project Status field |
+|---|---|
+| 설계 상태 | `In Design` |
+| 설계 이전 상태 | `Backlog` |
+| 설계 이후 상태 | `In Progress`, `Review`, `Done`, `Blocked`, `Cancelled` 등 그 외 |
+
+task-id ↔ Issue 매핑은 task-id 자체가 issue number(`#42` 또는 `42` 형식)이거나, task-id를 검색 키로 `gh issue list --search`로 단일 매칭을 찾는다. 본 프로젝트 컨벤션 외 다른 프로젝트에서 호출 시 `rules/context.md` 매핑을 재확인.
+
+**조회 절차**:
+- `gh issue view <task-id>` 또는 `gh issue list --search "<task-id>"`로 task 존재 확인.
+- 존재 시 `gh project item-list <project>`로 해당 issue의 Status field 값 읽기.
+
+**4갈래 분기**:
+
+1. **(a) task 부재** (issue 조회 결과 없음): 새 issue를 `gh issue create`로 생성하고 `gh project item-add`로 Project에 추가 + Status를 `In Design`으로 설정. 새 issue number를 새 task-id로 사용하며 — 이후 워크플로의 `<c>`는 새 task-id로 **교체**한다. `AskUserQuestion`으로 사용자에게 새 task-id를 명시적으로 안내한 후 진행. 새 task-id에 대해 사전 검사(단계 1)의 폴더 존재 검사·형식 검증을 다시 적용한다 (위험: 새 task-id의 `milestones/<m>/loops/<c>/` 폴더가 이미 있을 수 있음).
+2. **(b) 기존 task가 설계 상태(`In Design`)**: 상태를 변경하지 않고 다음 단계로 진행 (resume 케이스).
+3. **(c) 기존 task가 설계 이전 상태(`Backlog`)**: `gh project item-edit`로 Status field를 `In Design`으로 전이한 뒤 다음 단계로 진행.
+4. **(d) 기존 task가 설계 이후 상태(`In Progress`·`Review`·`Done` 등)**: 새 issue를 `gh issue create`로 생성·Project 추가·Status를 `In Design`으로 설정. 새 issue number로 task-id를 **교체**하고 `AskUserQuestion`으로 사용자에게 새 task-id를 명시적으로 안내한 후 진행. (a)와 동일하게 새 task-id에 대해 사전 검사를 재적용.
+
+**호출 실패 시 abort**: task 조회·생성·상태 전이 호출(`gh issue view`·`gh issue create`·`gh project item-list`·`gh project item-edit`·`gh project item-add`) 중 어느 하나라도 0이 아닌 exit으로 실패하면 명확한 에러 메시지와 함께 abort. 자동 roll-back은 수행하지 않으며 부분 실패 상태로 다음 단계로 진행하지 않는다.
+
+**범위 외 (비-목표)**: loop `start` 시점의 `In Design → In Progress` 전이, SPEC 승인 후 자동 후속 전이는 본 단계의 책임이 아니다 (다른 스킬·이벤트가 담당).
+
+### 3. 컨텍스트 탐색
 
 다음 명령으로 프로젝트 컨텍스트 자동 수집 (사용자에게 요약만):
 ```
@@ -84,15 +113,15 @@ ls rules/      # 있으면
 find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__' -o -name 'spec' \) 2>/dev/null | head -5
 ```
 
-목적: 테스트 컨벤션·CLAUDE.md 룰·디렉터리 구조 파악. 모노레포여도 단계 4에서 좁힐 것이므로 깊이 탐색 안 함.
+목적: 테스트 컨벤션·CLAUDE.md 룰·디렉터리 구조 파악. 모노레포여도 단계 5에서 좁힐 것이므로 깊이 탐색 안 함.
 
-### 3. 범위 분해 게이트
+### 4. 범위 분해 게이트
 
 `references/decomposition-gate.md` 휴리스틱으로 다중 서브시스템 검사. 감지 시 사용자에게 분해 제안.
 
 `--resume` 모드: 이 단계 생략 (이미 SPEC 존재).
 
-### 4. 명확화 라운드
+### 5. 명확화 라운드
 
 한 번에 한 질문 (`AskUserQuestion`, 가능하면 멀티초이스). 답변이 다음 질문 형태를 결정.
 
@@ -104,7 +133,7 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 `--resume` 모드: 마커가 박힌 섹션 관련 질문만.
 
-### 5. 접근법 비교 (조건부)
+### 6. 접근법 비교 (조건부)
 
 명확화에서 task가 비-자명한 설계 결정을 포함한다고 판단되면 2-3 접근법 + 트레이드오프 + 추천 제시. 자명하면 생략.
 
@@ -113,7 +142,7 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 - 영향 받는 코드 영역이 둘 이상의 명확히 다른 패턴 사이에서 선택을 요구
 - 외부 의존성·라이브러리 선택이 task 결과에 큰 영향
 
-### 6. 섹션별 SPEC 제시·승인
+### 7. 섹션별 SPEC 제시·승인
 
 다음 순서로 한 섹션씩 사용자에게 제시 → `AskUserQuestion`으로 "이 섹션 OK?" 확인:
 1. 제목
@@ -136,10 +165,10 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 `--resume` 모드: 마커가 박힌 섹션만.
 
-### 7. SPEC.md 작성
+### 8. SPEC.md 작성
 
 `references/spec-template.md` 읽어 placeholder 치환:
-- `{{task_title}}` → 단계 6에서 합의된 제목 (없으면 task-id 그대로)
+- `{{task_title}}` → 단계 7에서 합의된 제목 (없으면 task-id 그대로)
 - `{{task_description}}` → 섹션 2 합의 내용
 - `{{acceptance_criteria}}` → 섹션 3 합의 내용 (EARS 포맷)
 - `{{scope_in}}` / `{{scope_out}}` → 본문 섹션 4 (사람이 읽는 형식)
@@ -152,17 +181,17 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 `mkdir -p milestones/<m>/loops/<c>` 후 `milestones/<m>/loops/<c>/SPEC.md`에 기록.
 
-### 8. 자체 검토
+### 9. 자체 검토
 
-`references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 또는 `[NEEDS CLARIFICATION]` 마커만 — 사용자 Q&A 없음(단계 9에서 일괄 해결). 재루프 없음. 수정·마커 후 SPEC.md 재기록.
+`references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 또는 `[NEEDS CLARIFICATION]` 마커만 — 사용자 Q&A 없음(단계 10에서 일괄 해결). 재루프 없음. 수정·마커 후 SPEC.md 재기록.
 
-### 8.5. feat 브랜치 + SPEC.md commit (자동, main 작업트리 무손상)
+### 9.5. feat 브랜치 + SPEC.md commit (자동, main 작업트리 무손상)
 
 SPEC.md 작성과 자체 검토가 끝나면, sibling `autopilot:loop`이 worktree base로 사용할 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·생성하고 SPEC.md를 그 브랜치에 commit한다. main 작업트리 상태(staged/unstaged/untracked)는 변경되지 않아야 한다.
 
-이 단계를 단계 9의 사용자 최종 검토 *전*에 수행해 SPEC.md가 이미 git history에 반영된 상태에서 사용자가 결정을 내리도록 한다. 사용자가 단계 9에서 "변경" 옵션을 선택하면 단계 6/7 재진입 후 본 단계의 commit을 amend하거나 새 commit을 쌓는다 (자동 처리).
+이 단계를 단계 10의 사용자 최종 검토 *전*에 수행해 SPEC.md가 이미 git history에 반영된 상태에서 사용자가 결정을 내리도록 한다. 사용자가 단계 10에서 "변경" 옵션을 선택하면 단계 7/8 재진입 후 본 단계의 commit을 amend하거나 새 commit을 쌓는다 (자동 처리).
 
-#### 8.5.1 슬러그화 규칙 (결정적)
+#### 9.5.1 슬러그화 규칙 (결정적)
 
 SPEC §1 제목(첫 H1, `# ` 다음 텍스트)에서 `<slug>`를 도출:
 
@@ -183,7 +212,7 @@ slug=$(printf '%s' "$title" \
   | sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')
 ```
 
-#### 8.5.2 브랜치 생성·commit 절차
+#### 9.5.2 브랜치 생성·commit 절차
 
 1. `git status --porcelain`으로 main 작업트리 상태 스냅샷 캡처. unstaged·untracked가 있으면 그 사실을 인지 (다음 단계의 git 동작이 영향 안 주도록 명시적 경로 사용).
 2. 현재 브랜치 이름 보존: `orig_branch=$(git rev-parse --abbrev-ref HEAD)`.
@@ -197,30 +226,31 @@ slug=$(printf '%s' "$title" \
 8. `git checkout "$orig_branch"`로 원래 브랜치 복귀.
 9. 복귀 후 `git status --porcelain` 결과가 step 1과 동일한지 검증. 다르면 사용자에게 경고.
 
-#### 8.5.3 실패 처리
+#### 9.5.3 실패 처리
 
 위 절차 중 어떤 단계라도 실패하면:
 - 부분 결과 정리: 생성된 feat 브랜치가 있으면 `git branch -D "$branch"`로 삭제 (단, 그 브랜치에 다른 commit이 없을 때만; 의심스러우면 사용자에게 알리고 수동 정리 안내).
 - 원래 브랜치 복귀: `git checkout "$orig_branch"`.
 - 사용자에게 명시적으로 실패 사유와 복구 방법 안내. SPEC.md는 `milestones/<m>/loops/<c>/SPEC.md`에 그대로 남기되, loop 진행은 다음 단계에서 사용자가 결정.
 
-### 9. 사용자 최종 검토
+### 10. 사용자 최종 검토
 
 SPEC.md 경로(`milestones/<m>/loops/<c>/SPEC.md`)와 요약을 먼저 안내한 뒤, `AskUserQuestion`으로 **명시적 결정 입력**을 받는다 (자유 텍스트 안내·자유 텍스트 끝 질문 종결구 금지 — CLAUDE.md 규칙). 옵션은 다음 3개:
 
 - **지금 loop start 호출** (Recommended) — 동일 task-id로 sibling 스킬을 자동 연계 호출: `Skill(skill: "loop", args: "start <m>/<c>")`. 사용자가 이 옵션을 선택하면 모델은 즉시 본 Skill 호출을 발행하며, 추가 모니터 결정 질문은 묻지 않고 loop 기본 동작(자동 Monitor 가설 포함, `plugins/autopilot/skills/loop/SKILL.md` 참조)을 그대로 적용한다. milestone이 default `regular`인 경우 `start <c>` 단축형도 동등 (loop.sh가 자동 정규화).
 - **SPEC만 확정** — 경로만 안내하고 종료. 사용자가 이후 별도 시점에 `Skill(skill: "loop", args: "start <m>/<c>")`를 직접 호출.
-- **변경** — 어느 섹션을 변경할지 묻고 단계 6/7 재진입.
+- **변경** — 어느 섹션을 변경할지 묻고 단계 7/8 재진입.
 
 세 옵션은 상호배타. "지금 loop start 호출"이라는 옵션 라벨에서 본 결정의 효과가 곧 sibling loop 스킬 호출임이 명확해야 한다.
 
 ## --resume 모드 요약
 
-위 9단계 중:
+위 10단계 중:
 - 1: 마커 0개 시 즉시 종료
-- 3: 생략 (이미 SPEC 존재)
-- 4, 5: 마커 위치 기준으로 좁힘
-- 6: 마커 박힌 섹션만
+- 2: 일반 모드와 동일하게 적용 — 사전 검사 통과 직후 task 상태 정합(4갈래 분기·abort) 수행. `--resume`은 보통 (b) 설계 상태 분기로 떨어져 상태 변경 없이 통과한다.
+- 4: 생략 (이미 SPEC 존재)
+- 5, 6: 마커 위치 기준으로 좁힘
+- 7: 마커 박힌 섹션만
 - 나머지 동일
 
 ## 모듈 구성 (references/)
