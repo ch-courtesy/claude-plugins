@@ -1,7 +1,7 @@
 ---
 name: spec
 description: "autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 생성. 한 질문씩 명확화·섹션별 승인·EARS 포맷·[NEEDS CLARIFICATION] 마커로 자율 loop이 도중 질문 없이 완수 가능한 자기완결적 SPEC을 만듭니다. 호출 'Skill(skill=\"spec\", args=\"<task-id> [--milestone <m>] [--resume]\")'. milestone 미지정 시 `regular`(catch-all)을 default로 적용."
-allowed-tools: AskUserQuestion, Read, Write, Bash(git log:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*)
+allowed-tools: AskUserQuestion, Read, Write, Skill, Bash(git log:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*)
 ---
 
 # spec
@@ -105,9 +105,13 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 ### 9. 사용자 최종 검토
 
-SPEC.md 경로·요약 안내 + `AskUserQuestion`으로 검토 결과 수집:
-- 승인: 다음 단계 안내 출력 — *"SPEC 완성: milestones/<m>/loops/<c>/SPEC.md\n다음 단계: Skill(skill: \"loop\", args: \"start <m>/<c>\")"* (milestone이 default `regular`이면 `start <c>` 단축형도 동등 — loop.sh가 자동 정규화)
-- 변경: 어느 섹션을 변경할지 묻고 단계 6/7 재진입
+SPEC.md 경로(`milestones/<m>/loops/<c>/SPEC.md`)와 요약을 먼저 안내한 뒤, `AskUserQuestion`으로 **명시적 결정 입력**을 받는다 (자유 텍스트 안내·자유 텍스트 끝 질문 종결구 금지 — CLAUDE.md 규칙). 옵션은 다음 3개:
+
+- **지금 loop start 호출** (Recommended) — 동일 task-id로 sibling 스킬을 자동 연계 호출: `Skill(skill: "loop", args: "start <m>/<c>")`. 사용자가 이 옵션을 선택하면 모델은 즉시 본 Skill 호출을 발행하며, 추가 모니터 결정 질문은 묻지 않고 loop 기본 동작(자동 Monitor 가설 포함, `plugins/autopilot/skills/loop/SKILL.md` 참조)을 그대로 적용한다. milestone이 default `regular`인 경우 `start <c>` 단축형도 동등 (loop.sh가 자동 정규화).
+- **SPEC만 확정** — 경로만 안내하고 종료. 사용자가 이후 별도 시점에 `Skill(skill: "loop", args: "start <m>/<c>")`를 직접 호출.
+- **변경** — 어느 섹션을 변경할지 묻고 단계 6/7 재진입.
+
+세 옵션은 상호배타. "지금 loop start 호출"이라는 옵션 라벨에서 본 결정의 효과가 곧 sibling loop 스킬 호출임이 명확해야 한다.
 
 ## --resume 모드 요약
 
