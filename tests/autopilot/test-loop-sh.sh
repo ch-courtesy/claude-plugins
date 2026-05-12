@@ -2240,7 +2240,9 @@ chmod +x "$MOCK57/claude"
     && { echo "FAIL: 워크트리 CLAUDE.md(헌법 cp)가 suppressor false positive halt 트리거 — skip-worktree 미작동"; echo "$output57"; exit 1; }
   echo "$output57" | grep -q "이터 상한 도달" \
     || { echo "FAIL: loop이 MAX_ITERATIONS까지 정상 진행 못함 (게이트 패스 불완전)"; echo "$output57"; exit 1; }
-  WT57="$WORK_DIR/claude-tracked-project-57-loops/regular/gate-skip-worktree"
+  # v0.2 cutover: 워크트리는 메인 레포 내부 milestones/<m>/loops/<c>/.worktree에 nested.
+  # 이전 sibling 레이아웃(<project>-loops/) 경로 참조는 더 이상 유효하지 않음.
+  WT57="$T57_PROJECT/milestones/regular/loops/gate-skip-worktree/.worktree"
   # skip-worktree 비트가 실제로 설정됐는지 확인
   git -C "$WT57" ls-files -v CLAUDE.md 2>/dev/null | grep -qE "^S " \
     || { echo "FAIL: CLAUDE.md에 skip-worktree 비트(S) 미설정"; git -C "$WT57" ls-files -v CLAUDE.md; exit 1; }
