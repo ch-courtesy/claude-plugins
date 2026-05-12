@@ -95,6 +95,13 @@ echo "OK: [NEEDS CLARIFICATION] 마커"
 grep -q -- '--resume' "$SPEC_SKILL_MD" \
   || { echo "FAIL: spec/SKILL.md description에 '--resume' 마커 없음"; exit 1; }
 echo "OK: --resume 마커"
+# 신규 contract: feat 브랜치 자동 생성·SPEC.md commit 단계가 명시되어야 함
+grep -q 'feat/<task-id>' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md에 'feat/<task-id>' 브랜치 명세 없음 (신규 contract 미반영)"; exit 1; }
+echo "OK: feat/<task-id> 브랜치 명세"
+grep -qE '슬러그|slug' "$SPEC_SKILL_MD" \
+  || { echo "FAIL: spec/SKILL.md에 슬러그화 규칙 명세 없음"; exit 1; }
+echo "OK: 슬러그화 규칙 명세"
 
 echo ""
 echo "=== prd 스킬 구조 검증 ==="

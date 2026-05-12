@@ -192,10 +192,36 @@ compute_paths() {
   local milestone="${task_id%%/*}"
   local child="${task_id#*/}"
   LOOPS_DIR="$PROJECT_ROOT/milestones/$milestone/loops/$child"
+  # LOOPS_DIR_REL: worktree 안의 SPEC.md canonical 경로 prefix (신규 contract).
+  # 신규 contract에선 SPEC.md가 feat 브랜치에 commit되어 worktree에서
+  # <wt>/$LOOPS_DIR_REL/SPEC.md 경로로 자연 노출된다.
+  LOOPS_DIR_REL="milestones/$milestone/loops/$child"
   WT="$LOOPS_DIR/.worktree"
   LOCK_FILE="$LOOPS_DIR/.lock"
   # 정규화된 task-id를 caller에게 노출 (cmd_start에서 TASK_ID로 사용)
   TASK_ID_NORMALIZED="$task_id"
+}
+
+# 신규 contract 감지: feat/<task-id> 또는 feat/<task-id>-<slug> 브랜치 검색.
+# 0개 매칭이면 빈 출력 + return 1 (legacy 분기로 fallback).
+# 정확히 1개 매칭이면 브랜치 이름 출력 + return 0.
+# 2개 이상이면 die (모호성).
+find_feat_branch() {
+  local task_id="$1"
+  local matches count
+  matches=$(git -C "$PROJECT_ROOT" for-each-ref \
+    --format='%(refname:short)' \
+    "refs/heads/feat/$task_id" \
+    "refs/heads/feat/$task_id-*" 2>/dev/null)
+  if [[ -z "$matches" ]]; then
+    return 1
+  fi
+  count=$(printf '%s\n' "$matches" | grep -c .)
+  if [[ $count -ge 2 ]]; then
+    die "여러 feat 브랜치가 task-id '$task_id'와 매칭됨 (모호):\n$matches\n수동으로 하나 남기고 다른 것 정리 후 재시도."
+  fi
+  printf '%s\n' "$matches"
+  return 0
 }
 
 # ----- 동시성 락 -----
@@ -346,11 +372,20 @@ hash_deps() {
 }
 
 read_scope_yaml() {
+  # SPEC.md 위치 자동 감지:
+  #   - 신규 contract: <WT>/<LOOPS_DIR_REL>/SPEC.md (feat 브랜치 commit으로 자연 포함)
+  #   - legacy: <WT>/.loop/SPEC.md (셋업 시 cp)
+  local spec_path
+  if [[ -n "${LOOPS_DIR_REL:-}" ]] && [[ -f "$WT/$LOOPS_DIR_REL/SPEC.md" ]]; then
+    spec_path="$WT/$LOOPS_DIR_REL/SPEC.md"
+  else
+    spec_path="$WT/.loop/SPEC.md"
+  fi
   sed -n '1,/^---$/{
     1d
     /^---$/d
     p
-  }' "$WT/.loop/SPEC.md" 2>/dev/null
+  }' "$spec_path" 2>/dev/null
 }
 
 diff_vs_scope() {
@@ -531,6 +566,12 @@ iterate() {
 
   # 비동기 실행 + wait — bash trap은 동기 명령 안에서 deferred되므로 wait를 써야
   # SIGTERM/SIGINT가 즉시 처리돼 자식 트리 정리 가능 (orphan 방지)
+  # SPEC.md stdin 경로: 신규 contract는 worktree의 milestones/<m>/loops/<c>/SPEC.md,
+  # legacy는 .loop/SPEC.md (셋업 시 cp). 둘 다 worktree 안의 단일 canonical 경로.
+  local spec_stdin_path=".loop/SPEC.md"
+  if [[ -n "${LOOPS_DIR_REL:-}" ]] && [[ -f "$WT/$LOOPS_DIR_REL/SPEC.md" ]]; then
+    spec_stdin_path="$LOOPS_DIR_REL/SPEC.md"
+  fi
   local exit_code=0
   (
     cd "$WT"
@@ -541,7 +582,7 @@ iterate() {
       --system-prompt-file CLAUDE.md \
       --add-dir . \
       --output-format json \
-      < .loop/SPEC.md \
+      < "$spec_stdin_path" \
       > ".loop/iterations/$n.log" 2>&1
   ) &
   local claude_pid=$!
@@ -658,7 +699,7 @@ cmd_start() {
   MAX_CONCURRENT="${MAX_CONCURRENT:-3}"
   WATCH_MODE="$watch_mode"
 
-  # 1. --spec 외부 SPEC 전달 처리
+  # 1. --spec 외부 SPEC 전달 처리 (legacy 진입로 — main 작업트리에 SPEC을 직접 둠)
   if [[ -n "$spec_path" ]]; then
     [[ -f "$spec_path" ]] || die "외부 SPEC 파일을 찾을 수 없음: $spec_path"
     mkdir -p "$LOOPS_DIR"
@@ -666,22 +707,44 @@ cmd_start() {
     echo "외부 SPEC 파일 복사: $spec_path → $LOOPS_DIR/SPEC.md"
   fi
 
-  # 2. SPEC.md 존재 확인 (milestones/<m>/loops/<c>/SPEC.md 단일 경로 — legacy fallback 없음)
-  local spec_path_local="$LOOPS_DIR/SPEC.md"
-  if [[ ! -f "$spec_path_local" ]]; then
-    die "SPEC.md가 없습니다 (기대 경로: $spec_path_local).\n먼저 실행하세요: Skill(skill: \"spec\", args: \"$task_id\")"
+  # 1.5. 신규 contract 감지: feat/<task-id>[-<slug>] 브랜치가 main repo에 있으면
+  # 그 브랜치를 worktree base로 사용하고 SPEC은 worktree에서 자연 노출되는 경로로 읽음.
+  # 없으면 legacy 분기 (LOOPS_DIR/SPEC.md를 .loop/로 cp).
+  NEW_CONTRACT=0
+  local feat_branch=""
+  if feat_branch=$(find_feat_branch "$task_id"); then
+    if [[ -n "$feat_branch" ]]; then
+      NEW_CONTRACT=1
+      BRANCH="$feat_branch"
+    fi
   fi
 
-  # 2.5. [NEEDS CLARIFICATION] 마커 검사 (락 획득 전)
-  if grep -q '\[NEEDS CLARIFICATION' "$spec_path_local"; then
+  # 2. SPEC.md 존재·내용 검증 — 신규 contract와 legacy 분기.
+  local spec_content=""
+  if [[ $NEW_CONTRACT -eq 1 ]]; then
+    # 신규 contract: SPEC을 feat 브랜치 commit에서 읽음 (main 작업트리는 무시).
+    # 브랜치는 있는데 SPEC commit이 없으면 fail-fast.
+    spec_content=$(git -C "$PROJECT_ROOT" show "${BRANCH}:${LOOPS_DIR_REL}/SPEC.md" 2>/dev/null) \
+      || die "feat 브랜치 '${BRANCH}'의 HEAD에 SPEC.md(${LOOPS_DIR_REL}/SPEC.md) 부재 — spec 스킬로 SPEC 작성·commit 필요."
+  else
+    # legacy: main 작업트리의 LOOPS_DIR/SPEC.md를 읽음.
+    local spec_path_local="$LOOPS_DIR/SPEC.md"
+    if [[ ! -f "$spec_path_local" ]]; then
+      die "SPEC.md가 없습니다 (기대 경로: $spec_path_local 또는 feat/${task_id}[-<slug>] 브랜치).\n먼저 실행하세요: Skill(skill: \"spec\", args: \"$task_id\")"
+    fi
+    spec_content=$(cat "$spec_path_local")
+  fi
+
+  # 2.5. [NEEDS CLARIFICATION] 마커 검사 (락 획득 전, 양 contract 공통)
+  if grep -q '\[NEEDS CLARIFICATION' <<< "$spec_content"; then
     die "SPEC.md에 미해결 [NEEDS CLARIFICATION] 마커가 있습니다.\n해결: Skill(skill: \"spec\", args: \"$task_id --resume\")"
   fi
 
   # 3. placeholder 검사
   local placeholders
-  placeholders=$(grep -oE '\{\{[^}]+\}\}' "$spec_path_local" 2>/dev/null || true)
+  placeholders=$(grep -oE '\{\{[^}]+\}\}' <<< "$spec_content" 2>/dev/null || true)
   if [[ -n "$placeholders" ]]; then
-    die "채워지지 않은 placeholder가 있습니다: $(echo "$placeholders" | tr '\n' ' ')\n$spec_path_local 를 편집하세요."
+    die "채워지지 않은 placeholder가 있습니다: $(echo "$placeholders" | tr '\n' ' ')\nSPEC.md를 편집하세요."
   fi
 
   # 4. scope.include 비어있으면 거부 (start에서)
@@ -690,7 +753,7 @@ cmd_start() {
     1d
     /^---$/d
     p
-  }' "$spec_path_local" 2>/dev/null | yq '.scope.include | length' 2>/dev/null)
+  }' <<< "$spec_content" | yq '.scope.include | length' 2>/dev/null)
   if [[ "${include_count:-0}" -eq 0 ]]; then
     die "SPEC.md의 scope.include가 비어 있습니다. 최소 한 패턴 명시 필요 (예: 'src/**'·'**/*')"
   fi
@@ -705,8 +768,20 @@ cmd_start() {
     # 새 nested 정책: WT 부모(loops_dir)는 이미 SPEC.md 존재 시 만들어짐.
     # 일관성을 위해 mkdir -p로 보장.
     mkdir -p "$(dirname "$WT")"
-    git -C "$PROJECT_ROOT" worktree add "$WT" -b "$BRANCH" \
-      || die "git worktree add 실패: $WT"
+
+    # 신규 contract: 기존 feat 브랜치를 base로 worktree 체크아웃 (-b 없음).
+    # legacy: 새 autonomous-loop 브랜치를 만들며 worktree 생성.
+    if [[ $NEW_CONTRACT -eq 1 ]]; then
+      git -C "$PROJECT_ROOT" worktree add "$WT" "$BRANCH" \
+        || die "git worktree add 실패 (feat 브랜치 체크아웃): $WT (브랜치: $BRANCH)"
+      # 사후 검증: worktree HEAD에 SPEC.md 자연 노출 확인 (spec 스킬이 commit했어야)
+      if [[ ! -f "$WT/$LOOPS_DIR_REL/SPEC.md" ]]; then
+        die "feat 브랜치 ${BRANCH} 워크트리 HEAD에 SPEC.md 부재 (기대: $WT/$LOOPS_DIR_REL/SPEC.md)"
+      fi
+    else
+      git -C "$PROJECT_ROOT" worktree add "$WT" -b "$BRANCH" \
+        || die "git worktree add 실패: $WT"
+    fi
 
     # 워크트리 baseline empty commit — iter 1의 HEAD~1..HEAD diff가 부모 브랜치의
     # ensure_loops_setup chore commit 등 setup history를 worker 변경으로 오인하지
@@ -728,9 +803,12 @@ cmd_start() {
         || die "skip-worktree 설정 실패: $WT/CLAUDE.md"
     fi
 
-    # 메타 파일 시드
+    # 메타 파일 시드 — 신규 contract는 SPEC을 worktree에서 자연 포함하므로 cp 안 함.
+    # legacy만 LOOPS_DIR/SPEC.md → .loop/SPEC.md로 cp.
     mkdir -p "$WT/.loop/iterations"
-    cp "$LOOPS_DIR/SPEC.md" "$WT/.loop/SPEC.md"
+    if [[ $NEW_CONTRACT -eq 0 ]]; then
+      cp "$LOOPS_DIR/SPEC.md" "$WT/.loop/SPEC.md"
+    fi
     cp "$SCRIPT_DIR/plan-template.md" "$WT/.loop/PLAN.md"
     cp "$SCRIPT_DIR/notes-template.md" "$WT/.loop/NOTES.md"
     cp "$SCRIPT_DIR/handoff-template.md" "$WT/.loop/HANDOFF.md"
@@ -1061,12 +1139,27 @@ cmd_cleanup() {
     die "task $task_id 에 DONE 신호가 없습니다.\n--force 없이 cleanup하려면 먼저 DONE 파일이 필요합니다: $0 cleanup $task_id --force"
   fi
 
-  # 4. 메타 파일 archive (milestones/<m>/loops/<c>/ 로 이동)
-  mkdir -p "$LOOPS_DIR"
-  for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
-    cp "$WT/.loop/$f" "$LOOPS_DIR/$f" 2>/dev/null || true
-  done
-  echo "메타 파일 보관: $LOOPS_DIR"
+  # 3.5. 신규 contract 감지 — worktree HEAD 브랜치가 feat/... 이면 신규.
+  # 신규 contract는 메모리 파일 archive를 폐기하고 feat 브랜치를 PR base로 남긴다.
+  local current_branch=""
+  current_branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  local cleanup_new_contract=0
+  if [[ "$current_branch" == feat/* ]]; then
+    cleanup_new_contract=1
+    BRANCH="$current_branch"
+  fi
+
+  # 4. 메타 파일 archive — legacy contract만 수행.
+  # 신규 contract: worker 메모리 파일을 main 작업트리로 복사하지 않음 (worktree 제거와 함께 폐기).
+  if [[ $cleanup_new_contract -eq 0 ]]; then
+    mkdir -p "$LOOPS_DIR"
+    for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
+      cp "$WT/.loop/$f" "$LOOPS_DIR/$f" 2>/dev/null || true
+    done
+    echo "메타 파일 보관: $LOOPS_DIR"
+  else
+    echo "신규 contract: 메모리 파일 archive 건너뜀 (feat 브랜치 ${BRANCH}이 PR base)"
+  fi
 
   # 5. 워크트리 제거
   local wt_remove_flags=""
@@ -1074,15 +1167,22 @@ cmd_cleanup() {
   git -C "$PROJECT_ROOT" worktree remove $wt_remove_flags "$WT" \
     || die "git worktree remove 실패. 수동 제거: git worktree remove --force $WT"
 
-  # 6. 브랜치 삭제
-  local branch_delete_flag="-d"
-  [[ $force -eq 1 ]] && branch_delete_flag="-D"
-  git -C "$PROJECT_ROOT" branch $branch_delete_flag "$BRANCH" 2>/dev/null \
-    || echo "WARN: 브랜치 삭제 실패 (이미 머지됐거나 없을 수 있음): $BRANCH"
+  # 6. 브랜치 삭제 — legacy contract만 수행.
+  # 신규 contract: feat 브랜치는 PR base로 남겨야 하므로 삭제하지 않음.
+  if [[ $cleanup_new_contract -eq 0 ]]; then
+    local branch_delete_flag="-d"
+    [[ $force -eq 1 ]] && branch_delete_flag="-D"
+    git -C "$PROJECT_ROOT" branch $branch_delete_flag "$BRANCH" 2>/dev/null \
+      || echo "WARN: 브랜치 삭제 실패 (이미 머지됐거나 없을 수 있음): $BRANCH"
+  else
+    echo "feat 브랜치 보존: $BRANCH (PR base로 사용)"
+  fi
 
   echo ""
   echo "정리 완료: $task_id"
-  echo "보관된 메타 파일: $LOOPS_DIR"
+  if [[ $cleanup_new_contract -eq 0 ]]; then
+    echo "보관된 메타 파일: $LOOPS_DIR"
+  fi
 }
 
 # ----- subcommand: logs -----

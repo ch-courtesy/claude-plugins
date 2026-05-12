@@ -118,7 +118,10 @@ bash "$LOOP_SH" logs auth-refactor [--tail | --iter N]
 ```bash
 cat milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md  # 사유 확인
 cd milestones/<m>/loops/<c>/.worktree
-$EDITOR .loop/SPEC.md && $EDITOR .loop/NOTES.md             # 명세·학습 조정
+# 신규 contract: SPEC은 worktree 안 milestones/<m>/loops/<c>/SPEC.md
+$EDITOR milestones/<m>/loops/<c>/SPEC.md && $EDITOR .loop/NOTES.md
+# legacy contract: SPEC은 worktree 안 .loop/SPEC.md (위 명령에서 SPEC 경로만 교체)
+# $EDITOR .loop/SPEC.md && $EDITOR .loop/NOTES.md
 rm .loop/ESCALATION.md                                      # 보고 해제
 cd <project-root> && bash "$LOOP_SH" start <task-id>        # 재시작
 # --watch 모드면 ESCALATION.md 정리만으로 자동 재개 (60초 polling)
