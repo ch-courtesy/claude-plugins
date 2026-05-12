@@ -186,7 +186,6 @@ compute_paths() {
   task_id="$(normalize_task_id "$raw_task_id")"
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
-  PROJECT_NAME="$(basename "$PROJECT_ROOT")"
   BRANCH="autonomous-loop/$task_id"
   # v0.2 cutover: 워크트리·lock·메타 파일이 모두 milestones/<m>/loops/<c>/ 단일
   # 트리 안에 있다. 외부 sibling·.loops/locks/는 사용하지 않음.
@@ -819,7 +818,6 @@ cmd_status() {
 
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
-  PROJECT_NAME="$(basename "$PROJECT_ROOT")"
 
   # task-id 목록 수집: milestones/<m>/loops/<c>/SPEC.md 단일 트리
   # (M1 cutover: legacy .loops/<id>/SPEC.md 스캔 제거)
