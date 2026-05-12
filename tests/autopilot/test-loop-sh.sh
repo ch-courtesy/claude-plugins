@@ -2044,5 +2044,48 @@ EOF
 )
 echo "OK"
 
+echo "=== TEST 54: suppressor 게이트가 .loop/ 워커 메모리는 검사 제외 ==="
+# 워커가 PLAN.md 등에 헌법 본문 인용 시 suppressor 패턴 문자열이 들어감 — false positive 방지
+TEST54_TASK="gate-suppressor-loop-dir"
+mkdir -p "$PROJECT/milestones/regular/loops/$TEST54_TASK"
+cat > "$PROJECT/milestones/regular/loops/$TEST54_TASK/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Gate Test — .loop/ Excluded from Suppressor Scan
+EOF
+
+MOCK54="$WORK_DIR/mock54-bin"
+mkdir -p "$MOCK54"
+cat > "$MOCK54/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+# 워커가 PLAN.md에 헌법 본문 인용 (suppressor 패턴 문자열 포함) + commit
+# 헌법 §3.1 출력 요건: 메모리 파일 갱신은 commit과 함께
+mkdir -p .loop
+cat > .loop/PLAN.md <<'PLAN_EOF'
+- `# noqa`, `@ts-ignore`, `eslint-disable`, `#pragma warning disable` 등 경고 억제 지시어 신규 추가 금지
+PLAN_EOF
+git add .loop/PLAN.md
+git commit -q -m "feat: cite suppressor rules in PLAN.md"
+echo '{"result": "mock54", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK54/claude"
+
+set +e
+output54=$(PATH="$MOCK54:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start "$TEST54_TASK" 2>&1)
+set -e
+echo "$output54" | grep -q "Suppressor 신규 추가" \
+  && { echo "FAIL: .loop/PLAN.md의 suppressor 패턴 인용이 false positive halt 트리거"; echo "$output54"; exit 1; }
+echo "$output54" | grep -q "이터 상한 도달" \
+  || { echo "FAIL: loop이 MAX_ITERATIONS까지 정상 진행 못함 — false positive 부재만으로 OK 판정하면 mock·환경 이슈에서 false OK 발생"; echo "$output54"; exit 1; }
+loop cleanup "$TEST54_TASK" --force > /dev/null 2>&1 || true
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
