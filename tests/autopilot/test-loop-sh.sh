@@ -2301,5 +2301,150 @@ chmod +x "$MOCK58/claude"
 )
 echo "OK"
 
+echo "=== TEST 59: 신규 contract — feat 브랜치 + 커밋된 SPEC를 worktree가 자연 포함 (외부 cp 없음) ==="
+# 새 라이프사이클: spec 스킬이 feat/<task-id>-<slug> 브랜치에 SPEC.md를 commit. loop start는
+# 그 브랜치를 직접 체크아웃해 worktree를 만들며 worktree 외부에서 SPEC를 추가 복사하지 않는다.
+T59_PROJECT="$WORK_DIR/new-contract-feat"
+mkdir -p "$T59_PROJECT"
+git -C "$T59_PROJECT" init -q
+git -C "$T59_PROJECT" config user.email "t@e.com"
+git -C "$T59_PROJECT" config user.name "Test"
+git -C "$T59_PROJECT" commit --allow-empty -m "initial" -q
+
+# spec 스킬을 시뮬레이션: feat 브랜치 + SPEC commit (main 작업 트리는 변경하지 않음)
+T59_BRANCH="feat/regular/n59-my-feature"
+T59_LOOPS_REL="milestones/regular/loops/n59"
+T59_DEFAULT_BRANCH=$(git -C "$T59_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T59_PROJECT" checkout -q -b "$T59_BRANCH"
+mkdir -p "$T59_PROJECT/$T59_LOOPS_REL"
+cat > "$T59_PROJECT/$T59_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# My Feature
+EOF
+git -C "$T59_PROJECT" add "$T59_LOOPS_REL/SPEC.md"
+git -C "$T59_PROJECT" commit -q -m "feat(spec): n59 — My Feature"
+# 원래 브랜치로 복귀 (main 트리 상태)
+git -C "$T59_PROJECT" checkout -q "$T59_DEFAULT_BRANCH"
+# 워킹 트리에는 SPEC.md가 없어야 (spec 스킬이 main 트리를 더럽히지 않았다는 가정)
+[[ ! -f "$T59_PROJECT/$T59_LOOPS_REL/SPEC.md" ]] \
+  || { echo "FAIL: setup 단계에서 main 작업 트리에 SPEC.md가 남아 있음 (test setup 오류)"; exit 1; }
+
+(
+  cd "$T59_PROJECT"
+  set +e
+  output59=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/n59" 2>&1)
+  result59=$?
+  set -e
+  WT59="$T59_PROJECT/$T59_LOOPS_REL/.worktree"
+  [[ $result59 -eq 0 ]] || { echo "FAIL: 신규 contract start 실패. exit=$result59. got: $output59"; exit 1; }
+  [[ -d "$WT59" ]] || { echo "FAIL: 워크트리 미생성: $WT59"; exit 1; }
+  # SPEC.md는 worktree에서 자연 경로로 존재해야 (feat 브랜치 commit)
+  [[ -f "$WT59/$T59_LOOPS_REL/SPEC.md" ]] \
+    || { echo "FAIL: 워크트리 canonical 경로에 SPEC.md 없음 ($WT59/$T59_LOOPS_REL/SPEC.md)"; exit 1; }
+  # 워크트리의 브랜치가 feat/<task-id>-<slug>여야
+  CURR_BR=$(git -C "$WT59" rev-parse --abbrev-ref HEAD)
+  [[ "$CURR_BR" == "$T59_BRANCH" ]] \
+    || { echo "FAIL: 워크트리 브랜치가 feat가 아님 (got: $CURR_BR, expected: $T59_BRANCH)"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 60: 신규 contract cleanup — 메모리 파일 archive 안 함 + feat 브랜치 유지 ==="
+# 동일 setup 재사용. --force는 mock의 untracked DONE/.loop/CLAUDE.md를 정리하기 위함
+# (TEST 8과 동일 사유 — 정상 worker는 commit으로 정리)
+(
+  cd "$T59_PROJECT"
+  bash "$LOOP_SH_SRC" cleanup "regular/n59" --force > /dev/null 2>&1
+  WT60="$T59_PROJECT/$T59_LOOPS_REL/.worktree"
+  [[ ! -d "$WT60" ]] || { echo "FAIL: cleanup 후 워크트리 잔존"; exit 1; }
+  # 신규 contract: 메모리 파일이 archive되지 않아야
+  ARCHIVE60="$T59_PROJECT/$T59_LOOPS_REL"
+  [[ ! -f "$ARCHIVE60/PLAN.md" ]] \
+    || { echo "FAIL: 신규 contract인데 PLAN.md가 main 작업트리로 archive됨"; exit 1; }
+  [[ ! -f "$ARCHIVE60/NOTES.md" ]] \
+    || { echo "FAIL: 신규 contract인데 NOTES.md가 archive됨"; exit 1; }
+  [[ ! -f "$ARCHIVE60/HANDOFF.md" ]] \
+    || { echo "FAIL: 신규 contract인데 HANDOFF.md가 archive됨"; exit 1; }
+  [[ ! -f "$ARCHIVE60/RUN_LOG.md" ]] \
+    || { echo "FAIL: 신규 contract인데 RUN_LOG.md가 archive됨"; exit 1; }
+  # feat 브랜치는 보존되어야 (PR base)
+  git -C "$T59_PROJECT" show-ref --verify --quiet "refs/heads/$T59_BRANCH" \
+    || { echo "FAIL: cleanup 후 feat 브랜치가 사라짐: $T59_BRANCH"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 61: 신규 contract fail-fast — feat 브랜치 부재 + legacy SPEC 부재 ==="
+T61_PROJECT="$WORK_DIR/new-contract-missing"
+mkdir -p "$T61_PROJECT"
+git -C "$T61_PROJECT" init -q
+git -C "$T61_PROJECT" config user.email "t@e.com"
+git -C "$T61_PROJECT" config user.name "Test"
+git -C "$T61_PROJECT" commit --allow-empty -m "initial" -q
+# SPEC 부재 + feat 브랜치 부재 상태에서 start
+(
+  cd "$T61_PROJECT"
+  set +e
+  output61=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/missing" 2>&1)
+  result61=$?
+  set -e
+  [[ $result61 -ne 0 ]] || { echo "FAIL: SPEC·feat 브랜치 둘 다 없는데 start 성공"; exit 1; }
+  echo "$output61" | grep -qE "SPEC\.md|feat" \
+    || { echo "FAIL: fail-fast 메시지에 SPEC·feat 안내 없음. got: $output61"; exit 1; }
+  WT61="$T61_PROJECT/milestones/regular/loops/missing/.worktree"
+  [[ ! -d "$WT61" ]] || { echo "FAIL: fail-fast인데 워크트리 생성됨"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 62: 신규 contract slug-fallback — feat/<task-id> (slug 없는 단독 브랜치) 동작 ==="
+# 비-ASCII 제목 등으로 슬러그가 빈 경우 spec 스킬이 feat/<task-id>로 fallback. loop가 그것도 인식해야
+T62_PROJECT="$WORK_DIR/new-contract-fallback"
+mkdir -p "$T62_PROJECT"
+git -C "$T62_PROJECT" init -q
+git -C "$T62_PROJECT" config user.email "t@e.com"
+git -C "$T62_PROJECT" config user.name "Test"
+git -C "$T62_PROJECT" commit --allow-empty -m "initial" -q
+
+T62_BRANCH="feat/regular/n62"      # slug 없음 — fallback
+T62_LOOPS_REL="milestones/regular/loops/n62"
+T62_DEFAULT_BRANCH=$(git -C "$T62_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T62_PROJECT" checkout -q -b "$T62_BRANCH"
+mkdir -p "$T62_PROJECT/$T62_LOOPS_REL"
+cat > "$T62_PROJECT/$T62_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# 비-ASCII 제목 작업 (한국어)
+EOF
+git -C "$T62_PROJECT" add "$T62_LOOPS_REL/SPEC.md"
+git -C "$T62_PROJECT" commit -q -m "feat(spec): n62 fallback"
+git -C "$T62_PROJECT" checkout -q "$T62_DEFAULT_BRANCH"
+
+(
+  cd "$T62_PROJECT"
+  set +e
+  output62=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/n62" 2>&1)
+  result62=$?
+  set -e
+  WT62="$T62_PROJECT/$T62_LOOPS_REL/.worktree"
+  [[ $result62 -eq 0 ]] || { echo "FAIL: slug-fallback start 실패. exit=$result62. got: $output62"; exit 1; }
+  [[ -d "$WT62" ]] || { echo "FAIL: 워크트리 미생성"; exit 1; }
+  CURR_BR=$(git -C "$WT62" rev-parse --abbrev-ref HEAD)
+  [[ "$CURR_BR" == "$T62_BRANCH" ]] \
+    || { echo "FAIL: 워크트리 브랜치가 feat/<task-id>(fallback)가 아님 (got: $CURR_BR)"; exit 1; }
+  bash "$LOOP_SH_SRC" cleanup "regular/n62" --force > /dev/null 2>&1
+)
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="

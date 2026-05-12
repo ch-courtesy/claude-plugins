@@ -118,7 +118,7 @@ bash "$LOOP_SH" logs auth-refactor [--tail | --iter N]
 ```bash
 cat milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md  # 사유 확인
 cd milestones/<m>/loops/<c>/.worktree
-$EDITOR .loop/SPEC.md && $EDITOR .loop/NOTES.md             # 명세·학습 조정
+$EDITOR milestones/<m>/loops/<c>/SPEC.md && $EDITOR .loop/NOTES.md   # 명세·학습 조정 (legacy는 .loop/SPEC.md)
 rm .loop/ESCALATION.md                                      # 보고 해제
 cd <project-root> && bash "$LOOP_SH" start <task-id>        # 재시작
 # --watch 모드면 ESCALATION.md 정리만으로 자동 재개 (60초 polling)
