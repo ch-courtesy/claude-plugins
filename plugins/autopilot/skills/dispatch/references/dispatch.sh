@@ -323,7 +323,10 @@ cmd_cleanup() {
         [[ "$wt" == "$PROJECT_ROOT"/* ]] || continue
         case "$wt" in
           */milestones/*/loops/*/.worktree) ;;
-          *) continue ;;
+          *)
+            echo "[WARN] $m/$child: 워크트리 경로 형식 부적절 ($wt), skip" >&2
+            continue
+            ;;
         esac
         if [[ -f "$wt/DONE" ]]; then
           echo "[$(now_iso)] cleanup $m/$child (DONE 신호 있음, archival 포함)"

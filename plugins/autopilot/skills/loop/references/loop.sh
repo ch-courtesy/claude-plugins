@@ -35,13 +35,6 @@ require_tool() {
   command -v "$1" >/dev/null 2>&1 || die "$1이(가) 필요합니다. 설치 후 다시 실행하세요."
 }
 
-sanitize_for_filename() {
-  # 슬래시는 __로 인코딩 (lock 파일명에서 디렉토리 분리자 회피).
-  # 'a/b'와 'a-b'가 같은 lock으로 충돌하던 버그 수정. 공백·'__' raw는
-  # validate_task_id가 거부하므로 여기선 / 만 처리.
-  echo "${1//\//__}"
-}
-
 # task-id 유효성 검사 (공통). compute_paths·cmd_status filter에서 호출.
 validate_task_id() {
   local task_id="$1"
@@ -193,11 +186,7 @@ compute_paths() {
   local child="${task_id#*/}"
   LOOPS_DIR="$PROJECT_ROOT/milestones/$milestone/loops/$child"
   WT="$LOOPS_DIR/.worktree"
-  LOCK_DIR="$LOOPS_DIR"
   LOCK_FILE="$LOOPS_DIR/.lock"
-  # legacy 호환을 위해 TASK_ID_SAFE 유지 (sanitize_for_filename — 다른 곳에서
-  # 참조되지 않으면 의미 없음. lock 경로엔 더 이상 사용 안 함).
-  TASK_ID_SAFE="$(sanitize_for_filename "$task_id")"
   # 정규화된 task-id를 caller에게 노출 (cmd_start에서 TASK_ID로 사용)
   TASK_ID_NORMALIZED="$task_id"
 }
@@ -205,7 +194,7 @@ compute_paths() {
 # ----- 동시성 락 -----
 
 acquire_lock() {
-  mkdir -p "$LOCK_DIR"
+  mkdir -p "$LOOPS_DIR"
 
   # 우리 task에 stale lock(죽은/무효 PID)이 있으면 자동 정리
   if [[ -f "$LOCK_FILE" ]]; then
