@@ -2194,5 +2194,110 @@ echo "$output56" | grep -q "새 nested 패턴 추가" \
   || { echo "FAIL: .gitignore 갱신 메시지 없음. got: $output56"; exit 1; }
 echo "OK"
 
+echo "=== TEST 57: 워크트리 셋업이 main-tracked CLAUDE.md에 skip-worktree 설정 (false-positive halt 차단) ==="
+# 헌법 cp가 매 iter의 git diff에 영구 modified로 남아 suppressor 게이트가 헌법 본문의 금지 설명 텍스트를
+# false positive로 catch하던 문제 차단 검증. 사용자 main repo에 CLAUDE.md가 tracked인 환경 재현.
+T57_PROJECT="$WORK_DIR/claude-tracked-project-57"
+mkdir -p "$T57_PROJECT"
+git -C "$T57_PROJECT" init -q
+git -C "$T57_PROJECT" config user.email "test@example.com"
+git -C "$T57_PROJECT" config user.name "Test"
+echo "# user CLAUDE.md (40 lines simulated)" > "$T57_PROJECT/CLAUDE.md"
+git -C "$T57_PROJECT" add CLAUDE.md
+git -C "$T57_PROJECT" commit -q -m "chore: baseline with CLAUDE.md tracked"
+
+mkdir -p "$T57_PROJECT/milestones/regular/loops/gate-skip-worktree"
+cat > "$T57_PROJECT/milestones/regular/loops/gate-skip-worktree/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude:
+    - CLAUDE.md
+verify: 'true'
+---
+
+# Gate Test — CLAUDE.md skip-worktree
+EOF
+
+MOCK57="$WORK_DIR/mock57-bin"
+mkdir -p "$MOCK57"
+cat > "$MOCK57/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+# 워커가 코드 변경 0건 — 워크트리 CLAUDE.md modified만 남는 상태 재현 (fix 전엔 halt했던 시나리오)
+echo '{"result": "mock57", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK57/claude"
+
+(
+  cd "$T57_PROJECT"
+  set +e
+  output57=$(PATH="$MOCK57:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "gate-skip-worktree" 2>&1)
+  set -e
+  echo "$output57" | grep -q "Suppressor 신규 추가" \
+    && { echo "FAIL: 워크트리 CLAUDE.md(헌법 cp)가 suppressor false positive halt 트리거 — skip-worktree 미작동"; echo "$output57"; exit 1; }
+  echo "$output57" | grep -q "이터 상한 도달" \
+    || { echo "FAIL: loop이 MAX_ITERATIONS까지 정상 진행 못함 (게이트 패스 불완전)"; echo "$output57"; exit 1; }
+  WT57="$WORK_DIR/claude-tracked-project-57-loops/regular/gate-skip-worktree"
+  # skip-worktree 비트가 실제로 설정됐는지 확인
+  git -C "$WT57" ls-files -v CLAUDE.md 2>/dev/null | grep -qE "^S " \
+    || { echo "FAIL: CLAUDE.md에 skip-worktree 비트(S) 미설정"; git -C "$WT57" ls-files -v CLAUDE.md; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 58: 워커가 CLAUDE.md unskip + commit 시 scope.exclude 위반 halt (분별 능력 활성화) ==="
+# skip-worktree로 셋업 cp는 가려지지만 워커가 의도적으로 unskip하고 CLAUDE.md를 변경·commit하면
+# scope check가 SPEC scope.exclude(CLAUDE.md)에 매치되어 정상 halt해야 함. 이전엔 case 절이
+# CLAUDE.md를 명시 제외해 통과하던 hole 해소 검증.
+T58_PROJECT="$WORK_DIR/claude-tracked-project-58"
+mkdir -p "$T58_PROJECT"
+git -C "$T58_PROJECT" init -q
+git -C "$T58_PROJECT" config user.email "test@example.com"
+git -C "$T58_PROJECT" config user.name "Test"
+echo "# user CLAUDE.md" > "$T58_PROJECT/CLAUDE.md"
+git -C "$T58_PROJECT" add CLAUDE.md
+git -C "$T58_PROJECT" commit -q -m "chore: baseline with CLAUDE.md tracked"
+
+mkdir -p "$T58_PROJECT/milestones/regular/loops/gate-scope-catch"
+cat > "$T58_PROJECT/milestones/regular/loops/gate-scope-catch/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude:
+    - CLAUDE.md
+verify: 'true'
+---
+
+# Gate Test — CLAUDE.md scope catch
+EOF
+
+MOCK58="$WORK_DIR/mock58-bin"
+mkdir -p "$MOCK58"
+cat > "$MOCK58/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+# 워커가 CLAUDE.md skip-worktree를 풀고 임의 변경 + commit — 헌법 manipulation 시도 시나리오
+git update-index --no-skip-worktree CLAUDE.md 2>/dev/null || true
+echo "# WORKER INJECTED" >> CLAUDE.md
+git add CLAUDE.md
+git commit -q -m "feat: worker tries to inject into constitution" --no-verify
+echo '{"result": "mock58", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK58/claude"
+
+(
+  cd "$T58_PROJECT"
+  set +e
+  output58=$(PATH="$MOCK58:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "gate-scope-catch" 2>&1)
+  set -e
+  echo "$output58" | grep -qE "Scope 위반.*CLAUDE\.md" \
+    || { echo "FAIL: CLAUDE.md commit이 scope.exclude 위반으로 catch 안 됨 (분별 능력 미동작)"; echo "$output58"; exit 1; }
+)
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="

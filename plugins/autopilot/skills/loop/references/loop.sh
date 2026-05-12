@@ -370,8 +370,10 @@ diff_vs_scope() {
     [[ -z "$file" ]] && continue
 
     # 프레임워크 파일은 항상 scope 검사에서 제외 (워커 프레임워크 메타파일)
+    # CLAUDE.md는 SPEC scope.exclude로 통제 — skip-worktree로 보통은 diff에 안 잡히지만,
+    # 워커가 unskip + commit하면 여기서 정상 catch되어야 함 (워크트리 셋업 직후 자동 skip 처리).
     case "$file" in
-      .loop/*|.loop|CLAUDE.md|DONE) continue ;;
+      .loop/*|.loop|DONE) continue ;;
     esac
 
     # exclude 패턴 매칭 → 위반
@@ -717,6 +719,14 @@ cmd_start() {
     # 헌법을 워크트리 CLAUDE.md로 복사
     cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
       || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
+    # 헌법 cp는 워크트리-local 사실상의 untracked. main repo의 CLAUDE.md가 tracked일 때만
+    # skip-worktree로 git 추적에서 분리해 suppressor·scope 등 게이트의 false-positive를 차단.
+    # tracked 아니면 cp는 untracked가 되고 info/exclude로 이미 가려지므로 skip-worktree 불필요.
+    # 워커가 의도적으로 헌법을 수정·commit하려면 `--no-skip-worktree` 풀어야 함 (scope 게이트 catch).
+    if git -C "$WT" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
+      git -C "$WT" update-index --skip-worktree CLAUDE.md \
+        || die "skip-worktree 설정 실패: $WT/CLAUDE.md"
+    fi
 
     # 메타 파일 시드
     mkdir -p "$WT/.loop/iterations"
