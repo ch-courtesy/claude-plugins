@@ -24,8 +24,8 @@ grep -qE '검증 실패.*(라우팅|분기|routing)' "$SKILL_MD" \
 ok "검증 실패 라우팅/분기 섹션 헤더 존재"
 
 # 라우팅 옵션 (a)/(b)/(c) 모두 명시 — 본문 흐름에서 (a) … (b) … (c) 패턴
-for opt_label in '\(a\)' '\(b\)' '\(c\)'; do
-  grep -q "$opt_label" "$SKILL_MD" \
+for opt_label in '(a)' '(b)' '(c)'; do
+  grep -qF "$opt_label" "$SKILL_MD" \
     || fail "SKILL.md에 라우팅 옵션 $opt_label 표기 없음"
 done
 ok "라우팅 옵션 (a)/(b)/(c) 모두 명시"
