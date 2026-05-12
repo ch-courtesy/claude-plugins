@@ -2157,5 +2157,40 @@ grep -qxF 'milestones/**/loops/**/.worktree/' "$GITIGN_PROJECT55/.gitignore" \
   || { echo "FAIL: 새 워크트리 패턴 없음. content: $(cat "$GITIGN_PROJECT55/.gitignore")"; exit 1; }
 echo "OK"
 
+echo "=== TEST 56: has_legacy=0일 때 갱신 메시지에 \"legacy 라인 제거\" 비포함 ==="
+# bash ${var:+word}는 값이 "0"이어도 set/non-empty라 확장됨. has_legacy=0인데도
+# 메시지가 "+ legacy 라인 제거"를 잘못 포함하던 버그 방지.
+GITIGN_PROJECT56="$WORK_DIR/gitign-project-56"
+mkdir -p "$GITIGN_PROJECT56"
+git -C "$GITIGN_PROJECT56" init -q
+git -C "$GITIGN_PROJECT56" config user.email "test@example.com"
+git -C "$GITIGN_PROJECT56" config user.name "Test"
+git -C "$GITIGN_PROJECT56" commit --allow-empty -m "initial" -q
+
+# pre-state: legacy 라인 없음 (node_modules만)
+echo 'node_modules' > "$GITIGN_PROJECT56/.gitignore"
+git -C "$GITIGN_PROJECT56" add .gitignore
+git -C "$GITIGN_PROJECT56" commit -q -m "chore: gitignore no legacy"
+
+GITIGN_SPEC56="$WORK_DIR/gitign-spec-56.md"
+cat > "$GITIGN_SPEC56" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+# No Legacy Task
+EOF
+
+output56=$( (cd "$GITIGN_PROJECT56" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "no-legacy-task" --spec "$GITIGN_SPEC56") 2>&1 || true )
+echo "$output56" | grep -q "legacy 라인 제거" \
+  && { echo "FAIL: has_legacy=0인데 메시지에 \"legacy 라인 제거\" 포함. got: $output56"; exit 1; }
+# 갱신 메시지 자체는 있어야 함 (새 패턴 추가됐으니)
+echo "$output56" | grep -q "새 nested 패턴 추가" \
+  || { echo "FAIL: .gitignore 갱신 메시지 없음. got: $output56"; exit 1; }
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="

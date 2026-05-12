@@ -60,7 +60,6 @@ compute_milestone_paths() {
   validate_milestone "$milestone"
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
-  PROJECT_NAME="$(basename "$PROJECT_ROOT")"
   MILESTONE="$milestone"
   MILESTONE_DIR="$PROJECT_ROOT/milestones/$milestone"
   PRD_PATH="$MILESTONE_DIR/prd/PRD.md"
@@ -247,7 +246,6 @@ cmd_stop() {
 cmd_list() {
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
-  PROJECT_NAME="$(basename "$PROJECT_ROOT")"
 
   local milestones_base="$PROJECT_ROOT/milestones"
   if [[ ! -d "$milestones_base" ]]; then
@@ -283,7 +281,6 @@ cmd_cleanup() {
   local milestone="${1:-}"
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
-  PROJECT_NAME="$(basename "$PROJECT_ROOT")"
   local milestones_base="$PROJECT_ROOT/milestones"
 
   local milestones_to_clean=()

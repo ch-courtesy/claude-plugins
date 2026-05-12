@@ -171,7 +171,9 @@ ensure_loops_setup() {
     && git commit -q -m "$commit_msg" -- .gitignore >/dev/null 2>&1 ) \
     || die ".gitignore 자동 chore commit 실패 — 워크트리·lock 생성 중단"
 
-  echo "[$(now_iso)] .gitignore 갱신: 새 nested 패턴 추가${has_legacy:+ + legacy 라인 제거} (단독 chore commit)" >&2
+  local legacy_msg=""
+  [[ $has_legacy -eq 1 ]] && legacy_msg=" + legacy 라인 제거"
+  echo "[$(now_iso)] .gitignore 갱신: 새 nested 패턴 추가${legacy_msg} (단독 chore commit)" >&2
 }
 
 # ----- 경로 계산 헬퍼 -----
