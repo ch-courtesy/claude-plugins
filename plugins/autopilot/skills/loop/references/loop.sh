@@ -388,6 +388,14 @@ read_scope_yaml() {
   }' "$spec_path" 2>/dev/null
 }
 
+# SPEC frontmatter의 request_review 플래그가 true인지 확인.
+# 미지정·false·다른 값 → 1 (off). 본 플래그가 true일 때만 DONE 후 PR phase 진입.
+pr_phase_enabled() {
+  local val
+  val=$(read_scope_yaml | yq '.request_review // false' 2>/dev/null || echo "false")
+  [[ "$val" == "true" ]]
+}
+
 diff_vs_scope() {
   local scope_yaml include_patterns exclude_patterns committed working changed
   scope_yaml=$(read_scope_yaml)
@@ -845,6 +853,17 @@ cmd_start() {
 
     if [[ $iter_status -eq 100 ]]; then
       echo "[$(now_iso)] DONE 신호 감지. 정상 종료."
+
+      # PR 생성·재사용 phase (opt-in: SPEC frontmatter request_review: true).
+      # 워크트리·로컬 브랜치는 후속 단계(리뷰 모니터·자동 fix)를 위해 보존한다.
+      if pr_phase_enabled; then
+        echo "[$(now_iso)] request_review opt-in 감지 — PR phase 진입"
+        if ! bash "$SCRIPT_DIR/pr-phase.sh" "$WT" "$BRANCH" "$TASK_ID" "$PROJECT_ROOT"; then
+          echo "ERROR: PR phase 실패 — worktree·branch는 보존됨. 진단 후 재시도하세요." >&2
+          exit 1
+        fi
+      fi
+
       # cleanup 시 archive로 이동하도록 안내만
       echo ""
       echo "task $task_id 완료."

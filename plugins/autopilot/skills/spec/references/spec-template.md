@@ -27,6 +27,13 @@ verify: "{{verify_command}}"
 #   `ko` · `en` · `hybrid`. 미명시 시 디폴트는 `ko`(프로젝트 기본 언어).
 #   3모드 정의·예시는 references/ears-patterns.md "EARS 작성 언어" 절 참조.
 # ears_language: ko
+#
+# request_review (선택): true 지정 시 loop이 task DONE 직후 같은 워크트리에서
+#   PR 생성·재사용 단계를 자동 실행 (push → default 브랜치 자동 감지 → open PR 있으면 갱신,
+#   없으면 새 PR 생성). 제목은 SPEC H1, body는 "무엇을 만들 것인가" + base..HEAD commit log.
+#   숫자 task-id면 body 마지막에 `Closes #<id>` 자동 추가. reviewer·label·assignee는 미설정.
+#   미지정 또는 false면 PR 단계 skip. 자세한 동작은 plugins/autopilot/skills/loop/SKILL.md 참조.
+# request_review: true
 ---
 
 # {{task_title}}
