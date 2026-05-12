@@ -126,6 +126,14 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 승인 안 받은 섹션은 다시 제시·수정. 한 번에 통째로 보여주지 않음.
 
+**EARS 작성 언어 해석 (`ears_language` frontmatter override).** 수용 기준(섹션 3) 산출
+시점에 SPEC frontmatter의 `ears_language` 키를 읽어 디폴트와 override를 일관 적용한다:
+- 값이 `en`·`ko`·`hybrid` 중 하나면 그 모드로 AC를 산출한다.
+- 키가 미명시이면 **디폴트 `ko`**(프로젝트 기본 언어)로 산출한다.
+- 사용자에게 작성 언어를 다시 묻지 않는다 — frontmatter 값 또는 default만으로 결정.
+- 3모드 형식 정의·5패턴 예시·자유 텍스트→EARS 변환 규칙은 `references/ears-patterns.md`의
+  "EARS 작성 언어" 절을 단일 출처(single source of truth)로 사용한다.
+
 `--resume` 모드: 마커가 박힌 섹션만.
 
 ### 7. SPEC.md 작성

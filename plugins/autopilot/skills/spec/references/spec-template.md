@@ -22,6 +22,11 @@ verify: "{{verify_command}}"
 # test_sweep_paths:
 #   - "tests/legacy_to_remove/**"
 #   - "tests/test_specific_to_rename.py"
+#
+# ears_language (선택): "수용 기준 (EARS)" 산출 시 사용할 작성 언어. 허용 값:
+#   `ko` · `en` · `hybrid`. 미명시 시 디폴트는 `ko`(프로젝트 기본 언어).
+#   3모드 정의·예시는 references/ears-patterns.md "EARS 작성 언어" 절 참조.
+# ears_language: ko
 ---
 
 # {{task_title}}
@@ -37,6 +42,11 @@ verify: "{{verify_command}}"
   - State-driven: "While <상태>, the system shall <지속 응답>"
   - Optional: "Where <조건>, the system shall <응답>"
   - Unwanted: "If <불가용/오류>, then the system shall <복구·거부>"
+
+작성 언어 default는 `ko`(프로젝트 기본 언어). frontmatter `ears_language` 키로
+개별 SPEC이 `en`·`ko`·`hybrid` 중 하나를 override할 수 있다. 언어 정책·3모드
+형식·예시는 references/ears-patterns.md "EARS 작성 언어" 절 참조.
+
 각 기준이 verify 명령 안에서 *어떤 형태로든* fail 가능해야 합니다 (Independent-Test 규칙). 불가능한 기준은 [NEEDS CLARIFICATION: <질문>]으로 표시. -->
 {{acceptance_criteria}}
 
