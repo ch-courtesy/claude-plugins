@@ -134,8 +134,14 @@ ensure_loops_setup() {
   if [[ $has_legacy -eq 1 ]]; then
     local tmp
     tmp=$(mktemp 2>/dev/null) || die ".gitignore 임시 파일 생성 실패"
-    grep -vxF "$entry_legacy" "$gitignore" > "$tmp" \
-      || { rm -f "$tmp"; die ".gitignore에서 기존 $entry_legacy 라인 제거 실패"; }
+    # grep -v 는 매칭 라인이 전부라 출력이 비면 exit 1 — 정상 케이스(.gitignore가
+    # legacy 라인 하나뿐)이므로 die 트리거 금지. 실제 오류(exit ≥2)만 die.
+    local grc=0
+    grep -vxF "$entry_legacy" "$gitignore" > "$tmp" || grc=$?
+    if [[ $grc -ge 2 ]]; then
+      rm -f "$tmp"
+      die ".gitignore에서 기존 $entry_legacy 라인 제거 실패 (grep exit $grc)"
+    fi
     mv "$tmp" "$gitignore" \
       || die ".gitignore 갱신 실패 (rename)"
   fi

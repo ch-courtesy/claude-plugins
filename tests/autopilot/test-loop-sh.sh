@@ -2117,5 +2117,45 @@ echo "$output54" | grep -q "Suppressor 신규 추가" \
 loop cleanup "$TEST54_TASK" --force > /dev/null 2>&1 || true
 echo "OK"
 
+echo "=== TEST 55: .gitignore가 legacy 라인 단독일 때 ensure_loops_setup die 안 함 ==="
+# grep -vxF는 모든 라인이 제외되어 출력이 비면 exit 1 — 정상 케이스이므로 die 트리거 금지.
+# 기존 TEST 34는 node_modules가 함께 있어 이 경로 미커버.
+GITIGN_PROJECT55="$WORK_DIR/gitign-project-55"
+mkdir -p "$GITIGN_PROJECT55"
+git -C "$GITIGN_PROJECT55" init -q
+git -C "$GITIGN_PROJECT55" config user.email "test@example.com"
+git -C "$GITIGN_PROJECT55" config user.name "Test"
+git -C "$GITIGN_PROJECT55" commit --allow-empty -m "initial" -q
+
+# pre-state: .gitignore에 legacy 라인 단 한 줄
+echo '.loops/locks/' > "$GITIGN_PROJECT55/.gitignore"
+git -C "$GITIGN_PROJECT55" add .gitignore
+git -C "$GITIGN_PROJECT55" commit -q -m "chore: gitignore legacy only"
+
+GITIGN_SPEC55="$WORK_DIR/gitign-spec-55.md"
+cat > "$GITIGN_SPEC55" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+# Legacy-Only Gitignore Task
+EOF
+
+set +e
+output55=$( (cd "$GITIGN_PROJECT55" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "legacy-only-task" --spec "$GITIGN_SPEC55") 2>&1 )
+set -e
+echo "$output55" | grep -q "기존 .loops/locks/ 라인 제거 실패" \
+  && { echo "FAIL: legacy 라인 단독 .gitignore에서 die 오발동. got: $output55"; exit 1; }
+# legacy 라인은 제거됐어야 함
+grep -qxF '.loops/locks/' "$GITIGN_PROJECT55/.gitignore" \
+  && { echo "FAIL: legacy 라인이 제거되지 않음. content: $(cat "$GITIGN_PROJECT55/.gitignore")"; exit 1; }
+# 새 패턴은 추가됐어야 함
+grep -qxF 'milestones/**/loops/**/.worktree/' "$GITIGN_PROJECT55/.gitignore" \
+  || { echo "FAIL: 새 워크트리 패턴 없음. content: $(cat "$GITIGN_PROJECT55/.gitignore")"; exit 1; }
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
