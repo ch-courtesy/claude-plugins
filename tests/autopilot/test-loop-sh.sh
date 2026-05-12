@@ -2087,5 +2087,49 @@ echo "$output54" | grep -q "이터 상한 도달" \
 loop cleanup "$TEST54_TASK" --force > /dev/null 2>&1 || true
 echo "OK"
 
+echo "=== TEST 55: slugify helper — ASCII 정상 케이스 ==="
+# spec 스킬이 SPEC.md 최종 승인 후 호출하는 결정적 branch name 도출.
+# 입력: <task-id> <title>. 출력: feat/<task-id>-<slug> (또는 fallback feat/<task-id>).
+# 슬러그 규칙: [^A-Za-z0-9-] 제거 → 연속 하이픈 압축 → 양끝 하이픈 제거 → 소문자화.
+SLUGIFY="$REPO_ROOT/plugins/autopilot/skills/spec/references/slugify.sh"
+[[ -x "$SLUGIFY" ]] || { echo "FAIL: slugify.sh 부재 또는 실행 권한 없음: $SLUGIFY"; exit 1; }
+result=$(bash "$SLUGIFY" "regular/foo" "Test SPEC Title")
+[[ "$result" == "feat/regular/foo-test-spec-title" ]] \
+  || { echo "FAIL: ASCII slug. expected 'feat/regular/foo-test-spec-title' got '$result'"; exit 1; }
+echo "OK"
+
+echo "=== TEST 56: slugify — 비-ASCII 빈 슬러그 → task-id fallback ==="
+# 한국어 등 비-ASCII 문자만 있는 제목은 슬러그 결과가 비어 fallback 발동.
+result=$(bash "$SLUGIFY" "regular/foo" "한국어 제목")
+[[ "$result" == "feat/regular/foo" ]] \
+  || { echo "FAIL: fallback. expected 'feat/regular/foo' got '$result'"; exit 1; }
+echo "OK"
+
+echo "=== TEST 57: slugify — 특수문자 연속 → 하이픈 압축 + 양끝 trim ==="
+result=$(bash "$SLUGIFY" "regular/x" "!!Hello!!!  World??")
+[[ "$result" == "feat/regular/x-hello-world" ]] \
+  || { echo "FAIL: compress/trim. expected 'feat/regular/x-hello-world' got '$result'"; exit 1; }
+echo "OK"
+
+echo "=== TEST 58: slugify — 결정성 (동일 입력 → 동일 출력) ==="
+r1=$(bash "$SLUGIFY" "regular/x" "Deterministic Title")
+r2=$(bash "$SLUGIFY" "regular/x" "Deterministic Title")
+[[ "$r1" == "$r2" ]] && [[ -n "$r1" ]] \
+  || { echo "FAIL: not deterministic. r1='$r1' r2='$r2'"; exit 1; }
+echo "OK"
+
+echo "=== TEST 59: slugify — 명시적 milestone/child task-id (slashes preserved) ==="
+result=$(bash "$SLUGIFY" "m1/c1" "Foo Bar Baz")
+[[ "$result" == "feat/m1/c1-foo-bar-baz" ]] \
+  || { echo "FAIL: m1/c1. expected 'feat/m1/c1-foo-bar-baz' got '$result'"; exit 1; }
+echo "OK"
+
+echo "=== TEST 60: slugify — task-id만 인자, 제목 부재 → fallback ==="
+# 빈 제목 또는 한 인자 케이스도 fallback해야 함 (방어적 동작)
+result=$(bash "$SLUGIFY" "regular/x" "")
+[[ "$result" == "feat/regular/x" ]] \
+  || { echo "FAIL: empty title. expected 'feat/regular/x' got '$result'"; exit 1; }
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
