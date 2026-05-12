@@ -27,7 +27,7 @@ Skill(skill: "spec", args: "<task-id>")
 
 ## Subcommand
 
-### start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>]
+### start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>] [--no-monitor]
 
 검증 후 워크트리·락 생성 + 이터레이션 루프 시작.
 
@@ -39,6 +39,19 @@ Skill(skill: "spec", args: "<task-id>")
 - 헌법(`references/constitution.md`)을 워크트리의 CLAUDE.md로 복사
 - 메모리 파일 스텁 시드
 - 락 획득 + 이터레이션 루프
+
+#### 자동 Monitor 가설 (기본 동작)
+
+`--no-monitor`를 명시하지 않은 경우, 백그라운드로 띄운 `loop.sh start`의 stdout 스트림 위에 `Monitor` 도구를 즉시 가설하여 핵심 이벤트(이터 시작·종료, halt, escalation, done 등)를 사용자에게 자동 알림한다. 매 시작마다 별도 결정 질문을 묻지 않는다 — 기본 ON이며 비활성화는 호출 시 `--no-monitor` 플래그로만.
+
+권장 기본값:
+- `persistent: true`
+- `timeout_ms: 3600000` (1시간)
+- 필터 정규식: `이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|DONE`
+
+`--no-monitor` 플래그는 **SKILL.md 차원 옵션**이다 — 모델이 args 파싱 시 이 토큰을 분리·소비하여 `Monitor` 가설 자체를 생략하고, `loop.sh`로는 **전달하지 않는다** (셸 드라이버는 본 플래그를 모름). 따라서 본 플래그는 **본 스킬을 통한 호출 시점에만** 작용하며, 사용자가 셸 드라이버 `loop.sh start`를 직접 호출하는 경우엔 효력이 없다.
+
+`spec` 스킬 단계 9의 "지금 loop start 호출" 결정으로 자동 연계되는 경우에도 추가 모니터 결정 질문 없이 본 기본 동작(Monitor 가설 포함)이 그대로 적용된다.
 
 ### status [<task-id>] / stop <task-id> / list / cleanup <task-id> [--force] / logs <task-id> [--tail | --iter N]
 
