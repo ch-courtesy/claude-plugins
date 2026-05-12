@@ -28,9 +28,9 @@ Agent({
 ```
 당신은 자율 루프의 현재 이터레이션에서 만든 변경이 작업 명세에 부합하는지 검증합니다.
 
-## 요구사항 (.loop/SPEC.md에서)
+## 요구사항 (워크트리 SPEC.md에서)
 
-[`<worktree>/.loop/SPEC.md`의 작업 정의 섹션 전체 텍스트 — 작업 정의·수용 기준·범위·검증 명령을 그대로 paste. 파일을 다시 읽게 하지 말 것]
+[워크트리의 SPEC.md(신규 contract: `<worktree>/milestones/<m>/loops/<c>/SPEC.md`; legacy: `<worktree>/.loop/SPEC.md`)의 작업 정의 섹션 전체 텍스트 — 작업 정의·수용 기준·범위·검증 명령을 그대로 paste. 파일을 다시 읽게 하지 말 것]
 
 ## 이번 이터가 한 작업 (자기 보고)
 
@@ -111,7 +111,7 @@ Agent({
 
 ## 작업 정의 / 평가 기준
 
-이터의 작업 정의는 `<worktree>/.loop/SPEC.md`에 있음. 평가 기준은 헌법(`<worktree>/CLAUDE.md`) §3.5 Self-Review 4축.
+이터의 작업 정의는 워크트리의 SPEC.md(신규: `<worktree>/milestones/<m>/loops/<c>/SPEC.md`; legacy: `<worktree>/.loop/SPEC.md`)에 있음. 평가 기준은 헌법(`<worktree>/CLAUDE.md`) §3.5 Self-Review 4축.
 
 ## Git 범위
 

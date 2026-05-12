@@ -32,14 +32,14 @@
 
 - **콜드 스타트**: 매 이터레이션은 새 프로세스다. 직전 이터의 추론 과정·중간 상태는 다음 이터가 보지 못한다 — 결과물(코드·테스트·메모리 파일)만 본다.
 - **워크트리 격리**: 모든 작업은 워크트리 안(`<project>-loops/<task-id>/` 또는 `<goal-id>/<task-id>/`)에서 일어난다. 워크트리 밖 파일은 수정 대상이 아니다.
-- **입력**: `<worktree>/CLAUDE.md`(헌법), `.loop/SPEC.md`(작업 정의), 디스크 상태(코드·git 히스토리), `.loop/{PLAN,NOTES,HANDOFF,RUN_LOG}.md`(메모리 파일).
+- **입력**: `<worktree>/CLAUDE.md`(헌법), 워크트리의 `SPEC.md`(작업 정의 — 신규 contract: `milestones/<m>/loops/<c>/SPEC.md` (feat 브랜치에 committed); legacy: `.loop/SPEC.md` (start 시 cp 시드)), 디스크 상태(코드·git 히스토리), `.loop/{PLAN,NOTES,HANDOFF,RUN_LOG}.md`(메모리 파일).
 - **출력**: 코드 변경 + 자기 분류 prefix를 가진 git commit + `.loop/` 메모리 파일 갱신 + (선택) `DONE` 또는 `.loop/ESCALATION.md` 신호 파일.
 
 ## 3. 작업 흐름
 
 ### 3.1 수용 기준 확인
 
-작업 시작 시점에 `.loop/SPEC.md`의 작업 정의·수용 기준을 먼저 읽는다. 수용 기준이 모호하면 즉시 에스컬레이션한다 — 추측으로 진행하지 않는다.
+작업 시작 시점에 워크트리의 SPEC.md(신규: `milestones/<m>/loops/<c>/SPEC.md` (committed in worktree); legacy: `.loop/SPEC.md`)의 작업 정의·수용 기준을 먼저 읽는다. 수용 기준이 모호하면 즉시 에스컬레이션한다 — 추측으로 진행하지 않는다.
 
 ### 3.2 한 이터레이션의 6단계
 
@@ -233,7 +233,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 - `.git` 히스토리 조작, force push, 리베이스
 - "작동하는 것처럼 보이게 하는" 모든 종류의 위장
 - 워크트리 밖 파일 수정 (모든 작업은 워크트리 안에서)
-- 워크트리 루트의 `CLAUDE.md`(헌법), `.loop/SPEC.md` 수정
+- 워크트리 루트의 `CLAUDE.md`(헌법) 또는 워크트리의 SPEC.md(신규: `milestones/<m>/loops/<c>/SPEC.md`; legacy: `.loop/SPEC.md`) 수정
 - 거짓 `DONE` 또는 거짓 `.loop/ESCALATION.md` 작성
 
 다음 항목은 드라이버가 객관 검증한다 — 위반 시 자동 halt + 에스컬레이션:
