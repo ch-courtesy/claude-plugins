@@ -2228,5 +2228,55 @@ echo "$output62" | grep -qE "SPEC.md|feat|brand" \
 git -C "$PROJECT" branch -D "feat/regular/$NEW62_TASK" >/dev/null 2>&1 || true
 echo "OK"
 
+echo "=== TEST 63: 신규 contract — cleanup이 archive cp 없이 워크트리만 제거 + feat 브랜치 보존 ==="
+# 신규 contract cleanup 동작 (M4):
+#   - 메타 파일(PLAN/NOTES/HANDOFF/RUN_LOG/ESCALATION)을 main 작업트리로 cp하지 않음
+#   - feat/<task-id>-<slug> 브랜치는 PR base로 main repo에 보존
+#   - 워크트리만 제거
+# legacy contract cleanup(archive cp + branch delete)은 TEST 8·15에서 회귀 보호.
+NEW63_TASK="new-contract-cleanup"
+NEW63_TITLE="New Contract Cleanup"
+NEW63_SPEC_TMP="$WORK_DIR/new-contract-cleanup-spec.md"
+cat > "$NEW63_SPEC_TMP" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# New Contract Cleanup
+
+## 무엇을 만들 것인가
+신규 contract cleanup 동작 검증.
+EOF
+
+feat63_branch=$(seed_feat_branch_with_spec "regular/$NEW63_TASK" "$NEW63_TITLE" "$NEW63_SPEC_TMP")
+[[ -n "$feat63_branch" ]] || { echo "FAIL: TEST63 seed 실패"; exit 1; }
+
+MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start "$NEW63_TASK"
+WT63="$WORK_DIR/myproject-loops/regular/$NEW63_TASK"
+[[ -d "$WT63" ]] || { echo "FAIL: 워크트리 미생성"; exit 1; }
+[[ -f "$WT63/DONE" ]] || { echo "FAIL: mock claude가 DONE을 만들었어야 함"; exit 1; }
+
+# cleanup — `.loop/` 등 untracked 파일은 git이 보호하므로 --force 사용 (TEST 61 동일 패턴)
+loop cleanup "$NEW63_TASK" --force
+
+# (a) 워크트리 제거됨
+[[ ! -d "$WT63" ]] || { echo "FAIL: cleanup 후 워크트리 잔존"; exit 1; }
+# (b) feat 브랜치 보존됨 (PR base로 남김)
+preserved=$(git -C "$PROJECT" branch --list "$feat63_branch" | sed 's/^[ *]*//')
+[[ "$preserved" == "$feat63_branch" ]] \
+  || { echo "FAIL: cleanup 후 feat 브랜치가 사라짐 — 신규 contract는 PR base로 남겨야. expected '$feat63_branch' got '$preserved'"; exit 1; }
+# (c) main worktree에 archive 메타 파일 cp 없음
+ARCHIVE63="$PROJECT/milestones/regular/loops/$NEW63_TASK"
+[[ ! -f "$ARCHIVE63/PLAN.md" ]] \
+  || { echo "FAIL: archive PLAN.md 생성됨 — 신규 contract는 메타 archive 하지 않아야"; exit 1; }
+[[ ! -f "$ARCHIVE63/NOTES.md" ]] || { echo "FAIL: archive NOTES.md 생성됨"; exit 1; }
+[[ ! -f "$ARCHIVE63/HANDOFF.md" ]] || { echo "FAIL: archive HANDOFF.md 생성됨"; exit 1; }
+[[ ! -f "$ARCHIVE63/RUN_LOG.md" ]] || { echo "FAIL: archive RUN_LOG.md 생성됨"; exit 1; }
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="

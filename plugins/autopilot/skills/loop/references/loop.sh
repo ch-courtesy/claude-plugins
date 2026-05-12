@@ -1085,12 +1085,28 @@ cmd_cleanup() {
     die "task $task_id 에 DONE 신호가 없습니다.\n--force 없이 cleanup하려면 먼저 DONE 파일이 필요합니다: $0 cleanup $task_id --force"
   fi
 
-  # 4. 메타 파일 archive (milestones/<m>/loops/<c>/ 로 이동)
-  mkdir -p "$LOOPS_DIR"
-  for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
-    cp "$WT/.loop/$f" "$LOOPS_DIR/$f" 2>/dev/null || true
-  done
-  echo "메타 파일 보관: $LOOPS_DIR"
+  # M4: contract 모드 감지 — 워크트리 브랜치명이 feat/*이면 신규, 아니면 legacy.
+  # 신규 contract: feat 브랜치를 PR base로 보존, 메타 파일 archive cp 없음.
+  # legacy contract: autonomous-loop/<task-id> 브랜치 삭제 + 메타 파일 archive cp.
+  local wt_branch
+  wt_branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+  local use_feat_branch=0
+  if [[ "$wt_branch" == feat/* ]]; then
+    use_feat_branch=1
+    # 워크트리 실제 브랜치를 우선 (compute_paths가 설정한 autonomous-loop/ 기본값 override)
+    BRANCH="$wt_branch"
+  fi
+
+  # 4. 메타 파일 archive — 신규 contract에선 생략 (worker 메모리는 worktree와 함께 폐기)
+  if [[ $use_feat_branch -eq 0 ]]; then
+    mkdir -p "$LOOPS_DIR"
+    for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
+      cp "$WT/.loop/$f" "$LOOPS_DIR/$f" 2>/dev/null || true
+    done
+    echo "메타 파일 보관: $LOOPS_DIR"
+  else
+    echo "신규 contract: 메타 파일 archive 생략 (worker 메모리는 worktree와 함께 폐기)"
+  fi
 
   # 5. 워크트리 제거
   local wt_remove_flags=""
@@ -1098,15 +1114,23 @@ cmd_cleanup() {
   git -C "$PROJECT_ROOT" worktree remove $wt_remove_flags "$WT" \
     || die "git worktree remove 실패. 수동 제거: git worktree remove --force $WT"
 
-  # 6. 브랜치 삭제
-  local branch_delete_flag="-d"
-  [[ $force -eq 1 ]] && branch_delete_flag="-D"
-  git -C "$PROJECT_ROOT" branch $branch_delete_flag "$BRANCH" 2>/dev/null \
-    || echo "WARN: 브랜치 삭제 실패 (이미 머지됐거나 없을 수 있음): $BRANCH"
+  # 6. 브랜치 삭제 — 신규 contract에선 생략 (feat 브랜치는 PR base로 보존)
+  if [[ $use_feat_branch -eq 0 ]]; then
+    local branch_delete_flag="-d"
+    [[ $force -eq 1 ]] && branch_delete_flag="-D"
+    git -C "$PROJECT_ROOT" branch $branch_delete_flag "$BRANCH" 2>/dev/null \
+      || echo "WARN: 브랜치 삭제 실패 (이미 머지됐거나 없을 수 있음): $BRANCH"
+  else
+    echo "신규 contract: feat 브랜치 보존 (PR base): $BRANCH"
+  fi
 
   echo ""
-  echo "정리 완료: $task_id"
-  echo "보관된 메타 파일: $LOOPS_DIR"
+  if [[ $use_feat_branch -eq 1 ]]; then
+    echo "정리 완료: $task_id (신규 contract — feat 브랜치 $BRANCH 보존)"
+  else
+    echo "정리 완료: $task_id"
+    echo "보관된 메타 파일: $LOOPS_DIR"
+  fi
 }
 
 # ----- subcommand: logs -----
