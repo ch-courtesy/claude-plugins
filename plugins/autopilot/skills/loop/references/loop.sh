@@ -10,8 +10,11 @@
 #   bash /path/to/autopilot/skills/loop/references/loop.sh cleanup <task-id> [--force]
 #   bash /path/to/autopilot/skills/loop/references/loop.sh logs    <task-id> [--tail] [--iter N]
 #
+# 워크트리·lock 위치: 메인 레포 내부의 milestones/<m>/loops/<c>/ 단일 트리.
+# 단일 task는 normalize 과정에서 <m>=regular로 정규화. 외부 sibling 디렉터리·
+# .loops/ 별도 디렉터리는 더 이상 사용하지 않음 (v0.2 cutover).
+#
 # 환경 변수:
-#   LOOP_WORKTREE_BASE     워크트리 부모 디렉토리 (기본: <project>/../<project-name>-loops)
 #   MAX_CONCURRENT         동시 실행 task 수 (기본: 3)
 #   MAX_ITERATIONS         이터 상한 (기본: 30)
 #   WALL_CLOCK_MINUTES     시계 캡 (기본: 120)
@@ -30,13 +33,6 @@ die() {
 
 require_tool() {
   command -v "$1" >/dev/null 2>&1 || die "$1이(가) 필요합니다. 설치 후 다시 실행하세요."
-}
-
-sanitize_for_filename() {
-  # 슬래시는 __로 인코딩 (lock 파일명에서 디렉토리 분리자 회피).
-  # 'a/b'와 'a-b'가 같은 lock으로 충돌하던 버그 수정. 공백·'__' raw는
-  # validate_task_id가 거부하므로 여기선 / 만 처리.
-  echo "${1//\//__}"
 }
 
 # task-id 유효성 검사 (공통). compute_paths·cmd_status filter에서 호출.
@@ -111,29 +107,73 @@ else
   die "sha256sum 또는 shasum이 필요합니다 (macOS: shasum 기본 제공)"
 fi
 
-# ----- 첫 호출 setup (.loops/locks/ + .gitignore) -----
+# ----- 첫 호출 setup (.gitignore 자동 관리) -----
 
+# .gitignore에 새 nested 경로 패턴을 idempotent하게 추가하고, 기존 .loops/locks/
+# 라인이 있으면 제거. 변경 발생 시 .gitignore 단일 파일만 staging해 단독 chore
+# commit으로 격리 — 사용자의 staged/unstaged 변경과 commit 단위를 침범하지 않는다.
+# 갱신·commit 실패 시 die (워크트리·lock 생성 진입 전 차단).
 ensure_loops_setup() {
-  # compute_paths 호출 후 PROJECT_ROOT 설정 상태에서 호출
-  mkdir -p "$PROJECT_ROOT/.loops/locks"
-
   local gitignore="$PROJECT_ROOT/.gitignore"
-  local entry='.loops/locks/'
+  local entry_wt='milestones/**/loops/**/.worktree/'
+  local entry_lock='milestones/**/loops/**/.lock'
+  local entry_legacy='.loops/locks/'
 
-  # 이미 entry가 있으면 idempotent
-  if [[ -f "$gitignore" ]] && grep -qxF "$entry" "$gitignore"; then
+  local needs_wt=1 needs_lock=1 has_legacy=0
+  if [[ -f "$gitignore" ]]; then
+    grep -qxF "$entry_wt" "$gitignore" && needs_wt=0
+    grep -qxF "$entry_lock" "$gitignore" && needs_lock=0
+    grep -qxF "$entry_legacy" "$gitignore" && has_legacy=1
+  fi
+
+  if [[ $needs_wt -eq 0 ]] && [[ $needs_lock -eq 0 ]] && [[ $has_legacy -eq 0 ]]; then
     return 0
   fi
 
-  # 기존 .gitignore가 newline으로 끝나지 않으면 먼저 newline 추가 (파서 호환)
+  # 기존 legacy 라인 제거 (텍스트 매칭으로 정확히)
+  if [[ $has_legacy -eq 1 ]]; then
+    local tmp
+    tmp=$(mktemp 2>/dev/null) || die ".gitignore 임시 파일 생성 실패"
+    # grep -v 는 매칭 라인이 전부라 출력이 비면 exit 1 — 정상 케이스(.gitignore가
+    # legacy 라인 하나뿐)이므로 die 트리거 금지. 실제 오류(exit ≥2)만 die.
+    local grc=0
+    grep -vxF "$entry_legacy" "$gitignore" > "$tmp" || grc=$?
+    if [[ $grc -ge 2 ]]; then
+      rm -f "$tmp"
+      die ".gitignore에서 기존 $entry_legacy 라인 제거 실패 (grep exit $grc)"
+    fi
+    mv "$tmp" "$gitignore" \
+      || die ".gitignore 갱신 실패 (rename)"
+  fi
+
+  # 끝 newline 보장 (파서 호환)
   if [[ -s "$gitignore" ]]; then
     local last_byte
     last_byte=$(tail -c1 "$gitignore" 2>/dev/null)
     [[ "$last_byte" != "" ]] && echo "" >> "$gitignore"
   fi
 
-  echo "$entry" >> "$gitignore"
-  echo "[$(now_iso)] .gitignore에 $entry 추가됨" >&2
+  if [[ $needs_wt -eq 1 ]]; then
+    echo "$entry_wt" >> "$gitignore" \
+      || die ".gitignore 갱신 실패 ($entry_wt 추가)"
+  fi
+  if [[ $needs_lock -eq 1 ]]; then
+    echo "$entry_lock" >> "$gitignore" \
+      || die ".gitignore 갱신 실패 ($entry_lock 추가)"
+  fi
+
+  # .gitignore 단독 chore commit으로 격리.
+  # `git commit -- <pathspec>`은 명시된 경로만 commit하므로, 사용자가 다른
+  # 파일을 staging 중이어도 commit 단위가 섞이지 않는다.
+  local commit_msg='chore: .gitignore — autopilot 워크트리·lock 패턴 자동 관리'
+  ( cd "$PROJECT_ROOT" \
+    && git add .gitignore >/dev/null 2>&1 \
+    && git commit -q -m "$commit_msg" -- .gitignore >/dev/null 2>&1 ) \
+    || die ".gitignore 자동 chore commit 실패 — 워크트리·lock 생성 중단"
+
+  local legacy_msg=""
+  [[ $has_legacy -eq 1 ]] && legacy_msg=" + legacy 라인 제거"
+  echo "[$(now_iso)] .gitignore 갱신: 새 nested 패턴 추가${legacy_msg} (단독 chore commit)" >&2
 }
 
 # ----- 경로 계산 헬퍼 -----
@@ -146,17 +186,14 @@ compute_paths() {
   task_id="$(normalize_task_id "$raw_task_id")"
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
-  PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-  WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
-  WT="$WT_BASE/$task_id"
   BRANCH="autonomous-loop/$task_id"
-  TASK_ID_SAFE="$(sanitize_for_filename "$task_id")"
-  LOCK_DIR="$PROJECT_ROOT/.loops/locks"
-  LOCK_FILE="$LOCK_DIR/$TASK_ID_SAFE.lock"
-  # M1 cutover: SPEC·메타 파일은 milestones/<m>/loops/<c>/ 단일 트리. legacy 없음.
+  # v0.2 cutover: 워크트리·lock·메타 파일이 모두 milestones/<m>/loops/<c>/ 단일
+  # 트리 안에 있다. 외부 sibling·.loops/locks/는 사용하지 않음.
   local milestone="${task_id%%/*}"
   local child="${task_id#*/}"
   LOOPS_DIR="$PROJECT_ROOT/milestones/$milestone/loops/$child"
+  WT="$LOOPS_DIR/.worktree"
+  LOCK_FILE="$LOOPS_DIR/.lock"
   # 정규화된 task-id를 caller에게 노출 (cmd_start에서 TASK_ID로 사용)
   TASK_ID_NORMALIZED="$task_id"
 }
@@ -164,7 +201,7 @@ compute_paths() {
 # ----- 동시성 락 -----
 
 acquire_lock() {
-  mkdir -p "$LOCK_DIR"
+  mkdir -p "$LOOPS_DIR"
 
   # 우리 task에 stale lock(죽은/무효 PID)이 있으면 자동 정리
   if [[ -f "$LOCK_FILE" ]]; then
@@ -178,8 +215,12 @@ acquire_lock() {
     # else: PID 살아있음 — 아래 atomic create가 실패하며 die (정상 거부)
   fi
 
-  local running
-  running=$(find "$LOCK_DIR" -name "*.lock" -type f 2>/dev/null | wc -l | tr -d ' ')
+  # 새 nested 정책에서 lock 파일은 milestones/<m>/loops/<c>/.lock으로 분산.
+  # MAX_CONCURRENT 카운트는 milestones/ 하위 모든 .lock 파일을 합산.
+  local running=0
+  if [[ -d "$PROJECT_ROOT/milestones" ]]; then
+    running=$(find "$PROJECT_ROOT/milestones" -mindepth 4 -maxdepth 4 -type f -name '.lock' 2>/dev/null | wc -l | tr -d ' ')
+  fi
   if [[ $running -ge $MAX_CONCURRENT ]]; then
     die "이미 ${running}개 loop이 동작 중 (최대: $MAX_CONCURRENT). 새 loop 거부."
   fi
@@ -659,9 +700,19 @@ cmd_start() {
   if [[ ! -d "$WT" ]]; then
     echo "[$(now_iso)] 워크트리 생성 시작: $WT"
 
-    mkdir -p "$WT_BASE"
+    # 새 nested 정책: WT 부모(loops_dir)는 이미 SPEC.md 존재 시 만들어짐.
+    # 일관성을 위해 mkdir -p로 보장.
+    mkdir -p "$(dirname "$WT")"
     git -C "$PROJECT_ROOT" worktree add "$WT" -b "$BRANCH" \
       || die "git worktree add 실패: $WT"
+
+    # 워크트리 baseline empty commit — iter 1의 HEAD~1..HEAD diff가 부모 브랜치의
+    # ensure_loops_setup chore commit 등 setup history를 worker 변경으로 오인하지
+    # 않도록 분리한다. 기존 외부 sibling 워크트리 시절에는 프로젝트 setup이 baseline을
+    # 만들었으나, nested 정책에서 ensure_loops_setup이 main 브랜치에 .gitignore
+    # chore commit을 추가하므로 worktree 브랜치 baseline이 필요.
+    ( cd "$WT" && git commit -q --allow-empty -m "chore: autopilot worktree baseline" ) \
+      || die "워크트리 baseline commit 실패: $WT"
 
     # 헌법을 워크트리 CLAUDE.md로 복사
     cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
@@ -767,9 +818,6 @@ cmd_status() {
 
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
-  PROJECT_NAME="$(basename "$PROJECT_ROOT")"
-  WT_BASE="${LOOP_WORKTREE_BASE:-$PROJECT_ROOT/../${PROJECT_NAME}-loops}"
-  LOCK_DIR="$PROJECT_ROOT/.loops/locks"
 
   # task-id 목록 수집: milestones/<m>/loops/<c>/SPEC.md 단일 트리
   # (M1 cutover: legacy .loops/<id>/SPEC.md 스캔 제거)
@@ -809,14 +857,12 @@ cmd_status() {
   printf "%-25s %-12s %-12s %s\n" "-------------------------" "------------" "------------" "-----------"
 
   for tid in "${task_ids[@]}"; do
-    local tid_safe
-    tid_safe="$(sanitize_for_filename "$tid")"
-    local lock_file="$LOCK_DIR/$tid_safe.lock"
-    local wt="$WT_BASE/$tid"
-    # M1 cutover: 메타 디렉토리는 milestones/<m>/loops/<c>/
+    # v0.2 cutover: 모든 산출물이 milestones/<m>/loops/<c>/ 단일 트리.
     local milestone_part="${tid%%/*}"
     local child_part="${tid#*/}"
     local loops_dir="$milestones_base/$milestone_part/loops/$child_part"
+    local wt="$loops_dir/.worktree"
+    local lock_file="$loops_dir/.lock"
     local state="-"
     local iterations="-"
     local last_update="-"
@@ -988,6 +1034,17 @@ cmd_cleanup() {
   if [[ ! -d "$WT" ]]; then
     die "$task_id 에 대한 워크트리가 없습니다: $WT"
   fi
+
+  # 2.5. Path guard — WT가 예상 nested 경로 (milestones/<m>/loops/<c>/.worktree) 안인지
+  # 검증. 변수 누락·외부 경로·메인 레포 자체 손상을 차단.
+  [[ -n "$WT" ]] || die "WT 변수가 비어 있음 (cleanup 거부)"
+  [[ -n "$PROJECT_ROOT" ]] || die "PROJECT_ROOT 변수가 비어 있음 (cleanup 거부)"
+  [[ "$WT" == "$PROJECT_ROOT"/* ]] \
+    || die "워크트리가 PROJECT_ROOT 밖: $WT (cleanup 거부)"
+  case "$WT" in
+    */milestones/*/loops/*/.worktree) ;;
+    *) die "워크트리 경로 형식 부적절 (기대: */milestones/<m>/loops/<c>/.worktree): $WT" ;;
+  esac
 
   # 3. DONE 확인
   if [[ ! -f "$WT/DONE" ]] && [[ $force -eq 0 ]]; then

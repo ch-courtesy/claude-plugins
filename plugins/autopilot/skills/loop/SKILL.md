@@ -7,7 +7,7 @@ description: 자율 수행 루프(랄프 루프) 운영 인터페이스. start/s
 
 자율 수행 루프의 통합 운영 인터페이스. 인자로 subcommand와 sub args를 받아 자율 task lifecycle을 관리합니다.
 
-본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`), 외부 셸 드라이버(`references/loop.sh`), SPEC·메모리 파일 템플릿이 모두 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태(`milestones/<m>/loops/<c>/` 메타 + `.loops/locks/` 락)만 생성됩니다. ad-hoc 단일 task는 `regular` milestone(catch-all)로 자동 정규화됩니다.
+본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`), 외부 셸 드라이버(`references/loop.sh`), SPEC·메모리 파일 템플릿이 모두 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태가 모두 `milestones/<m>/loops/<c>/` 단일 nested 트리 안에 생성됩니다 (워크트리 `.worktree/`, lock `.lock`, SPEC·메타 파일). ad-hoc 단일 task는 `regular` milestone(catch-all)로 자동 정규화됩니다.
 
 ## 호출 방법
 
@@ -34,8 +34,8 @@ Skill(skill: "spec", args: "<task-id>")
 `Bash(bash $SKILL_DIR/references/loop.sh start <task-id> [...flags])` 호출. task-id가 단일 컴포넌트면 `regular/<input>`로 자동 정규화. loop.sh는 다음을 검증·수행:
 - `--spec <path>` 지정 시 외부 파일을 `milestones/<m>/loops/<c>/SPEC.md`로 복사 (prepare 대체)
 - `milestones/<m>/loops/<c>/SPEC.md` 존재 + `[NEEDS CLARIFICATION]` 마커 없음 + placeholder 모두 치환됨 (legacy `.loops/<task-id>/SPEC.md` fallback 없음 — v0.2 cutover)
-- 락 미보유
-- 워크트리 없으면 생성 (sibling 위치 `<project>/../<project-name>-loops/<task-id>/`)
+- 락 미보유 — lock 파일은 `milestones/<m>/loops/<c>/.lock`
+- 워크트리 없으면 생성 (메인 레포 내부 nested 위치 `milestones/<m>/loops/<c>/.worktree/` — `.gitignore`로 추적 차단)
 - 헌법(`references/constitution.md`)을 워크트리의 CLAUDE.md로 복사
 - 메모리 파일 스텁 시드
 - 락 획득 + 이터레이션 루프
@@ -52,9 +52,11 @@ Skill(skill: "spec", args: "<task-id>")
 
 ## 첫 호출 시 setup
 
-target 프로젝트에 `.loops/locks/` 부재 시 start 첫 호출에 자동:
-- `mkdir -p .loops/locks`
-- `.gitignore`에 `.loops/locks/` 라인 추가 (없으면)
+start 첫 호출에 자동:
+- `.gitignore`에 다음 패턴이 없으면 추가: `milestones/**/loops/**/.worktree/`, `milestones/**/loops/**/.lock`
+- 기존 `.loops/locks/` 라인이 있으면 제거 (v0.1 → v0.2 마이그레이션)
+- 변경분을 `.gitignore` 단독 chore commit으로 격리 — 사용자의 staged/unstaged 변경과 commit 단위를 침범하지 않는다
+- `.gitignore` 갱신·commit 실패 시 워크트리·lock 생성 중단 후 비-zero exit
 
 설치 단계가 별도로 필요 없음 — 스킬 첫 호출이 알아서 setup.
 
@@ -84,6 +86,6 @@ target 프로젝트에 `.loops/locks/` 부재 시 start 첫 호출에 자동:
 
 ## 규칙
 
-- 본 스킬은 target 프로젝트의 `milestones/<m>/loops/<c>/`(메타) 및 `.loops/locks/`(락)만 다룬다. `rules/`나 다른 디렉토리에 파일 생성하지 않음.
+- 본 스킬은 target 프로젝트의 `milestones/<m>/loops/<c>/` nested 트리(워크트리 `.worktree/`, lock `.lock`, SPEC·메타 파일)만 다룬다. `rules/`나 다른 디렉토리에 파일 생성하지 않음.
 - subcommand 위임 시 결과 코드를 그대로 사용자에게 보여주지 않고 형식화·요약.
 - 사용자가 명시적 요청한 subcommand만 실행. 다른 subcommand 자동 추론하지 않음.

@@ -1,13 +1,13 @@
 # 자율 루프 운영 가이드
 
-autopilot `loop` 스킬의 sibling 워크트리 기반 외부 셸 드라이버 운영 가이드입니다. 드라이버(`loop.sh`)와 헌법·템플릿은 모두 `references/` 안에 있으며, target 프로젝트에는 런타임 상태만 생성됩니다.
+autopilot `loop` 스킬의 nested 워크트리 기반 외부 셸 드라이버 운영 가이드입니다. 드라이버(`loop.sh`)와 헌법·템플릿은 모두 `references/` 안에 있으며, target 프로젝트에는 런타임 상태가 모두 `milestones/<m>/loops/<c>/` 단일 트리 안에 생성됩니다.
 
 ## 핵심 가정
 
 - 매 이터는 새 `claude --print` 프로세스 (콜드 스타트). 기억은 LLM이 아닌 파일에 있습니다.
-- 작업은 `<project>/../<project-name>-loops/<task-id>/` (sibling 워크트리)에서 일어납니다.
-- 격리: 워크트리는 프로젝트 트리 밖에 있어 프로젝트 `CLAUDE.md`·hooks가 자동 차단됩니다.
-- 사용자 레벨 `~/.claude/CLAUDE.md`·`~/.claude/settings.json`은 차단 불가 — **루프 시작 전 본인 환경을 검토**하시는 것을 권장합니다.
+- 작업은 `<project>/milestones/<m>/loops/<c>/.worktree/` (메인 레포 내부 nested 워크트리)에서 일어납니다.
+- 격리: 워크트리 경로는 `.gitignore`로 git 추적이 차단됩니다. 같은 부모 디렉터리(`milestones/<m>/loops/<c>/`)에 SPEC.md·메타 파일과 워크트리가 함께 위치하므로 IDE에서 한눈에 보입니다.
+- 워크트리의 자체 `CLAUDE.md`(헌법)는 워크트리 로컬 git exclude에 등록되어 main 트리로 새지 않습니다. 사용자 레벨 `~/.claude/CLAUDE.md`·`~/.claude/settings.json`은 차단 불가 — **루프 시작 전 본인 환경을 검토**하시는 것을 권장합니다.
 
 ## 보안 경계
 
@@ -16,25 +16,27 @@ autopilot `loop` 스킬의 sibling 워크트리 기반 외부 셸 드라이버 �
 **주의:**
 - 워크트리에 `.env`·credentials·SSH 키 등 secrets 파일을 두지 마세요. 워커가 의도치 않게 읽어 commit 메시지·로그·HANDOFF.md에 노출할 수 있습니다.
 - SPEC.md에 secrets 값을 인라인으로 적지 마세요. 워커가 그 내용을 다른 파일에 그대로 복사할 수 있습니다.
-- 워크트리는 사용자 본인 권한으로 동작합니다. 시스템 디렉토리(`/etc`·`/usr` 등)에 대한 영향은 워크트리 부모 격리(`<project>/../`)와 `--add-dir .` 범위로 제한됩니다 — 외부 경로 쓰기는 일반적으로 발생하지 않으나, 워커가 명시적으로 호출한 명령(예: `npm install`)은 사용자 홈에 부수효과를 만들 수 있습니다.
+- 워크트리는 사용자 본인 권한으로 동작합니다. 시스템 디렉토리(`/etc`·`/usr` 등)에 대한 영향은 워크트리 격리(`<project>/milestones/<m>/loops/<c>/.worktree/` 경로 안)와 `--add-dir .` 범위로 제한됩니다 — 외부 경로 쓰기는 일반적으로 발생하지 않으나, 워커가 명시적으로 호출한 명령(예: `npm install`)은 사용자 홈에 부수효과를 만들 수 있습니다.
 - 권장: 외부 SPEC(`--spec`)을 사용할 때 신뢰하지 못한 출처의 SPEC을 그대로 받지 마세요. SPEC은 워커의 행동을 직접 지시합니다.
 
 ## 디렉토리 구조
 
 ```
-# target 프로젝트 (스킬이 생성)
-.loops/
-├── locks/                     # 동시 실행 락 (gitignored)
-└── <task-id>/SPEC.md          # spec 스킬로 생성, cleanup 후 아카이브
-
-# 런타임 워크트리 (start가 생성)
-<project>/../<project-name>-loops/<task-id>/
-├── CLAUDE.md                  # 헌법 복사본
-└── .loop/
-    ├── SPEC.md / PLAN.md / NOTES.md / HANDOFF.md / RUN_LOG.md
-    ├── iterations/<n>.log     # 매 이터 stdout 캡처
-    └── ESCALATION.md          # 정지 사유 (있을 때만)
+# target 프로젝트 — 모든 산출물이 milestones/<m>/loops/<c>/ 단일 트리 (v0.2 cutover)
+milestones/<m>/loops/<c>/
+├── SPEC.md                    # spec 스킬로 생성
+├── .lock                      # 동시 실행 락 (gitignored)
+├── PLAN.md / NOTES.md / HANDOFF.md / RUN_LOG.md  # cleanup 후 archival 메타
+└── .worktree/                 # git 워크트리 (gitignored)
+    ├── CLAUDE.md              # 헌법 복사본
+    ├── DONE                   # 정상 완료 신호 (있을 때만)
+    └── .loop/
+        ├── SPEC.md / PLAN.md / NOTES.md / HANDOFF.md / RUN_LOG.md
+        ├── iterations/<n>.log # 매 이터 stdout 캡처
+        └── ESCALATION.md      # 정지 사유 (있을 때만)
 ```
+
+단일 task는 `<m>=regular`로 정규화 — `regular/<task-id>`. `.gitignore` 무시 패턴은 `milestones/**/loops/**/.worktree/`와 `milestones/**/loops/**/.lock`.
 
 스킬 패키지 파일 목록: `SKILL.md`의 모듈 구성 표 참조.
 
@@ -71,7 +73,7 @@ spec 스킬 대신 외부에서 만든 SPEC.md를 start에 직접 넘길 수 있
 bash "$LOOP_SH" start auth-refactor --spec /tmp/my-spec.md
 ```
 
-지정한 파일이 `.loops/<task-id>/SPEC.md`로 복사된 후 일반 start 흐름으로 진행됩니다. SPEC.md 형식: frontmatter에 `scope.include`·`scope.exclude`·`verify` 포함, 본문에 작업 정의.
+지정한 파일이 `milestones/<m>/loops/<c>/SPEC.md`로 복사된 후 일반 start 흐름으로 진행됩니다 (단일 컴포넌트는 `<m>=regular`로 정규화). SPEC.md 형식: frontmatter에 `scope.include`·`scope.exclude`·`verify` 포함, 본문에 작업 정의.
 
 ## 상태 조회
 
@@ -91,10 +93,10 @@ bash "$LOOP_SH" stop auth-refactor   # SIGTERM + 5초 대기 + 락 해제
 ## DONE 후 머지 및 정리
 
 ```bash
-git -C ../<project>-loops/auth-refactor log autonomous-loop/auth-refactor
-git merge autonomous-loop/auth-refactor        # 메인에서 머지 (또는 PR 생성)
-bash "$LOOP_SH" cleanup auth-refactor          # 아카이브 + 워크트리 제거
-# cleanup 후 메타 파일은 .loops/auth-refactor/ 보관
+git -C milestones/regular/loops/auth-refactor/.worktree log autonomous-loop/regular/auth-refactor
+git merge autonomous-loop/regular/auth-refactor     # 메인에서 머지 (또는 PR 생성)
+bash "$LOOP_SH" cleanup auth-refactor               # archival + 워크트리 제거
+# cleanup 후 메타 파일은 milestones/regular/loops/auth-refactor/ 에 보관 (워크트리만 제거)
 ```
 
 `cleanup --force`는 실행 중 프로세스가 있으면 SIGTERM 후 5초 대기 → 무응답 시 SIGKILL → lock·워크트리 제거. 정상 종료를 원할 때는 먼저 `stop <task-id>`로 정지 후 `cleanup` (without --force).
@@ -114,11 +116,11 @@ bash "$LOOP_SH" logs auth-refactor [--tail | --iter N]
 카테고리별 처리 흐름: `references/troubleshooting.md` 참조.
 
 ```bash
-cat ../<project>-loops/<task-id>/.loop/ESCALATION.md  # 사유 확인
-cd ../<project>-loops/<task-id>
-$EDITOR .loop/SPEC.md && $EDITOR .loop/NOTES.md        # 명세·학습 조정
-rm .loop/ESCALATION.md                                 # 보고 해제
-cd <project> && bash "$LOOP_SH" start <task-id>        # 재시작
+cat milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md  # 사유 확인
+cd milestones/<m>/loops/<c>/.worktree
+$EDITOR .loop/SPEC.md && $EDITOR .loop/NOTES.md             # 명세·학습 조정
+rm .loop/ESCALATION.md                                      # 보고 해제
+cd <project-root> && bash "$LOOP_SH" start <task-id>        # 재시작
 # --watch 모드면 ESCALATION.md 정리만으로 자동 재개 (60초 polling)
 ```
 
@@ -137,12 +139,13 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 
 | 환경 변수 | CLI 플래그 | 기본값 | 설명 |
 |---|---|---|---|
-| `LOOP_WORKTREE_BASE` | — | `<project>/../<project-name>-loops/` | 워크트리 부모 디렉토리 |
 | `MAX_CONCURRENT` | — | 3 | 동시 실행 task 수 |
 | `MAX_ITERATIONS` | `--max-iterations N` | 30 | 이터 상한 |
 | `WALL_CLOCK_MINUTES` | `--wall-clock-minutes N` | 120 | 시계 캡(분) |
 | — | `--watch` | off | ESCALATION 감지 시 정지 대신 polling 재개 대기 |
 | `WATCH_TIMEOUT_HOURS` | — | 24 | --watch 모드에서 polling 최대 시간(시간 단위). 초과 시 exit 1 |
+
+워크트리 위치는 v0.2부터 메인 레포 내부 `milestones/<m>/loops/<c>/.worktree/`로 고정 — 외부 sibling 경로를 지정하는 환경 변수는 더 이상 제공하지 않습니다.
 
 ## 객관 게이트
 

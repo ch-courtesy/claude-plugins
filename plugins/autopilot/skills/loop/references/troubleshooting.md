@@ -9,7 +9,7 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 처리:
 1. ESCALATION.md 본문 읽고 missing item 식별
 2. target 프로젝트 환경 조정 (도구 설치, env var 설정 등)
-3. `rm .loops/<task-id>/.../ESCALATION.md` 또는 워크트리 안으로 들어가서 정리
+3. `rm milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md`로 보고 해제 (또는 워크트리 안으로 들어가 정리)
 4. `start <task-id>` 또는 watch 모드면 자동 재개
 
 ## spec-gap (SPEC.md 결함)
@@ -18,7 +18,7 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 
 처리:
 1. ESCALATION.md의 "필요한 결정" 섹션 검토
-2. `<worktree>/.loop/SPEC.md` 직접 수정 (prepare 서브커맨드는 deprecated이며 SPEC 작성은 spec 스킬 사용: Skill(skill: "spec", args: "<task-id>"))
+2. `milestones/<m>/loops/<c>/.worktree/.loop/SPEC.md` 직접 수정 (prepare 서브커맨드는 deprecated이며 SPEC 작성은 spec 스킬 사용: Skill(skill: "spec", args: "<task-id>"))
 3. ESCALATION.md 정리 후 재시작
 
 ## architecture-gap (코드 구조 변경 필요)
@@ -48,3 +48,15 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 ## halt 발생 시 stash 확인
 
 drive가 자동 정지(halt)할 때 워크트리의 미커밋 변경은 자동 stash됨. 워크트리 들어가서 `git stash list`로 확인, 필요 시 `git stash pop`으로 복원.
+
+## v0.1 → v0.2 마이그레이션 (`.loops/` 잔존 정리)
+
+v0.2 cutover로 워크트리·lock·SPEC이 모두 `milestones/<m>/loops/<c>/` 단일 트리로 이동했습니다. 기존 `.loops/` 디렉터리에 in-flight SPEC·stale lock이 남아 있을 수 있으나, 새 코드는 이를 감지·자동 이동하지 않습니다 — 사용자가 수동으로 처리:
+
+1. **활성 task 정지·머지**: 진행 중이던 task가 있으면 v0.1 환경(`loop stop <task-id>` 후 그 시점 워크트리에서 변경 머지)에서 종결합니다.
+2. **SPEC 이전**: `.loops/<task-id>/SPEC.md` 내용을 `milestones/regular/loops/<task-id>/SPEC.md`로 이동 (`mkdir -p milestones/regular/loops/<task-id> && mv .loops/<task-id>/SPEC.md $_/`)
+3. **stale lock 제거**: `.loops/locks/*.lock`는 모두 안전하게 삭제 (`rm -f .loops/locks/*.lock`)
+4. **빈 디렉터리 제거**: `rm -rf .loops/`
+5. **외부 sibling 워크트리**: 기존 `<project>-loops/` 가 있다면 `git worktree list`로 확인 후 `git worktree remove`로 정리하고 디렉터리 삭제
+
+`.gitignore`의 새 패턴은 첫 `loop start` 호출 시 자동 정렬됩니다.

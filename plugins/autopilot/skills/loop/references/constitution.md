@@ -31,7 +31,7 @@
 ## 2. 이터레이션 모델
 
 - **콜드 스타트**: 매 이터레이션은 새 프로세스다. 직전 이터의 추론 과정·중간 상태는 다음 이터가 보지 못한다 — 결과물(코드·테스트·메모리 파일)만 본다.
-- **워크트리 격리**: 모든 작업은 워크트리 안(`<project>-loops/<task-id>/` 또는 `<goal-id>/<task-id>/`)에서 일어난다. 워크트리 밖 파일은 수정 대상이 아니다.
+- **워크트리 격리**: 모든 작업은 워크트리 안(`milestones/<m>/loops/<c>/.worktree/` — 단일 task는 `<m>=regular`로 정규화)에서 일어난다. 워크트리 밖 파일은 수정 대상이 아니다.
 - **입력**: `<worktree>/CLAUDE.md`(헌법), `.loop/SPEC.md`(작업 정의), 디스크 상태(코드·git 히스토리), `.loop/{PLAN,NOTES,HANDOFF,RUN_LOG}.md`(메모리 파일).
 - **출력**: 코드 변경 + 자기 분류 prefix를 가진 git commit + `.loop/` 메모리 파일 갱신 + (선택) `DONE` 또는 `.loop/ESCALATION.md` 신호 파일.
 

@@ -94,8 +94,8 @@ for wave in waves:
   while wave 진행 중:
     # references/dispatch.sh watch_wave <m> child1 child2 ...
     각 child의 sentinel 파일 watch (sleep 2s + test -e 단순 폴링):
-      <project>-loops/<m>/<c>/DONE                  → 성공
-      <project>-loops/<m>/<c>/.loop/ESCALATION.md   → 실패
+      milestones/<m>/loops/<c>/.worktree/DONE                  → 성공
+      milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md   → 실패
 
     누군가 ESCALATION (watch_wave exit 101):
       watch_wave가 나머지 진행 중 child들에 kill -TERM (fail-fast, 자동)

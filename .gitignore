@@ -4,3 +4,4 @@ node_modules/
 .env.*
 .loops/locks/
 milestones/*/dispatch/DISPATCH_LOG.md
+.loop/
