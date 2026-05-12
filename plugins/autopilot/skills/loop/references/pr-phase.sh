@@ -154,8 +154,14 @@ else
   pr_url=$(echo "$existing_pr_json" | sed -nE 's/.*"url":[[:space:]]*"([^"]+)".*/\1/p' | head -1)
   echo "[pr-phase] 기존 open PR 재사용 (number: $pr_number)"
 
-  # 기존 body 가져오기 (fence 안만 교체하려면 필요)
-  existing_body=$( cd "$WT" && gh pr view "$pr_number" --json body --jq '.body' 2>/dev/null || true )
+  # 기존 body 가져오기 (fence 안만 교체하려면 필요).
+  # PR 존재는 이미 확인됐으므로 view 실패는 환경 오류(권한·네트워크 등). 실패를 삼키면
+  # existing_body가 빈 값이 되어 fence 검사 통과 못하고 new_body="$PR_BODY" 전면 재작성으로
+  # 떨어져 사용자 수기 편집이 무음 소실됨 — 사용자 수기 보호 목표 위반. 즉시 abort.
+  if ! existing_body=$( cd "$WT" && gh pr view "$pr_number" --json body --jq '.body' ); then
+    echo "ERROR: gh pr view 실패 (PR #$pr_number) — 사용자 수기 body 보호 불가, abort" >&2
+    exit 1
+  fi
 
   # fence가 기존 body에 있으면 fence 안 영역만 교체, 없으면 전면 재작성 (1회 fence 삽입).
   new_body=""
