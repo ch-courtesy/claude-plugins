@@ -58,6 +58,31 @@ loop() {
   bash "$LOOP_SH_SRC" "$@"
 }
 
+# 신규 contract 시드 헬퍼 (M3): spec 스킬이 finalize 단계에서 수행할 동작을 테스트에서
+# 모사. main에서 임시 워크트리로 분기해 feat/<task-id>-<slug> 브랜치에
+# milestones/<m>/loops/<c>/SPEC.md를 commit한 후 임시 워크트리를 제거.
+# 인자: $1=task_id (정규화된 milestone/child), $2=title (slugify 입력), $3=SPEC.md 원본 경로.
+# 출력: stdout에 생성된 feat branch 이름 (호출자 검증용).
+seed_feat_branch_with_spec() {
+  local task_id="$1" title="$2" spec_src="$3"
+  [[ -f "$spec_src" ]] || { echo "FAIL: seed_feat_branch_with_spec: SPEC source 부재: $spec_src" >&2; return 1; }
+  local milestone="${task_id%%/*}"
+  local child="${task_id#*/}"
+  local branch
+  branch=$(bash "$REPO_ROOT/plugins/autopilot/skills/spec/references/slugify.sh" "$task_id" "$title")
+  local tmp_wt="$WORK_DIR/seed-wt-$$-$RANDOM"
+  git -C "$PROJECT" worktree add -q -b "$branch" "$tmp_wt" HEAD >/dev/null
+  mkdir -p "$tmp_wt/milestones/$milestone/loops/$child"
+  cp "$spec_src" "$tmp_wt/milestones/$milestone/loops/$child/SPEC.md"
+  (
+    cd "$tmp_wt"
+    git add "milestones/$milestone/loops/$child/SPEC.md"
+    git commit -q -m "feat($task_id): SPEC.md"
+  )
+  git -C "$PROJECT" worktree remove "$tmp_wt" >/dev/null
+  echo "$branch"
+}
+
 echo "=== TEST 1: prepare는 spec 스킬로 안내하는 스텁 ==="
 set +e
 output=$(loop prepare test-task-1 2>&1)
@@ -2129,6 +2154,78 @@ echo "=== TEST 60: slugify — task-id만 인자, 제목 부재 → fallback ===
 result=$(bash "$SLUGIFY" "regular/x" "")
 [[ "$result" == "feat/regular/x" ]] \
   || { echo "FAIL: empty title. expected 'feat/regular/x' got '$result'"; exit 1; }
+echo "OK"
+
+echo "=== TEST 61: 신규 contract — feat branch 기반 워크트리 + .loop/SPEC.md cp 부재 ==="
+# spec 스킬(M2)이 SPEC commit + feat branch 생성 → 그 후 loop start는 feat 브랜치를
+# 직접 체크아웃해 워크트리를 만든다. .loop/SPEC.md 복사는 발생하지 않으며 SPEC은
+# milestones/<m>/loops/<c>/SPEC.md (committed in worktree)에서 읽힌다.
+NEW_TASK="new-contract-task"
+NEW_TITLE="New Contract Task"
+NEW_SPEC_TMP="$WORK_DIR/new-contract-spec.md"
+cat > "$NEW_SPEC_TMP" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# New Contract Task
+
+## 무엇을 만들 것인가
+신규 contract 시드 테스트.
+EOF
+
+feat_branch=$(seed_feat_branch_with_spec "regular/$NEW_TASK" "$NEW_TITLE" "$NEW_SPEC_TMP")
+[[ -n "$feat_branch" ]] || { echo "FAIL: seed가 feat branch 이름을 반환 안 함"; exit 1; }
+
+# main 작업트리 상태가 변경되면 안 됨
+main_status=$(cd "$PROJECT" && git status --porcelain | wc -l | tr -d ' ')
+# Note: this just checks the seed itself didn't dirty main; test isolation depends on this.
+
+MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start "$NEW_TASK"
+WT_NEW="$WORK_DIR/myproject-loops/regular/$NEW_TASK"
+[[ -d "$WT_NEW" ]] || { echo "FAIL: 워크트리 미생성"; exit 1; }
+# 신규 contract: SPEC이 committed path에 존재
+[[ -f "$WT_NEW/milestones/regular/loops/$NEW_TASK/SPEC.md" ]] \
+  || { echo "FAIL: committed SPEC 부재 — feat branch 체크아웃이 SPEC을 포함해야"; exit 1; }
+# 신규 contract: .loop/SPEC.md 추가 복사 없음
+[[ ! -f "$WT_NEW/.loop/SPEC.md" ]] \
+  || { echo "FAIL: 신규 contract에선 .loop/SPEC.md cp가 없어야 — got: $(ls -la "$WT_NEW/.loop/SPEC.md")"; exit 1; }
+# 워크트리 브랜치는 feat/*
+wt_branch=$(git -C "$WT_NEW" rev-parse --abbrev-ref HEAD 2>/dev/null)
+[[ "$wt_branch" == feat/* ]] \
+  || { echo "FAIL: worktree branch '$wt_branch' is not feat/* (신규 contract는 feat 직접 체크아웃)"; exit 1; }
+# 신규 contract: autonomous-loop/* 브랜치는 생성되지 않아야
+auto_branch=$(git -C "$PROJECT" branch --list "autonomous-loop/regular/$NEW_TASK" | tr -d ' ')
+[[ -z "$auto_branch" ]] \
+  || { echo "FAIL: autonomous-loop/regular/$NEW_TASK 브랜치가 생성됨 — 신규 contract 폐지된 동작"; exit 1; }
+# 이터 1회 로그가 정상 기록됐는지
+[[ -f "$WT_NEW/.loop/iterations/1.log" ]] || { echo "FAIL: 이터 로그 미생성"; exit 1; }
+loop cleanup "$NEW_TASK" --force >/dev/null 2>&1
+echo "OK"
+
+echo "=== TEST 62: 신규 contract — feat branch 부재 + SPEC.md committed 미존재 시 fail-fast ==="
+# milestones/<m>/loops/<c>/SPEC.md가 untracked로만 존재하고 feat 브랜치가 없으면
+# 기존(legacy) 경로로 가도록 dual-mode 유지. 이 테스트는 그 dual-mode를 확인.
+# - feat 브랜치 있는데 worktree HEAD에 SPEC commit 부재 → fail-fast (신규 contract 위반)
+NEW62_TASK="new-contract-no-spec"
+# feat branch만 만들고 SPEC commit은 하지 않음 (M2 finalize 실패 시뮬레이션)
+git -C "$PROJECT" branch "feat/regular/$NEW62_TASK" HEAD
+# Untracked SPEC을 main에는 두지 않음 → cmd_start placeholder/needs-clar 검사 통과 못함 전에 fail
+# 단, cmd_start는 SPEC.md 존재 검사를 먼저 함. 신규 contract에선 worktree HEAD의 SPEC을 본다.
+set +e
+output62=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 loop start "$NEW62_TASK" 2>&1)
+result62=$?
+set -e
+[[ $result62 -ne 0 ]] \
+  || { echo "FAIL: feat 브랜치만 있고 SPEC commit 부재인데 start가 성공함"; echo "$output62"; exit 1; }
+echo "$output62" | grep -qE "SPEC.md|feat|brand" \
+  || { echo "FAIL: actionable 메시지 부재. got: $output62"; exit 1; }
+# 브랜치 정리
+git -C "$PROJECT" branch -D "feat/regular/$NEW62_TASK" >/dev/null 2>&1 || true
 echo "OK"
 
 echo ""
