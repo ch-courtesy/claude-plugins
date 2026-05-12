@@ -631,5 +631,78 @@ done
 [[ -f "$T9_DRIVER_PR" ]] || { echo "FAIL: pr-phase.sh 없음"; exit 1; }
 echo "OK"
 
+echo "=== TEST 10: AC3+M4 — fence 마커 부분 교체 (멀티라인 PR_BODY 이식성 회귀) ==="
+# pr-phase.sh의 fence-only 교체 경로(awk + ENVIRON)가 실제 실행되는지 회귀.
+# 기존 PR body에 fence 마커 + 사용자 수기 텍스트가 있을 때, fence 안만 새 PR_BODY로 교체되고
+# 바깥 사용자 텍스트는 그대로 보존돼야 한다. PR_BODY는 항상 멀티라인이므로 awk -v 이식성 결함이
+# 있으면 fence 내용이 잘리거나 누락되어 본 테스트가 RED가 된다.
+T10_NAME="fence-replace"
+T10_PROJECT="$(make_project_with_remote "$T10_NAME")"
+T10_MOCK="$(make_mock_bin "${T10_NAME}-mock")"
+install_claude_done_mock "$T10_MOCK"
+install_gh_record_mock "$T10_MOCK"
+T10_GH_LOG="$WORK_DIR/${T10_NAME}-gh.log"
+T10_CALL_DIR="$WORK_DIR/${T10_NAME}-gh-calls"
+: > "$T10_GH_LOG"
+rm -rf "$T10_CALL_DIR"
+
+mkdir -p "$T10_PROJECT/milestones/regular/loops/fence-task"
+cat > "$T10_PROJECT/milestones/regular/loops/fence-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+request_review: true
+---
+
+# Fence Replace Task
+
+## 무엇을 만들 것인가
+fence 안 영역만 새 body로 교체되고 바깥은 보존되는 회귀.
+EOF
+
+# 기존 PR body: 사용자 수기 prelude + fence + 옛 자동 body + fence + 사용자 epilogue.
+T10_OLD_BODY=$'사용자 수기 prelude — 보존돼야 함.\n<!-- autopilot:pr-body:begin -->\n## 무엇을 만들 것인가\n옛 자동 body (교체 대상)\n\n## Commits\n- old commit\n<!-- autopilot:pr-body:end -->\n사용자 수기 epilogue — 보존돼야 함.'
+
+(
+  cd "$T10_PROJECT"
+  GH_LOG_FILE="$T10_GH_LOG" GH_CALL_DIR="$T10_CALL_DIR" \
+    GH_OPEN_PR_NUMBER=77 GH_OPEN_PR_BODY="$T10_OLD_BODY" \
+    PATH="$T10_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "fence-task" > "$WORK_DIR/${T10_NAME}.out" 2>&1
+)
+
+# pr edit 호출 1회 이상
+grep -qE '^pr edit 77( |$)' "$T10_GH_LOG" \
+  || { echo "FAIL: pr edit 77 호출 기록 없음. log:"; cat "$T10_GH_LOG"; exit 1; }
+
+t10_body="$(extract_body_from_call "$T10_CALL_DIR" "pr-edit")"
+
+# 사용자 수기 prelude·epilogue 보존
+echo "$t10_body" | grep -qF "사용자 수기 prelude" \
+  || { echo "FAIL: fence 바깥 prelude 보존 실패. body:"; printf '%s\n' "$t10_body"; exit 1; }
+echo "$t10_body" | grep -qF "사용자 수기 epilogue" \
+  || { echo "FAIL: fence 바깥 epilogue 보존 실패. body:"; printf '%s\n' "$t10_body"; exit 1; }
+
+# 옛 자동 body는 사라져야 함 (fence 안 교체됨)
+if echo "$t10_body" | grep -qF "옛 자동 body (교체 대상)"; then
+  echo "FAIL: fence 안 옛 자동 body가 교체되지 않음 (awk -v 멀티라인 이식성 결함 의심). body:"
+  printf '%s\n' "$t10_body"; exit 1
+fi
+
+# 새 PR_BODY의 SPEC 본문이 fence 안에 들어왔어야 함
+echo "$t10_body" | grep -qF "fence 안 영역만 새 body로 교체되고 바깥은 보존되는 회귀" \
+  || { echo "FAIL: fence 안에 새 SPEC 본문 미반영. body:"; printf '%s\n' "$t10_body"; exit 1; }
+
+# fence 마커는 정확히 1쌍씩 유지
+fence_begin_count=$(printf '%s\n' "$t10_body" | grep -cF '<!-- autopilot:pr-body:begin -->' || true)
+fence_end_count=$(printf '%s\n' "$t10_body" | grep -cF '<!-- autopilot:pr-body:end -->' || true)
+[[ "$fence_begin_count" == "1" && "$fence_end_count" == "1" ]] \
+  || { echo "FAIL: fence 마커 개수 이상 (begin=$fence_begin_count, end=$fence_end_count). body:"; printf '%s\n' "$t10_body"; exit 1; }
+echo "OK"
+
 echo ""
 echo "=== 모든 PR phase 테스트 통과 ==="

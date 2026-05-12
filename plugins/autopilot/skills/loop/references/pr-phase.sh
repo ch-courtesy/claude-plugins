@@ -158,10 +158,11 @@ else
   if [[ -n "$existing_body" ]] && \
      echo "$existing_body" | grep -qF "$PR_BODY_FENCE_BEGIN" && \
      echo "$existing_body" | grep -qF "$PR_BODY_FENCE_END"; then
-    # fence 안만 교체 — sed로 begin..end 구간을 새 body로 대체.
-    # awk로 명료하게 처리.
-    new_body=$(printf '%s' "$existing_body" | awk -v new="$PR_BODY" -v b="$PR_BODY_FENCE_BEGIN" -v e="$PR_BODY_FENCE_END" '
-      BEGIN { in_fence = 0 }
+    # fence 안만 교체 — awk로 begin..end 구간을 새 body로 대체.
+    # 멀티라인 PR_BODY는 awk -v로 전달 시 POSIX 비보장(BSD/일부 mawk에서 첫 개행 잘림)이므로
+    # ENVIRON 경유로 이식성 보장.
+    new_body=$(printf '%s' "$existing_body" | PR_BODY_ENV="$PR_BODY" awk -v b="$PR_BODY_FENCE_BEGIN" -v e="$PR_BODY_FENCE_END" '
+      BEGIN { in_fence = 0; new = ENVIRON["PR_BODY_ENV"] }
       $0 == b { in_fence = 1; print new; next }
       $0 == e { in_fence = 0; next }
       !in_fence { print }
