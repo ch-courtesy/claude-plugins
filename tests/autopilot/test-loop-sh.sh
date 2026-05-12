@@ -2114,6 +2114,8 @@ output54=$(PATH="$MOCK54:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start
 set -e
 echo "$output54" | grep -q "Suppressor 신규 추가" \
   && { echo "FAIL: .loop/PLAN.md의 suppressor 패턴 인용이 false positive halt 트리거"; echo "$output54"; exit 1; }
+echo "$output54" | grep -q "이터 상한 도달" \
+  || { echo "FAIL: loop이 MAX_ITERATIONS까지 정상 진행 못함 — false positive 부재만으로 OK 판정하면 mock·환경 이슈에서 false OK 발생"; echo "$output54"; exit 1; }
 loop cleanup "$TEST54_TASK" --force > /dev/null 2>&1 || true
 echo "OK"
 
