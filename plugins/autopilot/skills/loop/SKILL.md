@@ -31,7 +31,7 @@ Skill(skill: "spec", args: "<task-id>")
 
 검증 후 워크트리·락 생성 + 이터레이션 루프 시작.
 
-`Bash(bash $SKILL_DIR/references/loop.sh start <task-id> [...flags])` 호출. task-id가 단일 컴포넌트면 `regular/<input>`로 자동 정규화. loop.sh는 다음을 검증·수행:
+`Bash(bash $SKILL_DIR/references/loop.sh start <task-id> [...flags], run_in_background: true)` 호출 — `run_in_background: true`는 필수다. 동기 호출하면 loop.sh의 이터레이션 루프가 메인 대화를 블록해 아래 "자동 Monitor 가설" 자체가 불가능해진다. task-id가 단일 컴포넌트면 `regular/<input>`로 자동 정규화. loop.sh는 다음을 검증·수행:
 - `--spec <path>` 지정 시 외부 파일을 `milestones/<m>/loops/<c>/SPEC.md`로 복사 (prepare 대체)
 - `milestones/<m>/loops/<c>/SPEC.md` 존재 + `[NEEDS CLARIFICATION]` 마커 없음 + placeholder 모두 치환됨 (legacy `.loops/<task-id>/SPEC.md` fallback 없음 — v0.2 cutover)
 - 락 미보유
