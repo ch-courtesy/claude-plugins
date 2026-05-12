@@ -123,9 +123,21 @@ case "${1:-}" in
         ;;
       view)
         if [[ -n "${GH_OPEN_PR_NUMBER:-}" ]]; then
-          printf '{"number":%s,"url":"%s","title":"%s","body":"%s"}\n' \
-            "$GH_OPEN_PR_NUMBER" "${GH_OPEN_PR_URL:-https://github.example/x/y/pull/$GH_OPEN_PR_NUMBER}" \
-            "${GH_OPEN_PR_TITLE:-existing title}" "${GH_OPEN_PR_BODY:-existing body}"
+          # --jq '.body' (또는 --jq=.body) 가 있으면 body 텍스트만 출력 (실제 gh의 jq 적용 모방).
+          # 그래야 pr-phase.sh가 fence 마커 부분 교체 경로를 실제로 실행한다.
+          want_body=0
+          for arg in "$@"; do
+            case "$arg" in
+              .body|--jq=.body) want_body=1;;
+            esac
+          done
+          if [[ $want_body -eq 1 ]]; then
+            printf '%s\n' "${GH_OPEN_PR_BODY:-existing body}"
+          else
+            printf '{"number":%s,"url":"%s","title":"%s","body":"%s"}\n' \
+              "$GH_OPEN_PR_NUMBER" "${GH_OPEN_PR_URL:-https://github.example/x/y/pull/$GH_OPEN_PR_NUMBER}" \
+              "${GH_OPEN_PR_TITLE:-existing title}" "${GH_OPEN_PR_BODY:-existing body}"
+          fi
           exit 0
         fi
         echo "no pr" >&2

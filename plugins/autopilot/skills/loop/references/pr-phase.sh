@@ -88,7 +88,6 @@ collect_commit_log() {
   local base="origin/$DEFAULT_BRANCH"
   # base가 존재하지 않으면 (신생 브랜치 — origin/HEAD가 fetch 안 됨 등) base 없이 전체 brief history
   if ! ( cd "$WT" && git rev-parse --verify "$base" >/dev/null 2>&1 ); then
-    base="HEAD~10..HEAD"
     ( cd "$WT" && git log --pretty=format:'- %h %s' -n 10 2>/dev/null || true )
     return
   fi
@@ -135,14 +134,12 @@ fi
 if [[ $existing_pr_count -eq 0 ]]; then
   # ----- 새 PR 생성 (M4) -----
   echo "[pr-phase] 새 PR 생성 (base: $DEFAULT_BRANCH, head: $BRANCH)"
-  pr_url=$( cd "$WT" && gh pr create \
+  if ! pr_url=$( cd "$WT" && gh pr create \
     --base "$DEFAULT_BRANCH" \
     --head "$BRANCH" \
     --title "$SPEC_TITLE" \
-    --body "$PR_BODY" )
-  pr_create_status=$?
-  if [[ $pr_create_status -ne 0 ]]; then
-    echo "ERROR: gh pr create 실패 (exit $pr_create_status)" >&2
+    --body "$PR_BODY" ); then
+    echo "ERROR: gh pr create 실패" >&2
     exit 1
   fi
   echo "PR URL: $pr_url"
