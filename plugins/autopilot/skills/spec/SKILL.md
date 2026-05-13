@@ -1,7 +1,7 @@
 ---
 name: spec
 description: "autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 생성. 한 질문씩 명확화·섹션별 승인·EARS 포맷·[NEEDS CLARIFICATION] 마커로 자율 loop이 도중 질문 없이 완수 가능한 자기완결적 SPEC을 만듭니다. SPEC.md 작성 후 결정적 슬러그화 규칙(ASCII 영숫자·하이픈만)으로 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·SPEC.md를 commit해 loop·PR 흐름이 단일 feature 브랜치로 통합되게 합니다. 호출 'Skill(skill=\"spec\", args=\"<task-id> [--milestone <m>] [--resume]\")'. milestone 미지정 시 `regular`(catch-all)을 default로 적용."
-allowed-tools: AskUserQuestion, Read, Write, Skill, Bash(git log:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git checkout:*), Bash(git branch:*), Bash(git add:*), Bash(git commit:*), Bash(git show-ref:*), Bash(git for-each-ref:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*), Bash(echo:*), Bash(head:*), Bash(tr:*), Bash(sed:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue create:*), Bash(gh project item-list:*), Bash(gh project item-edit:*), Bash(gh project item-add:*), Bash(gh api:*)
+allowed-tools: AskUserQuestion, Read, Write, Skill, Bash(git log:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git checkout:*), Bash(git branch:*), Bash(git add:*), Bash(git commit:*), Bash(git show-ref:*), Bash(git for-each-ref:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*), Bash(echo:*), Bash(head:*), Bash(tr:*), Bash(sed:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue create:*), Bash(gh issue edit:*), Bash(gh project item-list:*), Bash(gh project item-edit:*), Bash(gh project item-add:*), Bash(gh api:*)
 ---
 
 # spec
@@ -106,11 +106,13 @@ task-id ↔ Issue 매핑은 task-id 자체가 issue number(`#42` 또는 `42` 형
   spec 워크플로우 step 2에서 자동 생성. 본문은 SPEC.md 작성·승인 후 갱신될 예정.
   SPEC: milestones/<m>/loops/<new-task-id>/SPEC.md
   ```
+  `<new-task-id>` 플레이스홀더는 `gh issue create` 호출 시점엔 새 issue 번호를 모르므로 다음 절차로 처리한다 — `gh issue create`로 임시 body(`<new-task-id>` 리터럴 포함)를 올리고, 반환된 issue number(`N`)로 즉시 `gh issue edit N --body <substituted-body>`를 호출해 리터럴을 실제 번호로 치환한다. edit 실패 시 abort 규칙은 다른 `gh` 호출과 동일하다.
+
   명확화 라운드(step 5) 완료 시점에 본 issue 본문을 update할지 여부는 본 SPEC 범위 밖이며, 필요하면 사용자가 수동으로 보강한다.
 
 본 절차로 입력이 결정된 뒤에만 `gh issue create --title <title> --body <body>`를 호출한다. 사용자가 title 수집 단계에서 명시적 취소를 선택하면 (a)·(d) 분기는 abort로 처리한다 — `milestones/` 디렉터리도 생성하지 않는다.
 
-**호출 실패 시 abort**: task 조회·생성·상태 전이 호출(`gh issue view`·`gh issue create`·`gh project item-list`·`gh project item-edit`·`gh project item-add`) 중 어느 하나라도 0이 아닌 exit으로 실패하면 명확한 에러 메시지와 함께 abort. 자동 roll-back은 수행하지 않으며 부분 실패 상태로 다음 단계로 진행하지 않는다.
+**호출 실패 시 abort**: task 조회·생성·편집·상태 전이 호출(`gh issue view`·`gh issue create`·`gh issue edit`·`gh project item-list`·`gh project item-edit`·`gh project item-add`) 중 어느 하나라도 0이 아닌 exit으로 실패하면 명확한 에러 메시지와 함께 abort. 자동 roll-back은 수행하지 않으며 부분 실패 상태로 다음 단계로 진행하지 않는다.
 
 **범위 외 (비-목표)**: loop `start` 시점의 `In Design → In Progress` 전이, SPEC 승인 후 자동 후속 전이는 본 단계의 책임이 아니다 (다른 스킬·이벤트가 담당).
 

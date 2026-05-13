@@ -116,4 +116,16 @@ grep -qE 'body.*최소|최소 본문|body.*고정|placeholder' "$SKILL_MD" \
 echo "OK: body 최소/고정"
 
 echo ""
+echo "=== TEST 11: SKILL.md <new-task-id> 플레이스홀더 치환 절차 명시 ==="
+# PR #96 review NIT (claude[bot]): body의 <new-task-id> placeholder가 issue 생성 전엔
+# 값이 없으므로 create 후 즉시 edit으로 치환하는 절차를 명시해야 한다.
+grep -qE 'gh issue edit.*body|edit.*치환|치환.*edit|반환된 issue number.*edit' "$SKILL_MD" \
+  || { echo "FAIL: <new-task-id> 치환 절차(create 후 edit) 명시 없음"; exit 1; }
+echo "OK: create 후 edit 치환 절차"
+# allowed-tools에 gh issue edit 추가
+grep -m1 '^allowed-tools:' "$SKILL_MD" | grep -q 'gh issue edit' \
+  || { echo "FAIL: allowed-tools에 'gh issue edit' 없음"; exit 1; }
+echo "OK: allowed-tools에 gh issue edit"
+
+echo ""
 echo "=== 모든 spec 상태 전이 테스트 통과 ==="
