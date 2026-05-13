@@ -23,7 +23,7 @@
 Agent({
   description: "현재 이터의 명세 준수 검증",
   subagent_type: "general-purpose",
-  model: "claude-sonnet",  # Agent 도구 schema는 short form만 받음 → 실제 호출 시 "sonnet"
+  model: "sonnet",  # Agent 도구 model enum: "sonnet" | "opus" | "haiku" (short form만)
   prompt: <아래 양식>
 })
 ```
@@ -105,7 +105,7 @@ Agent({
 Agent({
   description: "현재 이터의 코드 품질 검토",
   subagent_type: "general-purpose",
-  model: "claude-opus",  # Agent 도구 schema는 short form만 받음 → 실제 호출 시 "opus"
+  model: "opus",  # Agent 도구 model enum: "sonnet" | "opus" | "haiku" (short form만)
   prompt: <아래 양식>
 })
 ```
@@ -205,13 +205,13 @@ Agent({
 Agent({
   description: "가설 A 검증: <가설 A 한 줄>",
   subagent_type: "general-purpose",
-  model: "claude-sonnet",  # Agent 도구 schema는 short form만 받음 → 실제 호출 시 "sonnet"
+  model: "sonnet",  # Agent 도구 model enum: "sonnet" | "opus" | "haiku" (short form만)
   prompt: <hypothesis A 양식>
 }),
 Agent({
   description: "가설 B 검증: <가설 B 한 줄>",
   subagent_type: "general-purpose",
-  model: "claude-sonnet",
+  model: "sonnet",
   prompt: <hypothesis B 양식>
 })
 ```
