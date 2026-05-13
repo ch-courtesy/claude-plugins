@@ -102,7 +102,6 @@ echo "OK: 10단계 헤더"
 
 echo ""
 echo "=== TEST 10: SKILL.md (a)·(d) 새 issue 생성 시 title/body 수집 절차 명시 ==="
-# PR #96 review (claude[bot]): step 2 (a)/(d) gh issue create title/body 명시 부재.
 # 모델이 임의 값으로 채우는 것을 방지하기 위해 title은 AskUserQuestion 1문항 + task-id fallback,
 # body는 고정 placeholder임을 명시해야 한다.
 grep -qE 'title.*AskUserQuestion|AskUserQuestion.*title|한 줄 제목.*수집' "$SKILL_MD" \
@@ -117,8 +116,6 @@ echo "OK: body 최소/고정"
 
 echo ""
 echo "=== TEST 11: SKILL.md <new-task-id> 플레이스홀더 치환 절차 명시 ==="
-# PR #96 review NIT (claude[bot]): body의 <new-task-id> placeholder가 issue 생성 전엔
-# 값이 없으므로 create 후 즉시 edit으로 치환하는 절차를 명시해야 한다.
 grep -qE 'gh issue edit.*body|edit.*치환|치환.*edit|반환된 issue number.*edit' "$SKILL_MD" \
   || { echo "FAIL: <new-task-id> 치환 절차(create 후 edit) 명시 없음"; exit 1; }
 echo "OK: create 후 edit 치환 절차"
