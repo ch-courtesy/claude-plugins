@@ -27,7 +27,7 @@ Skill(skill: "spec", args: "<task-id>")
 
 ## Subcommand
 
-### start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>] [--no-monitor]
+### start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>] [--no-monitor] [--no-pr]
 
 검증 후 워크트리·락 생성 + 이터레이션 루프 시작.
 
@@ -53,13 +53,14 @@ Skill(skill: "spec", args: "<task-id>")
 
 `spec` 스킬 단계 9의 "지금 loop start 호출" 결정으로 자동 연계되는 경우에도 추가 모니터 결정 질문 없이 본 기본 동작(Monitor 가설 포함)이 그대로 적용된다.
 
-#### DONE 이후 PR 생성·재사용 phase (opt-in)
+#### DONE 이후 PR 생성·재사용 phase (default)
 
-SPEC.md frontmatter에 `request_review: true`가 있으면, task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 동일 브랜치의 open PR 재사용) 단계가 자동 실행됩니다. 기본값은 비활성(키 미지정 또는 `false`).
+task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 동일 브랜치의 open PR 재사용) 단계가 **default로 자동 실행**됩니다 (SPEC 103 AC1). 건너뛰려면 `--no-pr` 플래그를 명시(SPEC 103 AC2).
 
 활성화 시 동작:
-- 현재 브랜치를 `origin`으로 push
 - default 브랜치 자동 감지 (`gh repo view` → `git symbolic-ref refs/remotes/origin/HEAD`)
+- push 직전에 `origin/<base>`로부터 `git fetch` + `git rebase` 수행 (SPEC 103 AC3) — base 최신 변경분을 흡수, fast-forward 가능하면 no-op. 첫 rebase가 충돌로 실패하면 `-X theirs`(feat 브랜치 우선) 전략으로 정확히 1회 자동 해결 시도(SPEC 103 AC4). 재시도도 실패하면 `git rebase --abort`로 워크트리 복구 + 명시적 사용자 알림 + non-zero exit (보수적 좌절 — 사용자 수동 해결 필요)
+- 현재 브랜치를 `origin`으로 push
 - 동일 head 브랜치에 open PR이 없으면 **새 PR 생성**, 있으면 **기존 PR을 in-place로 갱신** (제목·body 동기화)
 - PR 제목 = SPEC 문서의 H1, body = SPEC "무엇을 만들 것인가" 본문 + base..HEAD commit log
 - task-id가 `^[0-9]+$`이면 body 마지막에 `Closes #<id>` 자동 추가
@@ -67,10 +68,14 @@ SPEC.md frontmatter에 `request_review: true`가 있으면, task가 `DONE`에 �
 - 성공 시 PR URL·state(open)를 stdout으로 출력, worktree·local 브랜치 보존
 - push·pr create·pr edit 중 하나라도 실패하면 non-zero exit으로 단계 중단 (워크트리는 유지)
 - default 브랜치 감지 실패 시 push·pr 호출 전 abort
+- PR 생성·갱신 직후 **Monitor 단계** 진입 (SPEC 103 AC5): PR check가 모두 완료(success/failure)됐는데 PR state가 OPEN이고 reviewDecision이 없는 "stuck" 패턴을 감지하면 `gh pr checks <num> --rerun`을 호출. 최대 **3회** 재트리거하고 상한 도달 시 stderr에 사용자 개입 안내. MERGED·CLOSED 상태 전이 또는 리뷰 활동(reviewDecision set) 감지 시 즉시 종료. check 진행 중·정보 없음도 stuck 아닌 것으로 간주해 종료. 상한 도달은 경고이며 loop 자체는 정상 종료
+- **Cleanup 안내 단계** (SPEC 103 AC6): Monitor가 PR state를 MERGED 또는 CLOSED로 감지해 종료할 때 셸 드라이버는 "cleanup 후보" 안내(=PR 번호·상태·자동 삭제 차단·수동 cleanup 명령 위치)를 stdout에 명시 출력하고 worktree·feat 브랜치는 그대로 보존한다. 본 스킬을 통한 호출에서 cleanup 안내가 감지되면 `AskUserQuestion`으로 "worktree·feat 브랜치 cleanup 승인?"을 명시 확인하고 사용자의 명시 승인이 있을 때만 `cleanup` 서브커맨드를 호출한다 — 승인 없이 자동 삭제 금지
+
+`--no-pr` 플래그는 셸 드라이버(`loop.sh`)에 직접 전달되며, PR phase 진입 자체를 차단합니다. 이전 버전에서 `request_review: true`로 opt-in을 사용하던 호출자는 별도 마이그레이션이 필요 없습니다(default가 ON으로 변경됐으므로 동일 동작). 이전 버전에서 `request_review: false`(또는 키 미지정)로 PR을 차단하던 호출자는 `--no-pr`로 동일 동작을 재현해야 합니다.
 
 기존 PR body의 사용자 수기 편집 보호를 위해 자동 영역은 `<!-- autopilot:pr-body:begin --> ... <!-- autopilot:pr-body:end -->` marker fence 안에만 작성됩니다. 후속 단계(리뷰 모니터·자동 fix·worktree 정리)는 별도 task에서 다룹니다.
 
-요구: `gh` CLI 설치 + OAuth 인증. 키 이름 `request_review`는 `spec-template.md`·드라이버(`loop.sh`·`pr-phase.sh`)와 동기화돼 있어야 합니다.
+요구: `gh` CLI 설치 + OAuth 인증.
 
 ### status [<task-id>] / stop <task-id> / list / cleanup <task-id> [--force] / logs <task-id> [--tail | --iter N]
 
