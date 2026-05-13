@@ -76,10 +76,13 @@ run_cell() {
   printf "%s" "${prompt_body}" > "${cell_dir}/input.txt"
 
   # 실행 (CC --print --output-format json --model <model>)
+  # 시각·ms 모두 python3로 통일 — BSD date(macOS)의 %N 미지원으로 `+%s%3N`이 exit 0 +
+  # 비숫자 stdout(예: "1715624400%3N")을 내고 fallback이 트리거 안 됨. 이후 산술에서
+  # set -e가 스크립트 전체를 죽임. python3 단일 소스로 portable.
   local started_at
-  started_at="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+  started_at="$(python3 -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]+"Z")')"
   local t0
-  t0="$(date +%s%3N 2>/dev/null || python3 -c 'import time; print(int(time.time()*1000))')"
+  t0="$(python3 -c 'import time; print(int(time.time()*1000))')"
 
   set +e
   claude --print \
@@ -91,9 +94,9 @@ run_cell() {
   set -e
 
   local ended_at
-  ended_at="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+  ended_at="$(python3 -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3]+"Z")')"
   local t1
-  t1="$(date +%s%3N 2>/dev/null || python3 -c 'import time; print(int(time.time()*1000))')"
+  t1="$(python3 -c 'import time; print(int(time.time()*1000))')"
   local duration_ms=$((t1 - t0))
 
   # timing은 항상 기록 (rc 포함)
