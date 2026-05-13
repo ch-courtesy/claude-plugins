@@ -138,10 +138,10 @@ ok "AskUserQuestion 기반 스킬 체인 규칙 명시"
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== TEST 8: 기존 워크플로 보존 ==="
-# 검증 실패 분기 외 기존 단계 흐름은 그대로 유지되어야 함 (SPEC scope.exclude)
-grep -qE '(9|10)[- ]?(단계|step) 워크플로' "$SKILL_MD" \
-  || fail "SKILL.md에 단계 워크플로 헤더 보존 없음"
-ok "단계 워크플로 헤더 보존"
+# 검증 실패 분기 외 기존 10단계 흐름은 그대로 유지되어야 함 (SPEC scope.exclude)
+grep -qE '10[- ]?(단계|step) 워크플로' "$SKILL_MD" \
+  || fail "SKILL.md에 10단계 워크플로 헤더 보존 없음"
+ok "10단계 워크플로 헤더 보존"
 
 for step_kw in '컨텍스트 탐색' '범위 분해 게이트' '명확화 라운드' '섹션별 SPEC' '자체 검토' '사용자 최종 검토'; do
   grep -q "$step_kw" "$SKILL_MD" \
