@@ -239,6 +239,11 @@ else
     monitor_pr_state=$( cd "$WT" && gh pr view "$monitor_pr_number" --json state --jq '.state' 2>/dev/null || printf '' )
     if [[ "$monitor_pr_state" == "MERGED" || "$monitor_pr_state" == "CLOSED" ]]; then
       echo "[pr-phase] PR 상태=$monitor_pr_state — Monitor 종료 (lifecycle 완료 단계)"
+      # SPEC 103 M5/AC6: cleanup 후보 안내. 자동 삭제는 하지 않으며 사용자 명시 승인 필요.
+      # 셸 드라이버는 안내만 출력하고, 실제 cleanup은 사용자가 'loop.sh cleanup <task-id>'를
+      # 명시 호출하거나 SKILL 계층에서 AskUserQuestion 승인을 거친 뒤에만 수행한다.
+      echo "[pr-phase] cleanup 후보: PR #$monitor_pr_number 가 $monitor_pr_state 상태 — worktree·feat 브랜치 정리 가능."
+      echo "[pr-phase] 자동 삭제하지 않습니다 (AC6). 명시 승인 후 'loop.sh cleanup <task-id>'로 수동 정리하세요."
       break
     fi
 

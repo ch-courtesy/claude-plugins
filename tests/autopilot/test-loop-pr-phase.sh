@@ -1108,5 +1108,64 @@ grep -qE '^pr create ' "$T14_GH_LOG" \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
+echo "=== TEST 15: AC6 — PR MERGED 감지 시 cleanup 후보 안내 + 자동 삭제 안 함 ==="
+# AC6 (SPEC 103): PR이 merged 또는 closed 상태로 전이할 때, 시스템은 worktree·feat 브랜치
+# cleanup 여부를 사용자에게 명시적으로 확인하고, 명시적 승인이 없는 경우 어떤 항목도
+# 자동 삭제하지 않는다.
+# 본 케이스: stub gh가 state=MERGED 응답 → Monitor가 즉시 break하면서 cleanup 후보 안내
+# 메시지(승인 필요·자동 삭제 금지)를 명시 출력. worktree·feat 브랜치는 보존.
+T15_NAME="monitor-merged-cleanup-notice"
+T15_PROJECT="$(make_project_with_remote "$T15_NAME")"
+T15_MOCK="$(make_mock_bin "${T15_NAME}-mock")"
+install_claude_done_mock "$T15_MOCK"
+install_gh_record_mock "$T15_MOCK"
+T15_GH_LOG="$WORK_DIR/${T15_NAME}-gh.log"
+: > "$T15_GH_LOG"
+
+mkdir -p "$T15_PROJECT/milestones/regular/loops/merged-task"
+cat > "$T15_PROJECT/milestones/regular/loops/merged-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Monitor Merged Cleanup Notice
+
+## 무엇을 만들 것인가
+PR이 MERGED 상태로 전이될 때 cleanup 후보 안내만 출력하고 자동 삭제는 하지 않는 회귀.
+EOF
+
+(
+  cd "$T15_PROJECT"
+  GH_LOG_FILE="$T15_GH_LOG" \
+    GH_PR_STATE=MERGED \
+    PATH="$T15_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "merged-task" > "$WORK_DIR/${T15_NAME}.out" 2>&1
+)
+
+# AC6: cleanup 후보 안내 메시지 — "cleanup 후보" 또는 "loop.sh cleanup" 또는 "cleanup 승인" 토큰
+grep -qE "(cleanup 후보|loop\.sh cleanup|cleanup 승인)" "$WORK_DIR/${T15_NAME}.out" \
+  || { echo "FAIL: MERGED 상태인데 cleanup 후보 안내 메시지 없음 (AC6 위반). out:"; cat "$WORK_DIR/${T15_NAME}.out"; exit 1; }
+
+# AC6: 자동 삭제 차단 명시 — "자동 삭제하지 않" 또는 "수동" 또는 "명시 승인" 토큰
+grep -qE "(자동 삭제하지 않|수동|명시 승인)" "$WORK_DIR/${T15_NAME}.out" \
+  || { echo "FAIL: 자동 삭제 차단 안내 없음 (AC6 위반). out:"; cat "$WORK_DIR/${T15_NAME}.out"; exit 1; }
+
+# AC6: 자동 삭제 안 함 — worktree·DONE 보존
+[[ -d "$T15_PROJECT/milestones/regular/loops/merged-task/.worktree" ]] \
+  || { echo "FAIL: MERGED 감지 후 워크트리가 삭제됨 (AC6 위반 — 자동 삭제 금지)"; exit 1; }
+[[ -f "$T15_PROJECT/milestones/regular/loops/merged-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미보존"; exit 1; }
+
+# Monitor 진입 후 MERGED 감지로 즉시 break — pr checks --rerun 호출 0회
+if grep -qE '^pr checks .*--rerun' "$T15_GH_LOG"; then
+  echo "FAIL: MERGED 상태인데 pr checks --rerun 호출됨 (즉시 break 위반). gh log:"; cat "$T15_GH_LOG"; exit 1
+fi
+echo "OK"
+
 echo ""
 echo "=== 모든 PR phase 테스트 통과 ==="
