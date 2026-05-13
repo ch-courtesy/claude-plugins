@@ -98,6 +98,18 @@ task-id ↔ Issue 매핑은 task-id 자체가 issue number(`#42` 또는 `42` 형
 3. **(c) 기존 task가 설계 이전 상태(`Backlog`)**: `gh project item-edit`로 Status field를 `In Design`으로 전이한 뒤 다음 단계로 진행.
 4. **(d) 기존 task가 설계 이후 상태(`In Progress`·`Review`·`Done` 등)**: 새 issue를 `gh issue create`로 생성·Project 추가·Status를 `In Design`으로 설정. 새 issue number로 task-id를 **교체**하고 `AskUserQuestion`으로 사용자에게 새 task-id를 명시적으로 안내한 후 진행. (a)와 동일하게 새 task-id에 대해 사전 검사를 재적용.
 
+**(a)·(d) 새 issue 생성 시 title/body 수집**: step 2 시점에는 아직 명확화 라운드(step 5) 전이라 issue 본문에 쓸 문제·목표·범위가 수집되지 않은 상태다. 임의 값으로 채우면 실행 일관성이 깨지므로 다음 절차로 최소 정보를 명시적으로 확보한다:
+
+- **Title**: `AskUserQuestion`으로 한 줄 제목을 수집 (1문항, 자유 입력 옵션 포함). 사용자가 "그대로 task-id 사용"을 선택하거나 입력이 비어 있으면 원래 task-id 문자열을 fallback 제목으로 사용한다.
+- **Body**: 최소 본문은 다음 두 줄로 고정 — 임의 확장 금지:
+  ```
+  spec 워크플로우 step 2에서 자동 생성. 본문은 SPEC.md 작성·승인 후 갱신될 예정.
+  SPEC: milestones/<m>/loops/<new-task-id>/SPEC.md
+  ```
+  명확화 라운드(step 5) 완료 시점에 본 issue 본문을 update할지 여부는 본 SPEC 범위 밖이며, 필요하면 사용자가 수동으로 보강한다.
+
+본 절차로 입력이 결정된 뒤에만 `gh issue create --title <title> --body <body>`를 호출한다. 사용자가 title 수집 단계에서 명시적 취소를 선택하면 (a)·(d) 분기는 abort로 처리한다 — `milestones/` 디렉터리도 생성하지 않는다.
+
 **호출 실패 시 abort**: task 조회·생성·상태 전이 호출(`gh issue view`·`gh issue create`·`gh project item-list`·`gh project item-edit`·`gh project item-add`) 중 어느 하나라도 0이 아닌 exit으로 실패하면 명확한 에러 메시지와 함께 abort. 자동 roll-back은 수행하지 않으며 부분 실패 상태로 다음 단계로 진행하지 않는다.
 
 **범위 외 (비-목표)**: loop `start` 시점의 `In Design → In Progress` 전이, SPEC 승인 후 자동 후속 전이는 본 단계의 책임이 아니다 (다른 스킬·이벤트가 담당).

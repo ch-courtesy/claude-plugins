@@ -101,4 +101,19 @@ grep -qE '^## 10단계 워크플로|^## 10-step|총 10단계' "$SKILL_MD" \
 echo "OK: 10단계 헤더"
 
 echo ""
+echo "=== TEST 10: SKILL.md (a)·(d) 새 issue 생성 시 title/body 수집 절차 명시 ==="
+# PR #96 review (claude[bot]): step 2 (a)/(d) gh issue create title/body 명시 부재.
+# 모델이 임의 값으로 채우는 것을 방지하기 위해 title은 AskUserQuestion 1문항 + task-id fallback,
+# body는 고정 placeholder임을 명시해야 한다.
+grep -qE 'title.*AskUserQuestion|AskUserQuestion.*title|한 줄 제목.*수집' "$SKILL_MD" \
+  || { echo "FAIL: (a)/(d) title 수집 절차(AskUserQuestion) 명시 없음"; exit 1; }
+echo "OK: title 수집 절차"
+grep -qE 'task-id.*fallback|fallback.*task-id|task-id 문자열.*fallback' "$SKILL_MD" \
+  || { echo "FAIL: title fallback (task-id 사용) 명시 없음"; exit 1; }
+echo "OK: title fallback"
+grep -qE 'body.*최소|최소 본문|body.*고정|placeholder' "$SKILL_MD" \
+  || { echo "FAIL: body 최소/고정 placeholder 명시 없음"; exit 1; }
+echo "OK: body 최소/고정"
+
+echo ""
 echo "=== 모든 spec 상태 전이 테스트 통과 ==="
