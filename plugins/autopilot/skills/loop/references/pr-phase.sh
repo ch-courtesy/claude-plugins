@@ -119,6 +119,23 @@ PR_BODY_FENCE_END='<!-- autopilot:pr-body:end -->'
 
 PR_BODY="$(printf '%s\n%s\n%s' "$PR_BODY_FENCE_BEGIN" "$PR_BODY_INNER" "$PR_BODY_FENCE_END")"
 
+# ----- base branch rebase (SPEC 103 M2/AC3) -----
+# PR 생성 직전에 origin/<base>로부터 fetch + rebase를 수행해 base 최신 변경분을 흡수한다.
+# fast-forward(또는 동일 history)면 no-op으로 통과하고, conflict 발생 시 즉시 abort + 사용자
+# 알림 후 non-zero exit한다 (M3의 1회 자동 해결은 후속 작업). 워크트리는 보존된다.
+echo "[pr-phase] origin/$DEFAULT_BRANCH fetch"
+if ! ( cd "$WT" && git fetch origin "$DEFAULT_BRANCH" 2>&1 ); then
+  echo "ERROR: git fetch origin $DEFAULT_BRANCH 실패" >&2
+  exit 1
+fi
+
+echo "[pr-phase] origin/$DEFAULT_BRANCH rebase"
+if ! ( cd "$WT" && git rebase "origin/$DEFAULT_BRANCH" 2>&1 ); then
+  echo "ERROR: git rebase origin/$DEFAULT_BRANCH 실패 — conflict 가능성. 'git rebase --abort'로 워크트리 복구 후 abort." >&2
+  ( cd "$WT" && git rebase --abort 2>/dev/null || true )
+  exit 1
+fi
+
 # ----- 브랜치 push (M4) -----
 echo "[pr-phase] origin으로 push: $BRANCH"
 if ! ( cd "$WT" && git push --set-upstream origin "$BRANCH" 2>&1 ); then

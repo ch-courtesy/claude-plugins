@@ -167,6 +167,24 @@ GH_EOF
   chmod +x "$mock_bin/gh"
 }
 
+# git mock — argv를 GIT_LOG_FILE 환경변수 경로에 한 줄씩 기록한 뒤 실제 git으로 위임.
+# pr-phase.sh가 push 직전에 origin base를 fetch + rebase하는지 행적 검증할 때 사용한다.
+# 실제 git 절대경로를 install 시점에 baked in 해서 mock_bin이 PATH 앞에 와도 무한 recurse 안 됨.
+install_git_record_mock() {
+  local mock_bin="$1"
+  local real_git
+  real_git="$(command -v git)"
+  [[ -x "$real_git" ]] || { echo "FAIL: real git 경로 못 찾음 (command -v git 실패)"; exit 1; }
+  cat > "$mock_bin/git" <<GIT_EOF
+#!/usr/bin/env bash
+if [[ -n "\${GIT_LOG_FILE:-}" ]]; then
+  printf '%s\n' "\$*" >> "\$GIT_LOG_FILE"
+fi
+exec "$real_git" "\$@"
+GIT_EOF
+  chmod +x "$mock_bin/git"
+}
+
 # argv 덤프 디렉토리에서 특정 subcommand 호출의 --body 인자 추출
 # 사용: extract_body_from_call "<CALL_DIR>" "pr-create"  → 첫 매치 호출의 --body 값을 stdout
 # gh mock은 각 argv를 한 줄씩 기록(multiline body는 여러 줄 차지)하므로 --body 라인 다음부터
@@ -752,6 +770,63 @@ fence_begin_count=$(printf '%s\n' "$t10_body" | grep -cF '<!-- autopilot:pr-body
 fence_end_count=$(printf '%s\n' "$t10_body" | grep -cF '<!-- autopilot:pr-body:end -->' || true)
 [[ "$fence_begin_count" == "1" && "$fence_end_count" == "1" ]] \
   || { echo "FAIL: fence 마커 개수 이상 (begin=$fence_begin_count, end=$fence_end_count). body:"; printf '%s\n' "$t10_body"; exit 1; }
+echo "OK"
+
+echo "=== TEST 11: AC3 — PR push 직전 origin/<base> fetch + rebase 수행 ==="
+# AC3 (SPEC 103): PR 생성을 수행할 때, 시스템은 그 직전에 PR base branch(default `main`)로부터
+# rebase를 수행한 뒤 PR을 생성한다. base가 최신일 때 fast-forward는 no-op으로 통과,
+# conflict 시 별도 충돌 핸들러(M3) 경로로 위임된다 (본 테스트는 fast-forward 경로만 검증).
+T11_NAME="rebase-before-push"
+T11_PROJECT="$(make_project_with_remote "$T11_NAME")"
+T11_MOCK="$(make_mock_bin "${T11_NAME}-mock")"
+install_claude_done_mock "$T11_MOCK"
+install_gh_record_mock "$T11_MOCK"
+install_git_record_mock "$T11_MOCK"
+T11_GH_LOG="$WORK_DIR/${T11_NAME}-gh.log"
+T11_GIT_LOG="$WORK_DIR/${T11_NAME}-git.log"
+: > "$T11_GH_LOG"
+: > "$T11_GIT_LOG"
+
+mkdir -p "$T11_PROJECT/milestones/regular/loops/rebase-task"
+cat > "$T11_PROJECT/milestones/regular/loops/rebase-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Rebase Before Push
+
+## 무엇을 만들 것인가
+PR push 직전 origin base 브랜치 fetch + rebase가 실행되는 회귀.
+EOF
+
+(
+  cd "$T11_PROJECT"
+  GH_LOG_FILE="$T11_GH_LOG" GIT_LOG_FILE="$T11_GIT_LOG" PATH="$T11_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "rebase-task" > "$WORK_DIR/${T11_NAME}.out" 2>&1
+)
+
+# AC3: fetch + rebase 행적 (PR phase 안에서 호출됐어야)
+grep -qE '^fetch origin( |$)' "$T11_GIT_LOG" \
+  || { echo "FAIL: 'git fetch origin <base>' 호출 기록 없음 (AC3 위반). git log tail:"; tail -30 "$T11_GIT_LOG"; exit 1; }
+grep -qE '^rebase origin/' "$T11_GIT_LOG" \
+  || { echo "FAIL: 'git rebase origin/<base>' 호출 기록 없음 (AC3 위반). git log tail:"; tail -30 "$T11_GIT_LOG"; exit 1; }
+
+# rebase가 push보다 먼저 — pr-phase가 정확한 순서로 호출해야 한다.
+rebase_line=$(grep -nE '^rebase origin/' "$T11_GIT_LOG" | head -1 | cut -d: -f1)
+push_line=$(grep -nE '^push .*origin' "$T11_GIT_LOG" | head -1 | cut -d: -f1)
+[[ -n "$rebase_line" && -n "$push_line" && "$rebase_line" -lt "$push_line" ]] \
+  || { echo "FAIL: rebase가 push보다 먼저여야 함 (rebase_line=$rebase_line push_line=$push_line). git log tail:"; tail -50 "$T11_GIT_LOG"; exit 1; }
+
+# rebase 후 PR 생성 정상 흐름 유지
+grep -qE '^pr create ' "$T11_GH_LOG" \
+  || { echo "FAIL: rebase 후 pr create 호출 안 됨. gh log:"; cat "$T11_GH_LOG"; exit 1; }
+[[ -f "$T11_PROJECT/milestones/regular/loops/rebase-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
 echo ""
