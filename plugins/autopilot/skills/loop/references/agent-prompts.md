@@ -13,12 +13,17 @@
 
 **언제 쓰나:** 한 이터에서 코드를 변경한 후 그 변경이 SPEC.md의 수용 기준과 4-Level Verifier (existence/substantive/wired/runtime)에 부합하는지 **독립 시각으로** 검증하고 싶을 때.
 
+**권장 모델:** `claude-sonnet` (초기 권장 — 실측 벤치마크 결과로 보정 예정, `docs/superpowers/specs/2026-05-13-subagent-model-benchmark.md`)
+
+근거: SPEC·코드 대조는 정밀 추론이 필요하지만 자유로운 창작은 아님. opus 대비 절반 비용으로 충분히 수렴, haiku는 다단계 verifier 일관성에서 분산 큼 (prior knowledge — 실측 후 갱신).
+
 **호출 패턴:**
 
 ```
 Agent({
   description: "현재 이터의 명세 준수 검증",
   subagent_type: "general-purpose",
+  model: "claude-sonnet",  # Agent 도구 schema는 short form만 받음 → 실제 호출 시 "sonnet"
   prompt: <아래 양식>
 })
 ```
@@ -90,12 +95,17 @@ Agent({
 
 **언제 쓰나:** spec compliance가 통과했어도 코드 품질·구조·아키텍처 관점에서 **독립 검토**하고 싶을 때. §3.5 Self-Review 4축 (Completeness/Quality/Discipline/Testing) 중 Quality·Discipline 축의 보강.
 
+**권장 모델:** `claude-opus` (초기 권장 — 실측 벤치마크 결과로 보정 예정, `docs/superpowers/specs/2026-05-13-subagent-model-benchmark.md`)
+
+근거: 시니어 코드 리뷰는 아키텍처·결합도·심각도 분류 등 깊은 합성 추론을 요구. sonnet은 critical/important 경계 분류에서 일관성이 떨어지고, haiku는 strucutural 관찰이 얕음 (prior knowledge — 실측 후 갱신).
+
 **호출 패턴:**
 
 ```
 Agent({
   description: "현재 이터의 코드 품질 검토",
   subagent_type: "general-purpose",
+  model: "claude-opus",  # Agent 도구 schema는 short form만 받음 → 실제 호출 시 "opus"
   prompt: <아래 양식>
 })
 ```
@@ -183,6 +193,10 @@ Agent({
 
 **중요 제약:** 결과 합성은 메인 이터의 책임. Agent에게 "어느 가설이 맞는지 결정해 줘"는 §11.6 금지 ("이터 핵심 결정·합성은 메인이").
 
+**권장 모델:** `claude-sonnet` (초기 권장 — 실측 벤치마크 결과로 보정 예정, `docs/superpowers/specs/2026-05-13-subagent-model-benchmark.md`)
+
+근거: 단일 가설의 read-only 관찰·최소 변경 검증은 깊이보다 정확한 follow-through가 중요. 병렬 호출은 비용이 N배로 증폭되므로 opus는 과잉, haiku는 가설 진위 판정에서 false-positive 빈도가 높음 (prior knowledge — 실측 후 갱신).
+
 **호출 패턴 (병렬):**
 
 같은 메시지에서 두 Agent 호출 블록을 묶어 dispatch.
@@ -191,11 +205,13 @@ Agent({
 Agent({
   description: "가설 A 검증: <가설 A 한 줄>",
   subagent_type: "general-purpose",
+  model: "claude-sonnet",  # Agent 도구 schema는 short form만 받음 → 실제 호출 시 "sonnet"
   prompt: <hypothesis A 양식>
 }),
 Agent({
   description: "가설 B 검증: <가설 B 한 줄>",
   subagent_type: "general-purpose",
+  model: "claude-sonnet",
   prompt: <hypothesis B 양식>
 })
 ```
