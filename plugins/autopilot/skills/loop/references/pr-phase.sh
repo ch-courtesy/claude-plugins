@@ -261,7 +261,11 @@ else
       echo "[pr-phase] check 정보 없음 — Monitor 종료"
       break
     fi
-    if printf '%s' "$monitor_checks_json" | grep -qE '"state"[[:space:]]*:[[:space:]]*"(PENDING|IN_PROGRESS|QUEUED|RUNNING)"'; then
+    # stuck 후보: 모든 check가 COMPLETED 상태일 때만. 비완료(WAITING/PENDING/IN_PROGRESS/
+    # QUEUED/RUNNING 등 GitHub가 향후 추가할 모든 상태 포함)가 하나라도 있으면 stuck 아님.
+    # 화이트리스트(진행 상태 목록) 대신 블랙리스트(완료 상태만 stuck 후보)로 판정해
+    # GitHub API가 새 상태값을 추가해도 false-positive halt가 안 생기게 한다.
+    if printf '%s' "$monitor_checks_json" | grep -oE '"state"[[:space:]]*:[[:space:]]*"[A-Z_]+"' | grep -qv 'COMPLETED'; then
       # 진행 중 check가 있으면 아직 stuck 아님 → monitor 종료
       echo "[pr-phase] check 진행 중 — Monitor 종료 (stuck 아님)"
       break

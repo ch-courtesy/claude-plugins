@@ -178,6 +178,11 @@ case "${1:-}" in
           stuck)
             printf '[{"state":"COMPLETED","conclusion":"FAILURE"}]\n'
             ;;
+          waiting)
+            # 환경 보호 승인 대기 — stuck 아님 (regression: WAITING이 진행 상태 패턴에
+            # 누락돼 stuck으로 오판되던 버그 보호)
+            printf '[{"state":"WAITING","conclusion":null}]\n'
+            ;;
           *)
             printf '[]\n'
             ;;
@@ -1166,6 +1171,61 @@ grep -qE "(자동 삭제하지 않|수동|명시 승인)" "$WORK_DIR/${T15_NAME}
 if grep -qE '^pr checks .*--rerun' "$T15_GH_LOG"; then
   echo "FAIL: MERGED 상태인데 pr checks --rerun 호출됨 (즉시 break 위반). gh log:"; cat "$T15_GH_LOG"; exit 1
 fi
+echo "OK"
+
+echo "=== TEST 16: AC5 회귀 — WAITING(환경 승인 대기)은 stuck 아님 → --rerun 0회 ==="
+# AC5 회귀 (PR #109 NIT 대응): gh pr checks의 state 값에 WAITING(환경 보호 승인 대기)이
+# 포함될 수 있는데, 이전 코드는 진행 상태 화이트리스트(PENDING|IN_PROGRESS|QUEUED|RUNNING)에
+# WAITING이 빠져 있어 stuck으로 오판해 불필요한 --rerun이 발생했다. 본 회귀: 화이트리스트
+# 대신 'COMPLETED만 stuck 후보' 블랙리스트로 판정하므로 WAITING 응답 시 --rerun 0회 + 정상 break.
+T16_NAME="monitor-waiting-not-stuck"
+T16_PROJECT="$(make_project_with_remote "$T16_NAME")"
+T16_MOCK="$(make_mock_bin "${T16_NAME}-mock")"
+install_claude_done_mock "$T16_MOCK"
+install_gh_record_mock "$T16_MOCK"
+T16_GH_LOG="$WORK_DIR/${T16_NAME}-gh.log"
+: > "$T16_GH_LOG"
+
+mkdir -p "$T16_PROJECT/milestones/regular/loops/waiting-task"
+cat > "$T16_PROJECT/milestones/regular/loops/waiting-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Monitor Waiting Not Stuck
+
+## 무엇을 만들 것인가
+WAITING(환경 승인 대기) 상태는 stuck 아님 — --rerun 호출 0회.
+EOF
+
+(
+  cd "$T16_PROJECT"
+  GH_LOG_FILE="$T16_GH_LOG" \
+    GH_PR_STATE=OPEN \
+    GH_PR_REVIEW_DECISION="" \
+    GH_CHECKS_MODE=waiting \
+    LOOP_PR_RERUN_SLEEP_SECONDS=0 \
+    PATH="$T16_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "waiting-task" > "$WORK_DIR/${T16_NAME}.out" 2>&1
+)
+
+# AC5 회귀: WAITING은 진행 상태 → stuck 아님 → --rerun 호출 0회
+rerun_count_t16=$(grep -cE '^pr checks .*--rerun' "$T16_GH_LOG" || true)
+[[ "$rerun_count_t16" -eq 0 ]] \
+  || { echo "FAIL: WAITING 상태인데 pr checks --rerun ${rerun_count_t16}회 호출 (0회 기대). gh log:"; cat "$T16_GH_LOG"; echo "out:"; cat "$WORK_DIR/${T16_NAME}.out"; exit 1; }
+
+# Monitor 종료 메시지 (stuck 아님)
+grep -qE "(check 진행 중|stuck 아님)" "$WORK_DIR/${T16_NAME}.out" \
+  || { echo "FAIL: WAITING 시 'stuck 아님' 안내 메시지 없음. out:"; cat "$WORK_DIR/${T16_NAME}.out"; exit 1; }
+
+# DONE 보존 + 정상 종료
+[[ -f "$T16_PROJECT/milestones/regular/loops/waiting-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
 echo ""
