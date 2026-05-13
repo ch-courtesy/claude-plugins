@@ -693,7 +693,6 @@ cmd_start() {
         ;;
     esac
   done
-  NO_PR="$no_pr"
 
   compute_paths "$task_id"
   # 정규화된 task-id를 이후 출력·logging에 사용 (regular/ prefix 포함)
@@ -856,7 +855,7 @@ cmd_start() {
       # PR 생성·재사용 phase. SPEC 103 AC1: default로 실행 (opt-in 플래그 불필요).
       # SPEC 103 AC2: --no-pr 플래그가 지정되면 건너뜀.
       # 워크트리·로컬 브랜치는 후속 단계(리뷰 모니터·자동 fix)를 위해 보존한다.
-      if [[ "${NO_PR:-0}" -eq 1 ]]; then
+      if (( no_pr == 1 )); then
         echo "[$(now_iso)] --no-pr 플래그 감지 — PR phase 건너뜀"
       else
         echo "[$(now_iso)] PR phase 진입 (default — 건너뛰려면 --no-pr 사용)"
