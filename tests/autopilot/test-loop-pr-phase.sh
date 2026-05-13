@@ -208,8 +208,10 @@ count_calls() {
   ls "$call_dir" 2>/dev/null | grep -cF "$pattern" || true
 }
 
-echo "=== TEST 1: AC1 — request_review 미지정 시 PR phase skip (gh 호출 0회) ==="
-T1_NAME="optout-no-key"
+echo "=== TEST 1: AC1 — DONE 시 PR phase가 default로 실행 (request_review 키 없음) ==="
+# AC1 (SPEC 103): task가 DONE 상태로 종결될 때, 시스템은 별도 opt-in 플래그 없이
+# PR 생성 단계를 default로 수행한다. 기존 동작(키 미지정 → skip)은 역전됨.
+T1_NAME="default-pr-on-done"
 T1_PROJECT="$(make_project_with_remote "$T1_NAME")"
 T1_MOCK="$(make_mock_bin "${T1_NAME}-mock")"
 install_claude_done_mock "$T1_MOCK"
@@ -217,8 +219,8 @@ install_gh_record_mock "$T1_MOCK"
 T1_GH_LOG="$WORK_DIR/${T1_NAME}-gh.log"
 : > "$T1_GH_LOG"
 
-mkdir -p "$T1_PROJECT/milestones/regular/loops/optout-task"
-cat > "$T1_PROJECT/milestones/regular/loops/optout-task/SPEC.md" <<'EOF'
+mkdir -p "$T1_PROJECT/milestones/regular/loops/default-task"
+cat > "$T1_PROJECT/milestones/regular/loops/default-task/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -227,27 +229,76 @@ scope:
 verify: 'true'
 ---
 
-# Opt-out Task
+# Default PR Task
 
 ## 무엇을 만들 것인가
-opt-out 검증용.
+DONE 직후 PR 생성이 default로 실행되는지 검증.
 EOF
 
 (
   cd "$T1_PROJECT"
   GH_LOG_FILE="$T1_GH_LOG" PATH="$T1_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
-    bash "$LOOP_SH_SRC" start "optout-task" > "$WORK_DIR/${T1_NAME}.out" 2>&1
+    bash "$LOOP_SH_SRC" start "default-task" > "$WORK_DIR/${T1_NAME}.out" 2>&1
 )
 
-# gh 호출이 0회여야 함
+# AC1: gh 호출이 ≥1회 (PR phase가 default로 실행됨)
 [[ -f "$T1_GH_LOG" ]] || { echo "FAIL: gh log 파일 없음"; exit 1; }
 gh_calls_t1=$(wc -l < "$T1_GH_LOG" | tr -d ' ')
-[[ "$gh_calls_t1" -eq 0 ]] \
-  || { echo "FAIL: opt-out인데 gh가 ${gh_calls_t1}회 호출됨. log:"; cat "$T1_GH_LOG"; exit 1; }
+[[ "$gh_calls_t1" -ge 1 ]] \
+  || { echo "FAIL: default 동작인데 gh가 ${gh_calls_t1}회 호출 (≥1 기대). log:"; cat "$T1_GH_LOG"; echo "out:"; cat "$WORK_DIR/${T1_NAME}.out"; exit 1; }
 
-# DONE은 정상 생성됐어야 (기존 동작 회귀)
-[[ -f "$T1_PROJECT/milestones/regular/loops/optout-task/.worktree/DONE" ]] \
+# pr create가 호출됐어야 (PR 단계 진입 확인)
+grep -qE '^pr create ' "$T1_GH_LOG" \
+  || { echo "FAIL: default인데 pr create 호출 없음. log:"; cat "$T1_GH_LOG"; exit 1; }
+
+# DONE은 정상 생성됐어야
+[[ -f "$T1_PROJECT/milestones/regular/loops/default-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
+echo "OK"
+
+echo "=== TEST 1B: AC2 — --no-pr 플래그 사용 시 PR phase 건너뜀 ==="
+# AC2 (SPEC 103): 사용자가 PR 자동 생성 opt-out 플래그(--no-pr)를 지정한 경우,
+# 시스템은 PR 생성 단계를 건너뛴다.
+T1B_NAME="no-pr-opt-out"
+T1B_PROJECT="$(make_project_with_remote "$T1B_NAME")"
+T1B_MOCK="$(make_mock_bin "${T1B_NAME}-mock")"
+install_claude_done_mock "$T1B_MOCK"
+install_gh_record_mock "$T1B_MOCK"
+T1B_GH_LOG="$WORK_DIR/${T1B_NAME}-gh.log"
+: > "$T1B_GH_LOG"
+
+mkdir -p "$T1B_PROJECT/milestones/regular/loops/nopr-task"
+cat > "$T1B_PROJECT/milestones/regular/loops/nopr-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# No-PR Opt-out Task
+
+## 무엇을 만들 것인가
+--no-pr 플래그가 PR phase를 차단하는지 검증.
+EOF
+
+(
+  cd "$T1B_PROJECT"
+  GH_LOG_FILE="$T1B_GH_LOG" PATH="$T1B_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "nopr-task" --no-pr > "$WORK_DIR/${T1B_NAME}.out" 2>&1
+)
+
+# AC2: --no-pr이면 gh 호출 0회
+[[ -f "$T1B_GH_LOG" ]] || { echo "FAIL: gh log 파일 없음"; exit 1; }
+gh_calls_t1b=$(wc -l < "$T1B_GH_LOG" | tr -d ' ')
+[[ "$gh_calls_t1b" -eq 0 ]] \
+  || { echo "FAIL: --no-pr인데 gh가 ${gh_calls_t1b}회 호출됨. log:"; cat "$T1B_GH_LOG"; exit 1; }
+
+# DONE은 정상 생성됐어야
+[[ -f "$T1B_PROJECT/milestones/regular/loops/nopr-task/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
@@ -613,21 +664,20 @@ grep -qE "PR state:[[:space:]]*open" "$WORK_DIR/${T8_NAME}.out" \
 ) || { echo "FAIL: 워크트리의 HEAD 브랜치 미보존"; exit 1; }
 echo "OK"
 
-echo "=== TEST 9: M7 — request_review 키 이름이 SKILL.md·spec-template.md·driver 사이 동기화 ==="
-# 키 이름이 세 파일 중 어느 한쪽에서 누락·오타 나면 opt-in 자체가 동작 안 함.
-# 세 곳 모두에 정확히 `request_review` 토큰이 등장해야 함.
+echo "=== TEST 9: AC2 — --no-pr 플래그가 SKILL.md 문서·loop.sh driver 사이 동기화 ==="
+# AC2 (SPEC 103): --no-pr이 PR phase를 건너뛰는 공식 opt-out 인터페이스. SKILL.md
+# 문서·driver 모두에서 동일한 플래그 토큰이 등장해야 (오타·누락 방지).
 T9_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/loop/SKILL.md"
-T9_SPEC_TEMPLATE="$REPO_ROOT/plugins/autopilot/skills/spec/references/spec-template.md"
 T9_DRIVER_LOOP="$REPO_ROOT/plugins/autopilot/skills/loop/references/loop.sh"
 T9_DRIVER_PR="$REPO_ROOT/plugins/autopilot/skills/loop/references/pr-phase.sh"
 
-for f in "$T9_SKILL_MD" "$T9_SPEC_TEMPLATE" "$T9_DRIVER_LOOP"; do
+for f in "$T9_SKILL_MD" "$T9_DRIVER_LOOP"; do
   [[ -f "$f" ]] || { echo "FAIL: 파일 없음: $f"; exit 1; }
-  grep -qF 'request_review' "$f" \
-    || { echo "FAIL: $f 에 'request_review' 키 누락"; exit 1; }
+  grep -qF -- '--no-pr' "$f" \
+    || { echo "FAIL: $f 에 '--no-pr' 토큰 누락 (AC2 동기화 실패)"; exit 1; }
 done
 
-# pr-phase.sh는 caller가 opt-in 체크하므로 키 등장 불필요 — 존재만 확인.
+# pr-phase.sh는 caller가 PR 진입 여부를 결정하므로 토큰 등장 불필요 — 존재만 확인.
 [[ -f "$T9_DRIVER_PR" ]] || { echo "FAIL: pr-phase.sh 없음"; exit 1; }
 echo "OK"
 
