@@ -9,6 +9,9 @@ scope:
     - milestones/**
     - CLAUDE.md
 verify: "bash tests/autopilot/test-loop-pr-phase.sh && bash tests/autopilot/test-loop-sh.sh"
+test_sweep_paths:
+  - "tests/autopilot/test-loop-pr-phase.sh"
+  - "tests/autopilot/test-loop-sh.sh"
 ---
 
 # autopilot:loop PR/Monitor lifecycle 종단 자동화
@@ -58,7 +61,7 @@ autopilot:loop 스킬이 task DONE 이후의 PR/Monitor lifecycle을 종단까�
 bash tests/autopilot/test-loop-pr-phase.sh && bash tests/autopilot/test-loop-sh.sh
 ```
 
-기존 PR phase 테스트와 loop.sh 테스트의 회귀 통과를 먼저 요구한다. 구현 단계에서 AC1–AC6에 대응하는 시나리오를 동일 테스트 파일에 추가하고, 그 경우에도 동일 명령으로 0 exit이 유지되어야 한다. `gh`·`git push` 등 외부 호출은 테스트 내 stub binary로 격리되어 실제 네트워크·원격 접근은 발생하지 않는다 (기존 컨벤션 유지).
+최종적으로 위 명령이 0 exit으로 통과해야 한다. AC1이 기존 시나리오의 가정(예: `request_review` 키 부재 시 PR skip)을 뒤집기 때문에 양 테스트 파일은 `test_sweep_paths` 화이트리스트에 선언되어 있다 — 합법적 재작성(시나리오 의미 갱신)과 새 시나리오(AC1–AC6 default·opt-out·rebase·conflict·retrigger·cleanup) 추가가 모두 허용된다. `gh`·`git push` 등 외부 호출은 테스트 내 stub binary로 격리되어 실제 네트워크·원격 접근은 발생하지 않는다 (기존 컨벤션 유지).
 
 ## 제약
 
