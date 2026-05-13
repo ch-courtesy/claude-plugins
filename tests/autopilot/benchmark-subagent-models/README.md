@@ -25,7 +25,7 @@ tests/autopilot/benchmark-subagent-models/
       input.txt
       output.txt
       timing.json     # {started_at, ended_at, duration_ms}
-      usage.json      # {input_tokens, output_tokens, cache_read, cache_creation, cost_usd, model}
+      usage.json      # {input_tokens, output_tokens, cache_read, cache_creation, total_cost_usd, model}
       session.jsonl   # CC 세션 기록 원본 (cross-check 소스 #1)
     admin-aggregate.json  # Anthropic admin API 집계 (cross-check 소스 #2)
 ```
@@ -60,7 +60,7 @@ bash tests/autopilot/benchmark-subagent-models/collect-costs.sh > raw/summary.ts
 
 비용·token 카운트는 두 독립 소스에서 수집한다:
 
-1. **세션 기록**: `claude --print --output-format json --session-id ...` 의 결과 jsonl. `usage.json`은 result jsonl의 `usage` 필드 추출.
+1. **세션 기록**: `claude --print --output-format json --model ...` 의 결과 jsonl. `usage.json`은 result jsonl의 `usage`·`total_cost_usd`·`session_id` 필드를 추출 (session_id는 CC가 자동 부여).
 2. **관리 집계**: Anthropic admin API의 organization-level usage 집계. 측정 윈도(시작~끝 ISO timestamp)로 필터링.
 
 두 소스의 input/output token 합계, 추정 비용을 보고서에 나란히 표시한다. 차이가 있으면 그 원인(캐싱·서비스 티어·rounding)을 명시하고 truth source를 지정한다.
@@ -77,7 +77,7 @@ bash tests/autopilot/benchmark-subagent-models/collect-costs.sh > raw/summary.ts
 각 (variant, task, run) 셀에서 다음을 측정:
 
 - **품질**: task별 기준 산출물(`tasks/*.task.md` 안의 "기대 응답 체크리스트")에 대한 binary pass/fail 합산 + LLM-judge 점수 (0~5)
-- **비용**: usage.json의 `cost_usd` (CC 세션 기록) + admin-aggregate.json 항목 (관리 집계)
+- **비용**: usage.json의 `total_cost_usd` (CC 세션 기록) + admin-aggregate.json 항목 (관리 집계)
 - **속도**: timing.json의 `duration_ms`
 
 집계는 평균·중앙값·표준편차를 모두 산출한다 (분산 큰 변이 식별용).

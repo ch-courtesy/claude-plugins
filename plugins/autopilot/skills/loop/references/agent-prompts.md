@@ -97,7 +97,7 @@ Agent({
 
 **권장 모델:** `claude-opus` (초기 권장 — 실측 벤치마크 결과로 보정 예정, `docs/superpowers/specs/2026-05-13-subagent-model-benchmark.md`)
 
-근거: 시니어 코드 리뷰는 아키텍처·결합도·심각도 분류 등 깊은 합성 추론을 요구. sonnet은 critical/important 경계 분류에서 일관성이 떨어지고, haiku는 strucutural 관찰이 얕음 (prior knowledge — 실측 후 갱신).
+근거: 시니어 코드 리뷰는 아키텍처·결합도·심각도 분류 등 깊은 합성 추론을 요구. sonnet은 critical/important 경계 분류에서 일관성이 떨어지고, haiku는 structural 관찰이 얕음 (prior knowledge — 실측 후 갱신).
 
 **호출 패턴:**
 
