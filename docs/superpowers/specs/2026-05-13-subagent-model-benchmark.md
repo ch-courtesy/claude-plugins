@@ -89,7 +89,7 @@ raw/<variant>/<task>/run-N/
   output.txt       # claude 응답 텍스트 (result 필드)
   session.jsonl    # CC 세션 기록 원본
   timing.json      # {started_at, ended_at, duration_ms, exit_code}
-  usage.json       # {model, total_cost_usd, input_tokens, output_tokens, cache_read, cache_creation, session_id}
+  usage.json       # {model, total_cost_usd, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, session_id}
 ```
 
 ---
