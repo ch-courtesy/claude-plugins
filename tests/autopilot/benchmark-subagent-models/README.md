@@ -24,8 +24,8 @@ tests/autopilot/benchmark-subagent-models/
     <variant>/<task>/<run-N>/    # 각 실행의 입력·출력·session.jsonl·timing
       input.txt
       output.txt
-      timing.json     # {started_at, ended_at, duration_ms}
-      usage.json      # {input_tokens, output_tokens, cache_read, cache_creation, total_cost_usd, model}
+      timing.json     # {started_at, ended_at, duration_ms, exit_code}
+      usage.json      # {model, total_cost_usd, input_tokens, output_tokens, cache_read_input_tokens, cache_creation_input_tokens, session_id}
       session.jsonl   # CC 세션 기록 원본 (cross-check 소스 #1)
     admin-aggregate.json  # Anthropic admin API 집계 (cross-check 소스 #2)
 ```
