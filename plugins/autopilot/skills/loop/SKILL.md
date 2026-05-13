@@ -53,6 +53,25 @@ Skill(skill: "spec", args: "<task-id>")
 
 `spec` 스킬 단계 9의 "지금 loop start 호출" 결정으로 자동 연계되는 경우에도 추가 모니터 결정 질문 없이 본 기본 동작(Monitor 가설 포함)이 그대로 적용된다.
 
+#### DONE 이후 PR 생성·재사용 phase (opt-in)
+
+SPEC.md frontmatter에 `request_review: true`가 있으면, task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 동일 브랜치의 open PR 재사용) 단계가 자동 실행됩니다. 기본값은 비활성(키 미지정 또는 `false`).
+
+활성화 시 동작:
+- 현재 브랜치를 `origin`으로 push
+- default 브랜치 자동 감지 (`gh repo view` → `git symbolic-ref refs/remotes/origin/HEAD`)
+- 동일 head 브랜치에 open PR이 없으면 **새 PR 생성**, 있으면 **기존 PR을 in-place로 갱신** (제목·body 동기화)
+- PR 제목 = SPEC 문서의 H1, body = SPEC "무엇을 만들 것인가" 본문 + base..HEAD commit log
+- task-id가 `^[0-9]+$`이면 body 마지막에 `Closes #<id>` 자동 추가
+- reviewer·label·assignee는 일체 설정 안 함
+- 성공 시 PR URL·state(open)를 stdout으로 출력, worktree·local 브랜치 보존
+- push·pr create·pr edit 중 하나라도 실패하면 non-zero exit으로 단계 중단 (워크트리는 유지)
+- default 브랜치 감지 실패 시 push·pr 호출 전 abort
+
+기존 PR body의 사용자 수기 편집 보호를 위해 자동 영역은 `<!-- autopilot:pr-body:begin --> ... <!-- autopilot:pr-body:end -->` marker fence 안에만 작성됩니다. 후속 단계(리뷰 모니터·자동 fix·worktree 정리)는 별도 task에서 다룹니다.
+
+요구: `gh` CLI 설치 + OAuth 인증. 키 이름 `request_review`는 `spec-template.md`·드라이버(`loop.sh`·`pr-phase.sh`)와 동기화돼 있어야 합니다.
+
 ### status [<task-id>] / stop <task-id> / list / cleanup <task-id> [--force] / logs <task-id> [--tail | --iter N]
 
 각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임. 결과를 사용자에게 형식화 출력.

@@ -2,52 +2,95 @@
 
 EARS = Easy Approach to Requirements Syntax. 5개 패턴으로 모호성 없는 수용 기준을 작성.
 
+## EARS 작성 언어
+
+EARS 5패턴의 의미·구조(Mavin et al. 표준)는 언어와 무관하게 보존하되, 어휘만 작성 언어에
+맞춰 번역한다. **작성 언어 default는 프로젝트 기본 언어**다 — 현 레포의 경우 한국어(`ko`).
+
+SPEC frontmatter `ears_language` 키로 개별 SPEC이 default를 override할 수 있다. 허용 값은
+`ko` · `en` · `hybrid` 세 가지이며, 키 미명시 시 디폴트는 `ko`(프로젝트 기본 언어)다.
+
+3모드 정의:
+- `ko` — 본문·키워드 모두 한국어. 트리거는 "~할 때 / ~인 동안 / ~인 경우 / ~이면", 응답은
+  "시스템은 ~한다" 형태. 예: "사용자가 빈 비밀번호를 제출할 때, 시스템은 400으로 요청을 거부한다."
+- `en` — 본문·키워드 모두 영어. 표준 EARS 영어 키워드(`When` · `While` · `Where` · `If` · `shall`).
+  예: "When a user submits an empty password, the system shall reject the request with a 400 status."
+- `hybrid` — EARS 영어 키워드(`When` · `While` · `Where` · `If` · `shall`)는 그대로 두고 본문만
+  한국어로 작성. 형식 정의:
+  - 트리거·조건·오류가 있는 패턴(Event/State/Optional/Unwanted): `<EARS 영어 키워드> <한국어 본문>, the system shall <한국어 응답>한다.`
+  - Ubiquitous(트리거 없음): `The system shall <한국어 응답>한다.`
+  예시 라인: When 사용자가 빈 비밀번호를 제출하면, the system shall 400으로 요청을 거부한다.
+
+자유 텍스트→EARS 변환 시에도 동일 언어 규칙이 적용된다(아래 §변환 가이드).
+
 ## 5개 패턴
 
+각 패턴의 의미·구조는 모드 간 동일. 예시는 ko · en · hybrid 3모드를 함께 제시.
+
 ### 1. Ubiquitous (무조건)
-형식: `The system shall <응답>`
+형식:
+- en: `The system shall <응답>`
+- ko: `시스템은 <응답>한다`
+- hybrid: `The system shall <한국어 응답>한다`
 
 용례: 시스템의 *기본 행동*. 트리거나 조건 없이 항상 성립.
 
 예시:
-- The system shall log all authentication attempts.
-- The system shall expire idle sessions after 30 minutes.
+- (ko) 시스템은 모든 인증 시도를 로그에 기록한다.
+- (en) The system shall log all authentication attempts.
+- (hybrid) The system shall 모든 인증 시도를 로그에 기록한다.
 
 ### 2. Event-driven (이벤트 기반)
-형식: `When <트리거>, the system shall <응답>`
+형식:
+- en: `When <트리거>, the system shall <응답>`
+- ko: `<트리거>할 때, 시스템은 <응답>한다`
+- hybrid: `When <한국어 트리거>, the system shall <한국어 응답>한다`
 
 용례: 외부 입력·내부 이벤트로 촉발되는 행동.
 
 예시:
-- When a user submits an empty password, the system shall reject the request with a 400 status.
-- When the refresh token expires, the system shall invalidate the session.
+- (ko) 사용자가 빈 비밀번호를 제출할 때, 시스템은 400 상태로 요청을 거부한다.
+- (en) When a user submits an empty password, the system shall reject the request with a 400 status.
+- (hybrid) When 사용자가 빈 비밀번호를 제출하면, the system shall 400 상태로 요청을 거부한다.
 
 ### 3. State-driven (상태 기반)
-형식: `While <상태>, the system shall <지속 응답>`
+형식:
+- en: `While <상태>, the system shall <지속 응답>`
+- ko: `<상태>인 동안, 시스템은 <지속 응답>한다`
+- hybrid: `While <한국어 상태>인 동안, the system shall <한국어 지속 응답>한다`
 
 용례: 시스템이 특정 상태일 때만 *지속적으로* 성립.
 
 예시:
-- While the database is in read-only mode, the system shall reject all write operations with 503.
-- While a user is impersonated, the system shall include "X-Impersonated-By" in every response.
+- (ko) 데이터베이스가 read-only 모드인 동안, 시스템은 모든 쓰기 작업을 503으로 거부한다.
+- (en) While the database is in read-only mode, the system shall reject all write operations with 503.
+- (hybrid) While 데이터베이스가 read-only 모드인 동안, the system shall 모든 쓰기 작업을 503으로 거부한다.
 
 ### 4. Optional (조건부 기능)
-형식: `Where <조건>, the system shall <응답>`
+형식:
+- en: `Where <조건>, the system shall <응답>`
+- ko: `<조건>인 경우, 시스템은 <응답>한다`
+- hybrid: `Where <한국어 조건>인 경우, the system shall <한국어 응답>한다`
 
 용례: 특정 환경·feature flag·구성에서만 활성.
 
 예시:
-- Where the audit-log feature flag is enabled, the system shall record every state mutation.
-- Where MFA is configured, the system shall require a second factor on login.
+- (ko) audit-log feature flag가 활성화된 경우, 시스템은 모든 상태 변경을 기록한다.
+- (en) Where the audit-log feature flag is enabled, the system shall record every state mutation.
+- (hybrid) Where audit-log feature flag가 활성화된 경우, the system shall 모든 상태 변경을 기록한다.
 
 ### 5. Unwanted behavior (불가용·오류)
-형식: `If <불가용/오류>, then the system shall <복구·거부>`
+형식:
+- en: `If <불가용/오류>, then the system shall <복구·거부>`
+- ko: `<불가용/오류>이면, 시스템은 <복구·거부>한다`
+- hybrid: `If <한국어 불가용/오류>이면, then the system shall <한국어 복구·거부>한다`
 
 용례: 실패·예외 상황의 명시적 처리.
 
 예시:
-- If the database connection fails, then the system shall return 503 with a retry-after header.
-- If a webhook delivery fails three times, then the system shall mark the subscription as inactive.
+- (ko) 데이터베이스 연결이 실패하면, 시스템은 retry-after 헤더와 함께 503을 반환한다.
+- (en) If the database connection fails, then the system shall return 503 with a retry-after header.
+- (hybrid) If 데이터베이스 연결이 실패하면, then the system shall retry-after 헤더와 함께 503을 반환한다.
 
 ## 자유 텍스트 → EARS 변환 가이드
 

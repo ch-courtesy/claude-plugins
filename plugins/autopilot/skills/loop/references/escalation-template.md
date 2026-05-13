@@ -32,7 +32,7 @@
 ## 카테고리 선택 가이드
 
 - `config-gap` — 환경 설정·도구 버전·자격증명 부재. 사람이 환경 조정.
-- `spec-gap` — `.loop/SPEC.md` 자체 결함. 사람이 명세 수정.
+- `spec-gap` — SPEC.md 자체 결함 (신규: `milestones/<m>/loops/<c>/SPEC.md` / legacy: `.loop/SPEC.md`). 사람이 명세 수정.
 - `architecture-gap` — 현재 코드 구조로 해결 불가. 사람의 architecture 결정.
 - `environment-gap` — 외부 시스템 일시적 문제. 사람의 환경 점검.
 - `other` — 위에 안 맞을 때.

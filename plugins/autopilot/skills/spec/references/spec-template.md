@@ -22,6 +22,18 @@ verify: "{{verify_command}}"
 # test_sweep_paths:
 #   - "tests/legacy_to_remove/**"
 #   - "tests/test_specific_to_rename.py"
+#
+# ears_language (선택): "수용 기준 (EARS)" 산출 시 사용할 작성 언어. 허용 값:
+#   `ko` · `en` · `hybrid`. 미명시 시 디폴트는 `ko`(프로젝트 기본 언어).
+#   3모드 정의·예시는 references/ears-patterns.md "EARS 작성 언어" 절 참조.
+# ears_language: ko
+#
+# request_review (선택): true 지정 시 loop이 task DONE 직후 같은 워크트리에서
+#   PR 생성·재사용 단계를 자동 실행 (push → default 브랜치 자동 감지 → open PR 있으면 갱신,
+#   없으면 새 PR 생성). 제목은 SPEC H1, body는 "무엇을 만들 것인가" + base..HEAD commit log.
+#   숫자 task-id면 body 마지막에 `Closes #<id>` 자동 추가. reviewer·label·assignee는 미설정.
+#   미지정 또는 false면 PR 단계 skip. 자세한 동작은 plugins/autopilot/skills/loop/SKILL.md 참조.
+# request_review: true
 ---
 
 # {{task_title}}
@@ -32,11 +44,17 @@ verify: "{{verify_command}}"
 
 ## 수용 기준 (EARS)
 <!-- 5개 EARS 패턴 중 하나로 작성. 자세한 사례는 references/ears-patterns.md 참조.
-  - Ubiquitous: "The system shall <응답>"
-  - Event-driven: "When <트리거>, the system shall <응답>"
-  - State-driven: "While <상태>, the system shall <지속 응답>"
-  - Optional: "Where <조건>, the system shall <응답>"
-  - Unwanted: "If <불가용/오류>, then the system shall <복구·거부>"
+  작성 언어 default는 `ko`(프로젝트 기본 언어). 아래 형식은 ko 기준 — en·hybrid는
+  references/ears-patterns.md "EARS 작성 언어" 절 참조.
+  - Ubiquitous: "시스템은 <응답>한다"
+  - Event-driven: "<트리거>할 때, 시스템은 <응답>한다"
+  - State-driven: "<상태>인 동안, 시스템은 <지속 응답>한다"
+  - Optional: "<조건>인 경우, 시스템은 <응답>한다"
+  - Unwanted: "<불가용/오류>이면, 시스템은 <복구·거부>한다"
+
+frontmatter `ears_language` 키로 개별 SPEC이 `en`·`ko`·`hybrid` 중 하나를
+override할 수 있다(미명시 시 ko).
+
 각 기준이 verify 명령 안에서 *어떤 형태로든* fail 가능해야 합니다 (Independent-Test 규칙). 불가능한 기준은 [NEEDS CLARIFICATION: <질문>]으로 표시. -->
 {{acceptance_criteria}}
 

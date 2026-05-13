@@ -47,6 +47,18 @@
 
 불가능하면 `[NEEDS CLARIFICATION: 검증 가능한 형태로 재작성 — 어떤 fail 시나리오?]`.
 
+### 자유 텍스트 → EARS 변환 가이드 (작성 언어별)
+
+자체 검토 단계에서 자유 텍스트가 발견되면 `references/ears-patterns.md` 변환 가이드를
+적용한다. 작성 언어는 SPEC frontmatter `ears_language`를 따른다(미명시 시 `ko`).
+
+ko EARS 패턴 예시 (Event-driven):
+- 자유 텍스트: "사용자가 빈 비밀번호를 제출하면 400으로 거부함"
+- ko 변환: 사용자가 빈 비밀번호를 제출할 때, 시스템은 400으로 요청을 거부한다.
+
+다른 모드(en·hybrid)와 5패턴 전체 예시는 `references/ears-patterns.md`의
+"EARS 작성 언어"·"5개 패턴" 절을 단일 출처로 참조한다.
+
 ## 검토 출력 형식
 
 자체 검토 후 사용자에게:
