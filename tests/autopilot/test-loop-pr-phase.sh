@@ -170,6 +170,16 @@ GH_EOF
 # git mock — argv를 GIT_LOG_FILE 환경변수 경로에 한 줄씩 기록한 뒤 실제 git으로 위임.
 # pr-phase.sh가 push 직전에 origin base를 fetch + rebase하는지 행적 검증할 때 사용한다.
 # 실제 git 절대경로를 install 시점에 baked in 해서 mock_bin이 PATH 앞에 와도 무한 recurse 안 됨.
+#
+# 추가 환경변수:
+#   GIT_CONFLICT_MODE — rebase 충돌 시뮬레이션 모드 (M3/AC4 테스트용).
+#     - 미설정·빈값: pass-through (충돌 없음 — 기존 TEST 11 회귀 보존)
+#     - "auto-resolve": 평범한 `rebase origin/...`은 conflict로 실패시키지만, 재시도 인자 `-X`가
+#         포함된 `rebase -X theirs origin/...`는 real git으로 위임해 성공 (M3 자동 해결 성공 경로)
+#     - "abort": `-X` 포함 여부와 무관하게 모든 `rebase origin/...` 호출이 conflict로 실패
+#         (M3 자동 해결 실패 → 사용자 좌절 경로)
+#   `rebase --abort` 호출은 양 모드에서 stub 안에서 pass-through하며 real git이 rebase 진행
+#   상태가 아니라 실패해도 무시한다 (실제 충돌 상태를 만들지 않으므로).
 install_git_record_mock() {
   local mock_bin="$1"
   local real_git
@@ -180,6 +190,41 @@ install_git_record_mock() {
 if [[ -n "\${GIT_LOG_FILE:-}" ]]; then
   printf '%s\n' "\$*" >> "\$GIT_LOG_FILE"
 fi
+
+# rebase 충돌 시뮬레이션 (M3/AC4 — GIT_CONFLICT_MODE 설정 시)
+if [[ "\${1:-}" == "rebase" && -n "\${GIT_CONFLICT_MODE:-}" ]]; then
+  # --abort는 항상 pass-through (real git이 rebase 상태 아니라 fail해도 무시)
+  is_abort=0
+  is_x=0
+  for a in "\$@"; do
+    [[ "\$a" == "--abort" ]] && is_abort=1
+    [[ "\$a" == "-X" ]] && is_x=1
+  done
+
+  if [[ \$is_abort -eq 1 ]]; then
+    "$real_git" "\$@" 2>/dev/null || true
+    exit 0
+  fi
+
+  case "\$GIT_CONFLICT_MODE" in
+    auto-resolve)
+      if [[ \$is_x -eq 1 ]]; then
+        # 재시도(-X theirs)는 real git으로 위임 — 실제 worktree에는 충돌이 없으므로 fast-forward로 통과
+        exec "$real_git" "\$@"
+      else
+        # 첫 평범한 rebase는 충돌로 실패
+        echo "CONFLICT (content): Merge conflict simulated (mock — auto-resolve mode)" >&2
+        exit 1
+      fi
+      ;;
+    abort)
+      # 모든 rebase 시도가 실패 (자동 해결도 실패)
+      echo "CONFLICT (content): Merge conflict simulated (mock — abort mode)" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 exec "$real_git" "\$@"
 GIT_EOF
   chmod +x "$mock_bin/git"
@@ -827,6 +872,140 @@ grep -qE '^pr create ' "$T11_GH_LOG" \
   || { echo "FAIL: rebase 후 pr create 호출 안 됨. gh log:"; cat "$T11_GH_LOG"; exit 1; }
 [[ -f "$T11_PROJECT/milestones/regular/loops/rebase-task/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
+echo "OK"
+
+echo "=== TEST 12: AC4 — rebase 충돌 1회 자동 해결 성공 (-X theirs) + 정상 PR 생성 ==="
+# AC4 (SPEC 103): rebase 또는 머지 중 충돌이 발생하면, 시스템은 1회의 자동 해결을 시도한다.
+# 본 케이스: 평범한 rebase가 충돌로 실패하고, `-X theirs` 재시도가 성공해서 push·PR 생성으로 진행.
+T12_NAME="rebase-conflict-auto-resolve"
+T12_PROJECT="$(make_project_with_remote "$T12_NAME")"
+T12_MOCK="$(make_mock_bin "${T12_NAME}-mock")"
+install_claude_done_mock "$T12_MOCK"
+install_gh_record_mock "$T12_MOCK"
+install_git_record_mock "$T12_MOCK"
+T12_GH_LOG="$WORK_DIR/${T12_NAME}-gh.log"
+T12_GIT_LOG="$WORK_DIR/${T12_NAME}-git.log"
+: > "$T12_GH_LOG"
+: > "$T12_GIT_LOG"
+
+mkdir -p "$T12_PROJECT/milestones/regular/loops/conflict-auto-task"
+cat > "$T12_PROJECT/milestones/regular/loops/conflict-auto-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Rebase Conflict Auto-Resolve
+
+## 무엇을 만들 것인가
+첫 rebase 충돌 후 1회 -X theirs 재시도로 자동 해결되는 회귀.
+EOF
+
+(
+  cd "$T12_PROJECT"
+  GH_LOG_FILE="$T12_GH_LOG" GIT_LOG_FILE="$T12_GIT_LOG" \
+    GIT_CONFLICT_MODE=auto-resolve \
+    PATH="$T12_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "conflict-auto-task" > "$WORK_DIR/${T12_NAME}.out" 2>&1
+)
+
+# AC4: rebase 호출이 정확히 2회 발생 (1차 plain + 1회 -X theirs 재시도).
+rebase_total_t12=$(grep -cE '^rebase ' "$T12_GIT_LOG" || true)
+rebase_with_x_t12=$(grep -cE '^rebase .*\-X[[:space:]]+theirs ' "$T12_GIT_LOG" || true)
+rebase_plain_t12=$(grep -cE '^rebase origin/' "$T12_GIT_LOG" || true)
+[[ "$rebase_total_t12" -ge 2 ]] \
+  || { echo "FAIL: rebase 호출이 ${rebase_total_t12}회 (≥2 기대 — plain + -X theirs). git log tail:"; tail -50 "$T12_GIT_LOG"; echo "out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
+[[ "$rebase_with_x_t12" -ge 1 ]] \
+  || { echo "FAIL: '-X theirs' 재시도 미실행 (AC4 위반). git log tail:"; tail -50 "$T12_GIT_LOG"; exit 1; }
+[[ "$rebase_plain_t12" -ge 1 ]] \
+  || { echo "FAIL: 첫 plain 'rebase origin/<base>' 호출 기록 없음. git log tail:"; tail -50 "$T12_GIT_LOG"; exit 1; }
+
+# 자동 해결 시도 메시지가 출력에 있어야
+grep -qE "(자동 해결|충돌 1회|-X[[:space:]]+theirs)" "$WORK_DIR/${T12_NAME}.out" \
+  || { echo "FAIL: 자동 해결 시도 안내 메시지 없음. out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
+
+# 자동 해결 성공 후 정상 PR 생성 흐름이 이어져야
+grep -qE '^pr create ' "$T12_GH_LOG" \
+  || { echo "FAIL: 자동 해결 후 pr create 호출 안 됨. gh log:"; cat "$T12_GH_LOG"; echo "out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
+
+# DONE 보존
+[[ -f "$T12_PROJECT/milestones/regular/loops/conflict-auto-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
+echo "OK"
+
+echo "=== TEST 13: AC4 — rebase 충돌 자동 해결 실패(1회 시도 후 좌절) + abort + 사용자 알림 ==="
+# AC4 (SPEC 103): 자동 해결 시도가 실패한 경우 진행을 중단하고 사용자에게 명시적으로 알린다.
+# 본 케이스: plain rebase + -X theirs 재시도 모두 충돌 → loop abort + 명시 알림 + pr create 미호출.
+T13_NAME="rebase-conflict-abort"
+T13_PROJECT="$(make_project_with_remote "$T13_NAME")"
+T13_MOCK="$(make_mock_bin "${T13_NAME}-mock")"
+install_claude_done_mock "$T13_MOCK"
+install_gh_record_mock "$T13_MOCK"
+install_git_record_mock "$T13_MOCK"
+T13_GH_LOG="$WORK_DIR/${T13_NAME}-gh.log"
+T13_GIT_LOG="$WORK_DIR/${T13_NAME}-git.log"
+: > "$T13_GH_LOG"
+: > "$T13_GIT_LOG"
+
+mkdir -p "$T13_PROJECT/milestones/regular/loops/conflict-abort-task"
+cat > "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Rebase Conflict Abort
+
+## 무엇을 만들 것인가
+rebase 충돌 자동 해결 1회 시도가 실패해 사용자에게 위임되는 회귀.
+EOF
+
+set +e
+(
+  cd "$T13_PROJECT"
+  GH_LOG_FILE="$T13_GH_LOG" GIT_LOG_FILE="$T13_GIT_LOG" \
+    GIT_CONFLICT_MODE=abort \
+    PATH="$T13_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "conflict-abort-task" > "$WORK_DIR/${T13_NAME}.out" 2>&1
+)
+t13_exit=$?
+set -e
+
+# AC4: loop start exit ≠ 0 (rebase 충돌 자동 해결 실패로 PR phase가 abort)
+[[ $t13_exit -ne 0 ]] \
+  || { echo "FAIL: 자동 해결 실패에도 loop exit 0. out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
+
+# rebase 호출 2회 (plain + -X theirs) 후 좌절 — 3회 이상이면 1회 제한 위반
+rebase_total_t13=$(grep -cE '^rebase origin/|^rebase .*\-X[[:space:]]+theirs ' "$T13_GIT_LOG" || true)
+[[ "$rebase_total_t13" -eq 2 ]] \
+  || { echo "FAIL: rebase가 ${rebase_total_t13}회 호출 (정확히 2회 기대 — plain + -X theirs 한 번씩). git log tail:"; tail -50 "$T13_GIT_LOG"; exit 1; }
+
+# 자동 해결 실패 안내 메시지 — "자동 해결 실패" 또는 "1회 시도" 토큰 포함
+grep -qE "(자동 해결 실패|1회 시도|좌절)" "$WORK_DIR/${T13_NAME}.out" \
+  || { echo "FAIL: 자동 해결 실패 안내 메시지 없음 (사용자 위임 위반). out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
+
+# 사용자 수동 해결 안내 — "수동" 또는 "사용자" 명시
+grep -qE "(수동|사용자)" "$WORK_DIR/${T13_NAME}.out" \
+  || { echo "FAIL: 사용자 수동 해결 안내 없음. out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
+
+# pr create 호출 0회 (rebase 좌절 후 push·pr 단계 미진입)
+if grep -qE '^pr (create|edit) ' "$T13_GH_LOG"; then
+  echo "FAIL: rebase 좌절 후에도 pr create/edit 호출됨. gh log:"; cat "$T13_GH_LOG"; exit 1
+fi
+
+# 워크트리·DONE 보존 (사용자 수동 해결 가능하도록)
+[[ -d "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/.worktree" ]] \
+  || { echo "FAIL: 워크트리 미보존"; exit 1; }
+[[ -f "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미보존"; exit 1; }
 echo "OK"
 
 echo ""

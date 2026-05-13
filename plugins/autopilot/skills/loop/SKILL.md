@@ -59,7 +59,7 @@ task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 �
 
 활성화 시 동작:
 - default 브랜치 자동 감지 (`gh repo view` → `git symbolic-ref refs/remotes/origin/HEAD`)
-- push 직전에 `origin/<base>`로부터 `git fetch` + `git rebase` 수행 (SPEC 103 AC3) — base 최신 변경분을 흡수, fast-forward 가능하면 no-op, conflict 발생 시 abort + non-zero exit
+- push 직전에 `origin/<base>`로부터 `git fetch` + `git rebase` 수행 (SPEC 103 AC3) — base 최신 변경분을 흡수, fast-forward 가능하면 no-op. 첫 rebase가 충돌로 실패하면 `-X theirs`(feat 브랜치 우선) 전략으로 정확히 1회 자동 해결 시도(SPEC 103 AC4). 재시도도 실패하면 `git rebase --abort`로 워크트리 복구 + 명시적 사용자 알림 + non-zero exit (보수적 좌절 — 사용자 수동 해결 필요)
 - 현재 브랜치를 `origin`으로 push
 - 동일 head 브랜치에 open PR이 없으면 **새 PR 생성**, 있으면 **기존 PR을 in-place로 갱신** (제목·body 동기화)
 - PR 제목 = SPEC 문서의 H1, body = SPEC "무엇을 만들 것인가" 본문 + base..HEAD commit log

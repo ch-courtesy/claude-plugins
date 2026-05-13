@@ -119,10 +119,13 @@ PR_BODY_FENCE_END='<!-- autopilot:pr-body:end -->'
 
 PR_BODY="$(printf '%s\n%s\n%s' "$PR_BODY_FENCE_BEGIN" "$PR_BODY_INNER" "$PR_BODY_FENCE_END")"
 
-# ----- base branch rebase (SPEC 103 M2/AC3) -----
+# ----- base branch rebase (SPEC 103 M2/AC3·M3/AC4) -----
 # PR 생성 직전에 origin/<base>로부터 fetch + rebase를 수행해 base 최신 변경분을 흡수한다.
-# fast-forward(또는 동일 history)면 no-op으로 통과하고, conflict 발생 시 즉시 abort + 사용자
-# 알림 후 non-zero exit한다 (M3의 1회 자동 해결은 후속 작업). 워크트리는 보존된다.
+# fast-forward(또는 동일 history)면 no-op으로 통과한다. 첫 평범한 rebase가 실패하면(충돌
+# 가능성 — 본 단계 외 환경 오류도 포함될 수 있음) `-X theirs` 전략으로 정확히 1회만 재시도한다
+# (M3/AC4 휴리스틱: feat 브랜치의 변경을 base 위에 우선 적용). 재시도도 실패하면 워크트리를
+# `git rebase --abort`로 복구하고 명시적 사용자 알림 + non-zero exit (보수적 좌절).
+# 1회 제한은 분기를 한 갈래만 두어 코드로 강제한다 — counter 변수 불필요.
 echo "[pr-phase] origin/$DEFAULT_BRANCH fetch"
 if ! ( cd "$WT" && git fetch origin "$DEFAULT_BRANCH" 2>&1 ); then
   echo "ERROR: git fetch origin $DEFAULT_BRANCH 실패" >&2
@@ -131,9 +134,14 @@ fi
 
 echo "[pr-phase] origin/$DEFAULT_BRANCH rebase"
 if ! ( cd "$WT" && git rebase "origin/$DEFAULT_BRANCH" 2>&1 ); then
-  echo "ERROR: git rebase origin/$DEFAULT_BRANCH 실패 — conflict 가능성. 'git rebase --abort'로 워크트리 복구 후 abort." >&2
+  echo "[pr-phase] rebase 실패 감지 — 충돌 1회 자동 해결 시도 (-X theirs)"
   ( cd "$WT" && git rebase --abort 2>/dev/null || true )
-  exit 1
+  if ! ( cd "$WT" && git rebase -X theirs "origin/$DEFAULT_BRANCH" 2>&1 ); then
+    ( cd "$WT" && git rebase --abort 2>/dev/null || true )
+    echo "ERROR: rebase 충돌 자동 해결 실패 (1회 시도 후 좌절). 워크트리는 'git rebase --abort'로 복구됨 — 사용자 수동 해결 후 재시도하세요." >&2
+    exit 1
+  fi
+  echo "[pr-phase] rebase 충돌 자동 해결 성공 (-X theirs)"
 fi
 
 # ----- 브랜치 push (M4) -----
