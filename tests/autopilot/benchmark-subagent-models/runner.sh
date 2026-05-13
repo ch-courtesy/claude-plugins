@@ -84,8 +84,12 @@ run_cell() {
   local t0
   t0="$(python3 -c 'import time; print(int(time.time()*1000))')"
 
+  # --dangerously-skip-permissions: tasks 03·04는 Bash/Read 도구 호출 필요. 헤드리스
+  # 실행에서 권한 프롬프트가 뜨면 runner가 무한 대기. 본 벤치마크는 사전 정의된 task
+  # 파일만 사용하고 운영자가 명시적으로 invoke하므로 skip-permissions 적합.
   set +e
   claude --print \
+    --dangerously-skip-permissions \
     --output-format json \
     --model "${model}" \
     -- "${prompt_body}" \

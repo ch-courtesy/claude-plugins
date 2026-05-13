@@ -42,6 +42,11 @@ tests/autopilot/benchmark-subagent-models/
 
 ## 실행
 
+> **권한 모델**: runner.sh는 `claude --print --dangerously-skip-permissions ...`로
+> 호출한다. tasks 03·04가 Bash·Read 도구를 필요로 하며, 헤드리스 실행에서 권한 프롬프트가
+> 뜨면 runner가 무한 대기하기 때문. 본 벤치마크는 사전 정의 task만 사용하고 운영자가
+> 명시적으로 invoke하므로 적합. 외부 입력을 받는 환경에서는 사용하지 말 것.
+
 ```
 # 기본 N=5
 bash tests/autopilot/benchmark-subagent-models/runner.sh
