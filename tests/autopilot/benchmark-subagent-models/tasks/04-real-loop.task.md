@@ -2,7 +2,10 @@
 id: 04-real-loop
 role: spec-compliance-reviewer
 description: 실 운영 task — milestones/regular/loops/69 (완료된 루프) 의 실제 SPEC + 최종 commit을 입력으로 사용. 합성 task 3종의 대표성을 보강.
-source: milestones/regular/loops/69/.worktree/.loop/SPEC.md + 최종 git diff
+source: milestones/regular/loops/69/SPEC.md (tracked) + origin/autonomous-loop/regular/69 branch commit log
+prerequisites:
+  - "git: tracked file `milestones/regular/loops/69/SPEC.md` 존재 (모든 clone에 포함)"
+  - "git: `origin/autonomous-loop/regular/69` branch fetch 완료 (없으면 `git fetch origin autonomous-loop/regular/69`)"
 expected_signal:
   - applies_actual_4_level_verifier_to_real_change
   - finds_or_confirms_no_issues_in_actual_diff
@@ -18,11 +21,11 @@ quality_rubric:
 
 ## 요구사항
 
-`milestones/regular/loops/69/.worktree/.loop/SPEC.md` 의 작업 정의·수용 기준·검증 명령을 읽고 적용한다.
+`milestones/regular/loops/69/SPEC.md` (git tracked, 모든 clone에 포함) 의 작업 정의·수용 기준·검증 명령을 읽고 적용한다.
 
 ## 이번 이터가 한 작업 (자기 보고)
 
-`git log --oneline -10` 의 #69 관련 commit들을 검토.
+`git log --oneline origin/main..origin/autonomous-loop/regular/69` 의 #69 commit들을 검토. 브랜치가 fetch 안 돼 있으면 `git fetch origin autonomous-loop/regular/69` 후 재시도.
 
 ## 임무
 

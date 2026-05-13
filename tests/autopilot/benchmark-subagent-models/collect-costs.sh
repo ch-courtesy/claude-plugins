@@ -13,7 +13,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RAW_DIR="${ROOT}/raw"
 
-printf "variant\ttask\trun\tmodel\tduration_ms\texit_code\tcost_usd\tinput_tokens\toutput_tokens\tcache_read\tcache_creation\tsession_id\n"
+printf "variant\ttask\trun\tmodel\tduration_ms\texit_code\ttotal_cost_usd\tinput_tokens\toutput_tokens\tcache_read\tcache_creation\tsession_id\n"
 
 if [[ ! -d "${RAW_DIR}" ]]; then
   echo "ERROR: raw/ not found: ${RAW_DIR}" >&2
