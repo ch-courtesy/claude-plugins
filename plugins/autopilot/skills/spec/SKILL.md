@@ -106,7 +106,10 @@ task-id ↔ Issue 매핑은 task-id 자체가 issue number(`#42` 또는 `42` 형
   spec 워크플로우 step 2에서 자동 생성. 본문은 SPEC.md 작성·승인 후 갱신될 예정.
   SPEC: milestones/<m>/loops/<new-task-id>/SPEC.md
   ```
-  `<new-task-id>` 플레이스홀더는 `gh issue create` 호출 시점엔 새 issue 번호를 모르므로 다음 절차로 처리한다 — `gh issue create`로 임시 body(`<new-task-id>` 리터럴 포함)를 올리고, 반환된 issue number(`N`)로 즉시 `gh issue edit N --body <substituted-body>`를 호출해 리터럴을 실제 번호로 치환한다. edit 실패 시 abort 규칙은 다른 `gh` 호출과 동일하다.
+  본문 템플릿의 플레이스홀더 처리는 **두 단계로 나뉜다**:
+  - **`<m>` (milestone)**: step 1에서 이미 결정된 값(`--milestone <m>` 또는 default `regular`). `gh issue create` 호출 *전에* 실제 milestone 문자열로 치환한다.
+  - **`<new-task-id>` (issue number)**: `gh issue create` 호출 시점엔 아직 발급되지 않은 값. `<m>`만 치환한 임시 body(`<new-task-id>`는 리터럴로 남김)로 `gh issue create`를 호출하고, 반환된 issue number(`N`)로 즉시 `gh issue edit N --body <substituted-body>`를 호출해 리터럴을 실제 번호로 치환한다.
+  edit 실패 시 abort 규칙은 다른 `gh` 호출과 동일하다.
 
   명확화 라운드(step 5) 완료 시점에 본 issue 본문을 update할지 여부는 본 SPEC 범위 밖이며, 필요하면 사용자가 수동으로 보강한다.
 

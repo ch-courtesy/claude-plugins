@@ -126,6 +126,10 @@ echo "OK: create 후 edit 치환 절차"
 grep -m1 '^allowed-tools:' "$SKILL_MD" | grep -q 'gh issue edit' \
   || { echo "FAIL: allowed-tools에 'gh issue edit' 없음"; exit 1; }
 echo "OK: allowed-tools에 gh issue edit"
+# <m>은 create 전 치환 (이미 알려진 값이므로 리터럴로 남기지 않음)
+grep -qE 'create 호출.*전.*치환|create.*전에.*치환|create 호출 전' "$SKILL_MD" \
+  || { echo "FAIL: <m> milestone 치환 시점(create 전) 명시 없음"; exit 1; }
+echo "OK: <m> create 전 치환"
 
 echo ""
 echo "=== 모든 spec 상태 전이 테스트 통과 ==="
