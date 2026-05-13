@@ -201,8 +201,8 @@ ok "frontmatter allowed-tools에 Agent 포함"
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== TEST 11: step 2·step 8 본문에 양식 참조·도입 휴리스틱 ==="
-# 수용 기준 3·4: step 2(컨텍스트 탐색)·step 8(자체 검토) 본문이 양식 파일을 참조
+echo "=== TEST 11: step 3·step 9 본문에 양식 참조·도입 휴리스틱 ==="
+# 수용 기준 3·4: step 3(컨텍스트 탐색)·step 9(자체 검토) 본문이 양식 파일을 참조
 grep -qE 'references/agent-prompts\.md' "$SKILL_MD" \
   || fail "SKILL.md에 references/agent-prompts.md 참조 없음"
 ok "agent-prompts.md 참조 존재"
