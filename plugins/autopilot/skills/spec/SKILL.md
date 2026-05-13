@@ -1,7 +1,7 @@
 ---
 name: spec
 description: "autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 생성. 한 질문씩 명확화·섹션별 승인·EARS 포맷·[NEEDS CLARIFICATION] 마커로 자율 loop이 도중 질문 없이 완수 가능한 자기완결적 SPEC을 만듭니다. SPEC.md 작성 후 결정적 슬러그화 규칙(ASCII 영숫자·하이픈만)으로 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·SPEC.md를 commit해 loop·PR 흐름이 단일 feature 브랜치로 통합되게 합니다. 호출 'Skill(skill=\"spec\", args=\"<task-id> [--milestone <m>] [--resume]\")'. milestone 미지정 시 `regular`(catch-all)을 default로 적용."
-allowed-tools: AskUserQuestion, Read, Write, Skill, Bash(git log:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git checkout:*), Bash(git branch:*), Bash(git add:*), Bash(git commit:*), Bash(git show-ref:*), Bash(git for-each-ref:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*), Bash(echo:*), Bash(head:*), Bash(tr:*), Bash(sed:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue create:*), Bash(gh issue edit:*), Bash(gh project item-list:*), Bash(gh project item-edit:*), Bash(gh project item-add:*), Bash(gh api:*)
+allowed-tools: AskUserQuestion, Read, Write, Skill, Agent, Bash(git log:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git checkout:*), Bash(git branch:*), Bash(git add:*), Bash(git commit:*), Bash(git show-ref:*), Bash(git for-each-ref:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*), Bash(echo:*), Bash(head:*), Bash(tr:*), Bash(sed:*), Bash(gh issue view:*), Bash(gh issue list:*), Bash(gh issue create:*), Bash(gh issue edit:*), Bash(gh project item-list:*), Bash(gh project item-edit:*), Bash(gh project item-add:*), Bash(gh api:*)
 ---
 
 # spec
@@ -132,6 +132,21 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 목적: 테스트 컨벤션·CLAUDE.md 룰·디렉터리 구조 파악. 모노레포여도 단계 5에서 좁힐 것이므로 깊이 탐색 안 함.
 
+#### 3.1 subagent 위임 (선택)
+
+자동 수집 결과만으로는 관련 룰·기존 SPEC·코드 영역을 충분히 짚기 어려운 경우, `references/agent-prompts.md`의 **`spec-context-explorer`** 양식으로 `Agent` 도구에 위임할 수 있다.
+
+권장 도입 휴리스틱 (하나라도 해당 시 권장 — 강제 아님):
+
+- `rules/` 하위 파일이 다수(대략 5개 초과)이고 적용 룰이 자명하지 않음
+- 기존 `milestones/*/loops/*/SPEC.md`가 다수 존재해 유사 선례 식별이 필요
+- 영향 영역이 둘 이상의 컴포넌트에 걸침 (multi-file 영향)
+- 사용자가 자연어로 의도만 전달하고 코드 영역을 짚지 못해 사전 탐색이 필요
+
+위 트리거에 해당하지 않으면 위임하지 않는다 — 단순 1~2 query 탐색은 메인 이터가 직접 도구를 호출하는 편이 더 효율적이다 (헌법 §11.6).
+
+subagent의 보고는 사실 수집·인용에 그치며, **결정·합성은 메인 에이전트의 책임이다** (헌법 §11.6 "이터 내 서브 도구 위임" — Agent는 단일 패스 워커). 메인은 보고를 받아 step 4 이후의 분기·섹션 초안에 어떻게 반영할지 결정한다.
+
 ### 4. 범위 분해 게이트
 
 `references/decomposition-gate.md` 휴리스틱으로 다중 서브시스템 검사. 감지 시 사용자에게 분해 제안.
@@ -201,6 +216,18 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 ### 9. 자체 검토
 
 `references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 또는 `[NEEDS CLARIFICATION]` 마커만 — 사용자 Q&A 없음(단계 10에서 일괄 해결). 재루프 없음. 수정·마커 후 SPEC.md 재기록.
+
+#### 9.1 subagent 위임 (선택)
+
+SPEC.md 초안이 길거나 잔존 마커가 많아 메인의 self-review가 누락을 만들 우려가 있는 경우, `references/agent-prompts.md`의 **`spec-self-reviewer`** 양식으로 `Agent` 도구에 독립 검토를 위임할 수 있다.
+
+권장 도입 휴리스틱 (하나라도 해당 시 권장 — 강제 아님):
+
+- SPEC.md 본문 분량이 큼(대략 100줄 초과)
+- step 8 종료 시점에 잔존 `[NEEDS CLARIFICATION]` 마커가 다수(2개 이상)
+- 호출자가 자연어로 강화된 검토를 명시적으로 요청
+
+subagent는 5축 발견 사항만 보고하고 **SPEC.md 수정·마커 박기는 메인 에이전트가 직접 수행한다** — 결정·합성은 메인 책임이라는 헌법 §11.6 "이터 내 서브 도구 위임" 원칙에 따라 patch 생성은 subagent에 위임하지 않는다. step 9 본문 원칙("사용자 Q&A 없음, 재루프 없음")은 위임 여부와 무관하게 유지.
 
 ### 9.5. feat 브랜치 + SPEC.md commit (자동, main 작업트리 무손상)
 
@@ -278,6 +305,7 @@ SPEC.md 경로(`milestones/<m>/loops/<c>/SPEC.md`)와 요약을 먼저 안내한
 | `ears-patterns.md` | 5개 EARS 패턴 사례·자유 텍스트→EARS 변환 가이드·Independent-Test 규칙 |
 | `self-review.md` | 자체 검토 5항목 체크리스트 |
 | `decomposition-gate.md` | 다중 서브시스템 감지 휴리스틱·분해 제안 흐름 |
+| `agent-prompts.md` | step 3·step 9 선택적 subagent dispatch 양식 (`spec-context-explorer`·`spec-self-reviewer`) — 헌법 §11.6 "이터 내 서브 도구 위임" 보조 자료 |
 
 ## 규칙
 

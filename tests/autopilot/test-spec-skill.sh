@@ -138,10 +138,10 @@ ok "AskUserQuestion 기반 스킬 체인 규칙 명시"
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== TEST 8: 기존 워크플로 보존 ==="
-# 검증 실패 분기 외 기존 1~9단계 흐름은 그대로 유지되어야 함 (SPEC scope.exclude)
-grep -qE '9[- ]?(단계|step) 워크플로' "$SKILL_MD" \
-  || fail "SKILL.md에 9단계 워크플로 헤더 보존 없음"
-ok "9단계 워크플로 헤더 보존"
+# 검증 실패 분기 외 기존 10단계 흐름은 그대로 유지되어야 함 (SPEC scope.exclude)
+grep -qE '10[- ]?(단계|step) 워크플로' "$SKILL_MD" \
+  || fail "SKILL.md에 10단계 워크플로 헤더 보존 없음"
+ok "10단계 워크플로 헤더 보존"
 
 for step_kw in '컨텍스트 탐색' '범위 분해 게이트' '명확화 라운드' '섹션별 SPEC' '자체 검토' '사용자 최종 검토'; do
   grep -q "$step_kw" "$SKILL_MD" \
@@ -153,6 +153,90 @@ ok "기존 step 키워드 보존"
 grep -q 'WHAT/HOW' "$SKILL_MD" \
   || fail "WHAT/HOW 방어선 명시 보존 실패"
 ok "WHAT/HOW 방어선 보존"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== TEST 9: agent-prompts.md 양식 파일 (subagent 역할 2종) ==="
+# 이슈 #72 수용 기준 1·2: references/agent-prompts.md 존재 + 두 역할 헤더 + 각 양식 3섹션
+AGENT_PROMPTS="$SKILL_DIR/references/agent-prompts.md"
+[[ -f "$AGENT_PROMPTS" ]] \
+  || fail "agent-prompts.md 부재: $AGENT_PROMPTS"
+ok "references/agent-prompts.md 존재"
+
+for role in 'spec-context-explorer' 'spec-self-reviewer'; do
+  grep -qF "$role" "$AGENT_PROMPTS" \
+    || fail "agent-prompts.md에 역할 헤더 '$role' 부재"
+done
+ok "두 역할 헤더(spec-context-explorer·spec-self-reviewer) 존재"
+
+# 각 양식의 세 섹션 (언제·임무·응답) 키워드
+for section_kw in '언제' '임무' '응답'; do
+  cnt="$(grep -c "$section_kw" "$AGENT_PROMPTS" || true)"
+  [[ "$cnt" -ge 2 ]] \
+    || fail "양식 섹션 '$section_kw' 가 2회 이상(두 역할 각각) 등장하지 않음 (현재: $cnt)"
+done
+ok "각 양식의 세 섹션(언제·임무·응답) 양 역할 모두 존재"
+
+# context-explorer 응답 5섹션: 관련 룰·관련 기존 SPEC·관련 코드 영역·컨벤션·권고
+for resp_kw in '관련 룰' '관련 기존 SPEC' '관련 코드 영역' '컨벤션' '권고'; do
+  grep -qF "$resp_kw" "$AGENT_PROMPTS" \
+    || fail "context-explorer 응답 키워드 '$resp_kw' 부재"
+done
+ok "context-explorer 응답 5섹션 키워드 존재"
+
+# self-reviewer 응답 3섹션: 5축 검토 결과·Critical·Important·Minor·판정
+for resp_kw in '5축' 'Critical' 'Important' 'Minor' '판정'; do
+  grep -qF "$resp_kw" "$AGENT_PROMPTS" \
+    || fail "self-reviewer 응답 키워드 '$resp_kw' 부재"
+done
+ok "self-reviewer 응답 3섹션 키워드 존재"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== TEST 10: SKILL.md frontmatter allowed-tools에 Agent 포함 ==="
+# 수용 기준 5: subagent dispatch 도구 허가
+awk '/^---$/{c++; next} c==1' "$SKILL_MD" | grep -qE '^allowed-tools:.*\bAgent\b' \
+  || fail "SKILL.md frontmatter allowed-tools에 Agent 미포함"
+ok "frontmatter allowed-tools에 Agent 포함"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== TEST 11: step 3·step 9 본문에 양식 참조·도입 휴리스틱 ==="
+# 수용 기준 3·4: step 3(컨텍스트 탐색)·step 9(자체 검토) 본문이 양식 파일을 참조
+ref_count=$(grep -cE 'references/agent-prompts\.md' "$SKILL_MD")
+[[ "$ref_count" -ge 2 ]] \
+  || fail "SKILL.md에 references/agent-prompts.md 참조가 2회 미만 (step 3·step 9 각각 필요)"
+ok "agent-prompts.md 참조 2회 이상 (step 3·step 9 본문)"
+
+# 역할명이 SKILL.md 본문에도 등장 (스킬 본문이 역할명을 적시)
+for role in 'spec-context-explorer' 'spec-self-reviewer'; do
+  grep -qF "$role" "$SKILL_MD" \
+    || fail "SKILL.md 본문에 역할명 '$role' 부재"
+done
+ok "두 역할명 SKILL.md 본문 등장"
+
+# 권장 도입 휴리스틱 — 본문에 '권장'·'휴리스틱' 또는 '트리거' 어구
+grep -qE '권장 도입|도입 휴리스틱|권장 트리거|도입 트리거' "$SKILL_MD" \
+  || fail "SKILL.md에 권장 도입 휴리스틱/트리거 어구 부재"
+ok "권장 도입 휴리스틱 어구 존재"
+
+# ---------------------------------------------------------------------------
+echo ""
+echo "=== TEST 12: 모듈 구성 표·헌법 §11.6 인용·결정/합성 메인 책임 ==="
+# 수용 기준 6: 모듈 구성 표에 agent-prompts.md 행 (테이블 라인 안에 파일명)
+grep -qE '^\|.*agent-prompts\.md.*\|' "$SKILL_MD" \
+  || fail "모듈 구성 표에 agent-prompts.md 행 부재"
+ok "모듈 구성 표에 agent-prompts.md 행 존재"
+
+# 수용 기준 7: 헌법 §11.6 또는 "이터 내 서브 도구 위임" 인용
+grep -qE '§11\.6|이터 내 서브 도구 위임' "$SKILL_MD" \
+  || fail "SKILL.md에 헌법 §11.6 또는 '이터 내 서브 도구 위임' 인용 부재"
+ok "헌법 §11.6 / '이터 내 서브 도구 위임' 인용 존재"
+
+# 수용 기준 7: 결정·합성 메인 책임 유지 문구
+grep -qE '결정·합성.*메인|메인.*결정·합성|결정과 합성.*메인' "$SKILL_MD" \
+  || fail "SKILL.md에 '결정·합성은 메인 책임' 문구 부재"
+ok "'결정·합성 메인 책임' 문구 존재"
 
 # ---------------------------------------------------------------------------
 echo ""
