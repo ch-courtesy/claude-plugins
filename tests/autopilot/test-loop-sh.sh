@@ -2446,5 +2446,291 @@ git -C "$T62_PROJECT" checkout -q "$T62_DEFAULT_BRANCH"
 )
 echo "OK"
 
+echo "=== TEST 63: SPEC 110 EARS 1·3 — feat 브랜치 부재 + LOOPS_DIR SPEC 존재해도 start abort + autonomous-loop 브랜치 생성 0 ==="
+# SPEC 110: 단일 contract 일원화 — legacy 'autonomous-loop/<id>' fallback 분기를 제거.
+# 셋업: LOOPS_DIR(milestones/regular/loops/<id>/SPEC.md)는 있지만 feat 브랜치가 없는 상태.
+# 기대: start가 즉시 die(spec 스킬 안내) + 어떤 autonomous-loop/* 브랜치도 새로 생성되지 않음.
+T63_PROJECT="$WORK_DIR/spec110-feat-missing"
+mkdir -p "$T63_PROJECT"
+git -C "$T63_PROJECT" init -q
+git -C "$T63_PROJECT" config user.email "t@e.com"
+git -C "$T63_PROJECT" config user.name "Test"
+git -C "$T63_PROJECT" commit --allow-empty -m "initial" -q
+
+T63_ID="n63-no-feat"
+T63_LOOPS_REL="milestones/regular/loops/$T63_ID"
+mkdir -p "$T63_PROJECT/$T63_LOOPS_REL"
+cat > "$T63_PROJECT/$T63_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 63
+EOF
+
+(
+  cd "$T63_PROJECT"
+  set +e
+  output63=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "$T63_ID" 2>&1)
+  result63=$?
+  set -e
+  [[ $result63 -ne 0 ]] || { echo "FAIL: feat 브랜치 부재인데 start 성공 (EARS 1 위반)"; echo "$output63"; exit 1; }
+  echo "$output63" | grep -qE "spec" \
+    || { echo "FAIL: die 메시지에 spec 스킬 안내 없음 (EARS 1). got: $output63"; exit 1; }
+  # EARS 3: 어떤 autonomous-loop/* 브랜치도 새로 생성되지 않아야 함
+  bad_branch=$(git -C "$T63_PROJECT" for-each-ref --format='%(refname:short)' 'refs/heads/autonomous-loop/*' 2>/dev/null)
+  [[ -z "$bad_branch" ]] || { echo "FAIL: autonomous-loop/* 브랜치가 생성됨 (EARS 3 위반): $bad_branch"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 64: SPEC 110 EARS 6·7 — 워크트리에 .loop/ 부재 + .iterations/<N>.log 사용 + untracked ==="
+# 셋업: 신규 contract 표준 (feat 브랜치 + SPEC commit).
+# 기대: 워크트리에 .loop/ 디렉토리 부재. iter 1 raw 로그가 <WT>/.iterations/1.log 경로에 존재.
+# .iterations/ 경로가 git status에 untracked로 노출되지 않아야 (info/exclude 등록).
+T64_PROJECT="$WORK_DIR/spec110-no-loopdir"
+mkdir -p "$T64_PROJECT"
+git -C "$T64_PROJECT" init -q
+git -C "$T64_PROJECT" config user.email "t@e.com"
+git -C "$T64_PROJECT" config user.name "Test"
+git -C "$T64_PROJECT" commit --allow-empty -m "initial" -q
+
+T64_ID="n64-no-loopdir"
+T64_BRANCH="feat/regular/$T64_ID-spec110"
+T64_LOOPS_REL="milestones/regular/loops/$T64_ID"
+T64_DEFAULT=$(git -C "$T64_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T64_PROJECT" checkout -q -b "$T64_BRANCH"
+mkdir -p "$T64_PROJECT/$T64_LOOPS_REL"
+cat > "$T64_PROJECT/$T64_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 64
+EOF
+git -C "$T64_PROJECT" add "$T64_LOOPS_REL/SPEC.md"
+git -C "$T64_PROJECT" commit -q -m "feat(spec): n64 spec 110 test 64"
+git -C "$T64_PROJECT" checkout -q "$T64_DEFAULT"
+
+(
+  cd "$T64_PROJECT"
+  set +e
+  output64=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T64_ID" 2>&1)
+  result64=$?
+  set -e
+  WT64="$T64_PROJECT/$T64_LOOPS_REL/.worktree"
+  [[ $result64 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result64. got: $output64"; exit 1; }
+  # EARS 7: 워크트리 루트에 .loop/ 디렉토리 부재
+  [[ ! -d "$WT64/.loop" ]] || { echo "FAIL: 워크트리에 .loop/ 디렉토리 잔존 (EARS 7 위반)"; exit 1; }
+  # EARS 6: iter 1 raw 로그가 <WT>/.iterations/1.log 경로
+  [[ -f "$WT64/.iterations/1.log" ]] || { echo "FAIL: <WT>/.iterations/1.log 부재 (EARS 6 위반)"; exit 1; }
+  # EARS 6 (untracked): .iterations/ 경로가 git status에 노출되지 않아야
+  status_iter=$(git -C "$WT64" status --porcelain 2>/dev/null | grep '\.iterations' || true)
+  [[ -z "$status_iter" ]] || { echo "FAIL: .iterations/가 git status에 노출됨 (info/exclude 미등록): $status_iter (EARS 6 위반)"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 65: SPEC 110 EARS 4 — 워커가 메타 파일 수정 → chore(loop): meta iter N commit 1건 추가 ==="
+# 셋업: 신규 contract + mock claude가 HANDOFF.md를 수정한 뒤 DONE 생성.
+# 기대: iter 종료 직후 feat 브랜치 HEAD에 'chore(loop): meta iter 1' commit이 추가됨.
+T65_PROJECT="$WORK_DIR/spec110-meta-commit"
+mkdir -p "$T65_PROJECT"
+git -C "$T65_PROJECT" init -q
+git -C "$T65_PROJECT" config user.email "t@e.com"
+git -C "$T65_PROJECT" config user.name "Test"
+git -C "$T65_PROJECT" commit --allow-empty -m "initial" -q
+
+T65_ID="n65-meta-commit"
+T65_BRANCH="feat/regular/$T65_ID"
+T65_LOOPS_REL="milestones/regular/loops/$T65_ID"
+T65_DEFAULT=$(git -C "$T65_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T65_PROJECT" checkout -q -b "$T65_BRANCH"
+mkdir -p "$T65_PROJECT/$T65_LOOPS_REL"
+cat > "$T65_PROJECT/$T65_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 65
+EOF
+git -C "$T65_PROJECT" add "$T65_LOOPS_REL/SPEC.md"
+git -C "$T65_PROJECT" commit -q -m "feat(spec): n65 spec 110 test 65"
+git -C "$T65_PROJECT" checkout -q "$T65_DEFAULT"
+
+MOCK65="$WORK_DIR/mock65-bin"
+mkdir -p "$MOCK65"
+# mock: HANDOFF.md를 수정 + DONE 생성 (commit은 안 함 — loop.sh가 메타 commit 발행 책임)
+cat > "$MOCK65/claude" <<MOCKEOF
+#!/usr/bin/env bash
+cat > /dev/null
+# 워커는 워크트리 루트 cwd로 들어옴. 메타는 milestones/<m>/loops/<c>/ 경로.
+echo "next iter handoff content" >> "$T65_LOOPS_REL/HANDOFF.md"
+touch DONE
+echo '{"result": "mock65", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK65/claude"
+
+(
+  cd "$T65_PROJECT"
+  set +e
+  output65=$(PATH="$MOCK65:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T65_ID" 2>&1)
+  result65=$?
+  set -e
+  WT65="$T65_PROJECT/$T65_LOOPS_REL/.worktree"
+  [[ $result65 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result65. got: $output65"; exit 1; }
+  # EARS 4: feat 브랜치 HEAD에 'chore(loop): meta iter 1' commit 정확히 1건
+  meta_count=$(git -C "$WT65" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter 1$' || true)
+  [[ "$meta_count" == "1" ]] || { echo "FAIL: 'chore(loop): meta iter 1' commit count=$meta_count (기대 1, EARS 4 위반)"; git -C "$WT65" log --oneline -10; exit 1; }
+  # EARS 4 (격리): 그 commit이 메타 파일만 건드렸어야
+  meta_sha=$(git -C "$WT65" log --pretty=format:%H --grep='^chore(loop): meta iter 1$' -E | head -1)
+  changed_files=$(git -C "$WT65" show --pretty='' --name-only "$meta_sha")
+  echo "$changed_files" | grep -qE "^$T65_LOOPS_REL/(PLAN|NOTES|HANDOFF|RUN_LOG|ESCALATION)\.md$" \
+    || { echo "FAIL: meta commit이 메타 파일 외 다른 파일 포함: $changed_files"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 66: SPEC 110 EARS 5 — 워커가 메타 파일 미수정 → meta commit 0건 ==="
+# 셋업: 신규 contract + mock claude가 DONE만 만들고 메타 파일은 손대지 않음.
+# 기대: feat 브랜치에 'chore(loop): meta iter' commit이 0건.
+T66_PROJECT="$WORK_DIR/spec110-no-meta"
+mkdir -p "$T66_PROJECT"
+git -C "$T66_PROJECT" init -q
+git -C "$T66_PROJECT" config user.email "t@e.com"
+git -C "$T66_PROJECT" config user.name "Test"
+git -C "$T66_PROJECT" commit --allow-empty -m "initial" -q
+
+T66_ID="n66-no-meta"
+T66_BRANCH="feat/regular/$T66_ID"
+T66_LOOPS_REL="milestones/regular/loops/$T66_ID"
+T66_DEFAULT=$(git -C "$T66_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T66_PROJECT" checkout -q -b "$T66_BRANCH"
+mkdir -p "$T66_PROJECT/$T66_LOOPS_REL"
+cat > "$T66_PROJECT/$T66_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 66
+EOF
+git -C "$T66_PROJECT" add "$T66_LOOPS_REL/SPEC.md"
+git -C "$T66_PROJECT" commit -q -m "feat(spec): n66 spec 110 test 66"
+git -C "$T66_PROJECT" checkout -q "$T66_DEFAULT"
+
+# 기본 mock-bin 사용 (DONE만 생성, 메타 미수정)
+(
+  cd "$T66_PROJECT"
+  set +e
+  output66=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T66_ID" 2>&1)
+  result66=$?
+  set -e
+  WT66="$T66_PROJECT/$T66_LOOPS_REL/.worktree"
+  [[ $result66 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result66. got: $output66"; exit 1; }
+  meta_count=$(git -C "$WT66" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter' || true)
+  [[ "$meta_count" == "0" ]] || { echo "FAIL: 메타 변경 0인데 meta iter commit count=$meta_count (기대 0, EARS 5 위반)"; git -C "$WT66" log --oneline -10; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 67: SPEC 110 EARS 9·10·11·12 — grep 검사 (plugin code 안 legacy 문자열 0건) ==="
+# 본 worktree의 plugin 파일을 grep해 검증. 이 테스트는 실 코드를 직접 점검 (EARS 9-12).
+[[ -z "$(grep -rln 'autonomous-loop' "$SKILL_REFS" 2>/dev/null)" ]] \
+  || { echo "FAIL: 'autonomous-loop' 잔존 파일:"; grep -rln 'autonomous-loop' "$SKILL_REFS"; exit 1; }
+[[ -z "$(grep -rln -F '.loop/' "$SKILL_REFS" 2>/dev/null)" ]] \
+  || { echo "FAIL: '.loop/' 잔존 파일 (EARS 10):"; grep -rln -F '.loop/' "$SKILL_REFS"; exit 1; }
+# EARS 11: constitution.md 단독 검사 (중복이지만 명시)
+[[ -z "$(grep -F '.loop/' "$SKILL_REFS/constitution.md" 2>/dev/null)" ]] \
+  || { echo "FAIL: constitution.md에 '.loop/' 잔존 (EARS 11)"; exit 1; }
+# EARS 12: pr-phase.sh SPEC_FILE는 milestones 경로
+grep -E 'SPEC_FILE.*\.loop' "$SKILL_REFS/pr-phase.sh" >/dev/null && { echo "FAIL: pr-phase.sh의 SPEC_FILE에 .loop 잔존 (EARS 12)"; exit 1; }
+grep -E 'SPEC_FILE.*milestones.*loops' "$SKILL_REFS/pr-phase.sh" >/dev/null \
+  || { echo "FAIL: pr-phase.sh의 SPEC_FILE이 milestones/.../loops 패턴 아님 (EARS 12)"; exit 1; }
+echo "OK"
+
+echo "=== TEST 68: SPEC 110 EARS 13 — DONE feat 브랜치에 메타 commit + 워크트리 HEAD에 .loop/ 부재 + 메타는 milestones/ 경로에만 ==="
+# 셋업: 신규 contract + mock이 매 iter HANDOFF.md 갱신 + 2회째 DONE.
+# 기대: DONE 도달 시점에 'chore(loop): meta iter 1·2' commit 등장, 워크트리에 .loop/ 부재,
+# 메타 파일은 워크트리의 milestones/<m>/loops/<c>/ 경로에서만 발견.
+T68_PROJECT="$WORK_DIR/spec110-final-state"
+mkdir -p "$T68_PROJECT"
+git -C "$T68_PROJECT" init -q
+git -C "$T68_PROJECT" config user.email "t@e.com"
+git -C "$T68_PROJECT" config user.name "Test"
+git -C "$T68_PROJECT" commit --allow-empty -m "initial" -q
+
+T68_ID="n68-final"
+T68_BRANCH="feat/regular/$T68_ID"
+T68_LOOPS_REL="milestones/regular/loops/$T68_ID"
+T68_DEFAULT=$(git -C "$T68_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T68_PROJECT" checkout -q -b "$T68_BRANCH"
+mkdir -p "$T68_PROJECT/$T68_LOOPS_REL"
+cat > "$T68_PROJECT/$T68_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 68
+EOF
+git -C "$T68_PROJECT" add "$T68_LOOPS_REL/SPEC.md"
+git -C "$T68_PROJECT" commit -q -m "feat(spec): n68 spec 110 test 68"
+git -C "$T68_PROJECT" checkout -q "$T68_DEFAULT"
+
+COUNTER68="$WORK_DIR/iter-count-68.txt"
+echo "0" > "$COUNTER68"
+export COUNTER68_PATH="$COUNTER68"
+
+MOCK68="$WORK_DIR/mock68-bin"
+mkdir -p "$MOCK68"
+cat > "$MOCK68/claude" <<MOCKEOF
+#!/usr/bin/env bash
+cat > /dev/null
+n=\$(cat "\${COUNTER68_PATH}")
+n=\$((n + 1))
+echo "\$n" > "\${COUNTER68_PATH}"
+echo "iter \$n handoff" >> "$T68_LOOPS_REL/HANDOFF.md"
+if [[ \$n -ge 2 ]]; then
+  touch DONE
+fi
+echo '{"result": "mock68", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK68/claude"
+
+(
+  cd "$T68_PROJECT"
+  set +e
+  output68=$(PATH="$MOCK68:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T68_ID" 2>&1)
+  result68=$?
+  set -e
+  WT68="$T68_PROJECT/$T68_LOOPS_REL/.worktree"
+  [[ $result68 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result68. got: $output68"; exit 1; }
+  # EARS 13: 메타 commit이 메타 갱신 횟수(=2)만큼 등장
+  meta_count=$(git -C "$WT68" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter [0-9]+$' || true)
+  [[ "$meta_count" -ge 2 ]] || { echo "FAIL: meta iter commit count=$meta_count (기대 ≥2, EARS 13)"; git -C "$WT68" log --oneline -20; exit 1; }
+  # EARS 13: 워크트리 HEAD에 .loop/ 부재
+  [[ ! -d "$WT68/.loop" ]] || { echo "FAIL: DONE 시점에 .loop/ 잔존 (EARS 13)"; exit 1; }
+  # EARS 13: 메타 파일은 milestones/<m>/loops/<id>/에서만 발견
+  for meta_f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md; do
+    [[ -f "$WT68/$T68_LOOPS_REL/$meta_f" ]] || { echo "FAIL: 메타 파일 부재 ($T68_LOOPS_REL/$meta_f) — 워커가 milestones/ 경로에 못 씀 (EARS 13)"; exit 1; }
+  done
+)
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
