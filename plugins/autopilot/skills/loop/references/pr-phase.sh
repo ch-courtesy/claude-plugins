@@ -278,7 +278,8 @@ else
     # sleep 없이 즉시 재조회하면 여전히 COMPLETED로 보여 동일 stuck으로 재판정되고
     # 3회 상한이 수초 내에 모두 소진된다 — 상한이 실질적 재시도를 보장하지 못함.
     # 기본 10초 대기, 테스트는 LOOP_PR_RERUN_SLEEP_SECONDS=0으로 즉시 진행.
-    sleep "${LOOP_PR_RERUN_SLEEP_SECONDS:-10}"
+    # 상한 도달 시엔 다음 iteration이 없으므로 sleep 자체를 건너뛴다 (불필요한 10초 낭비 차단).
+    (( rerun_attempts < MAX_RERUN_ATTEMPTS )) && sleep "${LOOP_PR_RERUN_SLEEP_SECONDS:-10}"
   done
 
   if (( rerun_attempts >= MAX_RERUN_ATTEMPTS )); then
