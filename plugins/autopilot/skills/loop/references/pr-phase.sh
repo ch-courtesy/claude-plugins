@@ -62,7 +62,9 @@ if [[ -z "$DEFAULT_BRANCH" ]]; then
 fi
 
 # ----- SPEC 제목·본문 추출 (M3) -----
-SPEC_FILE="$WT/.loop/SPEC.md"
+# TASK_ID는 정규화된 '<milestone>/<child>' 형태. 단일 contract: SPEC은 워크트리 안의
+# milestones/<m>/loops/<c>/SPEC.md 단일 경로에서 읽음.
+SPEC_FILE="$WT/milestones/${TASK_ID%%/*}/loops/${TASK_ID#*/}/SPEC.md"
 [[ -f "$SPEC_FILE" ]] || { echo "ERROR: SPEC.md 없음: $SPEC_FILE" >&2; exit 1; }
 
 # 첫 H1 (frontmatter 이후의 단일 # 라인)

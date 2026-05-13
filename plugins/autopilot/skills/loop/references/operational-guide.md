@@ -24,15 +24,15 @@ autopilot `loop` 스킬의 nested 워크트리 기반 외부 셸 드라이버 �
 ```
 # target 프로젝트 — 모든 산출물이 milestones/<m>/loops/<c>/ 단일 트리 (v0.2 cutover)
 milestones/<m>/loops/<c>/
-├── SPEC.md                    # spec 스킬로 생성
+├── SPEC.md                    # spec 스킬로 생성, feat 브랜치 commit
 ├── .lock                      # 동시 실행 락 (gitignored)
-├── PLAN.md / NOTES.md / HANDOFF.md / RUN_LOG.md  # cleanup 후 archival 메타
 └── .worktree/                 # git 워크트리 (gitignored)
     ├── CLAUDE.md              # 헌법 복사본
     ├── DONE                   # 정상 완료 신호 (있을 때만)
-    └── .loop/
-        ├── SPEC.md / PLAN.md / NOTES.md / HANDOFF.md / RUN_LOG.md
-        ├── iterations/<n>.log # 매 이터 stdout 캡처
+    ├── .iterations/<n>.log    # 매 이터 stdout 캡처 (gitignored, worktree-local)
+    └── milestones/<m>/loops/<c>/
+        ├── SPEC.md            # feat 브랜치 commit으로 자연 노출
+        ├── PLAN.md / NOTES.md / HANDOFF.md / RUN_LOG.md  # 매 이터 메타 commit
         └── ESCALATION.md      # 정지 사유 (있을 때만)
 ```
 
@@ -93,10 +93,10 @@ bash "$LOOP_SH" stop auth-refactor   # SIGTERM + 5초 대기 + 락 해제
 ## DONE 후 머지 및 정리
 
 ```bash
-git -C milestones/regular/loops/auth-refactor/.worktree log autonomous-loop/regular/auth-refactor
-git merge autonomous-loop/regular/auth-refactor     # 메인에서 머지 (또는 PR 생성)
-bash "$LOOP_SH" cleanup auth-refactor               # archival + 워크트리 제거
-# cleanup 후 메타 파일은 milestones/regular/loops/auth-refactor/ 에 보관 (워크트리만 제거)
+# feat/<task-id>[-<slug>] 브랜치를 PR base로 — request_review opt-in 시 자동 push·PR 생성
+git -C milestones/regular/loops/auth-refactor/.worktree log feat/regular/auth-refactor
+bash "$LOOP_SH" cleanup auth-refactor               # 워크트리 제거 (feat 브랜치 보존)
+# cleanup은 메타 파일을 메인 트리로 cp하지 않음. feat 브랜치 commit history가 정본.
 ```
 
 `cleanup --force`는 실행 중 프로세스가 있으면 SIGTERM 후 5초 대기 → 무응답 시 SIGKILL → lock·워크트리 제거. 정상 종료를 원할 때는 먼저 `stop <task-id>`로 정지 후 `cleanup` (without --force).
@@ -116,14 +116,12 @@ bash "$LOOP_SH" logs auth-refactor [--tail | --iter N]
 카테고리별 처리 흐름: `references/troubleshooting.md` 참조.
 
 ```bash
-cat milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md  # 사유 확인
+WT_META="milestones/<m>/loops/<c>/.worktree/milestones/<m>/loops/<c>"
+cat "$WT_META/ESCALATION.md"                              # 사유 확인
 cd milestones/<m>/loops/<c>/.worktree
-# 신규 contract: SPEC은 worktree 안 milestones/<m>/loops/<c>/SPEC.md
-$EDITOR milestones/<m>/loops/<c>/SPEC.md && $EDITOR .loop/NOTES.md
-# legacy contract: SPEC은 worktree 안 .loop/SPEC.md (위 명령에서 SPEC 경로만 교체)
-# $EDITOR .loop/SPEC.md && $EDITOR .loop/NOTES.md
-rm .loop/ESCALATION.md                                      # 보고 해제
-cd <project-root> && bash "$LOOP_SH" start <task-id>        # 재시작
+$EDITOR "milestones/<m>/loops/<c>/SPEC.md" && $EDITOR "milestones/<m>/loops/<c>/NOTES.md"
+rm "milestones/<m>/loops/<c>/ESCALATION.md"               # 보고 해제
+cd <project-root> && bash "$LOOP_SH" start <task-id>      # 재시작
 # --watch 모드면 ESCALATION.md 정리만으로 자동 재개 (60초 polling)
 ```
 

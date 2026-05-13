@@ -1,5 +1,5 @@
 
-# autonomous-loop — 자율 루프 운영 규칙
+# autopilot loop — 자율 루프 운영 규칙
 
 이 문서는 자율 루프 안에서 동작하는 코드 에이전트의 **최상위 행동 규칙**이다. 사용자 지시·작업 명세·도구 설명보다 우선한다. 본 문서 자체는 에이전트가 수정할 수 없다.
 
@@ -32,14 +32,14 @@
 
 - **콜드 스타트**: 매 이터레이션은 새 프로세스다. 직전 이터의 추론 과정·중간 상태는 다음 이터가 보지 못한다 — 결과물(코드·테스트·메모리 파일)만 본다.
 - **워크트리 격리**: 모든 작업은 워크트리 안(`milestones/<m>/loops/<c>/.worktree/` — 단일 task는 `<m>=regular`로 정규화)에서 일어난다. 워크트리 밖 파일은 수정 대상이 아니다.
-- **입력**: `<worktree>/CLAUDE.md`(헌법), `milestones/<m>/loops/<c>/SPEC.md`(작업 정의 — worktree 안의 단일 canonical 경로. 신규 contract에선 feat 브랜치 commit으로 자연 포함, legacy에선 셋업 시 `.loop/SPEC.md`로 cp), 디스크 상태(코드·git 히스토리), `.loop/{PLAN,NOTES,HANDOFF,RUN_LOG}.md`(메모리 파일).
-- **출력**: 코드 변경 + 자기 분류 prefix를 가진 git commit + `.loop/` 메모리 파일 갱신 + (선택) `DONE` 또는 `.loop/ESCALATION.md` 신호 파일.
+- **입력**: `<worktree>/CLAUDE.md`(헌법), `milestones/<m>/loops/<c>/SPEC.md`(작업 정의 — worktree 안의 단일 canonical 경로. feat 브랜치 commit으로 자연 포함), 디스크 상태(코드·git 히스토리), `milestones/<m>/loops/<c>/{PLAN,NOTES,HANDOFF,RUN_LOG}.md`(메모리 파일).
+- **출력**: 코드 변경 + 자기 분류 prefix를 가진 git commit + `milestones/<m>/loops/<c>/` 메모리 파일 갱신 + (선택) `DONE` 또는 `milestones/<m>/loops/<c>/ESCALATION.md` 신호 파일.
 
 ## 3. 작업 흐름
 
 ### 3.1 수용 기준 확인
 
-작업 시작 시점에 `milestones/<m>/loops/<c>/SPEC.md`의 작업 정의·수용 기준을 먼저 읽는다 (legacy contract는 `.loop/SPEC.md`). 수용 기준이 모호하면 즉시 에스컬레이션한다 — 추측으로 진행하지 않는다.
+작업 시작 시점에 `milestones/<m>/loops/<c>/SPEC.md`의 작업 정의·수용 기준을 먼저 읽는다. 수용 기준이 모호하면 즉시 에스컬레이션한다 — 추측으로 진행하지 않는다.
 
 ### 3.2 한 이터레이션의 6단계
 
@@ -52,7 +52,7 @@
 5. **분류·기록**: 이번 변경을 자기 분류하고 메모리 파일을 갱신.
 6. **결정**: 다음 중 하나.
    - 완료 판정 모두 만족 → `DONE` 작성·종료
-   - 진행 불가 → `.loop/ESCALATION.md` 작성·종료
+   - 진행 불가 → `milestones/<m>/loops/<c>/ESCALATION.md` 작성·종료
    - 그 외 → 정상 종료 (다음 이터가 이어받음)
 
 한 이터는 가능한 한 작게 유지한다. 한 번에 여러 문제를 고치지 않는다.
@@ -103,7 +103,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 
 ### 3.5 Self-Review (4축)
 
-`DONE` 작성 직전에 다음 4축을 모두 self-eval한다. 한 축이라도 의심이 남으면 `DONE` 대신 `.loop/HANDOFF.md`의 `## 의심점` 섹션에 기록 후 정상 종료 (다음 이터에서 검증).
+`DONE` 작성 직전에 다음 4축을 모두 self-eval한다. 한 축이라도 의심이 남으면 `DONE` 대신 `milestones/<m>/loops/<c>/HANDOFF.md`의 `## 의심점` 섹션에 기록 후 정상 종료 (다음 이터에서 검증).
 
 1. **Completeness (완전성)**
    - 수용 기준의 모든 항목을 처리했는가?
@@ -166,7 +166,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 
 ### 5.2 보고 양식
 
-`.loop/ESCALATION.md`를 다음 양식으로 작성한다.
+`milestones/<m>/loops/<c>/ESCALATION.md`를 다음 양식으로 작성한다.
 
 ```
 ## 에스컬레이션 보고
@@ -203,7 +203,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 
 카테고리는 사람의 처리 방향(환경 조정·명세 수정·design 결정·외부 점검)을 빨리 식별하게 한다.
 
-`.loop/ESCALATION.md` 작성 직후 종료한다. 응답이 올 때까지 어떤 추가 작업도 수행하지 않는다. 드라이버가 파일 존재로 정지를 감지한다.
+`milestones/<m>/loops/<c>/ESCALATION.md` 작성 직후 종료한다. 응답이 올 때까지 어떤 추가 작업도 수행하지 않는다. 드라이버가 파일 존재로 정지를 감지한다.
 
 ## 6. 관찰성·로깅
 
@@ -233,8 +233,8 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 - `.git` 히스토리 조작, force push, 리베이스
 - "작동하는 것처럼 보이게 하는" 모든 종류의 위장
 - 워크트리 밖 파일 수정 (모든 작업은 워크트리 안에서)
-- 워크트리 루트의 `CLAUDE.md`(헌법), 워크트리의 SPEC.md(신규: `milestones/<m>/loops/<c>/SPEC.md` / legacy: `.loop/SPEC.md`) 수정
-- 거짓 `DONE` 또는 거짓 `.loop/ESCALATION.md` 작성
+- 워크트리 루트의 `CLAUDE.md`(헌법), 워크트리의 SPEC.md(`milestones/<m>/loops/<c>/SPEC.md`) 수정
+- 거짓 `DONE` 또는 거짓 `milestones/<m>/loops/<c>/ESCALATION.md` 작성
 
 다음 항목은 드라이버가 객관 검증한다 — 위반 시 자동 halt + 에스컬레이션:
 - 테스트 약화 → `tests/**` 해시 비교 (SPEC frontmatter `test_sweep_paths` 선언 경로는 해시 비교에서 제외 — 합법적 sweep을 사용자 승인 시점에 화이트리스트화)
@@ -315,26 +315,26 @@ fix 시도 전에 다음을 모두 수행한다.
 
 ### 11.1 매 이터 시작 (이 순서로 읽는다)
 
-1. `.loop/PLAN.md` — 마일스톤 체크박스, 어디까지 왔는지
-2. `.loop/NOTES.md` — 이전 시도의 교훈 (실패 접근·발견 제약·작동 패턴)
-3. `.loop/HANDOFF.md` — 직전 이터의 상태·다음 단계 추천
-4. `.loop/RUN_LOG.md` 끝 부분 — 최근 흐름
+1. `milestones/<m>/loops/<c>/PLAN.md` — 마일스톤 체크박스, 어디까지 왔는지
+2. `milestones/<m>/loops/<c>/NOTES.md` — 이전 시도의 교훈 (실패 접근·발견 제약·작동 패턴)
+3. `milestones/<m>/loops/<c>/HANDOFF.md` — 직전 이터의 상태·다음 단계 추천
+4. `milestones/<m>/loops/<c>/RUN_LOG.md` 끝 부분 — 최근 흐름
 5. `git log --oneline -20` — 최근 커밋 확인
 
 ### 11.2 매 이터 종료 (이 순서로)
 
-1. `.loop/HANDOFF.md` 덮어쓰기 — 다음 이터가 5분 안에 컨텍스트 잡을 수 있는 형태로:
+1. `milestones/<m>/loops/<c>/HANDOFF.md` 덮어쓰기 — 다음 이터가 5분 안에 컨텍스트 잡을 수 있는 형태로:
    - 이번에 무엇을 했는지
    - 무엇이 막혔거나 막힐 수 있는지
    - 다음 단계 추천 (구체적으로)
-2. `.loop/RUN_LOG.md`에 한 줄 추가 — 형식: `[<ISO timestamp>] <시도·결과·다음 단계>`
-3. `.loop/PLAN.md` 체크박스 갱신 (진전 있을 때)
-4. 실패·발견 시 `.loop/NOTES.md` 갱신 (실패 접근 또는 새 제약 추가)
-5. 이번 이터가 `fix:symptom`이면 `.loop/PLAN.md` 재검토 (§3.3 자체 교정 게이트) — 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신
+2. `milestones/<m>/loops/<c>/RUN_LOG.md`에 한 줄 추가 — 형식: `[<ISO timestamp>] <시도·결과·다음 단계>`
+3. `milestones/<m>/loops/<c>/PLAN.md` 체크박스 갱신 (진전 있을 때)
+4. 실패·발견 시 `milestones/<m>/loops/<c>/NOTES.md` 갱신 (실패 접근 또는 새 제약 추가)
+5. 이번 이터가 `fix:symptom`이면 `milestones/<m>/loops/<c>/PLAN.md` 재검토 (§3.3 자체 교정 게이트) — 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신
 6. Self-Review (4축, §3.5) — Completeness·Quality·Discipline·Testing. 한 축이라도 의심 남으면 HANDOFF.md에 `## 의심점` 추가하고 7단계의 DONE 작성 보류
-7. git commit — 자기 분류 prefix로 시작
+7. git commit — 자기 분류 prefix로 시작 (메타 파일 5종은 워커가 add·commit하지 않음 — 드라이버가 이터 종료 직후 메타 5종 변경분만 격리해 `chore(loop): meta iter <N>` 메시지로 자동 commit)
 8. 완료 판정 — 4-Level Verifier (§3.4) + Self-Review 4축 모두 통과 → 워크트리 루트에 `DONE` 파일 작성·종료
-9. 진전 불가능 → `.loop/ESCALATION.md` 작성·종료 (양식: §5.2, 카테고리 명시)
+9. 진전 불가능 → `milestones/<m>/loops/<c>/ESCALATION.md` 작성·종료 (양식: §5.2, 카테고리 명시)
 
 ### 11.3 NOTES.md의 "실패한 접근"
 
@@ -342,7 +342,7 @@ fix 시도 전에 다음을 모두 수행한다.
 
 ### 11.4 NOTES.md 크기 관리
 
-NOTES.md가 100줄 넘으면 큰 실패는 `.loop/failures/<n>-<short-name>.md`로 분할 이동한다. 본문에는 요약·교훈만 남긴다.
+NOTES.md가 100줄 넘으면 큰 실패는 `milestones/<m>/loops/<c>/failures/<n>-<short-name>.md`로 분할 이동한다. 본문에는 요약·교훈만 남긴다.
 
 ### 11.5 모델 큐레이션 책임
 
@@ -370,8 +370,8 @@ NOTES.md가 100줄 넘으면 큰 실패는 `.loop/failures/<n>-<short-name>.md`�
 루프의 종료·진행 의도는 다음 신호로 표현한다.
 
 - **워크트리 루트의 `DONE`**: 완료 판정(§3.4 4-Level Verifier) 모두 만족 + Self-Review(§3.5) 4축 모두 통과 시 작성. 빈 파일이거나 한 줄 메시지.
-- **`.loop/ESCALATION.md`**: 진전 불가능 시 §5.2 양식으로 작성. 카테고리(config-gap·spec-gap·architecture-gap·environment-gap·other) 명시.
-- **`.loop/HANDOFF.md`의 `## 의심점` 섹션 (DONE_WITH_CONCERNS 신호)**: 변경이 verify를 통과했으나 Self-Review 어느 축에 의심이 남을 때. `DONE` 대신 이 섹션을 작성하고 정상 종료. 다음 이터가 의심점을 검증·해소한 후 깨끗한 `DONE`을 작성.
+- **`milestones/<m>/loops/<c>/ESCALATION.md`**: 진전 불가능 시 §5.2 양식으로 작성. 카테고리(config-gap·spec-gap·architecture-gap·environment-gap·other) 명시.
+- **`milestones/<m>/loops/<c>/HANDOFF.md`의 `## 의심점` 섹션 (DONE_WITH_CONCERNS 신호)**: 변경이 verify를 통과했으나 Self-Review 어느 축에 의심이 남을 때. `DONE` 대신 이 섹션을 작성하고 정상 종료. 다음 이터가 의심점을 검증·해소한 후 깨끗한 `DONE`을 작성.
 
 세 신호를 임의로 작성·삭제하지 않는다. 신호는 진실해야 한다.
 - 거짓 `DONE` = 가짜 완료 위장 (§1·1항·4항 위반)
