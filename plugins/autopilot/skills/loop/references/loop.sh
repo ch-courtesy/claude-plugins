@@ -388,14 +388,6 @@ read_scope_yaml() {
   }' "$spec_path" 2>/dev/null
 }
 
-# SPEC frontmatter의 request_review 플래그가 true인지 확인.
-# 미지정·false·다른 값 → 1 (off). 본 플래그가 true일 때만 DONE 후 PR phase 진입.
-pr_phase_enabled() {
-  local val
-  val=$(read_scope_yaml | yq '.request_review // false' 2>/dev/null || echo "false")
-  [[ "$val" == "true" ]]
-}
-
 diff_vs_scope() {
   local scope_yaml include_patterns exclude_patterns committed working changed
   scope_yaml=$(read_scope_yaml)
