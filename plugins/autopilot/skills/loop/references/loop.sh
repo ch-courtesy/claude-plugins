@@ -835,14 +835,17 @@ cmd_start() {
 
     # 워크트리 로컬 비추적 등록 — .iterations/는 iter raw 로그, 어떤 git 브랜치에도
     # commit되지 않음. DONE은 종료 신호로 worktree-local.
-    local wt_gitdir
-    wt_gitdir="$(git -C "$WT" rev-parse --git-dir)"
-    mkdir -p "$wt_gitdir/info"
-    {
-      echo "CLAUDE.md"
-      echo ".iterations/"
-      echo "DONE"
-    } >> "$wt_gitdir/info/exclude"
+    # 주의: 워크트리별 info/exclude(--git-dir)는 git이 실제로 참조하지 않음 (공유 commondir만 참조).
+    #       --git-common-dir에 idempotent하게 append해야 git status가 실제로 제외 처리한다.
+    local wt_common_dir
+    wt_common_dir="$(git -C "$WT" rev-parse --git-common-dir)"
+    [[ "$wt_common_dir" != /* ]] && wt_common_dir="$WT/$wt_common_dir"
+    mkdir -p "$wt_common_dir/info"
+    local exclude_file="$wt_common_dir/info/exclude"
+    touch "$exclude_file"
+    for pat in "CLAUDE.md" ".iterations/" "DONE"; do
+      grep -qxF "$pat" "$exclude_file" 2>/dev/null || echo "$pat" >> "$exclude_file"
+    done
 
     echo "[$(now_iso)] 워크트리 생성 완료: $WT"
     echo "브랜치: $BRANCH"
