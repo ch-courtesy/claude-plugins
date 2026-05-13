@@ -213,3 +213,65 @@ else
   echo "PR URL: $pr_url"
   echo "PR state: open"
 fi
+
+# ----- Monitor: stuck PR check 재트리거 (SPEC 103 M4/AC5) -----
+# PR 생성·갱신 직후 같은 셸에서 동기적으로 PR check 상태를 polling한다.
+# "stuck" 패턴 = (1) PR state OPEN + (2) reviewDecision 없음 (리뷰 미발생) +
+#                (3) check가 모두 완료(COMPLETED state)된 상태.
+# stuck 감지 시 `gh pr checks <num> --rerun`을 호출. 최대 3회 재트리거, 상한 도달 시
+# 사용자 알림(stderr) + loop 정상 종료(상한은 에러가 아닌 경고).
+# bounded loop으로 무한 루프 위험을 코드로 차단 — counter 외 추가 안전장치 불필요.
+
+# PR number 추출 — 기존 PR 분기에선 pr_number 이미 set, 새 PR은 pr_url에서 추출
+monitor_pr_number="${pr_number:-}"
+if [[ -z "$monitor_pr_number" && -n "${pr_url:-}" ]]; then
+  monitor_pr_number=$(printf '%s' "$pr_url" | sed -nE 's|.*/pull/([0-9]+).*|\1|p')
+fi
+
+if [[ -z "$monitor_pr_number" ]]; then
+  echo "[pr-phase] PR number 추출 실패 — Monitor 단계 건너뜀" >&2
+else
+  echo "[pr-phase] Monitor 진입 (stuck check 재트리거 ≤3회, PR #$monitor_pr_number)"
+  MAX_RERUN_ATTEMPTS=3
+  rerun_attempts=0
+  while (( rerun_attempts < MAX_RERUN_ATTEMPTS )); do
+    # (1) PR state — MERGED/CLOSED면 monitor 종료 (review·done 단계 진입)
+    monitor_pr_state=$( cd "$WT" && gh pr view "$monitor_pr_number" --json state --jq '.state' 2>/dev/null || printf '' )
+    if [[ "$monitor_pr_state" == "MERGED" || "$monitor_pr_state" == "CLOSED" ]]; then
+      echo "[pr-phase] PR 상태=$monitor_pr_state — Monitor 종료 (lifecycle 완료 단계)"
+      break
+    fi
+
+    # (2) reviewDecision이 set이면 리뷰 활동 발생 → stuck 아님, monitor 종료
+    monitor_review_decision=$( cd "$WT" && gh pr view "$monitor_pr_number" --json reviewDecision --jq '.reviewDecision' 2>/dev/null || printf '' )
+    if [[ -n "$monitor_review_decision" && "$monitor_review_decision" != "null" ]]; then
+      echo "[pr-phase] reviewDecision=$monitor_review_decision — Monitor 종료 (리뷰 진행)"
+      break
+    fi
+
+    # (3) check 상태 조회
+    monitor_checks_json=$( cd "$WT" && gh pr checks "$monitor_pr_number" --json state,conclusion 2>/dev/null || printf '' )
+    if [[ -z "$monitor_checks_json" || "$monitor_checks_json" == "[]" ]]; then
+      # check 정보 없음 — 실행 안 시작·집계 비었음 → stuck 아님 → monitor 종료
+      echo "[pr-phase] check 정보 없음 — Monitor 종료"
+      break
+    fi
+    if printf '%s' "$monitor_checks_json" | grep -qE '"state"[[:space:]]*:[[:space:]]*"(PENDING|IN_PROGRESS|QUEUED|RUNNING)"'; then
+      # 진행 중 check가 있으면 아직 stuck 아님 → monitor 종료
+      echo "[pr-phase] check 진행 중 — Monitor 종료 (stuck 아님)"
+      break
+    fi
+
+    # (1)+(2)+(3) 모두 충족 → stuck 감지, 재트리거
+    rerun_attempts=$((rerun_attempts + 1))
+    echo "[pr-phase] PR check stuck 감지 — 재트리거 시도 ${rerun_attempts}/${MAX_RERUN_ATTEMPTS}"
+    if ! ( cd "$WT" && gh pr checks "$monitor_pr_number" --rerun 2>&1 ); then
+      echo "[pr-phase] gh pr checks --rerun 실패 — Monitor 중단" >&2
+      break
+    fi
+  done
+
+  if (( rerun_attempts >= MAX_RERUN_ATTEMPTS )); then
+    echo "WARN: PR check 재트리거 상한 도달 (${MAX_RERUN_ATTEMPTS}회) — 사용자 개입 필요 (PR #$monitor_pr_number)" >&2
+  fi
+fi

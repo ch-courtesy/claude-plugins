@@ -122,6 +122,25 @@ case "${1:-}" in
         exit 0
         ;;
       view)
+        # M4/AC5: state/reviewDecision 쿼리는 GH_OPEN_PR_NUMBER 여부와 무관하게 응답한다
+        # (monitor 단계가 새 PR·기존 PR 양쪽에서 동일하게 호출).
+        __want_state=0
+        __want_review=0
+        for __arg in "$@"; do
+          case "$__arg" in
+            .state|--jq=.state) __want_state=1;;
+            .reviewDecision|--jq=.reviewDecision) __want_review=1;;
+          esac
+        done
+        if [[ $__want_state -eq 1 ]]; then
+          printf '%s\n' "${GH_PR_STATE:-OPEN}"
+          exit 0
+        fi
+        if [[ $__want_review -eq 1 ]]; then
+          # 빈 값(리뷰 미발생) 또는 GH_PR_REVIEW_DECISION (APPROVED/CHANGES_REQUESTED 등)
+          printf '%s\n' "${GH_PR_REVIEW_DECISION:-}"
+          exit 0
+        fi
         if [[ -n "${GH_OPEN_PR_NUMBER:-}" ]]; then
           # --jq '.body' (또는 --jq=.body) 가 있으면 body 텍스트만 출력 (실제 gh의 jq 적용 모방).
           # 그래야 pr-phase.sh가 fence 마커 부분 교체 경로를 실제로 실행한다.
@@ -142,6 +161,28 @@ case "${1:-}" in
         fi
         echo "no pr" >&2
         exit 1
+        ;;
+      checks)
+        # M4/AC5: monitor PR check 쿼리·재트리거.
+        # `--rerun` 포함 시 단순 exit 0 (실제 재트리거는 외부 — 테스트는 호출 행적만 검증).
+        # 미포함 시 `--json state,conclusion` 쿼리 응답: GH_CHECKS_MODE=stuck 이면 모든 check가
+        # COMPLETED 상태로 보고(=stuck 가능 상태), 그 외엔 빈 배열 (=stuck 아님 → monitor 종료).
+        __is_rerun=0
+        for __arg in "$@"; do
+          [[ "$__arg" == "--rerun" ]] && __is_rerun=1
+        done
+        if [[ $__is_rerun -eq 1 ]]; then
+          exit 0
+        fi
+        case "${GH_CHECKS_MODE:-}" in
+          stuck)
+            printf '[{"state":"COMPLETED","conclusion":"FAILURE"}]\n'
+            ;;
+          *)
+            printf '[]\n'
+            ;;
+        esac
+        exit 0
         ;;
       create)
         if [[ "${GH_FAIL_PR_CREATE:-0}" == "1" ]]; then
@@ -1006,6 +1047,65 @@ fi
   || { echo "FAIL: 워크트리 미보존"; exit 1; }
 [[ -f "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미보존"; exit 1; }
+echo "OK"
+
+echo "=== TEST 14: AC5 — Monitor stuck PR check 재트리거 ≤3회 후 상한 알림 ==="
+# AC5 (SPEC 103): PR check가 success/failure로 완료됐으나 PR 상태가 review·done이 아닌
+# stuck 상태를 Monitor가 감지할 때, 시스템은 최대 3회 이내에서 check를 재트리거하며,
+# 상한에 도달하면 사용자에게 알린다.
+# 본 케이스: stub gh가 항상 "stuck" 응답 (state=OPEN, reviewDecision=빈값, checks=COMPLETED)을
+# 반환 → 드라이버가 `pr checks --rerun`을 정확히 3회 호출 + 상한 알림 메시지 + loop 정상 종료.
+T14_NAME="monitor-stuck-rerun"
+T14_PROJECT="$(make_project_with_remote "$T14_NAME")"
+T14_MOCK="$(make_mock_bin "${T14_NAME}-mock")"
+install_claude_done_mock "$T14_MOCK"
+install_gh_record_mock "$T14_MOCK"
+T14_GH_LOG="$WORK_DIR/${T14_NAME}-gh.log"
+: > "$T14_GH_LOG"
+
+mkdir -p "$T14_PROJECT/milestones/regular/loops/stuck-task"
+cat > "$T14_PROJECT/milestones/regular/loops/stuck-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Monitor Stuck Rerun
+
+## 무엇을 만들 것인가
+PR check가 stuck 상태일 때 Monitor가 최대 3회 재트리거 후 상한 알림.
+EOF
+
+(
+  cd "$T14_PROJECT"
+  GH_LOG_FILE="$T14_GH_LOG" \
+    GH_PR_STATE=OPEN \
+    GH_PR_REVIEW_DECISION="" \
+    GH_CHECKS_MODE=stuck \
+    PATH="$T14_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "stuck-task" > "$WORK_DIR/${T14_NAME}.out" 2>&1
+)
+
+# AC5: pr checks --rerun 호출이 정확히 3회 (상한). 4회 이상이면 무한 루프 위험.
+rerun_count_t14=$(grep -cE '^pr checks .*--rerun' "$T14_GH_LOG" || true)
+[[ "$rerun_count_t14" -eq 3 ]] \
+  || { echo "FAIL: pr checks --rerun이 ${rerun_count_t14}회 호출 (정확히 3회 기대 — AC5 상한 위반). gh log:"; cat "$T14_GH_LOG"; echo "out:"; cat "$WORK_DIR/${T14_NAME}.out"; exit 1; }
+
+# AC5: 상한 도달 알림 메시지 — "재트리거 상한" 또는 "3회" 또는 "사용자 개입" 토큰 포함
+grep -qE "(재트리거 상한|3회|상한 도달|사용자 개입)" "$WORK_DIR/${T14_NAME}.out" \
+  || { echo "FAIL: 상한 도달 알림 메시지 없음 (AC5 위반). out:"; cat "$WORK_DIR/${T14_NAME}.out"; exit 1; }
+
+# pr create는 정상 호출됐어야 (Monitor는 PR 생성 이후 단계)
+grep -qE '^pr create ' "$T14_GH_LOG" \
+  || { echo "FAIL: stuck 진입 전 pr create 호출 없음. gh log:"; cat "$T14_GH_LOG"; exit 1; }
+
+# DONE 보존 + 정상 종료 (상한 도달은 에러가 아니라 경고 — loop 자체는 정상 종료)
+[[ -f "$T14_PROJECT/milestones/regular/loops/stuck-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
 echo ""

@@ -68,6 +68,7 @@ task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 �
 - 성공 시 PR URL·state(open)를 stdout으로 출력, worktree·local 브랜치 보존
 - push·pr create·pr edit 중 하나라도 실패하면 non-zero exit으로 단계 중단 (워크트리는 유지)
 - default 브랜치 감지 실패 시 push·pr 호출 전 abort
+- PR 생성·갱신 직후 **Monitor 단계** 진입 (SPEC 103 AC5): PR check가 모두 완료(success/failure)됐는데 PR state가 OPEN이고 reviewDecision이 없는 "stuck" 패턴을 감지하면 `gh pr checks <num> --rerun`을 호출. 최대 **3회** 재트리거하고 상한 도달 시 stderr에 사용자 개입 안내. MERGED·CLOSED 상태 전이 또는 리뷰 활동(reviewDecision set) 감지 시 즉시 종료. check 진행 중·정보 없음도 stuck 아닌 것으로 간주해 종료. 상한 도달은 경고이며 loop 자체는 정상 종료
 
 `--no-pr` 플래그는 셸 드라이버(`loop.sh`)에 직접 전달되며, PR phase 진입 자체를 차단합니다. 이전 버전에서 `request_review: true`로 opt-in을 사용하던 호출자는 별도 마이그레이션이 필요 없습니다(default가 ON으로 변경됐으므로 동일 동작). 이전 버전에서 `request_review: false`(또는 키 미지정)로 PR을 차단하던 호출자는 `--no-pr`로 동일 동작을 재현해야 합니다.
 
