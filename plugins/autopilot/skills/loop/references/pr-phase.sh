@@ -98,26 +98,9 @@ collect_commit_log() {
   ( cd "$WT" && git log --pretty=format:'- %h %s' "$base..HEAD" 2>/dev/null || true )
 }
 
-COMMIT_LOG="$(collect_commit_log)"
-
-# Body 본문 (fence 안 내용)
-PR_BODY_INNER=$(printf '## 무엇을 만들 것인가\n%s\n\n## Commits\n%s' \
-  "$(printf '%s' "$WHAT_SECTION" | sed -e 's/[[:space:]]*$//' )" \
-  "${COMMIT_LOG:-(no new commits)}")
-
-# task-id가 숫자(^[0-9]+$)면 Closes #<id> 추가 (M3, AC6)
-# task-id는 정규화된 형태(<milestone>/<child>)일 수 있으므로 child 부분만 검사.
-CHILD_ID="${TASK_ID##*/}"
-if [[ "$CHILD_ID" =~ ^[0-9]+$ ]]; then
-  PR_BODY_INNER="$PR_BODY_INNER
-
-Closes #${CHILD_ID}"
-fi
-
-PR_BODY_FENCE_BEGIN='<!-- autopilot:pr-body:begin -->'
-PR_BODY_FENCE_END='<!-- autopilot:pr-body:end -->'
-
-PR_BODY="$(printf '%s\n%s\n%s' "$PR_BODY_FENCE_BEGIN" "$PR_BODY_INNER" "$PR_BODY_FENCE_END")"
+# COMMIT_LOG·PR_BODY 조립은 rebase 이후로 미룬다 — 충돌 자동 해결(-X theirs)이 SHA를 재작성하면
+# PR body '## Commits' 섹션이 구 SHA를 표시하기 때문. SPEC_TITLE·WHAT_SECTION은 rebase 영향을
+# 받지 않으므로 위에서 미리 추출해 둔다.
 
 # ----- base branch rebase (SPEC 103 M2/AC3·M3/AC4) -----
 # PR 생성 직전에 origin/<base>로부터 fetch + rebase를 수행해 base 최신 변경분을 흡수한다.
@@ -143,6 +126,28 @@ if ! ( cd "$WT" && git rebase "origin/$DEFAULT_BRANCH" 2>&1 ); then
   fi
   echo "[pr-phase] rebase 충돌 자동 해결 성공 (-X theirs)"
 fi
+
+# ----- COMMIT_LOG·PR_BODY 조립 (rebase 이후 — SHA 재작성 흡수) -----
+COMMIT_LOG="$(collect_commit_log)"
+
+# Body 본문 (fence 안 내용)
+PR_BODY_INNER=$(printf '## 무엇을 만들 것인가\n%s\n\n## Commits\n%s' \
+  "$(printf '%s' "$WHAT_SECTION" | sed -e 's/[[:space:]]*$//' )" \
+  "${COMMIT_LOG:-(no new commits)}")
+
+# task-id가 숫자(^[0-9]+$)면 Closes #<id> 추가 (M3, AC6)
+# task-id는 정규화된 형태(<milestone>/<child>)일 수 있으므로 child 부분만 검사.
+CHILD_ID="${TASK_ID##*/}"
+if [[ "$CHILD_ID" =~ ^[0-9]+$ ]]; then
+  PR_BODY_INNER="$PR_BODY_INNER
+
+Closes #${CHILD_ID}"
+fi
+
+PR_BODY_FENCE_BEGIN='<!-- autopilot:pr-body:begin -->'
+PR_BODY_FENCE_END='<!-- autopilot:pr-body:end -->'
+
+PR_BODY="$(printf '%s\n%s\n%s' "$PR_BODY_FENCE_BEGIN" "$PR_BODY_INNER" "$PR_BODY_FENCE_END")"
 
 # ----- 브랜치 push (M4) -----
 echo "[pr-phase] origin으로 push: $BRANCH"
