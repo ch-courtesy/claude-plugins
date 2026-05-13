@@ -4,8 +4,8 @@
 # SPEC: spec 워크플로우(일반·--resume)가 사전 검사 통과 직후 task-id로
 # 식별되는 외부 task의 상태를 설계 상태로 정합(reconcile)하는지 검사.
 #
-# 검사는 SKILL.md(+ references)에 4갈래 분기·abort·양 모드 적용·사용자
-# 안내·백킹 시스템 매핑이 명시되었는지 grep으로 정적 확인한다.
+# 검사는 SKILL.md에 4갈래 분기·abort·양 모드 적용·사용자 안내·백킹 시스템
+# 매핑이 명시되었는지 grep으로 정적 확인한다 (references/ 디렉터리는 미검사).
 
 set -euo pipefail
 
