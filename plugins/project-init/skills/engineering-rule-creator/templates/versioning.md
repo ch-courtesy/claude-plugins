@@ -9,13 +9,10 @@ inputs:
     options:
       - label: "SemVer (MAJOR.MINOR.PATCH)"
         description: "공개 API를 가진 라이브러리·SDK·플러그인의 표준"
-        value: "SemVer (MAJOR.MINOR.PATCH)"
       - label: "CalVer (YYYY.MM.PATCH)"
         description: "릴리스 주기가 시간 기반인 애플리케이션·서비스"
-        value: "CalVer (YYYY.MM.PATCH)"
       - label: "ZeroVer (0.x.y)"
         description: "공개 API가 아직 안정되지 않은 초기 단계"
-        value: "ZeroVer (0.x.y)"
   - name: source_of_truth
     header: "버전 SoT"
     question: "버전 값의 단일 출처(Source of Truth)는 어디인가?"
