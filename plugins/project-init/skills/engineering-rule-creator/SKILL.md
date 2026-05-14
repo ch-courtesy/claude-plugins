@@ -38,7 +38,10 @@ description: 현재 프로젝트에 맞는 엔지니어링 sub-룰(versioning �
 4-bis. **입력 수집 (동적).** 선택된 템플릿의 frontmatter에 `dynamic_inputs`가 있으면 각 항목을 순서대로 처리합니다. 동적 입력은 후보를 정적 옵션으로 적을 수 없고 target 프로젝트 디스크에서 그때그때 산출해야 하는 경우(예: 워치 디렉토리)에 사용합니다.
    - **후보 산출.** `candidate_source` 값에 따라 후보 목록을 만듭니다. 지원하는 값:
      - `depth1_dirs_filtered`: target 프로젝트 루트(`.`)의 **최상위(depth=1) 디렉토리**만 열거하되, 다음 패턴을 제외합니다 — `.*` (숨김 디렉토리), `node_modules`, `dist`, `build`, `target`. 권장 명령은 POSIX `find . -maxdepth 1 -mindepth 1 -type d` 또는 동등한 `ls -d */`이며, 결과에서 위 제외 패턴을 정확 일치(exact match)로 걸러냅니다. gitignore 존중 여부는 무시합니다.
-   - **사용자 선택.** 후보 목록과 함께 `AskUserQuestion`을 호출합니다. `multi_select: true`면 다중 선택을 허용합니다. `free_input: true`면 "Other"로 자유 텍스트(개행 또는 콤마로 구분된 추가 경로·글로브 패턴)를 받아 선택 목록에 합칩니다.
+   - **사용자 선택.** 후보 산출 결과의 개수에 따라 분기합니다.
+     - **후보 1개 이상**: 후보 목록과 함께 `AskUserQuestion`을 호출합니다. `multi_select: true`면 다중 선택을 허용합니다. `free_input: true`면 "Other"로 자유 텍스트(개행 또는 콤마로 구분된 추가 경로·글로브 패턴)를 받아 선택 목록에 합칩니다.
+     - **후보 0개 + `free_input: true`**: `AskUserQuestion`을 건너뜁니다 (옵션 최소 2개 요건상 "Other" 단독으로는 호출 불가). 사용자에게 후보가 비어 있음을 알리고 자유 텍스트만 받아 처리합니다. 빈 응답이면 4단계의 "응답 누락 처리"와 동일하게 `{{name}}`을 그대로 남깁니다.
+     - **후보 0개 + `free_input: false`**: 묻지 않고 후보가 비어 있음을 사용자에게 알린 뒤 `{{name}}`을 그대로 남깁니다.
    - **placeholder 치환.** `render` 값에 따라 최종 값을 만들어 본문의 `{{name}}`을 치환합니다. 지원하는 값:
      - `bullet_list`: 각 항목을 `- \`<path>\`` 마크다운 bullet 한 줄씩으로 변환해 결합. 항목 0개면 `(워치 대상 없음 — 검토 필요)` 한 줄로 대체합니다 (silent 빈 치환 금지).
    - **응답 누락 처리.** 사용자가 질문을 건너뛰거나 빈 응답을 반환하면 4단계와 동일하게 `{{name}}` 그대로 남깁니다.
