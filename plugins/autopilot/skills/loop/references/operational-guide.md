@@ -14,7 +14,7 @@ autopilot `loop` 스킬의 nested 워크트리 기반 외부 셸 드라이버 �
 자율 루프는 워커가 무인 동작하기 위해 `claude --dangerously-skip-permissions`로 호출됩니다. 이는 워커가 sibling 워크트리(`--add-dir .`로 부여) 내의 모든 파일을 자유롭게 읽고 쓸 수 있다는 의미입니다.
 
 **주의:**
-- 워크트리에 `.env`·credentials·SSH 키 등 secrets 파일을 두지 마세요. 워커가 의도치 않게 읽어 commit 메시지·로그·HANDOFF.md에 노출할 수 있습니다.
+- 워크트리에 `.env`·credentials·SSH 키 등 secrets 파일을 두지 마세요. 워커가 의도치 않게 읽어 commit 메시지·로그·`[handoff]` comment에 노출할 수 있습니다.
 - SPEC.md에 secrets 값을 인라인으로 적지 마세요. 워커가 그 내용을 다른 파일에 그대로 복사할 수 있습니다.
 - 워크트리는 사용자 본인 권한으로 동작합니다. 시스템 디렉토리(`/etc`·`/usr` 등)에 대한 영향은 워크트리 격리(`<project>/milestones/<m>/loops/<c>/.worktree/` 경로 안)와 `--add-dir .` 범위로 제한됩니다 — 외부 경로 쓰기는 일반적으로 발생하지 않으나, 워커가 명시적으로 호출한 명령(예: `npm install`)은 사용자 홈에 부수효과를 만들 수 있습니다.
 - 권장: 외부 SPEC(`--spec`)을 사용할 때 신뢰하지 못한 출처의 SPEC을 그대로 받지 마세요. SPEC은 워커의 행동을 직접 지시합니다.
@@ -31,9 +31,8 @@ milestones/<m>/loops/<c>/
     ├── DONE                   # 정상 완료 신호 (있을 때만)
     ├── .iterations/<n>.log    # 매 이터 stdout 캡처 (gitignored, worktree-local)
     └── milestones/<m>/loops/<c>/
-        ├── SPEC.md            # feat 브랜치 commit으로 자연 노출
-        ├── PLAN.md / NOTES.md / HANDOFF.md / RUN_LOG.md  # 매 이터 메타 commit
-        └── ESCALATION.md      # 정지 사유 (있을 때만)
+        └── SPEC.md            # feat 브랜치 commit으로 자연 노출
+# 이터간 상태(계획·교훈·인계·차단·완료)는 워크트리에 두지 않고 task issue body·prefix comments로 위임 (헌법 §11)
 ```
 
 단일 task는 `<m>=regular`로 정규화 — `regular/<task-id>`. `.gitignore` 무시 패턴은 `milestones/**/loops/**/.worktree/`와 `milestones/**/loops/**/.lock`.
@@ -62,7 +61,7 @@ LOOP_SH="$HOME/.claude/plugins/autopilot/skills/loop/references/loop.sh"
 Skill(skill: "spec", args: "auth-refactor")   # 대화형 SPEC.md 생성
 bash "$LOOP_SH" start auth-refactor           # 루프 시작
 bash "$LOOP_SH" logs auth-refactor --tail  # 별도 터미널에서 모니터링
-# 정지: Ctrl+C 또는 DONE/ESCALATION.md 생성 시 자동 종료
+# 정지: Ctrl+C, DONE 파일 생성, 또는 `[done]`/`[blocked]` prefix comment 작성 시 자동 종료
 ```
 
 ## 외부 SPEC 파일 전달 (--spec 플래그)
@@ -109,20 +108,21 @@ bash "$LOOP_SH" logs auth-refactor [--tail | --iter N]
 
 ## DONE_WITH_CONCERNS 처리
 
-이터가 verify는 통과했으나 self-review에서 의심점을 발견하면 `DONE` 대신 HANDOFF.md의 `## 의심점` 섹션을 작성하고 정상 종료합니다. 사용자 개입은 보통 불필요 — 다음 이터가 의심점을 읽고 검증·해소한 후 깨끗한 `DONE`을 작성합니다.
+이터가 verify는 통과했으나 self-review에서 의심점을 발견하면 `[done]` comment 대신 `[handoff]` prefix comment 본문에 `## 의심점` 섹션을 포함시켜 작성하고 정상 종료합니다. 사용자 개입은 보통 불필요 — 다음 이터가 의심점을 읽고 검증·해소한 후 깨끗한 `[done]` prefix comment를 작성합니다.
 
 ## ESCALATION 처리
 
 카테고리별 처리 흐름: `references/troubleshooting.md` 참조.
 
 ```bash
-WT_META="milestones/<m>/loops/<c>/.worktree/milestones/<m>/loops/<c>"
-cat "$WT_META/ESCALATION.md"                              # 사유 확인
+ISSUE=<task-issue-number>                                 # task-id가 숫자면 issue number와 동일
+gh issue view "$ISSUE" --comments | tail -n 60            # 최근 `[blocked]` comment 본문 확인
 cd milestones/<m>/loops/<c>/.worktree
-$EDITOR "milestones/<m>/loops/<c>/SPEC.md" && $EDITOR "milestones/<m>/loops/<c>/NOTES.md"
-rm "milestones/<m>/loops/<c>/ESCALATION.md"               # 보고 해제
+$EDITOR "milestones/<m>/loops/<c>/SPEC.md"                # 필요 시 SPEC 보정
+gh issue comment "$ISSUE" --body "[notes] 후속 조치 메모"   # 결정 사항 누적
+gh project item-edit --id <item-id> --field Status --value "In Progress"  # Blocked 해제
 cd <project-root> && bash "$LOOP_SH" start <task-id>      # 재시작
-# --watch 모드면 ESCALATION.md 정리만으로 자동 재개 (60초 polling)
+# --watch 모드면 Status가 Blocked에서 벗어나는 순간 자동 재개 (polling)
 ```
 
 ## 동시 실행
@@ -143,14 +143,14 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 | `MAX_CONCURRENT` | — | 3 | 동시 실행 task 수 |
 | `MAX_ITERATIONS` | `--max-iterations N` | 30 | 이터 상한 |
 | `WALL_CLOCK_MINUTES` | `--wall-clock-minutes N` | 120 | 시계 캡(분) |
-| — | `--watch` | off | ESCALATION 감지 시 정지 대신 polling 재개 대기 |
+| — | `--watch` | off | Project Status=`Blocked` 전이 시 정지 대신 polling 재개 대기 |
 | `WATCH_TIMEOUT_HOURS` | — | 24 | --watch 모드에서 polling 최대 시간(시간 단위). 초과 시 exit 1 |
 
 워크트리 위치는 v0.2부터 메인 레포 내부 `milestones/<m>/loops/<c>/.worktree/`로 고정 — 외부 sibling 경로를 지정하는 환경 변수는 더 이상 제공하지 않습니다.
 
 ## 객관 게이트
 
-드라이버가 매 이터 후 다음을 검사합니다. 위반 시 자동 halt + ESCALATION 자동 작성:
+드라이버가 매 이터 후 다음을 검사합니다. 위반 시 자동 halt + 자동 `[blocked]` prefix comment 작성·Project Status=`Blocked` 전이:
 
 | 가드 | 기준 |
 |---|---|

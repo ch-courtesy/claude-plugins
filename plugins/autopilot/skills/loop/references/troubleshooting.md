@@ -1,15 +1,15 @@
 # ESCALATION 카테고리별 처리 가이드
 
-ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
+정지된 task의 `[blocked]` prefix comment 본문 `**카테고리**` 필드 별 사람의 처리 권장 흐름. comment 본문은 `gh issue view <task-issue> --comments`로 읽고, Blocked 해제는 `gh project item-edit --id <item-id> --field Status --value "In Progress"`로 수행합니다.
 
 ## config-gap (환경 설정·도구 부재)
 
 증상: 도구 미설치, 자격증명 부재, 환경 변수 누락 등.
 
 처리:
-1. ESCALATION.md 본문 읽고 missing item 식별
+1. `[blocked]` comment 본문 읽고 missing item 식별 (`gh issue view <task-issue> --comments`)
 2. target 프로젝트 환경 조정 (도구 설치, env var 설정 등)
-3. `rm milestones/<m>/loops/<c>/.worktree/milestones/<m>/loops/<c>/ESCALATION.md`로 보고 해제 (또는 워크트리 안으로 들어가 정리)
+3. `gh project item-edit --id <item-id> --field Status --value "In Progress"`로 Blocked 해제
 4. `start <task-id>` 또는 watch 모드면 자동 재개
 
 ## spec-gap (SPEC.md 결함)
@@ -17,9 +17,9 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 증상: 모호한 수용 기준, 검증 명령 부적합, scope 정의 미흡 등.
 
 처리:
-1. ESCALATION.md의 "필요한 결정" 섹션 검토
+1. `[blocked]` comment 본문의 "필요한 결정" 섹션 검토
 2. 워크트리의 SPEC.md 직접 수정. 워크트리 루트는 `milestones/<m>/loops/<c>/.worktree`이고 그 안 SPEC 위치는 `milestones/<m>/loops/<c>/SPEC.md`. (SPEC 작성은 spec 스킬 사용: Skill(skill: "spec", args: "<task-id>"))
-3. ESCALATION.md 정리 후 재시작
+3. Project Status를 Blocked에서 In Progress로 전이 후 재시작
 
 ## architecture-gap (코드 구조 변경 필요)
 
@@ -43,7 +43,7 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 
 증상: 위 4종에 안 맞는 케이스.
 
-처리: ESCALATION.md 본문 내용 검토 후 사람의 판단.
+처리: `[blocked]` comment 본문 내용 검토 후 사람의 판단.
 
 ## halt 발생 시 stash 확인
 
