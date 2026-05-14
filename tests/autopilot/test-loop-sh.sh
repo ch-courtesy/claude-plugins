@@ -2676,8 +2676,13 @@ chmod +x "$MOCK65/claude"
   meta_sha=$(git -C "$WT65" log --pretty=tformat:'%H %s' | grep -E '^[0-9a-f]+ chore\(loop\): meta iter 1$' | awk '{print $1}' | head -1)
   [[ -n "$meta_sha" ]] || { echo "FAIL: meta SHA 추출 실패 (commit count $meta_count)"; exit 1; }
   changed_files=$(git -C "$WT65" show --pretty='' --name-only "$meta_sha")
+  # 비-메타 파일이 0건이어야 함 (메타 commit 격리). grep -v로 메타 패턴 제외 후 잔존 파일 검사.
+  non_meta=$(echo "$changed_files" | grep -v '^$' | grep -vE "^$T65_LOOPS_REL/(PLAN|NOTES|HANDOFF|RUN_LOG|ESCALATION)\.md$" || true)
+  [[ -z "$non_meta" ]] \
+    || { echo "FAIL: meta commit이 메타 파일 외 다른 파일 포함: $non_meta"; exit 1; }
+  # 메타 파일 최소 1개는 포함됐어야 (변경 있어 commit 발생함)
   echo "$changed_files" | grep -qE "^$T65_LOOPS_REL/(PLAN|NOTES|HANDOFF|RUN_LOG|ESCALATION)\.md$" \
-    || { echo "FAIL: meta commit이 메타 파일 외 다른 파일 포함: $changed_files"; exit 1; }
+    || { echo "FAIL: meta commit에 메타 파일이 하나도 없음: $changed_files"; exit 1; }
 )
 echo "OK"
 

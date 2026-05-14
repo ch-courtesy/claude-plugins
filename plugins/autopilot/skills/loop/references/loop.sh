@@ -833,8 +833,13 @@ cmd_start() {
 
     # 워크트리 로컬 비추적 등록 — .iterations/는 iter raw 로그, 어떤 git 브랜치에도
     # commit되지 않음. DONE은 종료 신호로 worktree-local.
-    # 주의: 워크트리별 info/exclude(--git-dir)는 git이 실제로 참조하지 않음 (공유 commondir만 참조).
-    #       --git-common-dir에 idempotent하게 append해야 git status가 실제로 제외 처리한다.
+    # 등록 위치 선택: --git-common-dir (공유 commondir의 info/exclude).
+    # 배경: git은 워크트리별 $GIT_DIR/info/exclude(--git-dir)도 참조하지만 그 효과는
+    #       해당 워크트리에만 한정된다. 본 패턴(CLAUDE.md·.iterations/·DONE)은 본 task의
+    #       워크트리 동안만 필요하지만, autopilot worktree는 task별로 새로 생성되므로
+    #       commondir에 idempotent하게 누적해도 충돌·중복은 없다. 단순성을 위해 commondir
+    #       선택. 다른 워크트리·메인 트리에도 위 3 패턴이 untracked로 노출되지 않게
+    #       정합되는 부수 효과는 의도된 것 (모두 ephemeral·메타 파일).
     local wt_common_dir
     wt_common_dir="$(git -C "$WT" rev-parse --git-common-dir)"
     [[ "$wt_common_dir" != /* ]] && wt_common_dir="$WT/$wt_common_dir"
