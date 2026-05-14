@@ -24,6 +24,46 @@ set -euo pipefail
 # ----- 스크립트 자신의 디렉토리 (references/) -----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ----- allowed-tools (SPEC 123 AC18) -----
+#
+# DONE 이후 PR 생애주기 자동화 phase 그룹(rebase·review-fix·cleanup)의 명령 실행에
+# 필요한 도구 권한. autopilot 워커가 새 claude CLI 세션을 띄울 때(rebase 충돌 자동 해소,
+# review-fix iter) `--allowed-tools "$AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS"` 형태로
+# 전달된다. 범위 최소화 원칙:
+#   - GitHub CLI: PR 관련 서브커맨드만 (gh pr merge·comment·view, gh api repos/.../pulls/* ·
+#     issues/*/comments). gh issue *·gh repo * 등 PR 무관 명령은 허용 안 함.
+#   - GitHub Project: 정확히 gh project item-edit만.
+#   - Git: rebase·push --delete·branch -D·worktree remove만. git add·commit은
+#     fix iter 본 작업에 필요.
+# 와일드카드(gh *, git *) 사용 금지. 본 변수는 워커 phase 스크립트가 export해 자식
+# claude CLI 호출에 환경 변수로 주입한다.
+AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS="\
+Bash(gh pr merge:*),\
+Bash(gh pr comment:*),\
+Bash(gh pr view:*),\
+Bash(gh api repos/*),\
+Bash(gh project item-edit:*),\
+Bash(git rebase:*),\
+Bash(git push --delete:*),\
+Bash(git branch -D:*),\
+Bash(git worktree remove:*),\
+Bash(git add:*),\
+Bash(git commit:*),\
+Bash(git status:*),\
+Bash(git diff:*),\
+Read,Edit,Write,Glob,Grep"
+export AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS
+
+# 충돌 자동 해소 세션 전용(rebase-phase): 더 좁은 범위.
+AUTOPILOT_REBASE_ALLOWED_TOOLS="\
+Bash(git add:*),\
+Bash(git status:*),\
+Bash(git diff:*),\
+Bash(cat:*),\
+Bash(ls:*),\
+Read,Edit,Write,Glob,Grep"
+export AUTOPILOT_REBASE_ALLOWED_TOOLS
+
 # ----- 헬퍼 -----
 
 die() {
@@ -920,6 +960,44 @@ cmd_start() {
         if ! bash "$SCRIPT_DIR/pr-phase.sh" "$WT" "$BRANCH" "$TASK_ID" "$PROJECT_ROOT"; then
           echo "ERROR: PR phase 실패 — worktree·branch는 보존됨. 진단 후 재시도하세요." >&2
           exit 1
+        fi
+
+        # ----- SPEC 123: request_review opt-in 감지 + review-fix 루프 dispatch -----
+        # PR 생성·재사용이 성공한 후 SPEC frontmatter에서 request_review: true를 검사.
+        # 활성 시 background로 review-fix-phase.sh를 띄워 폴링·자동 fix·자동 머지·
+        # cleanup·상태 전이를 자율 처리. loop.sh 자체는 정상 종료한다.
+        #
+        # 본 분기는 새 phase 3종(rebase-phase·review-fix-phase·cleanup-phase)을 참조한다.
+        # review-fix-phase 내부에서 rebase-phase·cleanup-phase를 호출하므로 loop.sh는
+        # 진입점인 review-fix-phase만 dispatch한다.
+        local spec_md="$WT/$LOOPS_DIR_REL/SPEC.md"
+        local request_review_val=""
+        if [[ -f "$spec_md" ]]; then
+          request_review_val=$(sed -n '1,/^---$/{
+            1d
+            /^---$/d
+            p
+          }' "$spec_md" | yq '.request_review // false' 2>/dev/null | tr -d '[:space:]')
+        fi
+
+        if [[ "$request_review_val" == "true" ]]; then
+          # PR 번호 추출 (head 브랜치로 조회)
+          local pr_num
+          pr_num=$( cd "$WT" && gh pr list --head "$BRANCH" --state all \
+                      --json number --jq '.[0].number' 2>/dev/null || echo "")
+          if [[ -z "$pr_num" ]]; then
+            echo "WARN: request_review: true 인데 PR 번호 조회 실패 — review-fix 루프 dispatch skip" >&2
+          else
+            echo "[$(now_iso)] request_review: true — review-fix-phase.sh background dispatch (PR #$pr_num)"
+            # review-fix-phase.sh는 PR이 MERGED/CLOSED/APPROVED 또는 owner cmd(/done·합격·통과)
+            # 가 들어올 때까지 background로 폴링하며, 종료 시 자체적으로 cleanup-phase.sh를
+            # 호출해 worktree·feat 로컬·feat origin을 정리한다. allowed-tools 환경 변수는
+            # 이미 위에서 export됨.
+            nohup bash "$SCRIPT_DIR/review-fix-phase.sh" \
+                  "$WT" "$BRANCH" "$TASK_ID" "$PROJECT_ROOT" "$pr_num" \
+                  > "$WT/.iterations/review-fix-phase.log" 2>&1 < /dev/null &
+            disown $!
+          fi
         fi
       fi
 
