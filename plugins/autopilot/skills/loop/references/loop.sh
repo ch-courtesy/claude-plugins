@@ -406,10 +406,11 @@ diff_vs_scope() {
     # 프레임워크 파일은 항상 scope 검사에서 제외 (워커 프레임워크 메타파일)
     # CLAUDE.md는 SPEC scope.exclude로 통제 — skip-worktree로 보통은 diff에 안 잡히지만,
     # 워커가 unskip + commit하면 여기서 정상 catch되어야 함 (워크트리 셋업 직후 자동 skip 처리).
-    # 메타 파일 5종 + SPEC.md는 milestones/<m>/loops/<c>/ 단일 트리 안에 있으므로
-    # 그 경로 패턴으로 제외 (드라이버 자동 메타 commit이 scope 게이트를 트리거하지 않게).
+    # SPEC.md(워커 명세)와 DONE(종료 신호)은 milestones/<m>/loops/<c>/ 단일 트리 안에 있으므로
+    # 그 경로 패턴으로 제외. 이터간 메타(handoff/notes/done/blocked)는 task issue
+    # body·prefix comments로 위임됐으므로 워크트리 파일이 존재하지 않는다 (헌법 §11).
     case "$file" in
-      milestones/*/loops/*/PLAN.md|milestones/*/loops/*/NOTES.md|milestones/*/loops/*/HANDOFF.md|milestones/*/loops/*/RUN_LOG.md|milestones/*/loops/*/ESCALATION.md|milestones/*/loops/*/SPEC.md|DONE) continue ;;
+      milestones/*/loops/*/SPEC.md|DONE) continue ;;
     esac
 
     # exclude 패턴 매칭 → 위반
@@ -448,16 +449,12 @@ diff_vs_scope() {
 
 grep_new_suppressors() {
   # 커밋된 diff(BASE..HEAD) + working tree 변경 양쪽 검사 (미커밋 suppressor도 catch).
-  # 메타 파일·SPEC은 워커 메모리·명세(헌법 인용 등 false positive 발생)이므로 검사 제외.
+  # SPEC.md는 워커 명세(헌법 인용 등 false positive 발생)이므로 검사 제외.
+  # 이터간 메타는 task issue body·prefix comments로 위임됐으므로 워크트리 파일 검사 대상 아님 (헌법 §11).
   # BASE..HEAD 근거는 diff_vs_scope 주석 참조 (SPEC 81).
   local base_sha="$1"
   cd "$WT" || return
   local meta_exclude=(
-    ':(exclude)milestones/*/loops/*/PLAN.md'
-    ':(exclude)milestones/*/loops/*/NOTES.md'
-    ':(exclude)milestones/*/loops/*/HANDOFF.md'
-    ':(exclude)milestones/*/loops/*/RUN_LOG.md'
-    ':(exclude)milestones/*/loops/*/ESCALATION.md'
     ':(exclude)milestones/*/loops/*/SPEC.md'
   )
   {
@@ -608,30 +605,10 @@ iterate() {
   local claude_pid=$!
   wait "$claude_pid" || exit_code=$?
 
-  echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 메타 commit·게이트 검사..."
+  echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 게이트 검사..."
 
-  # 메타 파일 5종 변경분이 있으면 chore(loop): meta iter <n> 메시지로 자동 commit.
-  # pathspec 격리로 워커 코드 commit과 commit 단위가 섞이지 않음.
-  # 변경 없으면 commit 0건 (EARS 5).
-  local meta_paths=(
-    "$LOOPS_DIR_REL/PLAN.md"
-    "$LOOPS_DIR_REL/NOTES.md"
-    "$LOOPS_DIR_REL/HANDOFF.md"
-    "$LOOPS_DIR_REL/RUN_LOG.md"
-    "$LOOPS_DIR_REL/ESCALATION.md"
-  )
-  local existing_meta=()
-  local mp
-  for mp in "${meta_paths[@]}"; do
-    [[ -f "$WT/$mp" ]] && existing_meta+=("$mp")
-  done
-  if [[ ${#existing_meta[@]} -gt 0 ]]; then
-    ( cd "$WT" && git add -- "${existing_meta[@]}" >/dev/null 2>&1 ) || true
-    if ! ( cd "$WT" && git diff --cached --quiet -- "${existing_meta[@]}" 2>/dev/null ); then
-      ( cd "$WT" && git commit -q -m "chore(loop): meta iter $n" -- "${existing_meta[@]}" >/dev/null 2>&1 ) \
-        || echo "[$(now_iso)] WARN: 메타 commit 실패 (iter $n)" >&2
-    fi
-  fi
+  # 이터간 메타(handoff/notes/done/blocked)는 task issue body·prefix comments로 발행됨 (헌법 §11).
+  # 워크트리에는 메타 파일이 생성되지 않으므로 드라이버 자동 메타 commit 단계가 없다.
 
   if [[ $exit_code -ne 0 ]]; then
     CLAUDE_FAIL_STREAK=$((CLAUDE_FAIL_STREAK + 1))
@@ -844,30 +821,8 @@ cmd_start() {
         || die "skip-worktree 설정 실패: $WT/CLAUDE.md"
     fi
 
-    # 메타 파일 시드 — 단일 contract: milestones/<m>/loops/<c>/ 안에 직접 cp.
-    # feat 브랜치 체크아웃으로 LOOPS_DIR_REL 디렉토리는 이미 존재 (SPEC.md 포함).
-    # 메타 템플릿을 cp + baseline commit으로 tracked 상태로 진입.
-    cp "$SCRIPT_DIR/plan-template.md" "$WT/$LOOPS_DIR_REL/PLAN.md"
-    cp "$SCRIPT_DIR/notes-template.md" "$WT/$LOOPS_DIR_REL/NOTES.md"
-    cp "$SCRIPT_DIR/handoff-template.md" "$WT/$LOOPS_DIR_REL/HANDOFF.md"
-    cp "$SCRIPT_DIR/runlog-template.md" "$WT/$LOOPS_DIR_REL/RUN_LOG.md"
-
-    # 워크트리 baseline commit — 메타 템플릿 4종을 tracked 상태로 commit해
-    # 워커가 수정 시 git diff가 인식하고, 드라이버의 자동 메타 commit이 동작하게 한다.
-    # iter 1의 HEAD~1..HEAD diff가 부모 브랜치의 ensure_loops_setup chore commit 등
-    # setup history를 worker 변경으로 오인하지 않도록 분리.
-    ( cd "$WT" \
-      && git add -- \
-           "$LOOPS_DIR_REL/PLAN.md" \
-           "$LOOPS_DIR_REL/NOTES.md" \
-           "$LOOPS_DIR_REL/HANDOFF.md" \
-           "$LOOPS_DIR_REL/RUN_LOG.md" \
-      && git commit -q -m "chore: autopilot worktree baseline" -- \
-           "$LOOPS_DIR_REL/PLAN.md" \
-           "$LOOPS_DIR_REL/NOTES.md" \
-           "$LOOPS_DIR_REL/HANDOFF.md" \
-           "$LOOPS_DIR_REL/RUN_LOG.md" ) \
-      || die "워크트리 baseline commit 실패: $WT"
+    # 이터간 메타(handoff/notes/done/blocked)는 task issue body·prefix comments로 발행됨 (헌법 §11).
+    # 워크트리에는 메타 파일을 시드·commit하지 않는다 — feat 브랜치 HEAD가 그대로 BASE SHA가 된다.
 
     # 워크트리 로컬 비추적 등록 — .iterations/는 iter raw 로그, 어떤 git 브랜치에도
     # commit되지 않음. DONE은 종료 신호로 worktree-local.
