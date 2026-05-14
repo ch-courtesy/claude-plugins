@@ -1,6 +1,7 @@
 ---
 name: loop
 description: 자율 수행 루프(랄프 루프) 운영 인터페이스. start/status/stop/list/cleanup/logs 서브커맨드로 자율 task의 lifecycle을 관리합니다. SPEC 작성은 별도 'autopilot:spec' 스킬을 사용. 본 스킬은 자기완결적이며 헌법·드라이버·템플릿을 모두 references/에 포함합니다.
+allowed-tools: Monitor
 ---
 
 # loop
