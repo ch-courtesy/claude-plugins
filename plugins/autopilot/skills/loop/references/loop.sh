@@ -968,20 +968,20 @@ cmd_start() {
       exit 0
     fi
     if [[ $iter_status -eq 101 ]]; then
-      echo "[$(now_iso)] ESCALATION.md 감지. 사람 처리 대기."
+      echo "[$(now_iso)] 차단 신호 감지 (Status=Blocked / [blocked] comment). 사람 처리 대기."
       if [[ $WATCH_MODE -eq 1 ]]; then
         local watch_timeout_hours="${WATCH_TIMEOUT_HOURS:-24}"
         local poll_interval=60
         local poll_count=0
         local max_polls=$(( watch_timeout_hours * 3600 / poll_interval ))
 
-        echo "[$(now_iso)] --watch 모드: ESCALATION.md 사라짐 polling 중 (60초 간격, 최대 ${watch_timeout_hours}시간, Ctrl+C로 종료)..."
-        while [[ -f "$WT/$LOOPS_DIR_REL/ESCALATION.md" ]]; do
+        echo "[$(now_iso)] --watch 모드: Status=Blocked 해제 polling 중 (60초 간격, 최대 ${watch_timeout_hours}시간, Ctrl+C로 종료)..."
+        while task_status_is_blocked "$TASK_ID"; do
           sleep $poll_interval
           poll_count=$((poll_count + 1))
           # 매 5분(5 polls)마다 진행 표시
           if (( poll_count % 5 == 0 )); then
-            echo "[$(now_iso)] --watch: ESCALATION.md 대기 중 ($((poll_count * poll_interval / 60))분 경과)..."
+            echo "[$(now_iso)] --watch: Status=Blocked 대기 중 ($((poll_count * poll_interval / 60))분 경과)..."
           fi
           # timeout 검사
           if [[ $poll_count -ge $max_polls ]]; then
@@ -989,7 +989,7 @@ cmd_start() {
             exit 1
           fi
         done
-        echo "[$(now_iso)] ESCALATION.md 해제 감지. 루프 재개."
+        echo "[$(now_iso)] Status=Blocked 해제 감지. 루프 재개."
         continue
       fi
       exit 1
@@ -1098,20 +1098,29 @@ cmd_status() {
       iterations="$cnt"
     fi
 
-    # 마지막 갱신 시각 — 워크트리 안의 RUN_LOG.md
-    local ref_file=""
-    if [[ -f "$wt/$loops_dir_rel/RUN_LOG.md" ]]; then
-      ref_file="$wt/$loops_dir_rel/RUN_LOG.md"
+    # 마지막 갱신 시각 — task issue의 최신 comment createdAt (헌법 §11).
+    # gh 부재·issue 매핑 실패 시 워크트리 안의 .iterations/ 최신 로그 mtime으로 fallback.
+    local issue_num last_at=""
+    if issue_num=$(task_issue_number "$tid" 2>/dev/null) && command -v gh >/dev/null 2>&1; then
+      last_at=$(gh issue view "$issue_num" --json comments \
+        --jq '.comments | sort_by(.createdAt) | last | .createdAt // empty' 2>/dev/null || true)
     fi
-    if [[ -n "$ref_file" ]] && [[ -f "$ref_file" ]]; then
-      local epoch=""
-      # macOS BSD: stat -f %m, Linux GNU: stat -c %Y
-      epoch=$(stat -f %m "$ref_file" 2>/dev/null || stat -c %Y "$ref_file" 2>/dev/null || echo "")
-      if [[ -n "$epoch" ]]; then
-        # macOS BSD: date -u -r <epoch>, Linux GNU: date -u -d "@<epoch>"
-        last_update=$(date -u -r "$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
-          || date -u -d "@$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
-          || echo "-")
+    if [[ -n "$last_at" ]]; then
+      last_update="$last_at"
+    elif [[ -d "$wt/.iterations" ]]; then
+      local ref_file
+      ref_file=$(find "$wt/.iterations" -name "*.log" -type f 2>/dev/null \
+        | sort | tail -n 1)
+      if [[ -n "$ref_file" && -f "$ref_file" ]]; then
+        local epoch=""
+        # macOS BSD: stat -f %m, Linux GNU: stat -c %Y
+        epoch=$(stat -f %m "$ref_file" 2>/dev/null || stat -c %Y "$ref_file" 2>/dev/null || echo "")
+        if [[ -n "$epoch" ]]; then
+          # macOS BSD: date -u -r <epoch>, Linux GNU: date -u -d "@<epoch>"
+          last_update=$(date -u -r "$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
+            || date -u -d "@$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
+            || echo "-")
+        fi
       fi
     fi
 
@@ -1298,16 +1307,31 @@ cmd_logs() {
     return 0
   fi
 
-  # RUN_LOG.md 단일 contract 경로: 워크트리 안의 milestones/<m>/loops/<c>/RUN_LOG.md.
-  local run_log="$WT/$LOOPS_DIR_REL/RUN_LOG.md"
-  if [[ ! -f "$run_log" ]]; then
-    die "RUN_LOG.md를 찾을 수 없습니다: $run_log (task-id 확인: $task_id)"
+  # 새 contract: 이터 흐름은 task issue의 comments에 저장 (헌법 §11). gh로 조회.
+  # raw 이터 로그는 위 --iter N 분기로 .iterations/<N>.log를 그대로 출력.
+  if ! command -v gh >/dev/null 2>&1; then
+    die "gh CLI가 필요합니다 (이터 흐름은 task issue comments에 저장됨). raw 이터 로그는 --iter N으로 조회 가능."
+  fi
+  local issue_num
+  if ! issue_num=$(task_issue_number "$task_id" 2>/dev/null); then
+    die "task '$task_id' issue 매핑 실패 — issue number 직접 지정 또는 raw 이터 로그(--iter N) 사용"
   fi
 
   if [[ $tail_mode -eq 1 ]]; then
-    tail -f "$run_log"
+    # --tail: 60초 간격으로 새 comment polling (Ctrl+C로 종료).
+    local last_seen=""
+    while true; do
+      local cur
+      cur=$(gh issue view "$issue_num" --json comments \
+        --jq '.comments | sort_by(.createdAt) | last | .createdAt // empty' 2>/dev/null || true)
+      if [[ -n "$cur" && "$cur" != "$last_seen" ]]; then
+        gh issue view "$issue_num" --comments 2>/dev/null || true
+        last_seen="$cur"
+      fi
+      sleep 60
+    done
   else
-    cat "$run_log"
+    gh issue view "$issue_num" --comments
   fi
 }
 
