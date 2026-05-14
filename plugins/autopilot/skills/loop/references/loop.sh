@@ -186,7 +186,7 @@ compute_paths() {
   task_id="$(normalize_task_id "$raw_task_id")"
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
-  BRANCH="autonomous-loop/$task_id"
+  # BRANCH는 cmd_start의 feat 브랜치 감지에서만 설정 — 단일 contract.
   # v0.2 cutover: 워크트리·lock·메타 파일이 모두 milestones/<m>/loops/<c>/ 단일
   # 트리 안에 있다. 외부 sibling·.loops/locks/는 사용하지 않음.
   local milestone="${task_id%%/*}"
@@ -372,15 +372,9 @@ hash_deps() {
 }
 
 read_scope_yaml() {
-  # SPEC.md 위치 자동 감지:
-  #   - 신규 contract: <WT>/<LOOPS_DIR_REL>/SPEC.md (feat 브랜치 commit으로 자연 포함)
-  #   - legacy: <WT>/.loop/SPEC.md (셋업 시 cp)
-  local spec_path
-  if [[ -n "${LOOPS_DIR_REL:-}" ]] && [[ -f "$WT/$LOOPS_DIR_REL/SPEC.md" ]]; then
-    spec_path="$WT/$LOOPS_DIR_REL/SPEC.md"
-  else
-    spec_path="$WT/.loop/SPEC.md"
-  fi
+  # SPEC.md 단일 contract 경로: <WT>/<LOOPS_DIR_REL>/SPEC.md
+  # (feat 브랜치 commit으로 자연 포함)
+  local spec_path="$WT/$LOOPS_DIR_REL/SPEC.md"
   sed -n '1,/^---$/{
     1d
     /^---$/d
@@ -407,8 +401,10 @@ diff_vs_scope() {
     # 프레임워크 파일은 항상 scope 검사에서 제외 (워커 프레임워크 메타파일)
     # CLAUDE.md는 SPEC scope.exclude로 통제 — skip-worktree로 보통은 diff에 안 잡히지만,
     # 워커가 unskip + commit하면 여기서 정상 catch되어야 함 (워크트리 셋업 직후 자동 skip 처리).
+    # 메타 파일 5종 + SPEC.md는 milestones/<m>/loops/<c>/ 단일 트리 안에 있으므로
+    # 그 경로 패턴으로 제외 (드라이버 자동 메타 commit이 scope 게이트를 트리거하지 않게).
     case "$file" in
-      .loop/*|.loop|DONE) continue ;;
+      milestones/*/loops/*/PLAN.md|milestones/*/loops/*/NOTES.md|milestones/*/loops/*/HANDOFF.md|milestones/*/loops/*/RUN_LOG.md|milestones/*/loops/*/ESCALATION.md|milestones/*/loops/*/SPEC.md|DONE) continue ;;
     esac
 
     # exclude 패턴 매칭 → 위반
@@ -447,11 +443,19 @@ diff_vs_scope() {
 
 grep_new_suppressors() {
   # 커밋된 diff + working tree 변경 양쪽 검사 (미커밋 suppressor도 catch)
-  # .loop/는 워커 메모리(헌법 인용 등 false positive 발생)이므로 검사 제외
+  # 메타 파일·SPEC은 워커 메모리·명세(헌법 인용 등 false positive 발생)이므로 검사 제외.
   cd "$WT" || return
+  local meta_exclude=(
+    ':(exclude)milestones/*/loops/*/PLAN.md'
+    ':(exclude)milestones/*/loops/*/NOTES.md'
+    ':(exclude)milestones/*/loops/*/HANDOFF.md'
+    ':(exclude)milestones/*/loops/*/RUN_LOG.md'
+    ':(exclude)milestones/*/loops/*/ESCALATION.md'
+    ':(exclude)milestones/*/loops/*/SPEC.md'
+  )
   {
-    git diff HEAD~1 HEAD -- ':(exclude).loop/**' 2>/dev/null
-    git diff HEAD -- ':(exclude).loop/**' 2>/dev/null
+    git diff HEAD~1 HEAD -- "${meta_exclude[@]}" 2>/dev/null
+    git diff HEAD -- "${meta_exclude[@]}" 2>/dev/null
   } \
     | grep -E '^\+' \
     | grep -E '#[[:space:]]*noqa|@ts-ignore|eslint-disable|#pragma[[:space:]]+warning[[:space:]]+disable' \
@@ -514,9 +518,9 @@ halt() {
     echo "  복구: cd $WT && git stash list / git stash pop" >&2
   fi
 
-  # 자동 ESCALATION 작성
-  mkdir -p "$WT/.loop"
-  cat > "$WT/.loop/ESCALATION.md" <<EOF
+  # 자동 ESCALATION 작성 — 단일 contract: milestones/<m>/loops/<c>/ESCALATION.md
+  mkdir -p "$WT/$LOOPS_DIR_REL"
+  cat > "$WT/$LOOPS_DIR_REL/ESCALATION.md" <<EOF
 # 에스컬레이션 보고 (드라이버 자동 작성)
 
 **작업**: $TASK_ID
@@ -538,7 +542,7 @@ $reason
 2. 메모리 파일(NOTES.md) 보강
 3. 본 ESCALATION.md 삭제 후 재시작
 
-자세한 내용은 .loop/iterations/ 의 최근 로그 참조.
+자세한 내용은 워크트리 루트의 .iterations/ 디렉토리 최근 로그 참조.
 EOF
 
   exit 1
@@ -548,7 +552,7 @@ EOF
 
 iterate() {
   local n
-  n=$(($(find "$WT/.loop/iterations" -name "*.log" -type f 2>/dev/null | wc -l | tr -d ' ') + 1))
+  n=$(($(find "$WT/.iterations" -name "*.log" -type f 2>/dev/null | wc -l | tr -d ' ') + 1))
 
   echo "[$(now_iso)] 이터 #$n 시작"
 
@@ -566,12 +570,8 @@ iterate() {
 
   # 비동기 실행 + wait — bash trap은 동기 명령 안에서 deferred되므로 wait를 써야
   # SIGTERM/SIGINT가 즉시 처리돼 자식 트리 정리 가능 (orphan 방지)
-  # SPEC.md stdin 경로: 신규 contract는 worktree의 milestones/<m>/loops/<c>/SPEC.md,
-  # legacy는 .loop/SPEC.md (셋업 시 cp). 둘 다 worktree 안의 단일 canonical 경로.
-  local spec_stdin_path=".loop/SPEC.md"
-  if [[ -n "${LOOPS_DIR_REL:-}" ]] && [[ -f "$WT/$LOOPS_DIR_REL/SPEC.md" ]]; then
-    spec_stdin_path="$LOOPS_DIR_REL/SPEC.md"
-  fi
+  # SPEC.md stdin 경로: 단일 contract — worktree의 milestones/<m>/loops/<c>/SPEC.md.
+  local spec_stdin_path="$LOOPS_DIR_REL/SPEC.md"
   local exit_code=0
   (
     cd "$WT"
@@ -583,18 +583,41 @@ iterate() {
       --add-dir . \
       --output-format json \
       < "$spec_stdin_path" \
-      > ".loop/iterations/$n.log" 2>&1
+      > ".iterations/$n.log" 2>&1
   ) &
   local claude_pid=$!
   wait "$claude_pid" || exit_code=$?
 
-  echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 게이트 검사..."
+  echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 메타 commit·게이트 검사..."
+
+  # 메타 파일 5종 변경분이 있으면 chore(loop): meta iter <n> 메시지로 자동 commit.
+  # pathspec 격리로 워커 코드 commit과 commit 단위가 섞이지 않음.
+  # 변경 없으면 commit 0건 (EARS 5).
+  local meta_paths=(
+    "$LOOPS_DIR_REL/PLAN.md"
+    "$LOOPS_DIR_REL/NOTES.md"
+    "$LOOPS_DIR_REL/HANDOFF.md"
+    "$LOOPS_DIR_REL/RUN_LOG.md"
+    "$LOOPS_DIR_REL/ESCALATION.md"
+  )
+  local existing_meta=()
+  local mp
+  for mp in "${meta_paths[@]}"; do
+    [[ -f "$WT/$mp" ]] && existing_meta+=("$mp")
+  done
+  if [[ ${#existing_meta[@]} -gt 0 ]]; then
+    ( cd "$WT" && git add -- "${existing_meta[@]}" >/dev/null 2>&1 ) || true
+    if ! ( cd "$WT" && git diff --cached --quiet -- "${existing_meta[@]}" 2>/dev/null ); then
+      ( cd "$WT" && git commit -q -m "chore(loop): meta iter $n" -- "${existing_meta[@]}" >/dev/null 2>&1 ) \
+        || echo "[$(now_iso)] WARN: 메타 commit 실패 (iter $n)" >&2
+    fi
+  fi
 
   if [[ $exit_code -ne 0 ]]; then
     CLAUDE_FAIL_STREAK=$((CLAUDE_FAIL_STREAK + 1))
-    echo "WARN: claude 호출이 0이 아닌 exit code 반환 (연속 실패: $CLAUDE_FAIL_STREAK). iterations/$n.log 확인 권장."
+    echo "WARN: claude 호출이 0이 아닌 exit code 반환 (연속 실패: $CLAUDE_FAIL_STREAK). .iterations/$n.log 확인 권장."
     if [[ $CLAUDE_FAIL_STREAK -ge ${CLAUDE_FAIL_STREAK_LIMIT:-3} ]]; then
-      halt "claude 비정상 exit ${CLAUDE_FAIL_STREAK}회 연속 (rate limit·네트워크·인증 의심). iterations/$n.log 확인."
+      halt "claude 비정상 exit ${CLAUDE_FAIL_STREAK}회 연속 (rate limit·네트워크·인증 의심). .iterations/$n.log 확인."
     fi
   else
     CLAUDE_FAIL_STREAK=0
@@ -604,7 +627,7 @@ iterate() {
   if [[ -f "$WT/DONE" ]]; then
     return 100   # 메인 루프에서 정상 종료 처리
   fi
-  if [[ -f "$WT/.loop/ESCALATION.md" ]]; then
+  if [[ -f "$WT/$LOOPS_DIR_REL/ESCALATION.md" ]]; then
     return 101   # 메인 루프에서 ESCALATION 처리
   fi
 
@@ -713,33 +736,18 @@ cmd_start() {
     echo "외부 SPEC 파일 복사: $spec_path → $LOOPS_DIR/SPEC.md"
   fi
 
-  # 1.5. 신규 contract 감지: feat/<task-id>[-<slug>] 브랜치가 main repo에 있으면
-  # 그 브랜치를 worktree base로 사용하고 SPEC은 worktree에서 자연 노출되는 경로로 읽음.
-  # 없으면 legacy 분기 (LOOPS_DIR/SPEC.md를 .loop/로 cp).
-  NEW_CONTRACT=0
+  # 1.5. 단일 contract: feat/<task-id>[-<slug>] 브랜치를 main repo에서 찾고 worktree base로 사용.
+  # 없으면 즉시 abort — legacy task-branch fallback 분기는 제거됨 (v0.3 cutover).
   local feat_branch=""
-  if feat_branch=$(find_feat_branch "$task_id"); then
-    if [[ -n "$feat_branch" ]]; then
-      NEW_CONTRACT=1
-      BRANCH="$feat_branch"
-    fi
+  if ! feat_branch=$(find_feat_branch "$task_id") || [[ -z "$feat_branch" ]]; then
+    die "feat 브랜치 부재 — 'feat/${task_id}' 또는 'feat/${task_id}-<slug>' 브랜치가 main repo에 없음.\n먼저 실행하세요: Skill(skill: \"spec\", args: \"$task_id\")"
   fi
+  BRANCH="$feat_branch"
 
-  # 2. SPEC.md 존재·내용 검증 — 신규 contract와 legacy 분기.
+  # 2. SPEC.md 존재·내용 검증 — feat 브랜치 commit에서 읽음.
   local spec_content=""
-  if [[ $NEW_CONTRACT -eq 1 ]]; then
-    # 신규 contract: SPEC을 feat 브랜치 commit에서 읽음 (main 작업트리는 무시).
-    # 브랜치는 있는데 SPEC commit이 없으면 fail-fast.
-    spec_content=$(git -C "$PROJECT_ROOT" show "${BRANCH}:${LOOPS_DIR_REL}/SPEC.md" 2>/dev/null) \
-      || die "feat 브랜치 '${BRANCH}'의 HEAD에 SPEC.md(${LOOPS_DIR_REL}/SPEC.md) 부재 — spec 스킬로 SPEC 작성·commit 필요."
-  else
-    # legacy: main 작업트리의 LOOPS_DIR/SPEC.md를 읽음.
-    local spec_path_local="$LOOPS_DIR/SPEC.md"
-    if [[ ! -f "$spec_path_local" ]]; then
-      die "SPEC.md가 없습니다 (기대 경로: $spec_path_local 또는 feat/${task_id}[-<slug>] 브랜치).\n먼저 실행하세요: Skill(skill: \"spec\", args: \"$task_id\")"
-    fi
-    spec_content=$(cat "$spec_path_local")
-  fi
+  spec_content=$(git -C "$PROJECT_ROOT" show "${BRANCH}:${LOOPS_DIR_REL}/SPEC.md" 2>/dev/null) \
+    || die "feat 브랜치 '${BRANCH}'의 HEAD에 SPEC.md(${LOOPS_DIR_REL}/SPEC.md) 부재 — spec 스킬로 SPEC 작성·commit 필요."
 
   # 2.5. [NEEDS CLARIFICATION] 마커 검사 (락 획득 전, 양 contract 공통)
   if grep -q '\[NEEDS CLARIFICATION' <<< "$spec_content"; then
@@ -775,27 +783,13 @@ cmd_start() {
     # 일관성을 위해 mkdir -p로 보장.
     mkdir -p "$(dirname "$WT")"
 
-    # 신규 contract: 기존 feat 브랜치를 base로 worktree 체크아웃 (-b 없음).
-    # legacy: 새 autonomous-loop 브랜치를 만들며 worktree 생성.
-    if [[ $NEW_CONTRACT -eq 1 ]]; then
-      git -C "$PROJECT_ROOT" worktree add "$WT" "$BRANCH" \
-        || die "git worktree add 실패 (feat 브랜치 체크아웃): $WT (브랜치: $BRANCH)"
-      # 사후 검증: worktree HEAD에 SPEC.md 자연 노출 확인 (spec 스킬이 commit했어야)
-      if [[ ! -f "$WT/$LOOPS_DIR_REL/SPEC.md" ]]; then
-        die "feat 브랜치 ${BRANCH} 워크트리 HEAD에 SPEC.md 부재 (기대: $WT/$LOOPS_DIR_REL/SPEC.md)"
-      fi
-    else
-      git -C "$PROJECT_ROOT" worktree add "$WT" -b "$BRANCH" \
-        || die "git worktree add 실패: $WT"
+    # 단일 contract: 기존 feat 브랜치를 base로 worktree 체크아웃 (-b 없음).
+    git -C "$PROJECT_ROOT" worktree add "$WT" "$BRANCH" \
+      || die "git worktree add 실패 (feat 브랜치 체크아웃): $WT (브랜치: $BRANCH)"
+    # 사후 검증: worktree HEAD에 SPEC.md 자연 노출 확인 (spec 스킬이 commit했어야)
+    if [[ ! -f "$WT/$LOOPS_DIR_REL/SPEC.md" ]]; then
+      die "feat 브랜치 ${BRANCH} 워크트리 HEAD에 SPEC.md 부재 (기대: $WT/$LOOPS_DIR_REL/SPEC.md)"
     fi
-
-    # 워크트리 baseline empty commit — iter 1의 HEAD~1..HEAD diff가 부모 브랜치의
-    # ensure_loops_setup chore commit 등 setup history를 worker 변경으로 오인하지
-    # 않도록 분리한다. 기존 외부 sibling 워크트리 시절에는 프로젝트 setup이 baseline을
-    # 만들었으나, nested 정책에서 ensure_loops_setup이 main 브랜치에 .gitignore
-    # chore commit을 추가하므로 worktree 브랜치 baseline이 필요.
-    ( cd "$WT" && git commit -q --allow-empty -m "chore: autopilot worktree baseline" ) \
-      || die "워크트리 baseline commit 실패: $WT"
 
     # 헌법을 워크트리 CLAUDE.md로 복사
     cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
@@ -809,26 +803,52 @@ cmd_start() {
         || die "skip-worktree 설정 실패: $WT/CLAUDE.md"
     fi
 
-    # 메타 파일 시드 — 신규 contract는 SPEC을 worktree에서 자연 포함하므로 cp 안 함.
-    # legacy만 LOOPS_DIR/SPEC.md → .loop/SPEC.md로 cp.
-    mkdir -p "$WT/.loop/iterations"
-    if [[ $NEW_CONTRACT -eq 0 ]]; then
-      cp "$LOOPS_DIR/SPEC.md" "$WT/.loop/SPEC.md"
-    fi
-    cp "$SCRIPT_DIR/plan-template.md" "$WT/.loop/PLAN.md"
-    cp "$SCRIPT_DIR/notes-template.md" "$WT/.loop/NOTES.md"
-    cp "$SCRIPT_DIR/handoff-template.md" "$WT/.loop/HANDOFF.md"
-    cp "$SCRIPT_DIR/runlog-template.md" "$WT/.loop/RUN_LOG.md"
+    # iter raw 로그 디렉토리 — 워크트리-local untracked (info/exclude로 가림).
+    mkdir -p "$WT/.iterations"
 
-    # 워크트리 로컬 비추적 등록
-    local wt_gitdir
-    wt_gitdir="$(git -C "$WT" rev-parse --git-dir)"
-    mkdir -p "$wt_gitdir/info"
-    {
-      echo "CLAUDE.md"
-      echo ".loop/"
-      echo "DONE"
-    } >> "$wt_gitdir/info/exclude"
+    # 메타 파일 시드 — 단일 contract: milestones/<m>/loops/<c>/ 안에 직접 cp.
+    # feat 브랜치 체크아웃으로 LOOPS_DIR_REL 디렉토리는 이미 존재 (SPEC.md 포함).
+    # 메타 템플릿을 cp + baseline commit으로 tracked 상태로 진입.
+    cp "$SCRIPT_DIR/plan-template.md" "$WT/$LOOPS_DIR_REL/PLAN.md"
+    cp "$SCRIPT_DIR/notes-template.md" "$WT/$LOOPS_DIR_REL/NOTES.md"
+    cp "$SCRIPT_DIR/handoff-template.md" "$WT/$LOOPS_DIR_REL/HANDOFF.md"
+    cp "$SCRIPT_DIR/runlog-template.md" "$WT/$LOOPS_DIR_REL/RUN_LOG.md"
+
+    # 워크트리 baseline commit — 메타 템플릿 4종을 tracked 상태로 commit해
+    # 워커가 수정 시 git diff가 인식하고, 드라이버의 자동 메타 commit이 동작하게 한다.
+    # iter 1의 HEAD~1..HEAD diff가 부모 브랜치의 ensure_loops_setup chore commit 등
+    # setup history를 worker 변경으로 오인하지 않도록 분리.
+    ( cd "$WT" \
+      && git add -- \
+           "$LOOPS_DIR_REL/PLAN.md" \
+           "$LOOPS_DIR_REL/NOTES.md" \
+           "$LOOPS_DIR_REL/HANDOFF.md" \
+           "$LOOPS_DIR_REL/RUN_LOG.md" \
+      && git commit -q -m "chore: autopilot worktree baseline" -- \
+           "$LOOPS_DIR_REL/PLAN.md" \
+           "$LOOPS_DIR_REL/NOTES.md" \
+           "$LOOPS_DIR_REL/HANDOFF.md" \
+           "$LOOPS_DIR_REL/RUN_LOG.md" ) \
+      || die "워크트리 baseline commit 실패: $WT"
+
+    # 워크트리 로컬 비추적 등록 — .iterations/는 iter raw 로그, 어떤 git 브랜치에도
+    # commit되지 않음. DONE은 종료 신호로 worktree-local.
+    # 등록 위치 선택: --git-common-dir (공유 commondir의 info/exclude).
+    # 배경: git은 워크트리별 $GIT_DIR/info/exclude(--git-dir)도 참조하지만 그 효과는
+    #       해당 워크트리에만 한정된다. 본 패턴(CLAUDE.md·.iterations/·DONE)은 본 task의
+    #       워크트리 동안만 필요하지만, autopilot worktree는 task별로 새로 생성되므로
+    #       commondir에 idempotent하게 누적해도 충돌·중복은 없다. 단순성을 위해 commondir
+    #       선택. 다른 워크트리·메인 트리에도 위 3 패턴이 untracked로 노출되지 않게
+    #       정합되는 부수 효과는 의도된 것 (모두 ephemeral·메타 파일).
+    local wt_common_dir
+    wt_common_dir="$(git -C "$WT" rev-parse --git-common-dir)"
+    [[ "$wt_common_dir" != /* ]] && wt_common_dir="$WT/$wt_common_dir"
+    mkdir -p "$wt_common_dir/info"
+    local exclude_file="$wt_common_dir/info/exclude"
+    touch "$exclude_file"
+    for pat in "CLAUDE.md" ".iterations/" "DONE"; do
+      grep -qxF "$pat" "$exclude_file" 2>/dev/null || echo "$pat" >> "$exclude_file"
+    done
 
     echo "[$(now_iso)] 워크트리 생성 완료: $WT"
     echo "브랜치: $BRANCH"
@@ -881,7 +901,7 @@ cmd_start() {
         local max_polls=$(( watch_timeout_hours * 3600 / poll_interval ))
 
         echo "[$(now_iso)] --watch 모드: ESCALATION.md 사라짐 polling 중 (60초 간격, 최대 ${watch_timeout_hours}시간, Ctrl+C로 종료)..."
-        while [[ -f "$WT/.loop/ESCALATION.md" ]]; do
+        while [[ -f "$WT/$LOOPS_DIR_REL/ESCALATION.md" ]]; do
           sleep $poll_interval
           poll_count=$((poll_count + 1))
           # 매 5분(5 polls)마다 진행 표시
@@ -969,6 +989,7 @@ cmd_status() {
     local milestone_part="${tid%%/*}"
     local child_part="${tid#*/}"
     local loops_dir="$milestones_base/$milestone_part/loops/$child_part"
+    local loops_dir_rel="milestones/$milestone_part/loops/$child_part"
     local wt="$loops_dir/.worktree"
     local lock_file="$loops_dir/.lock"
     local state="-"
@@ -979,7 +1000,7 @@ cmd_status() {
     if [[ -f "$lock_file" ]]; then
       state="running"
     elif [[ -d "$wt" ]]; then
-      if [[ -f "$wt/.loop/ESCALATION.md" ]]; then
+      if [[ -f "$wt/$loops_dir_rel/ESCALATION.md" ]]; then
         state="escalated"
       elif [[ -f "$wt/DONE" ]]; then
         state="done"
@@ -987,34 +1008,23 @@ cmd_status() {
         state="idle"
       fi
     elif [[ -d "$loops_dir" ]]; then
-      # SPEC.md만 있으면 prepared, 메모리 파일이 있으면 archived
-      if [[ -f "$loops_dir/PLAN.md" ]] || [[ -f "$loops_dir/NOTES.md" ]]; then
-        state="archived"
-      elif [[ -f "$loops_dir/SPEC.md" ]]; then
+      # SPEC.md만 있으면 prepared
+      if [[ -f "$loops_dir/SPEC.md" ]]; then
         state="prepared"
       fi
     fi
 
-    # 이터 횟수
-    if [[ -d "$wt/.loop/iterations" ]]; then
+    # 이터 횟수 — 워크트리 안의 .iterations/ 디렉토리에서 카운트
+    if [[ -d "$wt/.iterations" ]]; then
       local cnt
-      cnt=$(find "$wt/.loop/iterations" -name "*.log" -type f 2>/dev/null | wc -l | tr -d ' ')
+      cnt=$(find "$wt/.iterations" -name "*.log" -type f 2>/dev/null | wc -l | tr -d ' ')
       iterations="$cnt"
-    elif [[ -d "$loops_dir" ]]; then
-      # archived 상태에서 RUN_LOG.md로 추정
-      if [[ -f "$loops_dir/RUN_LOG.md" ]]; then
-        local cnt
-        cnt=$(grep -c '^\[' "$loops_dir/RUN_LOG.md" 2>/dev/null || echo "?")
-        iterations="$cnt"
-      fi
     fi
 
-    # 마지막 갱신 시각
+    # 마지막 갱신 시각 — 워크트리 안의 RUN_LOG.md
     local ref_file=""
-    if [[ -d "$wt/.loop" ]]; then
-      ref_file="$wt/.loop/RUN_LOG.md"
-    elif [[ -f "$loops_dir/RUN_LOG.md" ]]; then
-      ref_file="$loops_dir/RUN_LOG.md"
+    if [[ -f "$wt/$loops_dir_rel/RUN_LOG.md" ]]; then
+      ref_file="$wt/$loops_dir_rel/RUN_LOG.md"
     fi
     if [[ -n "$ref_file" ]] && [[ -f "$ref_file" ]]; then
       local epoch=""
@@ -1159,27 +1169,17 @@ cmd_cleanup() {
     die "task $task_id 에 DONE 신호가 없습니다.\n--force 없이 cleanup하려면 먼저 DONE 파일이 필요합니다: $0 cleanup $task_id --force"
   fi
 
-  # 3.5. 신규 contract 감지 — worktree HEAD 브랜치가 feat/... 이면 신규.
-  # 신규 contract는 메모리 파일 archive를 폐기하고 feat 브랜치를 PR base로 남긴다.
+  # 3.5. 단일 contract: worktree HEAD 브랜치가 feat/... 이어야 함 (사전 검증).
+  # 외부에서 다른 브랜치로 체크아웃 변경된 경우 die — cleanup 동작 비정상화 차단.
   local current_branch=""
   current_branch=$(git -C "$WT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-  local cleanup_new_contract=0
-  if [[ "$current_branch" == feat/* ]]; then
-    cleanup_new_contract=1
-    BRANCH="$current_branch"
+  if [[ "$current_branch" != feat/* ]]; then
+    die "워크트리 HEAD 브랜치가 feat/* 아님: '$current_branch' (cleanup 거부 — 외부에서 브랜치 변경된 듯)"
   fi
+  BRANCH="$current_branch"
 
-  # 4. 메타 파일 archive — legacy contract만 수행.
-  # 신규 contract: worker 메모리 파일을 main 작업트리로 복사하지 않음 (worktree 제거와 함께 폐기).
-  if [[ $cleanup_new_contract -eq 0 ]]; then
-    mkdir -p "$LOOPS_DIR"
-    for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
-      cp "$WT/.loop/$f" "$LOOPS_DIR/$f" 2>/dev/null || true
-    done
-    echo "메타 파일 보관: $LOOPS_DIR"
-  else
-    echo "신규 contract: 메모리 파일 archive 건너뜀 (feat 브랜치 ${BRANCH}이 PR base)"
-  fi
+  # 4. 메타 파일은 feat 브랜치 commit history에 있으므로 메인 트리로 cp하지 않음.
+  echo "단일 contract: 메모리 파일 archive 건너뜀 (feat 브랜치 ${BRANCH}이 PR base)"
 
   # 5. 워크트리 제거
   local wt_remove_flags=""
@@ -1187,22 +1187,11 @@ cmd_cleanup() {
   git -C "$PROJECT_ROOT" worktree remove $wt_remove_flags "$WT" \
     || die "git worktree remove 실패. 수동 제거: git worktree remove --force $WT"
 
-  # 6. 브랜치 삭제 — legacy contract만 수행.
-  # 신규 contract: feat 브랜치는 PR base로 남겨야 하므로 삭제하지 않음.
-  if [[ $cleanup_new_contract -eq 0 ]]; then
-    local branch_delete_flag="-d"
-    [[ $force -eq 1 ]] && branch_delete_flag="-D"
-    git -C "$PROJECT_ROOT" branch $branch_delete_flag "$BRANCH" 2>/dev/null \
-      || echo "WARN: 브랜치 삭제 실패 (이미 머지됐거나 없을 수 있음): $BRANCH"
-  else
-    echo "feat 브랜치 보존: $BRANCH (PR base로 사용)"
-  fi
+  # 6. feat 브랜치는 PR base로 보존 (자동 삭제 없음).
+  echo "feat 브랜치 보존: $BRANCH (PR base로 사용)"
 
   echo ""
   echo "정리 완료: $task_id"
-  if [[ $cleanup_new_contract -eq 0 ]]; then
-    echo "보관된 메타 파일: $LOOPS_DIR"
-  fi
 }
 
 # ----- subcommand: logs -----
@@ -1225,21 +1214,17 @@ cmd_logs() {
   task_id="$TASK_ID_NORMALIZED"
 
   if [[ -n "$iter_n" ]]; then
-    # 이터 로그 출력 (워크트리 우선, fallback 없음)
-    local iter_log="$WT/.loop/iterations/$iter_n.log"
+    # 이터 raw 로그 — 워크트리 안의 .iterations/<N>.log (worktree-local untracked).
+    local iter_log="$WT/.iterations/$iter_n.log"
     [[ -f "$iter_log" ]] || die "이터 로그가 없습니다: $iter_log"
     cat "$iter_log"
     return 0
   fi
 
-  # RUN_LOG.md 위치 찾기 (워크트리 우선, archived fallback)
-  local run_log=""
-  if [[ -f "$WT/.loop/RUN_LOG.md" ]]; then
-    run_log="$WT/.loop/RUN_LOG.md"
-  elif [[ -f "$LOOPS_DIR/RUN_LOG.md" ]]; then
-    run_log="$LOOPS_DIR/RUN_LOG.md"
-  else
-    die "RUN_LOG.md를 찾을 수 없습니다. task-id가 올바른지 확인하세요: $task_id"
+  # RUN_LOG.md 단일 contract 경로: 워크트리 안의 milestones/<m>/loops/<c>/RUN_LOG.md.
+  local run_log="$WT/$LOOPS_DIR_REL/RUN_LOG.md"
+  if [[ ! -f "$run_log" ]]; then
+    die "RUN_LOG.md를 찾을 수 없습니다: $run_log (task-id 확인: $task_id)"
   fi
 
   if [[ $tail_mode -eq 1 ]]; then

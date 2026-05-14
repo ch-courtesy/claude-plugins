@@ -49,17 +49,39 @@ export PATH="$MOCK_BIN:$PATH"
 command -v yq >/dev/null || { echo "SKIP: yq 미설치"; exit 0; }
 
 # loop.sh 호출 헬퍼 (새 아키텍처: SKILL_REFS에서 직접 호출)
-# SPEC 103 AC1: PR phase가 default로 실행됨. 본 파일의 테스트는 loop driver 본체를
-# 검증하며 PR phase는 검증 대상이 아니므로(별도 test-loop-pr-phase.sh가 담당), `start`
-# 호출 시 `--no-pr` 플래그를 자동 주입해 gh·origin 미설치 환경에서도 안정 동작하게 한다.
+# main의 PR phase default-enabled 변경(#109) 흡수: start 서브커맨드에 --no-pr 자동 주입.
+# PR phase는 별도 tests/autopilot/test-loop-pr-phase.sh가 다룬다.
 loop() {
   if [[ "${1:-}" == "start" ]]; then
-    local sub="$1"
-    shift
-    bash "$LOOP_SH_SRC" "$sub" "$@" --no-pr
+    bash "$LOOP_SH_SRC" "$@" --no-pr
   else
     bash "$LOOP_SH_SRC" "$@"
   fi
+}
+
+# SPEC 110 단일 contract — feat 브랜치에 SPEC.md를 commit해 단일 contract 셋업.
+# 사용: setup_feat_with_spec <PROJECT> <TASK_ID>
+# 사전 조건: $PROJECT/milestones/<m>/loops/<c>/SPEC.md 파일이 이미 존재.
+# 동작: feat/<normalized_task_id> 브랜치 생성·체크아웃 → SPEC.md add+commit → 원래 브랜치 복귀.
+setup_feat_with_spec() {
+  local proj="$1"
+  local task_id="$2"
+  local norm_id="$task_id"
+  [[ "$norm_id" != */* ]] && norm_id="regular/$task_id"
+  local mst="${norm_id%%/*}"
+  local child="${norm_id#*/}"
+  local loops_rel="milestones/$mst/loops/$child"
+  local default_br
+  default_br=$(git -C "$proj" rev-parse --abbrev-ref HEAD)
+  local feat_br="feat/$norm_id"
+  if git -C "$proj" rev-parse --verify "$feat_br" >/dev/null 2>&1; then
+    git -C "$proj" checkout -q "$feat_br"
+  else
+    git -C "$proj" checkout -q -b "$feat_br"
+  fi
+  git -C "$proj" add -f "$loops_rel/SPEC.md"
+  git -C "$proj" commit -q -m "feat(spec): $task_id (test setup)" 2>/dev/null || true
+  git -C "$proj" checkout -q "$default_br"
 }
 
 echo "=== TEST 1: prepare는 spec 스킬로 안내하는 스텁 ==="
@@ -80,7 +102,8 @@ output=$(loop start test-task-unprepared 2>&1)
 result=$?
 set -e
 [[ $result -ne 0 ]] || { echo "FAIL: prepare 없이 start가 성공하면 안 됨"; exit 1; }
-echo "$output" | grep -q "SPEC.md가 없습니다" || { echo "FAIL: SPEC.md 없음 안내 메시지 없음. got: $output"; exit 1; }
+# 단일 contract: feat 브랜치 부재 시 spec 스킬 안내로 abort.
+echo "$output" | grep -qE "feat 브랜치 부재|spec 스킬|spec\", args" || { echo "FAIL: spec 스킬 안내 메시지 없음. got: $output"; exit 1; }
 echo "OK"
 
 LOOPS_TASK_DIR="$PROJECT/milestones/regular/loops/test-task-1"
@@ -117,17 +140,20 @@ true
 EOF
 
 WT="$PROJECT/milestones/regular/loops/test-task-1/.worktree"
+TEST3_LOOPS_REL="milestones/regular/loops/test-task-1"
+setup_feat_with_spec "$PROJECT" "test-task-1"
 MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start test-task-1
 [[ -d "$WT" ]] || { echo "FAIL: 워크트리 미생성"; exit 1; }
 [[ -f "$WT/CLAUDE.md" ]] || { echo "FAIL: CLAUDE.md 미복사"; exit 1; }
-[[ -f "$WT/.loop/SPEC.md" ]] || { echo "FAIL: SPEC.md 미복사"; exit 1; }
-[[ -f "$WT/.loop/PLAN.md" ]] || { echo "FAIL: PLAN.md 미시드"; exit 1; }
-[[ -f "$WT/.loop/iterations/1.log" ]] || { echo "FAIL: 이터 로그 미생성"; exit 1; }
+[[ -f "$WT/$TEST3_LOOPS_REL/SPEC.md" ]] || { echo "FAIL: SPEC.md 미복사"; exit 1; }
+[[ -f "$WT/$TEST3_LOOPS_REL/PLAN.md" ]] || { echo "FAIL: PLAN.md 미시드"; exit 1; }
+[[ -f "$WT/.iterations/1.log" ]] || { echo "FAIL: 이터 로그 미생성"; exit 1; }
 
-# .git/info/exclude 검증
-WT_GITDIR=$(git -C "$WT" rev-parse --git-dir)
-grep -q "^CLAUDE.md$" "$WT_GITDIR/info/exclude" || { echo "FAIL: exclude에 CLAUDE.md 없음"; exit 1; }
-grep -q "^.loop/$" "$WT_GITDIR/info/exclude" || { echo "FAIL: exclude에 .loop/ 없음"; exit 1; }
+# .git/info/exclude 검증 — 단일 contract: --git-common-dir에 등록 (실제 git이 참조하는 경로).
+WT_COMMON_DIR=$(git -C "$WT" rev-parse --git-common-dir)
+[[ "$WT_COMMON_DIR" == /* ]] || WT_COMMON_DIR="$WT/$WT_COMMON_DIR"
+grep -q "^CLAUDE.md$" "$WT_COMMON_DIR/info/exclude" || { echo "FAIL: exclude에 CLAUDE.md 없음"; exit 1; }
+grep -q "^.iterations/$" "$WT_COMMON_DIR/info/exclude" || { echo "FAIL: exclude에 .iterations/ 없음"; exit 1; }
 
 # CLAUDE.md가 constitution.md 내용과 동일한지 확인
 diff "$CONSTITUTION_SRC" "$WT/CLAUDE.md" >/dev/null || { echo "FAIL: CLAUDE.md가 constitution.md와 다름"; exit 1; }
@@ -165,6 +191,7 @@ verify: 'true'
 # Test Slash Task
 EOF
 
+setup_feat_with_spec "$PROJECT" "goal-x/sub-task"
 MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "goal-x/sub-task" > /dev/null 2>&1 || true
 WT2="$PROJECT/milestones/goal-x/loops/sub-task/.worktree"
 [[ -d "$WT2" ]] || { echo "FAIL: 슬래시 task-id 워크트리 미생성"; exit 1; }
@@ -206,6 +233,7 @@ MOCKEOF
 chmod +x "$NO_DONE_MOCK/claude"
 
 WT3="$PROJECT/milestones/regular/loops/no-done-task/.worktree"
+setup_feat_with_spec "$PROJECT" "no-done-task"
 # no-done mock으로 이터 1회 실행 후 자연 종료 (MAX_ITERATIONS=1)
 PATH="$NO_DONE_MOCK:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "no-done-task" 2>&1 || true
 [[ -d "$WT3" ]] || { echo "FAIL: no-done-task 워크트리 미생성"; exit 1; }
@@ -263,15 +291,21 @@ none
 true
 EOF
 
-# --spec 플래그로 start (prepare 없이)
+# --spec 플래그로 start. 단일 contract: --spec이 main 트리에 SPEC을 cp한 뒤
+# 별도로 feat 브랜치에도 commit돼야 cmd_start가 진행. 테스트는 cp 후 helper로 셋업.
 SPEC_TASK_ID="spec-flag-task"
-MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$SPEC_TASK_ID" --spec "$EXTERNAL_SPEC"
-
-# milestones/regular/loops/<id>/SPEC.md로 복사 확인
+# 먼저 main 트리에 SPEC을 cp하기 위해 --spec 옵션을 사용. cmd_start는 단일 contract에서
+# feat 브랜치를 요구하므로 첫 호출은 die할 것 — 그 동안 LOOPS_DIR/SPEC.md만 cp 받아옴.
+set +e
+loop start "$SPEC_TASK_ID" --spec "$EXTERNAL_SPEC" >/dev/null 2>&1
+set -e
+# milestones/regular/loops/<id>/SPEC.md로 복사 확인 (cmd_start step 1이 cp 수행)
 [[ -f "$PROJECT/milestones/regular/loops/$SPEC_TASK_ID/SPEC.md" ]] || { echo "FAIL: --spec 복사 후 milestones/regular/loops/<id>/SPEC.md 미생성"; exit 1; }
-# 워크트리에도 .loop/SPEC.md 복사 확인
+# 이제 feat 브랜치를 셋업하고 다시 start
+setup_feat_with_spec "$PROJECT" "$SPEC_TASK_ID"
+MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$SPEC_TASK_ID"
 WT_SPEC="$PROJECT/milestones/regular/loops/$SPEC_TASK_ID/.worktree"
-[[ -f "$WT_SPEC/.loop/SPEC.md" ]] || { echo "FAIL: 워크트리 .loop/SPEC.md 미복사"; exit 1; }
+[[ -f "$WT_SPEC/milestones/regular/loops/$SPEC_TASK_ID/SPEC.md" ]] || { echo "FAIL: 워크트리 SPEC.md 부재"; exit 1; }
 echo "OK"
 
 echo "=== TEST 10: 빈 SPEC.md (placeholder 그대로) → start 거부 ==="
@@ -292,13 +326,14 @@ verify: '{{verify_command}}'
 
 {{goal_description}}
 SPEC_EOF
+setup_feat_with_spec "$PROJECT" "placeholder-task"
 # placeholder를 채우지 않은 채 start 호출
 set +e
 output=$(MAX_ITERATIONS=1 loop start "placeholder-task" 2>&1)
 result=$?
 set -e
 [[ $result -ne 0 ]] || { echo "FAIL: placeholder가 남은 SPEC.md로 start가 성공하면 안 됨"; exit 1; }
-echo "$output" | grep -qE '\{\{[^}]+\}\}|placeholder' \
+echo "$output" | grep -qE '\{\{[^}]+\}\}|placeholder가|채워지지' \
   || { echo "FAIL: placeholder 이름이 에러 메시지에 없음. got: $output"; exit 1; }
 echo "OK"
 
@@ -334,12 +369,13 @@ none
 ## 검증
 {{verify_command}}
 EOF
+setup_feat_with_spec "$PROJECT" "bad-yaml-task"
 set +e
 output=$(MAX_ITERATIONS=1 loop start "bad-yaml-task" 2>&1)
 result=$?
 set -e
 [[ $result -ne 0 ]] || { echo "FAIL: frontmatter에 placeholder가 남은 SPEC.md로 start가 성공하면 안 됨"; exit 1; }
-echo "$output" | grep -qE '\{\{[^}]+\}\}|placeholder' \
+echo "$output" | grep -qE '\{\{[^}]+\}\}|placeholder가|채워지지' \
   || { echo "FAIL: 에러 메시지에 placeholder 이름 없음. got: $output"; exit 1; }
 echo "OK"
 
@@ -403,10 +439,11 @@ verify: 'true'
 
 # Long Task-ID Task
 EOF
+setup_feat_with_spec "$PROJECT" "$LONG_ID"
 MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "$LONG_ID" > /dev/null 2>&1
 WT_LONG="$PROJECT/milestones/regular/loops/$LONG_ID/.worktree"
 [[ -d "$WT_LONG" ]] || { echo "FAIL: 긴 task-id 워크트리 미생성"; exit 1; }
-[[ -f "$WT_LONG/.loop/iterations/1.log" ]] || { echo "FAIL: 긴 task-id 이터 로그 미생성"; exit 1; }
+[[ -f "$WT_LONG/.iterations/1.log" ]] || { echo "FAIL: 긴 task-id 이터 로그 미생성"; exit 1; }
 loop cleanup "$LONG_ID" --force > /dev/null 2>&1
 [[ ! -d "$WT_LONG" ]] || { echo "FAIL: 긴 task-id cleanup 후 워크트리가 남아있음"; exit 1; }
 echo "OK"
@@ -449,21 +486,24 @@ MOCKEOF
 chmod +x "$MULTI_MOCK_BIN/claude"
 
 WT_MULTI="$PROJECT/milestones/regular/loops/$MULTI_TASK/.worktree"
+setup_feat_with_spec "$PROJECT" "$MULTI_TASK"
 PATH="$MULTI_MOCK_BIN:$PATH" MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$MULTI_TASK"
 # 3회 이터 로그 확인
-[[ -f "$WT_MULTI/.loop/iterations/1.log" ]] || { echo "FAIL: iter 1.log 없음"; exit 1; }
-[[ -f "$WT_MULTI/.loop/iterations/2.log" ]] || { echo "FAIL: iter 2.log 없음"; exit 1; }
-[[ -f "$WT_MULTI/.loop/iterations/3.log" ]] || { echo "FAIL: iter 3.log 없음"; exit 1; }
+[[ -f "$WT_MULTI/.iterations/1.log" ]] || { echo "FAIL: iter 1.log 없음"; exit 1; }
+[[ -f "$WT_MULTI/.iterations/2.log" ]] || { echo "FAIL: iter 2.log 없음"; exit 1; }
+[[ -f "$WT_MULTI/.iterations/3.log" ]] || { echo "FAIL: iter 3.log 없음"; exit 1; }
 # DONE 파일 확인
 [[ -f "$WT_MULTI/DONE" ]] || { echo "FAIL: DONE 파일 없음"; exit 1; }
-# cleanup 후 archive 메타 파일 확인 (mock이 커밋하지 않으므로 --force 사용)
+# cleanup — 단일 contract: archive 없음, 워크트리만 제거 (feat 브랜치 보존)
 loop cleanup "$MULTI_TASK" --force
-MULTI_LOOPS_DIR="$PROJECT/milestones/regular/loops/$MULTI_TASK"
-[[ -d "$MULTI_LOOPS_DIR" ]] || { echo "FAIL: archive 디렉토리 없음"; exit 1; }
-[[ -f "$MULTI_LOOPS_DIR/PLAN.md" ]] || { echo "FAIL: archive PLAN.md 없음"; exit 1; }
+# feat 브랜치 보존 + SPEC.md가 feat 브랜치 commit에 존재
+git -C "$PROJECT" rev-parse --verify "feat/regular/$MULTI_TASK" >/dev/null 2>&1 \
+  || { echo "FAIL: cleanup 후 feat 브랜치가 보존되지 않음"; exit 1; }
+git -C "$PROJECT" show "feat/regular/$MULTI_TASK:milestones/regular/loops/$MULTI_TASK/SPEC.md" >/dev/null 2>&1 \
+  || { echo "FAIL: feat 브랜치에 SPEC.md 없음"; exit 1; }
 echo "OK"
 
-echo "=== TEST 16: scope 게이트가 framework 파일(.loop/*·CLAUDE.md·DONE) 무시 ==="
+echo "=== TEST 16: scope 게이트가 framework 파일(메타 파일·CLAUDE.md·DONE) 무시 ==="
 # 회귀 테스트: 모델이 메모리 파일과 함께 commit해도 scope 게이트가 발동 안 해야
 # (autopilot-smoke-STREAK 시나리오에서 발견된 버그의 regression 보호)
 
@@ -471,7 +511,7 @@ SCOPE_TASK="scope-framework-test"
 mkdir -p "$PROJECT/milestones/regular/loops/$SCOPE_TASK"
 SCOPE_TASK_DIR="$PROJECT/milestones/regular/loops/$SCOPE_TASK"
 
-# 좁은 scope.include — app/만 (.loop/는 명시 안 함)
+# 좁은 scope.include — app/만 (메타 파일은 명시 안 함)
 cat > "$SCOPE_TASK_DIR/SPEC.md" <<'EOF'
 ---
 scope:
@@ -494,22 +534,22 @@ scope.include = ["app/**"] 만 — framework 파일은 명시 안 함.
 EOF
 
 # scope 게이트가 framework 파일을 무시하는지 검증하는 mock
-# mock이: 1) app/main.py 생성+commit, 2) .loop/PLAN.md 변경+commit (framework 파일도 함께)
-# 그 후 scope 게이트가 .loop/PLAN.md를 위반으로 잡지 않아야
+# mock이: 1) app/main.py 생성+commit, 2) 메타 PLAN.md 변경 (드라이버가 chore(loop): meta iter로 commit)
+# 그 후 scope 게이트가 메타 파일을 위반으로 잡지 않아야 함.
 SCOPE_MOCK="$WORK_DIR/scope-mock-bin"
+SCOPE_LOOPS_REL="milestones/regular/loops/$SCOPE_TASK"
 mkdir -p "$SCOPE_MOCK"
-cat > "$SCOPE_MOCK/claude" <<'MOCKEOF'
+cat > "$SCOPE_MOCK/claude" <<MOCKEOF
 #!/usr/bin/env bash
 cat > /dev/null
 # 1. app/main.py 생성
 mkdir -p app
 echo "print('hello')" > app/main.py
-# 2. 메모리 파일도 변경 (시나리오 재현)
-echo "# updated" >> .loop/PLAN.md
-# 3. 모두 stage + commit (memory file 포함, .git/info/exclude를 -f로 우회)
-git add -f .loop/PLAN.md
+# 2. 메타 파일도 변경 (시나리오 재현 — 워커가 uncommitted 상태로 두면 드라이버가 자동 commit)
+echo "# updated" >> "$SCOPE_LOOPS_REL/PLAN.md"
+# 3. 코드 파일만 워커 commit으로 (메타는 드라이버 자동 commit이 담당)
 git add app/main.py
-git commit -q -m "feat: hello + plan update" --no-verify 2>/dev/null
+git commit -q -m "feat: hello" --no-verify 2>/dev/null
 # DONE 작성해 단일 이터 종료
 touch DONE
 echo '{"result": "scope test mock", "usage": {"input_tokens": 1, "output_tokens": 1}}'
@@ -517,11 +557,12 @@ MOCKEOF
 chmod +x "$SCOPE_MOCK/claude"
 
 WT_SCOPE="$PROJECT/milestones/regular/loops/$SCOPE_TASK/.worktree"
+setup_feat_with_spec "$PROJECT" "$SCOPE_TASK"
 set +e
 output=$(PATH="$SCOPE_MOCK:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start "$SCOPE_TASK" 2>&1)
 result=$?
 set -e
-# 게이트가 .loop/PLAN.md를 잡지 않아 정상 진행 → DONE 신호로 정상 종료(exit 0)
+# 게이트가 메타 파일을 잡지 않아 정상 진행 → DONE 신호로 정상 종료(exit 0)
 [[ $result -eq 0 ]] || { echo "FAIL: scope 게이트가 framework 파일을 위반으로 잡음 (regression). exit=$result"; echo "$output" | tail -10; exit 1; }
 [[ -f "$WT_SCOPE/DONE" ]] || { echo "FAIL: DONE 파일 미생성 (정상 종료 안 됨)"; exit 1; }
 echo "$output" | grep -q "Scope 위반" && { echo "FAIL: scope 게이트가 framework 파일을 잡음 (regression)"; exit 1; }
@@ -570,6 +611,7 @@ echo '{"result": "mock17", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK17/claude"
 
+setup_feat_with_spec "$PROJECT" "$TEST17_TASK"
 set +e
 output17=$(PATH="$MOCK17:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST17_TASK" 2>&1)
 result17=$?
@@ -578,7 +620,7 @@ set -e
 echo "$output17" | grep -q "HALT\|tests modified\|테스트 약화" \
   || { echo "FAIL: 테스트 약화 halt 메시지 없음. got: $output17"; exit 1; }
 WT17="$PROJECT/milestones/regular/loops/$TEST17_TASK/.worktree"
-[[ -f "$WT17/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+[[ -f "$WT17/milestones/regular/loops/$TEST17_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST17_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -624,6 +666,7 @@ echo '{"result": "mock18", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK18/claude"
 
+setup_feat_with_spec "$PROJECT" "$TEST18_TASK"
 set +e
 output18=$(PATH="$MOCK18:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST18_TASK" 2>&1)
 result18=$?
@@ -632,7 +675,7 @@ set -e
 echo "$output18" | grep -q "HALT\|deps modified\|의존성 변경" \
   || { echo "FAIL: 의존성 변경 halt 메시지 없음. got: $output18"; exit 1; }
 WT18="$PROJECT/milestones/regular/loops/$TEST18_TASK/.worktree"
-[[ -f "$WT18/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+[[ -f "$WT18/milestones/regular/loops/$TEST18_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST18_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -665,6 +708,7 @@ echo '{"result": "mock19", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK19/claude"
 
+setup_feat_with_spec "$PROJECT" "$TEST19_TASK"
 set +e
 output19=$(PATH="$MOCK19:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 loop start "$TEST19_TASK" 2>&1)
 result19=$?
@@ -673,7 +717,7 @@ set -e
 echo "$output19" | grep -q "HALT\|Suppressor" \
   || { echo "FAIL: suppressor halt 메시지 없음. got: $output19"; exit 1; }
 WT19="$PROJECT/milestones/regular/loops/$TEST19_TASK/.worktree"
-[[ -f "$WT19/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+[[ -f "$WT19/milestones/regular/loops/$TEST19_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST19_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -719,6 +763,7 @@ echo '{"result": "mock20", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK20/claude"
 
+setup_feat_with_spec "$PROJECT" "$TEST20_TASK"
 set +e
 output20=$(PATH="$MOCK20:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST20_TASK" 2>&1)
 result20=$?
@@ -727,7 +772,7 @@ set -e
 echo "$output20" | grep -q "HALT\|fix:symptom streak" \
   || { echo "FAIL: fix:symptom streak halt 메시지 없음. got: $output20"; exit 1; }
 WT20="$PROJECT/milestones/regular/loops/$TEST20_TASK/.worktree"
-[[ -f "$WT20/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+[[ -f "$WT20/milestones/regular/loops/$TEST20_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST20_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -773,6 +818,7 @@ echo '{"result": "mock21", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK21/claude"
 
+setup_feat_with_spec "$PROJECT" "$TEST21_TASK"
 set +e
 output21=$(PATH="$MOCK21:$PATH" MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=5 loop start "$TEST21_TASK" 2>&1)
 result21=$?
@@ -781,7 +827,7 @@ set -e
 echo "$output21" | grep -q "HALT\|진동 패턴" \
   || { echo "FAIL: 진동 패턴 halt 메시지 없음. got: $output21"; exit 1; }
 WT21="$PROJECT/milestones/regular/loops/$TEST21_TASK/.worktree"
-[[ -f "$WT21/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+[[ -f "$WT21/milestones/regular/loops/$TEST21_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST21_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -810,6 +856,7 @@ verify: 'true'
 
 # Empty Scope Task
 EOF
+setup_feat_with_spec "$PROJECT" "empty-scope-task"
 set +e
 output=$(MAX_ITERATIONS=1 loop start "empty-scope-task" 2>&1)
 result=$?
@@ -896,6 +943,7 @@ echo '{"result": "mock26", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK26/claude"
 
+setup_feat_with_spec "$PROJECT" "$STASH_TASK"
 set +e
 output26=$(PATH="$MOCK26:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$STASH_TASK" 2>&1)
 result26=$?
@@ -948,6 +996,7 @@ echo '{"result": "mock27", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK27/claude"
 
+setup_feat_with_spec "$PROJECT" "$TEST27_TASK"
 set +e
 output27=$(PATH="$MOCK27:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST27_TASK" 2>&1)
 result27=$?
@@ -956,7 +1005,7 @@ set -e
 echo "$output27" | grep -q "HALT\|테스트 약화" \
   || { echo "FAIL: 테스트 약화 halt 메시지 없음. got: $output27"; exit 1; }
 WT27="$PROJECT/milestones/regular/loops/$TEST27_TASK/.worktree"
-[[ -f "$WT27/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+[[ -f "$WT27/milestones/regular/loops/$TEST27_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST27_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -1006,6 +1055,7 @@ echo '{"result": "mock28", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK28/claude"
 
+setup_feat_with_spec "$PROJECT" "$TEST28_TASK"
 set +e
 output28=$(PATH="$MOCK28:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST28_TASK" 2>&1)
 result28=$?
@@ -1048,6 +1098,7 @@ verify: 'true'
 
 # Shasum Fallback Task
 EOF
+    setup_feat_with_spec "$PROJECT" "shasum-fallback"
     set +e
     output29=$(PATH="$ISOLATED_PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
       bash "$LOOP_SH_SRC" start "shasum-fallback" --no-pr 2>&1)
@@ -1058,7 +1109,7 @@ EOF
     WT29="$PROJECT/milestones/regular/loops/shasum-fallback/.worktree"
     [[ -f "$WT29/DONE" ]] || { echo "FAIL: DONE 파일 미생성 (해시 함수 미동작 의심)"; exit 1; }
     # 해시 함수가 빈 값이 아니어야 — iterations 로그 존재 확인
-    [[ -f "$WT29/.loop/iterations/1.log" ]] || { echo "FAIL: 이터 로그 미생성"; exit 1; }
+    [[ -f "$WT29/.iterations/1.log" ]] || { echo "FAIL: 이터 로그 미생성"; exit 1; }
     loop cleanup "shasum-fallback" --force > /dev/null 2>&1
     echo "OK"
   fi
@@ -1106,6 +1157,7 @@ echo '{"result": "mock30", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK30/claude"
 
+setup_feat_with_spec "$PROJECT" "$TEST30_TASK"
 set +e
 output30=$(PATH="$MOCK30:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST30_TASK" 2>&1)
 result30=$?
@@ -1114,7 +1166,7 @@ set -e
 echo "$output30" | grep -q "HALT\|Suppressor" \
   || { echo "FAIL: suppressor halt 메시지 없음. got: $output30"; exit 1; }
 WT30="$PROJECT/milestones/regular/loops/$TEST30_TASK/.worktree"
-[[ -f "$WT30/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+[[ -f "$WT30/milestones/regular/loops/$TEST30_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST30_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -1137,6 +1189,7 @@ EOF
 STALE_ACQUIRE_LOCK_31="$PROJECT/milestones/regular/loops/$STALE_ACQUIRE_TASK/.lock"
 mkdir -p "$(dirname "$STALE_ACQUIRE_LOCK_31")"
 echo "999999" > "$STALE_ACQUIRE_LOCK_31"
+setup_feat_with_spec "$PROJECT" "$STALE_ACQUIRE_TASK"
 
 # loop start: 자동 정리 후 정상 진행되어야
 set +e
@@ -1170,6 +1223,7 @@ EOF
 EMPTY_LOCK_32="$PROJECT/milestones/regular/loops/$EMPTY_LOCK_TASK/.lock"
 mkdir -p "$(dirname "$EMPTY_LOCK_32")"
 : > "$EMPTY_LOCK_32"
+setup_feat_with_spec "$PROJECT" "$EMPTY_LOCK_TASK"
 
 set +e
 output32=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 loop start "$EMPTY_LOCK_TASK" 2>&1)
@@ -1250,6 +1304,7 @@ echo '{"result": "mock33", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK33/claude"
 
+setup_feat_with_spec "$PROJECT" "$TEST33_TASK"
 set +e
 output33=$(PATH="$GITLEAKS_MOCK:$MOCK33:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
   loop start "$TEST33_TASK" 2>&1)
@@ -1259,7 +1314,7 @@ set -e
 echo "$output33" | grep -q "HALT.*Secrets\|Secrets 의심" \
   || { echo "FAIL: secrets halt 메시지 없음. got: $output33"; exit 1; }
 WT33="$PROJECT/milestones/regular/loops/$TEST33_TASK/.worktree"
-[[ -f "$WT33/.loop/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+[[ -f "$WT33/milestones/regular/loops/$TEST33_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
 loop cleanup "$TEST33_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -1292,7 +1347,8 @@ verify: 'true'
 ---
 # First Task
 EOF
-(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "first-task" --spec "$GITIGN_SPEC34" --no-pr > /dev/null 2>&1)
+# 단일 contract: feat 브랜치 없으면 die — 본 테스트는 ensure_loops_setup의 .gitignore 갱신만 검증.
+(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "first-task" --spec "$GITIGN_SPEC34" --no-pr > /dev/null 2>&1 || true)
 
 [[ -f "$GITIGN_PROJECT/.gitignore" ]] || { echo "FAIL: .gitignore 사라짐"; exit 1; }
 grep -qxF 'milestones/**/loops/**/.worktree/' "$GITIGN_PROJECT/.gitignore" \
@@ -1326,9 +1382,9 @@ verify: 'true'
 ---
 # Second Task
 EOF
-# 두 번째 호출 시점에 변경 없음 확인 (commit 추가 없음)
+# 두 번째 호출 시점에 변경 없음 확인 (commit 추가 없음). feat 브랜치 부재로 die 정상.
 HEAD_BEFORE_35=$(git -C "$GITIGN_PROJECT" rev-parse HEAD)
-(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "second-task" --spec "$GITIGN_SPEC35" --no-pr > /dev/null 2>&1)
+(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "second-task" --spec "$GITIGN_SPEC35" --no-pr > /dev/null 2>&1 || true)
 COUNT35_WT=$(grep -cxF 'milestones/**/loops/**/.worktree/' "$GITIGN_PROJECT/.gitignore")
 COUNT35_LOCK=$(grep -cxF 'milestones/**/loops/**/.lock' "$GITIGN_PROJECT/.gitignore")
 [[ $COUNT35_WT -eq 1 ]] \
@@ -1365,7 +1421,7 @@ verify: 'true'
 ---
 # Task X
 EOF
-(cd "$NL_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "task-x" --spec "$GITIGN_SPEC36" --no-pr > /dev/null 2>&1)
+(cd "$NL_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "task-x" --spec "$GITIGN_SPEC36" --no-pr > /dev/null 2>&1 || true)
 
 # 두 라인이 정확히 분리됐는지 (붙어버리면 'node_modulesmilestones/...'가 됨)
 grep -qx 'node_modules' "$NL_PROJECT/.gitignore" \
@@ -1424,6 +1480,7 @@ echo '{"result": "mock37", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
   chmod +x "$MOCK37/claude"
 
+  setup_feat_with_spec "$PROJECT" "$TEST37_TASK"
   set +e
   output37=$(LANG="$LOCALE_FOUND" LC_ALL="$LOCALE_FOUND" \
     PATH="$MOCK37:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 \
@@ -1482,6 +1539,7 @@ verify: 'true'
 
 # TDD RED — Adding New Test
 EOF
+  setup_feat_with_spec "$TDD_PROJECT" "tdd-add"
   set +e
   output38=$(PATH="$MOCK38:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "tdd-add" --no-pr 2>&1)
@@ -1535,6 +1593,7 @@ verify: 'true'
 
 # TDD — Existing Test Modified (must halt)
 EOF
+  setup_feat_with_spec "$TDD_MOD_PROJECT" "tdd-mod"
   set +e
   output39=$(PATH="$MOCK39:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "tdd-mod" --no-pr 2>&1)
@@ -1572,6 +1631,8 @@ echo \$\$ > "$CLAUDE_PID_FILE"
 sleep 60
 MOCKEOF
 chmod +x "$LONG_MOCK/claude"
+
+setup_feat_with_spec "$PROJECT" "$ORPHAN_TASK"
 
 # 백그라운드에서 loop start 실행
 rm -f "$CLAUDE_PID_FILE"
@@ -1645,6 +1706,8 @@ sleep 60
 MOCKEOF
 chmod +x "$LONG_MOCK_41/claude"
 
+setup_feat_with_spec "$PROJECT" "$FORCE_TASK"
+
 # 백그라운드에서 loop start
 rm -f "$CLAUDE_PID_FILE_41"
 PATH="$LONG_MOCK_41:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 \
@@ -1714,6 +1777,7 @@ verify: 'true'
 # Slash vs Hyphen Collision Test
 EOF
 
+setup_feat_with_spec "$PROJECT" "col/fake"
 set +e
 output42=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "col/fake" 2>&1)
 result42=$?
@@ -1825,6 +1889,7 @@ none
 true
 EOF
 
+setup_feat_with_spec "$PROJECT" "needs-clar-task"
 set +e
 output=$(MAX_ITERATIONS=1 loop start needs-clar-task 2>&1)
 result=$?
@@ -1853,10 +1918,11 @@ verify: 'true'
 # Single Component Normalization Task
 EOF
 
+setup_feat_with_spec "$PROJECT" "$TEST48_ID"
 MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "$TEST48_ID" > /dev/null 2>&1
 WT48="$PROJECT/milestones/regular/loops/$TEST48_ID/.worktree"
 [[ -d "$WT48" ]] || { echo "FAIL: regular/<input> 정규화 후 워크트리 미생성 (expected: $WT48)"; exit 1; }
-[[ -f "$WT48/.loop/SPEC.md" ]] || { echo "FAIL: 워크트리에 .loop/SPEC.md 미복사"; exit 1; }
+[[ -f "$WT48/milestones/regular/loops/$TEST48_ID/SPEC.md" ]] || { echo "FAIL: 워크트리에 SPEC.md 부재"; exit 1; }
 # 새 nested 정책: lock은 milestones/regular/loops/<id>/.lock에만 존재
 [[ ! -d "$PROJECT/.loops/locks" ]] \
   || { echo "FAIL: 새 정책인데 legacy .loops/locks/ 디렉터리가 생성됨"; exit 1; }
@@ -1877,10 +1943,11 @@ verify: 'true'
 # Explicit Milestone Task
 EOF
 
+setup_feat_with_spec "$PROJECT" "m1/c1"
 MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "m1/c1" > /dev/null 2>&1
 WT49="$PROJECT/milestones/m1/loops/c1/.worktree"
 [[ -d "$WT49" ]] || { echo "FAIL: m1/c1 워크트리 미생성 (expected: $WT49)"; exit 1; }
-[[ -f "$WT49/.loop/SPEC.md" ]] || { echo "FAIL: m1/c1 워크트리에 .loop/SPEC.md 미복사"; exit 1; }
+[[ -f "$WT49/milestones/m1/loops/c1/SPEC.md" ]] || { echo "FAIL: m1/c1 워크트리에 SPEC.md 부재"; exit 1; }
 loop cleanup "m1/c1" --force > /dev/null 2>&1
 echo "OK"
 
@@ -1907,7 +1974,8 @@ output50=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 loop start "$LEGACY_ID" 2>&1)
 result50=$?
 set -e
 [[ $result50 -ne 0 ]] || { echo "FAIL: legacy .loops/<id>/SPEC.md fallback이 동작함 (cutover 위반)"; exit 1; }
-echo "$output50" | grep -q "SPEC.md가 없습니다\|milestones/" \
+# 단일 contract: feat 브랜치 부재 시 spec 스킬 안내로 abort.
+echo "$output50" | grep -qE "feat 브랜치 부재|spec 스킬" \
   || { echo "FAIL: legacy 부재 에러 메시지 없음. got: $output50"; exit 1; }
 # 워크트리·락 잡혀선 안 됨 (새 nested 경로)
 [[ ! -d "$PROJECT/milestones/regular/loops/$LEGACY_ID/.worktree" ]] \
@@ -1969,6 +2037,7 @@ test_sweep_paths:
 
 # Sweep Allow Test
 EOF
+  setup_feat_with_spec "$SWEEP_OK_PROJECT" "sweep-ok"
   set +e
   output51=$(PATH="$MOCK51:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "sweep-ok" --no-pr 2>&1)
@@ -2020,6 +2089,7 @@ test_sweep_paths:
 
 # Sweep Empty Match Test
 EOF
+  setup_feat_with_spec "$SWEEP_WARN_PROJECT" "sweep-warn"
   set +e
   output52=$(PATH="$MOCK52:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "sweep-warn" --no-pr 2>&1)
@@ -2074,6 +2144,7 @@ test_sweep_paths:
 
 # Sweep Boundary Test
 EOF
+  setup_feat_with_spec "$SWEEP_BOUND_PROJECT" "sweep-bound"
   set +e
   output53=$(PATH="$MOCK53:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "sweep-bound" --no-pr 2>&1)
@@ -2085,9 +2156,9 @@ EOF
 )
 echo "OK"
 
-echo "=== TEST 54: suppressor 게이트가 .loop/ 워커 메모리는 검사 제외 ==="
+echo "=== TEST 54: suppressor 게이트가 메타 파일(milestones/<m>/loops/<c>/) 워커 메모리는 검사 제외 ==="
 # 워커가 PLAN.md 등에 헌법 본문 인용 시 suppressor 패턴 문자열이 들어감 — false positive 방지
-TEST54_TASK="gate-suppressor-loop-dir"
+TEST54_TASK="gate-suppressor-meta-dir"
 mkdir -p "$PROJECT/milestones/regular/loops/$TEST54_TASK"
 cat > "$PROJECT/milestones/regular/loops/$TEST54_TASK/SPEC.md" <<'EOF'
 ---
@@ -2098,22 +2169,20 @@ scope:
 verify: 'true'
 ---
 
-# Gate Test — .loop/ Excluded from Suppressor Scan
+# Gate Test — Meta Excluded from Suppressor Scan
 EOF
+setup_feat_with_spec "$PROJECT" "$TEST54_TASK"
 
 MOCK54="$WORK_DIR/mock54-bin"
+T54_LOOPS_REL="milestones/regular/loops/$TEST54_TASK"
 mkdir -p "$MOCK54"
-cat > "$MOCK54/claude" <<'MOCKEOF'
+cat > "$MOCK54/claude" <<MOCKEOF
 #!/usr/bin/env bash
 cat > /dev/null
-# 워커가 PLAN.md에 헌법 본문 인용 (suppressor 패턴 문자열 포함) + commit
-# 헌법 §3.1 출력 요건: 메모리 파일 갱신은 commit과 함께
-mkdir -p .loop
-cat > .loop/PLAN.md <<'PLAN_EOF'
-- `# noqa`, `@ts-ignore`, `eslint-disable`, `#pragma warning disable` 등 경고 억제 지시어 신규 추가 금지
+# 워커가 PLAN.md에 헌법 본문 인용 (suppressor 패턴 문자열 포함). 드라이버가 chore(loop): meta iter로 자동 commit.
+cat > "$T54_LOOPS_REL/PLAN.md" <<'PLAN_EOF'
+- \`# noqa\`, \`@ts-ignore\`, \`eslint-disable\`, \`#pragma warning disable\` 등 경고 억제 지시어 신규 추가 금지
 PLAN_EOF
-git add .loop/PLAN.md
-git commit -q -m "feat: cite suppressor rules in PLAN.md"
 echo '{"result": "mock54", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK54/claude"
@@ -2122,7 +2191,7 @@ set +e
 output54=$(PATH="$MOCK54:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start "$TEST54_TASK" 2>&1)
 set -e
 echo "$output54" | grep -q "Suppressor 신규 추가" \
-  && { echo "FAIL: .loop/PLAN.md의 suppressor 패턴 인용이 false positive halt 트리거"; echo "$output54"; exit 1; }
+  && { echo "FAIL: 메타 PLAN.md의 suppressor 패턴 인용이 false positive halt 트리거"; echo "$output54"; exit 1; }
 echo "$output54" | grep -q "이터 상한 도달" \
   || { echo "FAIL: loop이 MAX_ITERATIONS까지 정상 진행 못함 — false positive 부재만으로 OK 판정하면 mock·환경 이슈에서 false OK 발생"; echo "$output54"; exit 1; }
 loop cleanup "$TEST54_TASK" --force > /dev/null 2>&1 || true
@@ -2239,6 +2308,7 @@ echo '{"result": "mock57", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK57/claude"
 
+setup_feat_with_spec "$T57_PROJECT" "gate-skip-worktree"
 (
   cd "$T57_PROJECT"
   set +e
@@ -2299,6 +2369,7 @@ echo '{"result": "mock58", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK58/claude"
 
+setup_feat_with_spec "$T58_PROJECT" "gate-scope-catch"
 (
   cd "$T58_PROJECT"
   set +e
@@ -2452,6 +2523,298 @@ git -C "$T62_PROJECT" checkout -q "$T62_DEFAULT_BRANCH"
   [[ "$CURR_BR" == "$T62_BRANCH" ]] \
     || { echo "FAIL: 워크트리 브랜치가 feat/<task-id>(fallback)가 아님 (got: $CURR_BR)"; exit 1; }
   bash "$LOOP_SH_SRC" cleanup "regular/n62" --force > /dev/null 2>&1
+)
+echo "OK"
+
+echo "=== TEST 63: SPEC 110 EARS 1·3 — feat 브랜치 부재 + LOOPS_DIR SPEC 존재해도 start abort + autonomous-loop 브랜치 생성 0 ==="
+# SPEC 110: 단일 contract 일원화 — legacy 'autonomous-loop/<id>' fallback 분기를 제거.
+# 셋업: LOOPS_DIR(milestones/regular/loops/<id>/SPEC.md)는 있지만 feat 브랜치가 없는 상태.
+# 기대: start가 즉시 die(spec 스킬 안내) + 어떤 autonomous-loop/* 브랜치도 새로 생성되지 않음.
+T63_PROJECT="$WORK_DIR/spec110-feat-missing"
+mkdir -p "$T63_PROJECT"
+git -C "$T63_PROJECT" init -q
+git -C "$T63_PROJECT" config user.email "t@e.com"
+git -C "$T63_PROJECT" config user.name "Test"
+git -C "$T63_PROJECT" commit --allow-empty -m "initial" -q
+
+T63_ID="n63-no-feat"
+T63_LOOPS_REL="milestones/regular/loops/$T63_ID"
+mkdir -p "$T63_PROJECT/$T63_LOOPS_REL"
+cat > "$T63_PROJECT/$T63_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 63
+EOF
+
+(
+  cd "$T63_PROJECT"
+  set +e
+  output63=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "$T63_ID" --no-pr 2>&1)
+  result63=$?
+  set -e
+  [[ $result63 -ne 0 ]] || { echo "FAIL: feat 브랜치 부재인데 start 성공 (EARS 1 위반)"; echo "$output63"; exit 1; }
+  echo "$output63" | grep -qE "spec" \
+    || { echo "FAIL: die 메시지에 spec 스킬 안내 없음 (EARS 1). got: $output63"; exit 1; }
+  # EARS 3: 어떤 autonomous-loop/* 브랜치도 새로 생성되지 않아야 함
+  bad_branch=$(git -C "$T63_PROJECT" for-each-ref --format='%(refname:short)' 'refs/heads/autonomous-loop/*' 2>/dev/null)
+  [[ -z "$bad_branch" ]] || { echo "FAIL: autonomous-loop/* 브랜치가 생성됨 (EARS 3 위반): $bad_branch"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 64: SPEC 110 EARS 6·7 — 워크트리에 .loop/ 부재 + .iterations/<N>.log 사용 + untracked ==="
+# 셋업: 신규 contract 표준 (feat 브랜치 + SPEC commit).
+# 기대: 워크트리에 .loop/ 디렉토리 부재. iter 1 raw 로그가 <WT>/.iterations/1.log 경로에 존재.
+# .iterations/ 경로가 git status에 untracked로 노출되지 않아야 (info/exclude 등록).
+T64_PROJECT="$WORK_DIR/spec110-no-loopdir"
+mkdir -p "$T64_PROJECT"
+git -C "$T64_PROJECT" init -q
+git -C "$T64_PROJECT" config user.email "t@e.com"
+git -C "$T64_PROJECT" config user.name "Test"
+git -C "$T64_PROJECT" commit --allow-empty -m "initial" -q
+
+T64_ID="n64-no-loopdir"
+T64_BRANCH="feat/regular/$T64_ID-spec110"
+T64_LOOPS_REL="milestones/regular/loops/$T64_ID"
+T64_DEFAULT=$(git -C "$T64_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T64_PROJECT" checkout -q -b "$T64_BRANCH"
+mkdir -p "$T64_PROJECT/$T64_LOOPS_REL"
+cat > "$T64_PROJECT/$T64_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 64
+EOF
+git -C "$T64_PROJECT" add "$T64_LOOPS_REL/SPEC.md"
+git -C "$T64_PROJECT" commit -q -m "feat(spec): n64 spec 110 test 64"
+git -C "$T64_PROJECT" checkout -q "$T64_DEFAULT"
+
+(
+  cd "$T64_PROJECT"
+  set +e
+  output64=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T64_ID" --no-pr 2>&1)
+  result64=$?
+  set -e
+  WT64="$T64_PROJECT/$T64_LOOPS_REL/.worktree"
+  [[ $result64 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result64. got: $output64"; exit 1; }
+  # EARS 7: 워크트리 루트에 .loop/ 디렉토리 부재
+  [[ ! -d "$WT64/.loop" ]] || { echo "FAIL: 워크트리에 .loop/ 디렉토리 잔존 (EARS 7 위반)"; exit 1; }
+  # EARS 6: iter 1 raw 로그가 <WT>/.iterations/1.log 경로
+  [[ -f "$WT64/.iterations/1.log" ]] || { echo "FAIL: <WT>/.iterations/1.log 부재 (EARS 6 위반)"; exit 1; }
+  # EARS 6 (untracked): .iterations/ 경로가 git status에 노출되지 않아야
+  status_iter=$(git -C "$WT64" status --porcelain 2>/dev/null | grep '\.iterations' || true)
+  [[ -z "$status_iter" ]] || { echo "FAIL: .iterations/가 git status에 노출됨 (info/exclude 미등록): $status_iter (EARS 6 위반)"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 65: SPEC 110 EARS 4 — 워커가 메타 파일 수정 → chore(loop): meta iter N commit 1건 추가 ==="
+# 셋업: 신규 contract + mock claude가 HANDOFF.md를 수정한 뒤 DONE 생성.
+# 기대: iter 종료 직후 feat 브랜치 HEAD에 'chore(loop): meta iter 1' commit이 추가됨.
+T65_PROJECT="$WORK_DIR/spec110-meta-commit"
+mkdir -p "$T65_PROJECT"
+git -C "$T65_PROJECT" init -q
+git -C "$T65_PROJECT" config user.email "t@e.com"
+git -C "$T65_PROJECT" config user.name "Test"
+git -C "$T65_PROJECT" commit --allow-empty -m "initial" -q
+
+T65_ID="n65-meta-commit"
+T65_BRANCH="feat/regular/$T65_ID"
+T65_LOOPS_REL="milestones/regular/loops/$T65_ID"
+T65_DEFAULT=$(git -C "$T65_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T65_PROJECT" checkout -q -b "$T65_BRANCH"
+mkdir -p "$T65_PROJECT/$T65_LOOPS_REL"
+cat > "$T65_PROJECT/$T65_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 65
+EOF
+git -C "$T65_PROJECT" add "$T65_LOOPS_REL/SPEC.md"
+git -C "$T65_PROJECT" commit -q -m "feat(spec): n65 spec 110 test 65"
+git -C "$T65_PROJECT" checkout -q "$T65_DEFAULT"
+
+MOCK65="$WORK_DIR/mock65-bin"
+mkdir -p "$MOCK65"
+# mock: HANDOFF.md를 수정 + DONE 생성 (commit은 안 함 — loop.sh가 메타 commit 발행 책임)
+cat > "$MOCK65/claude" <<MOCKEOF
+#!/usr/bin/env bash
+cat > /dev/null
+# 워커는 워크트리 루트 cwd로 들어옴. 메타는 milestones/<m>/loops/<c>/ 경로.
+echo "next iter handoff content" >> "$T65_LOOPS_REL/HANDOFF.md"
+touch DONE
+echo '{"result": "mock65", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK65/claude"
+
+(
+  cd "$T65_PROJECT"
+  set +e
+  output65=$(PATH="$MOCK65:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T65_ID" --no-pr 2>&1)
+  result65=$?
+  set -e
+  WT65="$T65_PROJECT/$T65_LOOPS_REL/.worktree"
+  [[ $result65 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result65. got: $output65"; exit 1; }
+  # EARS 4: feat 브랜치 HEAD에 'chore(loop): meta iter 1' commit 정확히 1건
+  meta_count=$(git -C "$WT65" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter 1$' || true)
+  [[ "$meta_count" == "1" ]] || { echo "FAIL: 'chore(loop): meta iter 1' commit count=$meta_count (기대 1, EARS 4 위반)"; git -C "$WT65" log --oneline -10; exit 1; }
+  # EARS 4 (격리): 그 commit이 메타 파일만 건드렸어야 — git log subject로 SHA 추출
+  meta_sha=$(git -C "$WT65" log --pretty=tformat:'%H %s' | grep -E '^[0-9a-f]+ chore\(loop\): meta iter 1$' | awk '{print $1}' | head -1)
+  [[ -n "$meta_sha" ]] || { echo "FAIL: meta SHA 추출 실패 (commit count $meta_count)"; exit 1; }
+  changed_files=$(git -C "$WT65" show --pretty='' --name-only "$meta_sha")
+  # 비-메타 파일이 0건이어야 함 (메타 commit 격리). grep -v로 메타 패턴 제외 후 잔존 파일 검사.
+  non_meta=$(echo "$changed_files" | grep -v '^$' | grep -vE "^$T65_LOOPS_REL/(PLAN|NOTES|HANDOFF|RUN_LOG|ESCALATION)\.md$" || true)
+  [[ -z "$non_meta" ]] \
+    || { echo "FAIL: meta commit이 메타 파일 외 다른 파일 포함: $non_meta"; exit 1; }
+  # 메타 파일 최소 1개는 포함됐어야 (변경 있어 commit 발생함)
+  echo "$changed_files" | grep -qE "^$T65_LOOPS_REL/(PLAN|NOTES|HANDOFF|RUN_LOG|ESCALATION)\.md$" \
+    || { echo "FAIL: meta commit에 메타 파일이 하나도 없음: $changed_files"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 66: SPEC 110 EARS 5 — 워커가 메타 파일 미수정 → meta commit 0건 ==="
+# 셋업: 신규 contract + mock claude가 DONE만 만들고 메타 파일은 손대지 않음.
+# 기대: feat 브랜치에 'chore(loop): meta iter' commit이 0건.
+T66_PROJECT="$WORK_DIR/spec110-no-meta"
+mkdir -p "$T66_PROJECT"
+git -C "$T66_PROJECT" init -q
+git -C "$T66_PROJECT" config user.email "t@e.com"
+git -C "$T66_PROJECT" config user.name "Test"
+git -C "$T66_PROJECT" commit --allow-empty -m "initial" -q
+
+T66_ID="n66-no-meta"
+T66_BRANCH="feat/regular/$T66_ID"
+T66_LOOPS_REL="milestones/regular/loops/$T66_ID"
+T66_DEFAULT=$(git -C "$T66_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T66_PROJECT" checkout -q -b "$T66_BRANCH"
+mkdir -p "$T66_PROJECT/$T66_LOOPS_REL"
+cat > "$T66_PROJECT/$T66_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 66
+EOF
+git -C "$T66_PROJECT" add "$T66_LOOPS_REL/SPEC.md"
+git -C "$T66_PROJECT" commit -q -m "feat(spec): n66 spec 110 test 66"
+git -C "$T66_PROJECT" checkout -q "$T66_DEFAULT"
+
+# 기본 mock-bin 사용 (DONE만 생성, 메타 미수정)
+(
+  cd "$T66_PROJECT"
+  set +e
+  output66=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T66_ID" --no-pr 2>&1)
+  result66=$?
+  set -e
+  WT66="$T66_PROJECT/$T66_LOOPS_REL/.worktree"
+  [[ $result66 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result66. got: $output66"; exit 1; }
+  meta_count=$(git -C "$WT66" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter' || true)
+  [[ "$meta_count" == "0" ]] || { echo "FAIL: 메타 변경 0인데 meta iter commit count=$meta_count (기대 0, EARS 5 위반)"; git -C "$WT66" log --oneline -10; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 67: SPEC 110 EARS 9·10·11·12 — grep 검사 (plugin code 안 legacy 문자열 0건) ==="
+# 본 worktree의 plugin 파일을 grep해 검증. 이 테스트는 실 코드를 직접 점검 (EARS 9-12).
+[[ -z "$(grep -rln 'autonomous-loop' "$SKILL_REFS" 2>/dev/null)" ]] \
+  || { echo "FAIL: 'autonomous-loop' 잔존 파일:"; grep -rln 'autonomous-loop' "$SKILL_REFS"; exit 1; }
+[[ -z "$(grep -rln -F '.loop/' "$SKILL_REFS" 2>/dev/null)" ]] \
+  || { echo "FAIL: '.loop/' 잔존 파일 (EARS 10):"; grep -rln -F '.loop/' "$SKILL_REFS"; exit 1; }
+# EARS 11: constitution.md 단독 검사 (중복이지만 명시)
+[[ -z "$(grep -F '.loop/' "$SKILL_REFS/constitution.md" 2>/dev/null)" ]] \
+  || { echo "FAIL: constitution.md에 '.loop/' 잔존 (EARS 11)"; exit 1; }
+# EARS 12: pr-phase.sh SPEC_FILE는 milestones 경로
+grep -E 'SPEC_FILE.*\.loop' "$SKILL_REFS/pr-phase.sh" >/dev/null && { echo "FAIL: pr-phase.sh의 SPEC_FILE에 .loop 잔존 (EARS 12)"; exit 1; }
+grep -E 'SPEC_FILE.*milestones.*loops' "$SKILL_REFS/pr-phase.sh" >/dev/null \
+  || { echo "FAIL: pr-phase.sh의 SPEC_FILE이 milestones/.../loops 패턴 아님 (EARS 12)"; exit 1; }
+echo "OK"
+
+echo "=== TEST 68: SPEC 110 EARS 13 — DONE feat 브랜치에 메타 commit + 워크트리 HEAD에 .loop/ 부재 + 메타는 milestones/ 경로에만 ==="
+# 셋업: 신규 contract + mock이 매 iter HANDOFF.md 갱신 + 2회째 DONE.
+# 기대: DONE 도달 시점에 'chore(loop): meta iter 1·2' commit 등장, 워크트리에 .loop/ 부재,
+# 메타 파일은 워크트리의 milestones/<m>/loops/<c>/ 경로에서만 발견.
+T68_PROJECT="$WORK_DIR/spec110-final-state"
+mkdir -p "$T68_PROJECT"
+git -C "$T68_PROJECT" init -q
+git -C "$T68_PROJECT" config user.email "t@e.com"
+git -C "$T68_PROJECT" config user.name "Test"
+git -C "$T68_PROJECT" commit --allow-empty -m "initial" -q
+
+T68_ID="n68-final"
+T68_BRANCH="feat/regular/$T68_ID"
+T68_LOOPS_REL="milestones/regular/loops/$T68_ID"
+T68_DEFAULT=$(git -C "$T68_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T68_PROJECT" checkout -q -b "$T68_BRANCH"
+mkdir -p "$T68_PROJECT/$T68_LOOPS_REL"
+cat > "$T68_PROJECT/$T68_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 110 Test 68
+EOF
+git -C "$T68_PROJECT" add "$T68_LOOPS_REL/SPEC.md"
+git -C "$T68_PROJECT" commit -q -m "feat(spec): n68 spec 110 test 68"
+git -C "$T68_PROJECT" checkout -q "$T68_DEFAULT"
+
+COUNTER68="$WORK_DIR/iter-count-68.txt"
+echo "0" > "$COUNTER68"
+export COUNTER68_PATH="$COUNTER68"
+
+MOCK68="$WORK_DIR/mock68-bin"
+mkdir -p "$MOCK68"
+cat > "$MOCK68/claude" <<MOCKEOF
+#!/usr/bin/env bash
+cat > /dev/null
+n=\$(cat "\${COUNTER68_PATH}")
+n=\$((n + 1))
+echo "\$n" > "\${COUNTER68_PATH}"
+echo "iter \$n handoff" >> "$T68_LOOPS_REL/HANDOFF.md"
+if [[ \$n -ge 2 ]]; then
+  touch DONE
+fi
+echo '{"result": "mock68", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK68/claude"
+
+(
+  cd "$T68_PROJECT"
+  set +e
+  output68=$(PATH="$MOCK68:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T68_ID" --no-pr 2>&1)
+  result68=$?
+  set -e
+  WT68="$T68_PROJECT/$T68_LOOPS_REL/.worktree"
+  [[ $result68 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result68. got: $output68"; exit 1; }
+  # EARS 13: 메타 commit이 메타 갱신 횟수(=2)만큼 등장
+  meta_count=$(git -C "$WT68" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter [0-9]+$' || true)
+  [[ "$meta_count" -ge 2 ]] || { echo "FAIL: meta iter commit count=$meta_count (기대 ≥2, EARS 13)"; git -C "$WT68" log --oneline -20; exit 1; }
+  # EARS 13: 워크트리 HEAD에 .loop/ 부재
+  [[ ! -d "$WT68/.loop" ]] || { echo "FAIL: DONE 시점에 .loop/ 잔존 (EARS 13)"; exit 1; }
+  # EARS 13: 메타 파일은 milestones/<m>/loops/<id>/에서만 발견
+  for meta_f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md; do
+    [[ -f "$WT68/$T68_LOOPS_REL/$meta_f" ]] || { echo "FAIL: 메타 파일 부재 ($T68_LOOPS_REL/$meta_f) — 워커가 milestones/ 경로에 못 씀 (EARS 13)"; exit 1; }
+  done
 )
 echo "OK"
 

@@ -9,7 +9,7 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 처리:
 1. ESCALATION.md 본문 읽고 missing item 식별
 2. target 프로젝트 환경 조정 (도구 설치, env var 설정 등)
-3. `rm milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md`로 보고 해제 (또는 워크트리 안으로 들어가 정리)
+3. `rm milestones/<m>/loops/<c>/.worktree/milestones/<m>/loops/<c>/ESCALATION.md`로 보고 해제 (또는 워크트리 안으로 들어가 정리)
 4. `start <task-id>` 또는 watch 모드면 자동 재개
 
 ## spec-gap (SPEC.md 결함)
@@ -18,7 +18,7 @@ ESCALATION.md의 `**카테고리**` 필드 별 사람의 처리 권장 흐름.
 
 처리:
 1. ESCALATION.md의 "필요한 결정" 섹션 검토
-2. 워크트리의 SPEC.md 직접 수정. 워크트리 루트는 `milestones/<m>/loops/<c>/.worktree`이고 그 안 SPEC 위치는 contract에 따라 다름 — 신규 contract: `milestones/<m>/loops/<c>/SPEC.md`, legacy: `.loop/SPEC.md`. (SPEC 작성은 spec 스킬 사용: Skill(skill: "spec", args: "<task-id>"))
+2. 워크트리의 SPEC.md 직접 수정. 워크트리 루트는 `milestones/<m>/loops/<c>/.worktree`이고 그 안 SPEC 위치는 `milestones/<m>/loops/<c>/SPEC.md`. (SPEC 작성은 spec 스킬 사용: Skill(skill: "spec", args: "<task-id>"))
 3. ESCALATION.md 정리 후 재시작
 
 ## architecture-gap (코드 구조 변경 필요)
