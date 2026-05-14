@@ -61,6 +61,82 @@ normalize_task_id() {
   fi
 }
 
+# ----- task ↔ GitHub issue 매핑 (헌법 §11, rules/context.md) -----
+# task-id의 마지막 컴포넌트(예: 'regular/124' → '124')가 숫자면 issue number로 직접 사용.
+# 그 외 문자열이면 `gh issue list --search`로 첫 매칭 lookup. 실패 시 빈 출력 + return 1.
+# 호출자(halt·iterate·cmd_status)는 매핑 실패 시 graceful degrade한다.
+# M4-b 인라인 — M4-c에서 재시도/backoff 추가.
+task_issue_number() {
+  local task_id="${1:-$TASK_ID}"
+  local child="${task_id##*/}"
+  if [[ "$child" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$child"
+    return 0
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
+  fi
+  local n
+  n=$(gh issue list --search "$task_id" --json number --jq '.[0].number' 2>/dev/null || true)
+  if [[ -n "$n" && "$n" != "null" ]]; then
+    printf '%s\n' "$n"
+    return 0
+  fi
+  return 1
+}
+
+# task issue의 Project Status가 `Blocked`인지 검사 (헌법 §5·§12, SPEC AC4·8).
+# Project 미설정 환경 fallback: 가장 최근 issue comment의 본문 첫 줄이 `[blocked]`
+# prefix면 blocked로 간주. 0=blocked, 1=blocked 아님(판정 불가 포함).
+task_status_is_blocked() {
+  local task_id="${1:-$TASK_ID}"
+  local issue
+  issue=$(task_issue_number "$task_id" 2>/dev/null) || return 1
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
+  fi
+  local last_body
+  last_body=$(gh issue view "$issue" --json comments \
+    --jq '.comments | sort_by(.createdAt) | last | .body' 2>/dev/null || true)
+  if [[ -n "$last_body" ]] && printf '%s' "$last_body" | head -n 1 | grep -q '^\[blocked\]'; then
+    return 0
+  fi
+  return 1
+}
+
+# 자동 `[blocked]` prefix comment 발행 + Project Status=Blocked 전이 시도 (헌법 §5.2).
+# AUTOPILOT_PROJECT_ITEM_ID env가 있으면 Status 전이도 시도, 없으면 comment만.
+# 둘 다 best-effort — gh 미설치·실패 시 stderr WARN으로 알리고 비차단 진행.
+gh_post_blocked_comment() {
+  local task_id="$1"
+  local body="$2"
+  local issue
+  if ! issue=$(task_issue_number "$task_id" 2>/dev/null); then
+    echo "[$(now_iso)] WARN: task '$task_id' issue 매핑 실패 — [blocked] comment 건너뜀 (수동 보고 필요)" >&2
+    return 1
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "[$(now_iso)] WARN: gh CLI 부재 — issue #$issue [blocked] comment 건너뜀" >&2
+    return 1
+  fi
+  if ! gh issue comment "$issue" --body "$body" >/dev/null 2>&1; then
+    echo "[$(now_iso)] WARN: gh issue comment 실패 (issue #$issue) — 수동 발행 필요" >&2
+    return 1
+  fi
+  echo "[$(now_iso)] [blocked] prefix comment 발행: issue #$issue" >&2
+  if [[ -n "${AUTOPILOT_PROJECT_ITEM_ID:-}" ]]; then
+    if ! gh project item-edit \
+        --id "$AUTOPILOT_PROJECT_ITEM_ID" \
+        --field Status \
+        --value Blocked >/dev/null 2>&1; then
+      echo "[$(now_iso)] WARN: gh project item-edit 실패 (item=$AUTOPILOT_PROJECT_ITEM_ID) — comment는 발행됨" >&2
+    fi
+  else
+    echo "[$(now_iso)] INFO: AUTOPILOT_PROJECT_ITEM_ID 미설정 — Status=Blocked 전이 생략 (수동 전이 필요)" >&2
+  fi
+  return 0
+}
+
 now_iso() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
@@ -535,32 +611,36 @@ halt() {
     echo "  복구: cd $WT && git stash list / git stash pop" >&2
   fi
 
-  # 자동 ESCALATION 작성 — 단일 contract: milestones/<m>/loops/<c>/ESCALATION.md
-  mkdir -p "$WT/$LOOPS_DIR_REL"
-  cat > "$WT/$LOOPS_DIR_REL/ESCALATION.md" <<EOF
-# 에스컬레이션 보고 (드라이버 자동 작성)
+  # 자동 [blocked] prefix comment 발행 + Project Status=Blocked 전이 시도 (헌법 §5.2, SPEC AC5).
+  # 워크트리에 메타 파일을 쓰지 않는다 — 이터간 상태는 task issue body·comments에 위임.
+  local blocked_body
+  blocked_body=$(cat <<EOF
+[blocked] 에스컬레이션 보고 (드라이버 자동 작성)
 
 **작업**: $TASK_ID
 **이터레이션**: 자동 정지
+**카테고리**: config-gap | spec-gap | architecture-gap | environment-gap | other (사람 분류)
 **트리거**: 객관 게이트 위반 — $reason
 
-## 현재 상태
+### 현재 상태
 
 드라이버가 매 이터 후 게이트를 검사한 결과 위반이 감지되어 자동 정지함.
 
-## 문제
+### 문제
 
 $reason
 
-## 처리
+### 처리
 
 다음 중 하나:
 1. 가설 점검 후 작업 명세(scope·verify) 조정
-2. 메모리 파일(NOTES.md) 보강
-3. 본 ESCALATION.md 삭제 후 재시작
+2. 후속 메모를 \`[notes]\` prefix comment로 누적
+3. \`gh project item-edit --id <item-id> --field Status --value "In Progress"\`로 Blocked 해제 후 재시작
 
 자세한 내용은 워크트리 루트의 .iterations/ 디렉토리 최근 로그 참조.
 EOF
+)
+  gh_post_blocked_comment "$TASK_ID" "$blocked_body" || true
 
   exit 1
 }
@@ -624,8 +704,10 @@ iterate() {
   if [[ -f "$WT/DONE" ]]; then
     return 100   # 메인 루프에서 정상 종료 처리
   fi
-  if [[ -f "$WT/$LOOPS_DIR_REL/ESCALATION.md" ]]; then
-    return 101   # 메인 루프에서 ESCALATION 처리
+  # 워커가 진행 불가 보고 시 task issue에 [blocked] prefix comment + Status=Blocked 전이 (헌법 §5.2, SPEC AC5).
+  # 드라이버는 Project Status 또는 최신 comment prefix로 차단 신호를 감지한다 (SPEC AC4).
+  if task_status_is_blocked "$TASK_ID"; then
+    return 101   # 메인 루프에서 [blocked] 처리
   fi
 
   # 객관 게이트 9종
@@ -993,8 +1075,10 @@ cmd_status() {
     if [[ -f "$lock_file" ]]; then
       state="running"
     elif [[ -d "$wt" ]]; then
-      if [[ -f "$wt/$loops_dir_rel/ESCALATION.md" ]]; then
-        state="escalated"
+      # 차단 신호는 task issue의 Project Status=Blocked 또는 최신 [blocked] prefix comment.
+      # gh 부재·미설정 시 task_status_is_blocked가 1을 반환해 자연스럽게 idle로 떨어진다.
+      if task_status_is_blocked "$tid"; then
+        state="blocked"
       elif [[ -f "$wt/DONE" ]]; then
         state="done"
       else
