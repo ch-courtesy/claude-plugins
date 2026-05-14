@@ -383,12 +383,17 @@ read_scope_yaml() {
 }
 
 diff_vs_scope() {
+  local base_sha="$1"
   local scope_yaml include_patterns exclude_patterns committed working changed
   scope_yaml=$(read_scope_yaml)
   include_patterns=$(echo "$scope_yaml" | yq '.scope.include[]' 2>/dev/null || true)
   exclude_patterns=$(echo "$scope_yaml" | yq '.scope.exclude[]' 2>/dev/null || true)
-  # 커밋된 diff + working tree 변경 양쪽 검사 (claude 비정상 종료로 미커밋 변경이 남는 경우 차단)
-  committed=$(cd "$WT" && git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+  # 커밋된 diff: BASE..HEAD (워크트리 생성 시점부터 누적 변경) — HEAD~1..HEAD는 한 이터에 commit이
+  # 2개 이상(워커 코드 commit + 드라이버 메타 commit) 발생할 때 가장 최근 commit만 보여 직전 commit의
+  # 위반을 false-negative로 통과시키는 결함이 있다 (SPEC 81). BASE..HEAD는 누적이라 모든 이터의
+  # 모든 commit을 포함하지만, 이전 이터의 in-scope commit은 재검사돼도 동일하게 통과한다.
+  # 작업 트리 변경: claude 비정상 종료로 미커밋 변경이 남는 경우 추가로 차단.
+  committed=$(cd "$WT" && git diff --name-only "$base_sha" HEAD 2>/dev/null || true)
   working=$(cd "$WT" && git diff --name-only HEAD 2>/dev/null || true)
   changed=$(printf '%s\n%s\n' "$committed" "$working" | sort -u | grep -v '^$' || true)
 
@@ -442,8 +447,11 @@ diff_vs_scope() {
 }
 
 grep_new_suppressors() {
-  # 커밋된 diff + working tree 변경 양쪽 검사 (미커밋 suppressor도 catch)
+  # 커밋된 diff(BASE..HEAD) + working tree 변경 양쪽 검사 (미커밋 suppressor도 catch).
   # 메타 파일·SPEC은 워커 메모리·명세(헌법 인용 등 false positive 발생)이므로 검사 제외.
+  # BASE..HEAD 기준: 한 이터 안에 워커 commit + 드라이버 메타 commit 2단으로 누적될 때
+  # 워커 commit의 신규 suppressor가 HEAD~1..HEAD 시야에서 누락되는 false-negative 차단 (SPEC 81).
+  local base_sha="$1"
   cd "$WT" || return
   local meta_exclude=(
     ':(exclude)milestones/*/loops/*/PLAN.md'
@@ -454,7 +462,7 @@ grep_new_suppressors() {
     ':(exclude)milestones/*/loops/*/SPEC.md'
   )
   {
-    git diff HEAD~1 HEAD -- "${meta_exclude[@]}" 2>/dev/null
+    git diff "$base_sha" HEAD -- "${meta_exclude[@]}" 2>/dev/null
     git diff HEAD -- "${meta_exclude[@]}" 2>/dev/null
   } \
     | grep -E '^\+' \
@@ -464,14 +472,29 @@ grep_new_suppressors() {
 
 check_secrets() {
   command -v gitleaks >/dev/null 2>&1 || return 0
-  # 이번 이터 커밋(HEAD~1..HEAD) + 미커밋 staged 양쪽 검사
+  # 워크트리 생성 시점부터의 누적 commit (BASE..HEAD) + 미커밋 staged 양쪽 검사 (SPEC 81).
+  # HEAD~1..HEAD는 한 이터에 워커 commit + 메타 commit 2단으로 쌓일 때 워커 commit의 비밀이
+  # 누락될 수 있어 BASE..HEAD로 누적 검사.
   # 비고: gitleaks는 unstaged-tracked 변경의 직접 스캔 옵션이 없음 (--no-git은 워크트리
   #       전체 스캔이라 노이즈 큼) → unstaged-tracked는 본 게이트의 의도된 미커버.
   #       헌법이 매 이터 commit 강제하므로 일반 흐름에선 gap 없음.
+  local base_sha="$1"
   {
-    cd "$WT" && gitleaks detect --log-opts="HEAD~1..HEAD" --no-banner 2>&1 || true
+    cd "$WT" && gitleaks detect --log-opts="$base_sha..HEAD" --no-banner 2>&1 || true
     cd "$WT" && gitleaks detect --staged --no-banner 2>&1 || true
   }
+}
+
+# 워크트리 생성 시점의 부모 브랜치 HEAD SHA를 읽어 반환. 부재·빈값이면 비-0 exit.
+# BASE 메타는 `$WT/.iterations/BASE_SHA` 단일 파일 (info/exclude로 자기 참조 회피).
+# 워크트리 생성 시 1회 기록되며 이후 변경되지 않는다 (SPEC 81 AC1).
+read_base_sha() {
+  local f="$WT/.iterations/BASE_SHA"
+  [[ -f "$f" ]] || return 1
+  local sha
+  sha=$(tr -d '[:space:]' < "$f" 2>/dev/null)
+  [[ -n "$sha" ]] || return 1
+  printf '%s' "$sha"
 }
 
 count_fix_symptom_streak() {
@@ -642,16 +665,23 @@ iterate() {
     halt "의존성 변경 — 매니페스트 해시 변경"
   fi
 
+  # BASE SHA 메타 — 워크트리 생성 시점의 부모 브랜치 HEAD. 게이트 diff 비교 기준 (SPEC 81 AC2).
+  # 부재 시 명확한 에러로 halt (AC6: false-positive 통과 차단).
+  local base_sha
+  if ! base_sha=$(read_base_sha); then
+    halt "BASE SHA 메타 부재 — 워크트리 ${WT}의 .iterations/BASE_SHA 파일이 없습니다. 본 변경 이전에 생성된 pre-existing 워크트리로 의심됩니다. cleanup 후 재생성 필요 (loop.sh cleanup ${TASK_ID})."
+  fi
+
   local out_of_scope new_supp streak osc
-  out_of_scope=$(diff_vs_scope)
+  out_of_scope=$(diff_vs_scope "$base_sha")
   [[ -n "$out_of_scope" ]] && halt "Scope 위반: $out_of_scope"
 
-  new_supp=$(grep_new_suppressors)
+  new_supp=$(grep_new_suppressors "$base_sha")
   [[ -n "$new_supp" ]] && halt "Suppressor 신규 추가: $new_supp"
 
   if command -v gitleaks >/dev/null 2>&1; then
     local secrets
-    secrets=$(check_secrets)
+    secrets=$(check_secrets "$base_sha")
     [[ -n "$secrets" ]] && halt "Secrets 의심: $secrets"
   fi
 
@@ -790,6 +820,17 @@ cmd_start() {
     if [[ ! -f "$WT/$LOOPS_DIR_REL/SPEC.md" ]]; then
       die "feat 브랜치 ${BRANCH} 워크트리 HEAD에 SPEC.md 부재 (기대: $WT/$LOOPS_DIR_REL/SPEC.md)"
     fi
+
+    # BASE SHA 메타 캡처 (SPEC 81 AC1) — 워크트리 생성 직후, baseline commit 전.
+    # 게이트(scope·suppressor·secret)의 BASE..HEAD diff 기준점. `.iterations/`는
+    # info/exclude로 자동 untracked 처리되어 BASE_SHA 파일이 자기 참조 게이트 검사에 잡히지 않음.
+    mkdir -p "$WT/.iterations" \
+      || die ".iterations 디렉토리 생성 실패: $WT/.iterations"
+    local _base_sha_capture
+    _base_sha_capture=$(git -C "$WT" rev-parse HEAD 2>/dev/null) \
+      || die "BASE SHA 캡처 실패 (git rev-parse HEAD): $WT"
+    printf '%s\n' "$_base_sha_capture" > "$WT/.iterations/BASE_SHA" \
+      || die "BASE SHA 메타 기록 실패: $WT/.iterations/BASE_SHA"
 
     # 헌법을 워크트리 CLAUDE.md로 복사
     cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \

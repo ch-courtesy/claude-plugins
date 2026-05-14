@@ -2818,5 +2818,265 @@ chmod +x "$MOCK68/claude"
 )
 echo "OK"
 
+echo "=== TEST 69: SPEC 81 AC1 — 워크트리 생성 시 BASE SHA 메타 기록 (.iterations/BASE_SHA = 부모 브랜치 HEAD) ==="
+# 셋업: 일반 feat 브랜치 + worktree 생성.
+# 기대: $WT/.iterations/BASE_SHA 파일에 worktree add 시점의 부모 브랜치 HEAD SHA가 정확히 기록됨
+# (baseline commit 이전의 SHA. baseline commit이 만든 SHA가 들어가면 회귀).
+T69_PROJECT="$WORK_DIR/spec81-base-sha-record"
+mkdir -p "$T69_PROJECT"
+git -C "$T69_PROJECT" init -q
+git -C "$T69_PROJECT" config user.email "t@e.com"
+git -C "$T69_PROJECT" config user.name "Test"
+git -C "$T69_PROJECT" commit --allow-empty -m "initial" -q
+
+T69_ID="n69-base-sha-record"
+T69_BRANCH="feat/regular/$T69_ID"
+T69_LOOPS_REL="milestones/regular/loops/$T69_ID"
+T69_DEFAULT=$(git -C "$T69_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T69_PROJECT" checkout -q -b "$T69_BRANCH"
+mkdir -p "$T69_PROJECT/$T69_LOOPS_REL"
+cat > "$T69_PROJECT/$T69_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 81 Test 69
+EOF
+git -C "$T69_PROJECT" add "$T69_LOOPS_REL/SPEC.md"
+git -C "$T69_PROJECT" commit -q -m "feat(spec): n69 base sha record"
+T69_FEAT_HEAD=$(git -C "$T69_PROJECT" rev-parse HEAD)
+git -C "$T69_PROJECT" checkout -q "$T69_DEFAULT"
+
+(
+  cd "$T69_PROJECT"
+  set +e
+  output69=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T69_ID" --no-pr 2>&1)
+  result69=$?
+  set -e
+  WT69="$T69_PROJECT/$T69_LOOPS_REL/.worktree"
+  # iter 1에 mock(DONE 생성)으로 정상 종료 — exit 0 기대.
+  [[ $result69 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result69. got: $output69"; exit 1; }
+  # AC1: BASE_SHA 파일 존재
+  [[ -f "$WT69/.iterations/BASE_SHA" ]] \
+    || { echo "FAIL: BASE_SHA 파일 부재 ($WT69/.iterations/BASE_SHA) — AC1 위반"; exit 1; }
+  # AC1: 내용 = worktree add 시점의 부모 브랜치 HEAD SHA (= feat 브랜치 HEAD before baseline)
+  recorded_base=$(tr -d '[:space:]' < "$WT69/.iterations/BASE_SHA")
+  [[ "$recorded_base" == "$T69_FEAT_HEAD" ]] \
+    || { echo "FAIL: BASE_SHA 내용 불일치. got='$recorded_base', expected='$T69_FEAT_HEAD' (feat HEAD before baseline)"; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 70: SPEC 81 AC2/AC4 — 한 이터에 워커 코드 commit + 드라이버 메타 commit 2단 → out-of-scope 코드 catch (BASE..HEAD) ==="
+# 셋업: scope.include = "src/**" (좁은 범위).
+# mock claude: out-of-scope 파일(bad.txt) git add + 자체 commit + HANDOFF.md 수정 (uncommitted).
+# 현 동작(HEAD~1..HEAD): 메타 commit이 워커 commit 위에 붙어 HEAD~1=워커commit, HEAD=메타commit →
+#   diff에 메타 파일만 나와 메타 필터로 사라짐 → out-of-scope 위반 false-negative 통과.
+# 새 동작(BASE..HEAD): worktree 생성 후 누적 diff에서 워커 commit의 out-of-scope 변경 catch → halt.
+T70_PROJECT="$WORK_DIR/spec81-multi-commit-scope"
+mkdir -p "$T70_PROJECT"
+git -C "$T70_PROJECT" init -q
+git -C "$T70_PROJECT" config user.email "t@e.com"
+git -C "$T70_PROJECT" config user.name "Test"
+git -C "$T70_PROJECT" commit --allow-empty -m "initial" -q
+
+T70_ID="n70-multi-commit-scope"
+T70_BRANCH="feat/regular/$T70_ID"
+T70_LOOPS_REL="milestones/regular/loops/$T70_ID"
+T70_DEFAULT=$(git -C "$T70_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T70_PROJECT" checkout -q -b "$T70_BRANCH"
+mkdir -p "$T70_PROJECT/$T70_LOOPS_REL"
+cat > "$T70_PROJECT/$T70_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "src/**"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 81 Test 70
+EOF
+git -C "$T70_PROJECT" add "$T70_LOOPS_REL/SPEC.md"
+git -C "$T70_PROJECT" commit -q -m "feat(spec): n70 multi commit scope"
+git -C "$T70_PROJECT" checkout -q "$T70_DEFAULT"
+
+MOCK70="$WORK_DIR/mock70-bin"
+mkdir -p "$MOCK70"
+# mock: bad.txt (out-of-scope) git add+commit + HANDOFF.md 수정 (uncommitted). DONE 안 만듦 → 게이트 평가됨.
+cat > "$MOCK70/claude" <<MOCKEOF
+#!/usr/bin/env bash
+cat > /dev/null
+# cwd = worktree root
+git config user.email t@e.com
+git config user.name T
+echo "out of scope" > bad.txt
+git add bad.txt
+git commit -q -m "feat: out of scope worker commit"
+echo "handoff update" >> "$T70_LOOPS_REL/HANDOFF.md"
+echo '{"result": "mock70", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK70/claude"
+
+(
+  cd "$T70_PROJECT"
+  set +e
+  output70=$(PATH="$MOCK70:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T70_ID" --no-pr 2>&1)
+  result70=$?
+  set -e
+  WT70="$T70_PROJECT/$T70_LOOPS_REL/.worktree"
+  # AC2/AC4: out-of-scope bad.txt를 게이트가 catch → halt (exit≠0) + ESCALATION.md + 스코프 위반 메시지
+  [[ $result70 -ne 0 ]] \
+    || { echo "FAIL: out-of-scope 워커 commit + 메타 commit 2단 이후에도 halt 없이 0 exit — BASE..HEAD 미적용, false-negative (AC2/AC4)"; echo "$output70" | tail -20; exit 1; }
+  echo "$output70" | grep -qE "Scope 위반|scope.*위반|bad\.txt" \
+    || { echo "FAIL: scope 위반 메시지 없음 — bad.txt가 게이트 diff에 포함 안 됨 (AC2/AC4)"; echo "$output70" | tail -30; exit 1; }
+)
+echo "OK"
+
+echo "=== TEST 71: SPEC 81 AC3/AC5 — 머지 commit 부모 + 워커 무변경 첫 이터 → 스코프 halt 없음 (회귀 방지) ==="
+# 셋업: feat 브랜치 HEAD = 머지 commit (main을 feat에 머지).
+# mock claude: 아무 변경 없음 (DONE 안 만들고 메타도 안 만짐).
+# 기대: iter 1 종료 시 scope 위반 halt 없음. MAX_ITERATIONS=1이라 상한 도달 halt는 정상.
+T71_PROJECT="$WORK_DIR/spec81-merge-noop"
+mkdir -p "$T71_PROJECT"
+git -C "$T71_PROJECT" init -q
+git -C "$T71_PROJECT" config user.email "t@e.com"
+git -C "$T71_PROJECT" config user.name "Test"
+git -C "$T71_PROJECT" commit --allow-empty -m "initial" -q
+
+T71_ID="n71-merge-noop"
+T71_BRANCH="feat/regular/$T71_ID"
+T71_LOOPS_REL="milestones/regular/loops/$T71_ID"
+T71_DEFAULT=$(git -C "$T71_PROJECT" rev-parse --abbrev-ref HEAD)
+
+git -C "$T71_PROJECT" checkout -q -b "$T71_BRANCH"
+mkdir -p "$T71_PROJECT/$T71_LOOPS_REL"
+cat > "$T71_PROJECT/$T71_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "src/**"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 81 Test 71
+EOF
+git -C "$T71_PROJECT" add "$T71_LOOPS_REL/SPEC.md"
+git -C "$T71_PROJECT" commit -q -m "feat(spec): n71 merge noop"
+
+# default 브랜치에서 sidefile 추가
+git -C "$T71_PROJECT" checkout -q "$T71_DEFAULT"
+echo "side" > "$T71_PROJECT/sidefile.txt"
+git -C "$T71_PROJECT" add sidefile.txt
+git -C "$T71_PROJECT" commit -q -m "main side commit"
+
+# feat에 머지 (no-ff로 머지 commit 보장)
+git -C "$T71_PROJECT" checkout -q "$T71_BRANCH"
+git -C "$T71_PROJECT" merge --no-ff --no-edit -q "$T71_DEFAULT"
+git -C "$T71_PROJECT" checkout -q "$T71_DEFAULT"
+
+MOCK71="$WORK_DIR/mock71-bin"
+mkdir -p "$MOCK71"
+# mock: 진짜 아무것도 안 함
+cat > "$MOCK71/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+echo '{"result": "mock71", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK71/claude"
+
+(
+  cd "$T71_PROJECT"
+  set +e
+  output71=$(PATH="$MOCK71:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T71_ID" --no-pr 2>&1)
+  set -e
+  # AC3/AC5: scope 위반 메시지가 절대 나오면 안 됨 (머지 parent + noop → 정상)
+  if echo "$output71" | grep -qE "Scope 위반|scope.*위반|sidefile\.txt"; then
+    echo "FAIL: 머지 parent + 워커 무변경에서 스코프 위반 false-positive halt (AC3 회귀)"; echo "$output71" | tail -40; exit 1
+  fi
+  # AC3: 만약 halt 발생했다면 그 이유는 상한 도달이어야 (scope·suppressor·secret 위반이 아닌)
+  if echo "$output71" | grep -qE "HALT:"; then
+    echo "$output71" | grep -qE "HALT:.*이터 상한 도달|HALT:.*상한" \
+      || { echo "FAIL: 머지 parent + noop에서 의도하지 않은 HALT (상한 외 위반)"; echo "$output71" | tail -40; exit 1; }
+  fi
+)
+echo "OK"
+
+echo "=== TEST 72: SPEC 81 AC6 — BASE_SHA 메타 부재 워크트리에서 게이트 명확한 에러로 halt ==="
+# 셋업: 일반 워크트리 생성 후, BASE_SHA 파일을 지움 (pre-existing 워크트리 시뮬레이션).
+# mock claude: 아무 변경 없음 → 게이트가 평가됨.
+# 기대: BASE_SHA 부재가 게이트 단계에서 명확한 에러로 halt (false-positive 통과 안 됨).
+T72_PROJECT="$WORK_DIR/spec81-missing-base"
+mkdir -p "$T72_PROJECT"
+git -C "$T72_PROJECT" init -q
+git -C "$T72_PROJECT" config user.email "t@e.com"
+git -C "$T72_PROJECT" config user.name "Test"
+git -C "$T72_PROJECT" commit --allow-empty -m "initial" -q
+
+T72_ID="n72-missing-base"
+T72_BRANCH="feat/regular/$T72_ID"
+T72_LOOPS_REL="milestones/regular/loops/$T72_ID"
+T72_DEFAULT=$(git -C "$T72_PROJECT" rev-parse --abbrev-ref HEAD)
+git -C "$T72_PROJECT" checkout -q -b "$T72_BRANCH"
+mkdir -p "$T72_PROJECT/$T72_LOOPS_REL"
+cat > "$T72_PROJECT/$T72_LOOPS_REL/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Spec 81 Test 72
+EOF
+git -C "$T72_PROJECT" add "$T72_LOOPS_REL/SPEC.md"
+git -C "$T72_PROJECT" commit -q -m "feat(spec): n72 missing base"
+git -C "$T72_PROJECT" checkout -q "$T72_DEFAULT"
+
+# 1차 invocation: 워크트리·BASE_SHA 정상 생성 (mock=DONE 즉시).
+# 1차 종료 후 BASE_SHA를 지워 pre-existing 워크트리 시뮬레이션.
+# 그리고 DONE도 지우고 mock을 noop으로 바꿔 게이트 평가가 일어나게 한 뒤 재진입.
+(
+  cd "$T72_PROJECT"
+  set +e
+  MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T72_ID" --no-pr >/dev/null 2>&1
+  set -e
+)
+WT72="$T72_PROJECT/$T72_LOOPS_REL/.worktree"
+[[ -f "$WT72/.iterations/BASE_SHA" ]] \
+  || { echo "FAIL (전제): 1차 invocation에서 BASE_SHA가 생성됐어야 함"; exit 1; }
+rm -f "$WT72/.iterations/BASE_SHA"
+rm -f "$WT72/DONE"
+
+# noop mock으로 교체해 iter 안에서 게이트가 평가되게 만듦
+MOCK72="$WORK_DIR/mock72-bin"
+mkdir -p "$MOCK72"
+cat > "$MOCK72/claude" <<'MOCKEOF'
+#!/usr/bin/env bash
+cat > /dev/null
+echo '{"result": "mock72", "usage": {"input_tokens": 1, "output_tokens": 1}}'
+MOCKEOF
+chmod +x "$MOCK72/claude"
+
+(
+  cd "$T72_PROJECT"
+  set +e
+  output72=$(PATH="$MOCK72:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T72_ID" --no-pr 2>&1)
+  result72=$?
+  set -e
+  # AC6: BASE_SHA 부재 → 명확한 halt (exit ≠ 0)
+  [[ $result72 -ne 0 ]] \
+    || { echo "FAIL: BASE_SHA 부재인데 0 exit으로 통과 — false-positive 통과 (AC6 위반)"; echo "$output72" | tail -30; exit 1; }
+  # AC6: 에러 메시지에 BASE SHA 또는 base 메타 부재 단서가 있어야 함
+  echo "$output72" | grep -qiE "BASE.*SHA|베이스.*메타|base.*sha|BASE_SHA" \
+    || { echo "FAIL: BASE_SHA 부재 진단 메시지 없음 (AC6의 '명확한 에러 메시지' 요구 위반)"; echo "$output72" | tail -30; exit 1; }
+)
+echo "OK"
+
 echo ""
 echo "=== 모든 테스트 통과 ==="
