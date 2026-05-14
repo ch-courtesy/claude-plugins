@@ -186,39 +186,77 @@ compute_paths() {
   task_id="$(normalize_task_id "$raw_task_id")"
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
-  # BRANCH는 cmd_start의 feat 브랜치 감지에서만 설정 — 단일 contract.
-  # v0.2 cutover: 워크트리·lock·메타 파일이 모두 milestones/<m>/loops/<c>/ 단일
-  # 트리 안에 있다. 외부 sibling·.loops/locks/는 사용하지 않음.
   local milestone="${task_id%%/*}"
   local child="${task_id#*/}"
-  LOOPS_DIR="$PROJECT_ROOT/milestones/$milestone/loops/$child"
-  # LOOPS_DIR_REL: worktree 안의 SPEC.md canonical 경로 prefix (신규 contract).
-  # 신규 contract에선 SPEC.md가 feat 브랜치에 commit되어 worktree에서
-  # <wt>/$LOOPS_DIR_REL/SPEC.md 경로로 자연 노출된다.
-  LOOPS_DIR_REL="milestones/$milestone/loops/$child"
+
+  # SPEC 116 단일 컨벤션: feat 브랜치 이름의 slug 가 디렉토리 이름의 suffix.
+  # find_feat_branch 가 input-id (child) 만으로 `feat/<child>-<slug>` 또는 `feat/<child>` 를 찾는다.
+  # 매칭 없음(rc=1)은 legacy/uninitialized 상태로 간주해 slug-less fallback.
+  # 매칭 2+ (rc=2)는 모호성으로 즉시 die.
+  local feat_branch=""
+  local ffb_rc=0
+  set +e
+  feat_branch=$(find_feat_branch "$child")
+  ffb_rc=$?
+  set -e
+  case $ffb_rc in
+    0) ;;                     # 단일 매칭
+    1) feat_branch="" ;;      # 매칭 없음 — slug-less fallback
+    2) die "여러 feat 브랜치가 input-id '$child' 와 매칭됩니다 (위 stderr 참조)." ;;
+    *) die "find_feat_branch 비정상 종료 (rc=$ffb_rc)" ;;
+  esac
+
+  # feat 브랜치 이름에서 slug 추출 — `feat/<child>-<slug>` 패턴의 suffix.
+  local slug=""
+  if [[ -n "$feat_branch" ]]; then
+    local prefix="feat/$child"
+    if [[ "$feat_branch" == "${prefix}-"* ]]; then
+      slug="${feat_branch#${prefix}-}"
+    fi
+    # feat_branch == "$prefix" (slug-less 브랜치) → slug 비어있음 유지
+  fi
+
+  local loop_dir_name="$child"
+  if [[ -n "$slug" ]]; then
+    loop_dir_name="$child-$slug"
+  fi
+
+  # v0.2 cutover: 워크트리·lock·메타 파일이 모두 milestones/<m>/loops/<c>[-<slug>]/ 단일 트리.
+  LOOPS_DIR="$PROJECT_ROOT/milestones/$milestone/loops/$loop_dir_name"
+  # LOOPS_DIR_REL: worktree 안의 SPEC.md canonical 경로 prefix.
+  # SPEC.md 는 feat 브랜치에 동일 slug-bearing 경로로 commit 되어 worktree 에서
+  # <wt>/$LOOPS_DIR_REL/SPEC.md 로 자연 노출된다.
+  LOOPS_DIR_REL="milestones/$milestone/loops/$loop_dir_name"
   WT="$LOOPS_DIR/.worktree"
   LOCK_FILE="$LOOPS_DIR/.lock"
-  # 정규화된 task-id를 caller에게 노출 (cmd_start에서 TASK_ID로 사용)
+  # 정규화된 task-id 와 발견된 feat 브랜치를 caller 에게 노출.
   TASK_ID_NORMALIZED="$task_id"
+  FEAT_BRANCH="$feat_branch"
 }
 
-# 신규 contract 감지: feat/<task-id> 또는 feat/<task-id>-<slug> 브랜치 검색.
-# 0개 매칭이면 빈 출력 + return 1 (legacy 분기로 fallback).
-# 정확히 1개 매칭이면 브랜치 이름 출력 + return 0.
-# 2개 이상이면 die (모호성).
+# feat 브랜치 검색: input-id (정규화된 task-id 의 child 컴포넌트) 만으로 `feat/<id>` 또는
+# `feat/<id>-<slug>` 패턴을 찾는다. SPEC 116 단일 컨벤션 — milestone prefix 는 사용하지 않는다.
+#
+# 반환:
+#   0 + stdout 에 단일 브랜치 이름     — 매칭 정확히 1개
+#   1 + stdout 빈 출력                — 매칭 없음 (legacy/uninitialized)
+#   2 + stderr 모호성 안내            — 매칭 2개 이상 (caller 가 die 결정)
 find_feat_branch() {
-  local task_id="$1"
+  local input_id="$1"
   local matches count
   matches=$(git -C "$PROJECT_ROOT" for-each-ref \
     --format='%(refname:short)' \
-    "refs/heads/feat/$task_id" \
-    "refs/heads/feat/$task_id-*" 2>/dev/null)
+    "refs/heads/feat/$input_id" \
+    "refs/heads/feat/$input_id-*" 2>/dev/null)
   if [[ -z "$matches" ]]; then
     return 1
   fi
   count=$(printf '%s\n' "$matches" | grep -c .)
   if [[ $count -ge 2 ]]; then
-    die "여러 feat 브랜치가 task-id '$task_id'와 매칭됨 (모호):\n$matches\n수동으로 하나 남기고 다른 것 정리 후 재시도."
+    echo "ERROR: 여러 feat 브랜치가 input-id '$input_id' 와 매칭됨 (모호):" >&2
+    printf '%s\n' "$matches" >&2
+    echo "수동으로 하나 남기고 다른 것 정리 후 재시도." >&2
+    return 2
   fi
   printf '%s\n' "$matches"
   return 0
@@ -763,13 +801,13 @@ cmd_start() {
     echo "외부 SPEC 파일 복사: $spec_path → $LOOPS_DIR/SPEC.md"
   fi
 
-  # 1.5. 단일 contract: feat/<task-id>[-<slug>] 브랜치를 main repo에서 찾고 worktree base로 사용.
+  # 1.5. 단일 contract: feat/<input-id>[-<slug>] 브랜치를 compute_paths 에서 이미 검색·캐시 (FEAT_BRANCH).
   # 없으면 즉시 abort — legacy task-branch fallback 분기는 제거됨 (v0.3 cutover).
-  local feat_branch=""
-  if ! feat_branch=$(find_feat_branch "$task_id") || [[ -z "$feat_branch" ]]; then
-    die "feat 브랜치 부재 — 'feat/${task_id}' 또는 'feat/${task_id}-<slug>' 브랜치가 main repo에 없음.\n먼저 실행하세요: Skill(skill: \"spec\", args: \"$task_id\")"
+  if [[ -z "${FEAT_BRANCH:-}" ]]; then
+    local _child="${task_id#*/}"
+    die "feat 브랜치 부재 — 'feat/${_child}' 또는 'feat/${_child}-<slug>' 브랜치가 main repo에 없음.\n먼저 실행하세요: Skill(skill: \"spec\", args: \"$_child\")"
   fi
-  BRANCH="$feat_branch"
+  BRANCH="$FEAT_BRANCH"
 
   # 2. SPEC.md 존재·내용 검증 — feat 브랜치 commit에서 읽음.
   local spec_content=""
@@ -976,14 +1014,34 @@ cmd_start() {
 cmd_status() {
   local filter_task_id="${1:-}"
 
-  # filter 지정 시 task-id 검증 + 정규화 (단일 컴포넌트 → regular/)
+  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || die "git 저장소 안에서 실행해야 합니다."
+
+  # filter 지정 시 task-id 검증 + 정규화 (단일 컴포넌트 → regular/) + SPEC 116
+  # slug-bearing 디렉토리 매핑 (feat 브랜치 발견 시).
   if [[ -n "$filter_task_id" ]]; then
     validate_task_id "$filter_task_id"
     filter_task_id="$(normalize_task_id "$filter_task_id")"
+    local _fchild="${filter_task_id#*/}"
+    local _fmile="${filter_task_id%%/*}"
+    local _ffeat=""
+    local _frc=0
+    set +e
+    _ffeat=$(find_feat_branch "$_fchild")
+    _frc=$?
+    set -e
+    case $_frc in
+      0|1) ;;  # 단일 매칭 또는 매칭 없음 — 다음 단계로
+      2) die "filter input-id '$_fchild' 가 모호 (위 stderr 참조)" ;;
+      *) die "find_feat_branch 비정상 종료 (rc=$_frc)" ;;
+    esac
+    if [[ -n "$_ffeat" ]]; then
+      local _fprefix="feat/$_fchild"
+      if [[ "$_ffeat" == "${_fprefix}-"* ]]; then
+        filter_task_id="${_fmile}/${_fchild}-${_ffeat#${_fprefix}-}"
+      fi
+    fi
   fi
-
-  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
-    || die "git 저장소 안에서 실행해야 합니다."
 
   # task-id 목록 수집: milestones/<m>/loops/<c>/SPEC.md 단일 트리
   # (M1 cutover: legacy .loops/<id>/SPEC.md 스캔 제거)

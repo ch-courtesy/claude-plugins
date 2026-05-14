@@ -62,9 +62,22 @@ if [[ -z "$DEFAULT_BRANCH" ]]; then
 fi
 
 # ----- SPEC 제목·본문 추출 (M3) -----
-# TASK_ID는 정규화된 '<milestone>/<child>' 형태. 단일 contract: SPEC은 워크트리 안의
-# milestones/<m>/loops/<c>/SPEC.md 단일 경로에서 읽음.
-SPEC_FILE="$WT/milestones/${TASK_ID%%/*}/loops/${TASK_ID#*/}/SPEC.md"
+# TASK_ID 는 정규화된 '<milestone>/<child>' 형태. SPEC 116 단일 컨벤션:
+# SPEC.md 는 워크트리 안의 `milestones/<m>/loops/<child>-<slug>/SPEC.md` (slug 비-empty 시)
+# 또는 fallback `milestones/<m>/loops/<child>/SPEC.md` 단일 경로에서 읽는다.
+# slug 는 $BRANCH (`feat/<child>-<slug>`) 이름에서 추출 — spec 스킬·loop 드라이버와 동일 키.
+SPEC_MILESTONE="${TASK_ID%%/*}"
+SPEC_CHILD="${TASK_ID#*/}"
+SPEC_SLUG_FROM_BRANCH=""
+SPEC_BRANCH_PREFIX="feat/${SPEC_CHILD}"
+if [[ "$BRANCH" == "${SPEC_BRANCH_PREFIX}-"* ]]; then
+  SPEC_SLUG_FROM_BRANCH="${BRANCH#${SPEC_BRANCH_PREFIX}-}"
+fi
+if [[ -n "$SPEC_SLUG_FROM_BRANCH" ]]; then
+  SPEC_FILE="$WT/milestones/${SPEC_MILESTONE}/loops/${SPEC_CHILD}-${SPEC_SLUG_FROM_BRANCH}/SPEC.md"
+else
+  SPEC_FILE="$WT/milestones/${SPEC_MILESTONE}/loops/${SPEC_CHILD}/SPEC.md"
+fi
 [[ -f "$SPEC_FILE" ]] || { echo "ERROR: SPEC.md 없음: $SPEC_FILE" >&2; exit 1; }
 
 # 첫 H1 (frontmatter 이후의 단일 # 라인)
