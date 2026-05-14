@@ -449,8 +449,7 @@ diff_vs_scope() {
 grep_new_suppressors() {
   # 커밋된 diff(BASE..HEAD) + working tree 변경 양쪽 검사 (미커밋 suppressor도 catch).
   # 메타 파일·SPEC은 워커 메모리·명세(헌법 인용 등 false positive 발생)이므로 검사 제외.
-  # BASE..HEAD 기준: 한 이터 안에 워커 commit + 드라이버 메타 commit 2단으로 누적될 때
-  # 워커 commit의 신규 suppressor가 HEAD~1..HEAD 시야에서 누락되는 false-negative 차단 (SPEC 81).
+  # BASE..HEAD 근거는 diff_vs_scope 주석 참조 (SPEC 81).
   local base_sha="$1"
   cd "$WT" || return
   local meta_exclude=(
@@ -472,9 +471,7 @@ grep_new_suppressors() {
 
 check_secrets() {
   command -v gitleaks >/dev/null 2>&1 || return 0
-  # 워크트리 생성 시점부터의 누적 commit (BASE..HEAD) + 미커밋 staged 양쪽 검사 (SPEC 81).
-  # HEAD~1..HEAD는 한 이터에 워커 commit + 메타 commit 2단으로 쌓일 때 워커 commit의 비밀이
-  # 누락될 수 있어 BASE..HEAD로 누적 검사.
+  # BASE..HEAD 누적 commit + 미커밋 staged 양쪽 검사. BASE..HEAD 근거는 diff_vs_scope 주석 참조 (SPEC 81).
   # 비고: gitleaks는 unstaged-tracked 변경의 직접 스캔 옵션이 없음 (--no-git은 워크트리
   #       전체 스캔이라 노이즈 큼) → unstaged-tracked는 본 게이트의 의도된 미커버.
   #       헌법이 매 이터 commit 강제하므로 일반 흐름에선 gap 없음.
@@ -822,8 +819,11 @@ cmd_start() {
     fi
 
     # BASE SHA 메타 캡처 (SPEC 81 AC1) — 워크트리 생성 직후, baseline commit 전.
-    # 게이트(scope·suppressor·secret)의 BASE..HEAD diff 기준점. `.iterations/`는
-    # info/exclude로 자동 untracked 처리되어 BASE_SHA 파일이 자기 참조 게이트 검사에 잡히지 않음.
+    # 게이트(scope·suppressor·secret)의 BASE..HEAD diff 기준점. BASE_SHA는 git add된 적
+    # 없는 untracked 파일이므로 `git diff --name-only` 시야 밖 — 자기 참조 게이트 검사에
+    # 잡히지 않는다. info/exclude는 별개 효과로 워크트리 git status에서 `.iterations/`
+    # 노이즈를 억제할 뿐 untracked 상태와는 무관.
+    # `.iterations/`는 iter raw 로그 디렉토리도 겸한다 (이전 별도 mkdir 블록 통합).
     mkdir -p "$WT/.iterations" \
       || die ".iterations 디렉토리 생성 실패: $WT/.iterations"
     local _base_sha_capture
@@ -843,9 +843,6 @@ cmd_start() {
       git -C "$WT" update-index --skip-worktree CLAUDE.md \
         || die "skip-worktree 설정 실패: $WT/CLAUDE.md"
     fi
-
-    # iter raw 로그 디렉토리 — 워크트리-local untracked (info/exclude로 가림).
-    mkdir -p "$WT/.iterations"
 
     # 메타 파일 시드 — 단일 contract: milestones/<m>/loops/<c>/ 안에 직접 cp.
     # feat 브랜치 체크아웃으로 LOOPS_DIR_REL 디렉토리는 이미 존재 (SPEC.md 포함).
