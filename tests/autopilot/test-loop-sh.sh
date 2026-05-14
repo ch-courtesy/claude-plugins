@@ -49,8 +49,14 @@ export PATH="$MOCK_BIN:$PATH"
 command -v yq >/dev/null || { echo "SKIP: yq 미설치"; exit 0; }
 
 # loop.sh 호출 헬퍼 (새 아키텍처: SKILL_REFS에서 직접 호출)
+# main의 PR phase default-enabled 변경(#109) 흡수: start 서브커맨드에 --no-pr 자동 주입.
+# PR phase는 별도 tests/autopilot/test-loop-pr-phase.sh가 다룬다.
 loop() {
-  bash "$LOOP_SH_SRC" "$@"
+  if [[ "${1:-}" == "start" ]]; then
+    bash "$LOOP_SH_SRC" "$@" --no-pr
+  else
+    bash "$LOOP_SH_SRC" "$@"
+  fi
 }
 
 # SPEC 110 단일 contract — feat 브랜치에 SPEC.md를 commit해 단일 contract 셋업.
@@ -1095,7 +1101,7 @@ EOF
     setup_feat_with_spec "$PROJECT" "shasum-fallback"
     set +e
     output29=$(PATH="$ISOLATED_PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
-      bash "$LOOP_SH_SRC" start "shasum-fallback" 2>&1)
+      bash "$LOOP_SH_SRC" start "shasum-fallback" --no-pr 2>&1)
     result29=$?
     set -e
     [[ $result29 -eq 0 ]] \
@@ -1342,7 +1348,7 @@ verify: 'true'
 # First Task
 EOF
 # 단일 contract: feat 브랜치 없으면 die — 본 테스트는 ensure_loops_setup의 .gitignore 갱신만 검증.
-(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "first-task" --spec "$GITIGN_SPEC34" > /dev/null 2>&1 || true)
+(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "first-task" --spec "$GITIGN_SPEC34" --no-pr > /dev/null 2>&1 || true)
 
 [[ -f "$GITIGN_PROJECT/.gitignore" ]] || { echo "FAIL: .gitignore 사라짐"; exit 1; }
 grep -qxF 'milestones/**/loops/**/.worktree/' "$GITIGN_PROJECT/.gitignore" \
@@ -1378,7 +1384,7 @@ verify: 'true'
 EOF
 # 두 번째 호출 시점에 변경 없음 확인 (commit 추가 없음). feat 브랜치 부재로 die 정상.
 HEAD_BEFORE_35=$(git -C "$GITIGN_PROJECT" rev-parse HEAD)
-(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "second-task" --spec "$GITIGN_SPEC35" > /dev/null 2>&1 || true)
+(cd "$GITIGN_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "second-task" --spec "$GITIGN_SPEC35" --no-pr > /dev/null 2>&1 || true)
 COUNT35_WT=$(grep -cxF 'milestones/**/loops/**/.worktree/' "$GITIGN_PROJECT/.gitignore")
 COUNT35_LOCK=$(grep -cxF 'milestones/**/loops/**/.lock' "$GITIGN_PROJECT/.gitignore")
 [[ $COUNT35_WT -eq 1 ]] \
@@ -1415,7 +1421,7 @@ verify: 'true'
 ---
 # Task X
 EOF
-(cd "$NL_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "task-x" --spec "$GITIGN_SPEC36" > /dev/null 2>&1 || true)
+(cd "$NL_PROJECT" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "task-x" --spec "$GITIGN_SPEC36" --no-pr > /dev/null 2>&1 || true)
 
 # 두 라인이 정확히 분리됐는지 (붙어버리면 'node_modulesmilestones/...'가 됨)
 grep -qx 'node_modules' "$NL_PROJECT/.gitignore" \
@@ -1536,7 +1542,7 @@ EOF
   setup_feat_with_spec "$TDD_PROJECT" "tdd-add"
   set +e
   output38=$(PATH="$MOCK38:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 \
-    bash "$LOOP_SH_SRC" start "tdd-add" 2>&1)
+    bash "$LOOP_SH_SRC" start "tdd-add" --no-pr 2>&1)
   result38=$?
   set -e
   [[ $result38 -eq 0 ]] || { echo "FAIL: 새 test 추가가 weakening halt 트리거 (regression). exit=$result38"; echo "$output38"; exit 1; }
@@ -1590,7 +1596,7 @@ EOF
   setup_feat_with_spec "$TDD_MOD_PROJECT" "tdd-mod"
   set +e
   output39=$(PATH="$MOCK39:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
-    bash "$LOOP_SH_SRC" start "tdd-mod" 2>&1)
+    bash "$LOOP_SH_SRC" start "tdd-mod" --no-pr 2>&1)
   result39=$?
   set -e
   [[ $result39 -ne 0 ]] || { echo "FAIL: 기존 test 수정이 halt 트리거 안 됨 (exit 0)"; echo "$output39"; exit 1; }
@@ -1631,7 +1637,7 @@ setup_feat_with_spec "$PROJECT" "$ORPHAN_TASK"
 # 백그라운드에서 loop start 실행
 rm -f "$CLAUDE_PID_FILE"
 PATH="$LONG_MOCK:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 \
-  bash "$LOOP_SH_SRC" start "$ORPHAN_TASK" > "$WORK_DIR/orphan-output.log" 2>&1 &
+  bash "$LOOP_SH_SRC" start "$ORPHAN_TASK" --no-pr > "$WORK_DIR/orphan-output.log" 2>&1 &
 LOOP_PID=$!
 
 # claude PID 파일이 생길 때까지 대기 (max 5초)
@@ -1705,7 +1711,7 @@ setup_feat_with_spec "$PROJECT" "$FORCE_TASK"
 # 백그라운드에서 loop start
 rm -f "$CLAUDE_PID_FILE_41"
 PATH="$LONG_MOCK_41:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=10 \
-  bash "$LOOP_SH_SRC" start "$FORCE_TASK" > "$WORK_DIR/force-output.log" 2>&1 &
+  bash "$LOOP_SH_SRC" start "$FORCE_TASK" --no-pr > "$WORK_DIR/force-output.log" 2>&1 &
 LOOP_PID_41=$!
 
 # claude PID 파일 대기
@@ -2034,7 +2040,7 @@ EOF
   setup_feat_with_spec "$SWEEP_OK_PROJECT" "sweep-ok"
   set +e
   output51=$(PATH="$MOCK51:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
-    bash "$LOOP_SH_SRC" start "sweep-ok" 2>&1)
+    bash "$LOOP_SH_SRC" start "sweep-ok" --no-pr 2>&1)
   result51=$?
   set -e
   [[ $result51 -eq 0 ]] || { echo "FAIL: sweep 경로 수정이 weakening halt 트리거. exit=$result51"; echo "$output51"; exit 1; }
@@ -2086,7 +2092,7 @@ EOF
   setup_feat_with_spec "$SWEEP_WARN_PROJECT" "sweep-warn"
   set +e
   output52=$(PATH="$MOCK52:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
-    bash "$LOOP_SH_SRC" start "sweep-warn" 2>&1)
+    bash "$LOOP_SH_SRC" start "sweep-warn" --no-pr 2>&1)
   result52=$?
   set -e
   [[ $result52 -eq 0 ]] || { echo "FAIL: sweep 매칭 0건이 halt 트리거. exit=$result52"; echo "$output52"; exit 1; }
@@ -2141,7 +2147,7 @@ EOF
   setup_feat_with_spec "$SWEEP_BOUND_PROJECT" "sweep-bound"
   set +e
   output53=$(PATH="$MOCK53:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
-    bash "$LOOP_SH_SRC" start "sweep-bound" 2>&1)
+    bash "$LOOP_SH_SRC" start "sweep-bound" --no-pr 2>&1)
   result53=$?
   set -e
   [[ $result53 -ne 0 ]] || { echo "FAIL: sweep 밖 파일 수정이 halt 안 됨 (AC4 위반). exit=$result53"; echo "$output53"; exit 1; }
@@ -2219,7 +2225,7 @@ verify: 'true'
 EOF
 
 set +e
-output55=$( (cd "$GITIGN_PROJECT55" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "legacy-only-task" --spec "$GITIGN_SPEC55") 2>&1 )
+output55=$( (cd "$GITIGN_PROJECT55" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "legacy-only-task" --spec "$GITIGN_SPEC55" --no-pr) 2>&1 )
 set -e
 echo "$output55" | grep -q "기존 .loops/locks/ 라인 제거 실패" \
   && { echo "FAIL: legacy 라인 단독 .gitignore에서 die 오발동. got: $output55"; exit 1; }
@@ -2258,7 +2264,7 @@ verify: 'true'
 # No Legacy Task
 EOF
 
-output56=$( (cd "$GITIGN_PROJECT56" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "no-legacy-task" --spec "$GITIGN_SPEC56") 2>&1 || true )
+output56=$( (cd "$GITIGN_PROJECT56" && MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "no-legacy-task" --spec "$GITIGN_SPEC56" --no-pr) 2>&1 || true )
 echo "$output56" | grep -q "legacy 라인 제거" \
   && { echo "FAIL: has_legacy=0인데 메시지에 \"legacy 라인 제거\" 포함. got: $output56"; exit 1; }
 # 갱신 메시지 자체는 있어야 함 (새 패턴 추가됐으니)
@@ -2307,7 +2313,7 @@ setup_feat_with_spec "$T57_PROJECT" "gate-skip-worktree"
   cd "$T57_PROJECT"
   set +e
   output57=$(PATH="$MOCK57:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
-    bash "$LOOP_SH_SRC" start "gate-skip-worktree" 2>&1)
+    bash "$LOOP_SH_SRC" start "gate-skip-worktree" --no-pr 2>&1)
   set -e
   echo "$output57" | grep -q "Suppressor 신규 추가" \
     && { echo "FAIL: 워크트리 CLAUDE.md(헌법 cp)가 suppressor false positive halt 트리거 — skip-worktree 미작동"; echo "$output57"; exit 1; }
@@ -2368,7 +2374,7 @@ setup_feat_with_spec "$T58_PROJECT" "gate-scope-catch"
   cd "$T58_PROJECT"
   set +e
   output58=$(PATH="$MOCK58:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
-    bash "$LOOP_SH_SRC" start "gate-scope-catch" 2>&1)
+    bash "$LOOP_SH_SRC" start "gate-scope-catch" --no-pr 2>&1)
   set -e
   echo "$output58" | grep -qE "Scope 위반.*CLAUDE\.md" \
     || { echo "FAIL: CLAUDE.md commit이 scope.exclude 위반으로 catch 안 됨 (분별 능력 미동작)"; echo "$output58"; exit 1; }
@@ -2413,7 +2419,7 @@ git -C "$T59_PROJECT" checkout -q "$T59_DEFAULT_BRANCH"
 (
   cd "$T59_PROJECT"
   set +e
-  output59=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/n59" 2>&1)
+  output59=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/n59" --no-pr 2>&1)
   result59=$?
   set -e
   WT59="$T59_PROJECT/$T59_LOOPS_REL/.worktree"
@@ -2464,7 +2470,7 @@ git -C "$T61_PROJECT" commit --allow-empty -m "initial" -q
 (
   cd "$T61_PROJECT"
   set +e
-  output61=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/missing" 2>&1)
+  output61=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/missing" --no-pr 2>&1)
   result61=$?
   set -e
   [[ $result61 -ne 0 ]] || { echo "FAIL: SPEC·feat 브랜치 둘 다 없는데 start 성공"; exit 1; }
@@ -2507,7 +2513,7 @@ git -C "$T62_PROJECT" checkout -q "$T62_DEFAULT_BRANCH"
 (
   cd "$T62_PROJECT"
   set +e
-  output62=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/n62" 2>&1)
+  output62=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/n62" --no-pr 2>&1)
   result62=$?
   set -e
   WT62="$T62_PROJECT/$T62_LOOPS_REL/.worktree"
@@ -2549,7 +2555,7 @@ EOF
 (
   cd "$T63_PROJECT"
   set +e
-  output63=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "$T63_ID" 2>&1)
+  output63=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "$T63_ID" --no-pr 2>&1)
   result63=$?
   set -e
   [[ $result63 -ne 0 ]] || { echo "FAIL: feat 브랜치 부재인데 start 성공 (EARS 1 위반)"; echo "$output63"; exit 1; }
@@ -2596,7 +2602,7 @@ git -C "$T64_PROJECT" checkout -q "$T64_DEFAULT"
 (
   cd "$T64_PROJECT"
   set +e
-  output64=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T64_ID" 2>&1)
+  output64=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T64_ID" --no-pr 2>&1)
   result64=$?
   set -e
   WT64="$T64_PROJECT/$T64_LOOPS_REL/.worktree"
@@ -2658,7 +2664,7 @@ chmod +x "$MOCK65/claude"
 (
   cd "$T65_PROJECT"
   set +e
-  output65=$(PATH="$MOCK65:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T65_ID" 2>&1)
+  output65=$(PATH="$MOCK65:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T65_ID" --no-pr 2>&1)
   result65=$?
   set -e
   WT65="$T65_PROJECT/$T65_LOOPS_REL/.worktree"
@@ -2710,7 +2716,7 @@ git -C "$T66_PROJECT" checkout -q "$T66_DEFAULT"
 (
   cd "$T66_PROJECT"
   set +e
-  output66=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T66_ID" 2>&1)
+  output66=$(MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T66_ID" --no-pr 2>&1)
   result66=$?
   set -e
   WT66="$T66_PROJECT/$T66_LOOPS_REL/.worktree"
@@ -2790,7 +2796,7 @@ chmod +x "$MOCK68/claude"
 (
   cd "$T68_PROJECT"
   set +e
-  output68=$(PATH="$MOCK68:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T68_ID" 2>&1)
+  output68=$(PATH="$MOCK68:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T68_ID" --no-pr 2>&1)
   result68=$?
   set -e
   WT68="$T68_PROJECT/$T68_LOOPS_REL/.worktree"

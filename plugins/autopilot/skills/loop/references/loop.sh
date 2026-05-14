@@ -382,14 +382,6 @@ read_scope_yaml() {
   }' "$spec_path" 2>/dev/null
 }
 
-# SPEC frontmatter의 request_review 플래그가 true인지 확인.
-# 미지정·false·다른 값 → 1 (off). 본 플래그가 true일 때만 DONE 후 PR phase 진입.
-pr_phase_enabled() {
-  local val
-  val=$(read_scope_yaml | yq '.request_review // false' 2>/dev/null || echo "false")
-  [[ "$val" == "true" ]]
-}
-
 diff_vs_scope() {
   local scope_yaml include_patterns exclude_patterns committed working changed
   scope_yaml=$(read_scope_yaml)
@@ -692,9 +684,9 @@ EOF
 cmd_start() {
   local task_id="$1"
   shift || true
-  [[ -z "$task_id" ]] && die "사용: $0 start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>]"
+  [[ -z "$task_id" ]] && die "사용: $0 start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>] [--no-pr]"
 
-  local max_iterations_override="" wall_clock_minutes_override="" watch_mode=0 spec_path=""
+  local max_iterations_override="" wall_clock_minutes_override="" watch_mode=0 spec_path="" no_pr=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --max-iterations)
@@ -712,6 +704,12 @@ cmd_start() {
       --spec)
         spec_path="$2"
         shift 2
+        ;;
+      --no-pr)
+        # AC2 (SPEC 103): PR 자동 생성 opt-out. 지정 시 DONE 직후 PR phase 건너뜀.
+        # default(없음): PR phase가 실행됨 (AC1).
+        no_pr=1
+        shift
         ;;
       *)
         die "알 수 없는 옵션: $1"
@@ -869,10 +867,13 @@ cmd_start() {
     if [[ $iter_status -eq 100 ]]; then
       echo "[$(now_iso)] DONE 신호 감지. 정상 종료."
 
-      # PR 생성·재사용 phase (opt-in: SPEC frontmatter request_review: true).
+      # PR 생성·재사용 phase. SPEC 103 AC1: default로 실행 (opt-in 플래그 불필요).
+      # SPEC 103 AC2: --no-pr 플래그가 지정되면 건너뜀.
       # 워크트리·로컬 브랜치는 후속 단계(리뷰 모니터·자동 fix)를 위해 보존한다.
-      if pr_phase_enabled; then
-        echo "[$(now_iso)] request_review opt-in 감지 — PR phase 진입"
+      if (( no_pr == 1 )); then
+        echo "[$(now_iso)] --no-pr 플래그 감지 — PR phase 건너뜀"
+      else
+        echo "[$(now_iso)] PR phase 진입 (default — 건너뛰려면 --no-pr 사용)"
         if ! bash "$SCRIPT_DIR/pr-phase.sh" "$WT" "$BRANCH" "$TASK_ID" "$PROJECT_ROOT"; then
           echo "ERROR: PR phase 실패 — worktree·branch는 보존됨. 진단 후 재시도하세요." >&2
           exit 1

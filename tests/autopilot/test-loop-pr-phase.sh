@@ -122,6 +122,25 @@ case "${1:-}" in
         exit 0
         ;;
       view)
+        # M4/AC5: state/reviewDecision 쿼리는 GH_OPEN_PR_NUMBER 여부와 무관하게 응답한다
+        # (monitor 단계가 새 PR·기존 PR 양쪽에서 동일하게 호출).
+        __want_state=0
+        __want_review=0
+        for __arg in "$@"; do
+          case "$__arg" in
+            .state|--jq=.state) __want_state=1;;
+            .reviewDecision|--jq=.reviewDecision) __want_review=1;;
+          esac
+        done
+        if [[ $__want_state -eq 1 ]]; then
+          printf '%s\n' "${GH_PR_STATE:-OPEN}"
+          exit 0
+        fi
+        if [[ $__want_review -eq 1 ]]; then
+          # 빈 값(리뷰 미발생) 또는 GH_PR_REVIEW_DECISION (APPROVED/CHANGES_REQUESTED 등)
+          printf '%s\n' "${GH_PR_REVIEW_DECISION:-}"
+          exit 0
+        fi
         if [[ -n "${GH_OPEN_PR_NUMBER:-}" ]]; then
           # --jq '.body' (또는 --jq=.body) 가 있으면 body 텍스트만 출력 (실제 gh의 jq 적용 모방).
           # 그래야 pr-phase.sh가 fence 마커 부분 교체 경로를 실제로 실행한다.
@@ -142,6 +161,33 @@ case "${1:-}" in
         fi
         echo "no pr" >&2
         exit 1
+        ;;
+      checks)
+        # M4/AC5: monitor PR check 쿼리·재트리거.
+        # `--rerun` 포함 시 단순 exit 0 (실제 재트리거는 외부 — 테스트는 호출 행적만 검증).
+        # 미포함 시 `--json state,conclusion` 쿼리 응답: GH_CHECKS_MODE=stuck 이면 모든 check가
+        # COMPLETED 상태로 보고(=stuck 가능 상태), 그 외엔 빈 배열 (=stuck 아님 → monitor 종료).
+        __is_rerun=0
+        for __arg in "$@"; do
+          [[ "$__arg" == "--rerun" ]] && __is_rerun=1
+        done
+        if [[ $__is_rerun -eq 1 ]]; then
+          exit 0
+        fi
+        case "${GH_CHECKS_MODE:-}" in
+          stuck)
+            printf '[{"state":"COMPLETED","conclusion":"FAILURE"}]\n'
+            ;;
+          waiting)
+            # 환경 보호 승인 대기 — stuck 아님 (regression: WAITING이 진행 상태 패턴에
+            # 누락돼 stuck으로 오판되던 버그 보호)
+            printf '[{"state":"WAITING","conclusion":null}]\n'
+            ;;
+          *)
+            printf '[]\n'
+            ;;
+        esac
+        exit 0
         ;;
       create)
         if [[ "${GH_FAIL_PR_CREATE:-0}" == "1" ]]; then
@@ -165,6 +211,69 @@ esac
 exit 0
 GH_EOF
   chmod +x "$mock_bin/gh"
+}
+
+# git mock — argv를 GIT_LOG_FILE 환경변수 경로에 한 줄씩 기록한 뒤 실제 git으로 위임.
+# pr-phase.sh가 push 직전에 origin base를 fetch + rebase하는지 행적 검증할 때 사용한다.
+# 실제 git 절대경로를 install 시점에 baked in 해서 mock_bin이 PATH 앞에 와도 무한 recurse 안 됨.
+#
+# 추가 환경변수:
+#   GIT_CONFLICT_MODE — rebase 충돌 시뮬레이션 모드 (M3/AC4 테스트용).
+#     - 미설정·빈값: pass-through (충돌 없음 — 기존 TEST 11 회귀 보존)
+#     - "auto-resolve": 평범한 `rebase origin/...`은 conflict로 실패시키지만, 재시도 인자 `-X`가
+#         포함된 `rebase -X theirs origin/...`는 real git으로 위임해 성공 (M3 자동 해결 성공 경로)
+#     - "abort": `-X` 포함 여부와 무관하게 모든 `rebase origin/...` 호출이 conflict로 실패
+#         (M3 자동 해결 실패 → 사용자 좌절 경로)
+#   `rebase --abort` 호출은 양 모드에서 stub 안에서 pass-through하며 real git이 rebase 진행
+#   상태가 아니라 실패해도 무시한다 (실제 충돌 상태를 만들지 않으므로).
+install_git_record_mock() {
+  local mock_bin="$1"
+  local real_git
+  real_git="$(command -v git)"
+  [[ -x "$real_git" ]] || { echo "FAIL: real git 경로 못 찾음 (command -v git 실패)"; exit 1; }
+  cat > "$mock_bin/git" <<GIT_EOF
+#!/usr/bin/env bash
+if [[ -n "\${GIT_LOG_FILE:-}" ]]; then
+  printf '%s\n' "\$*" >> "\$GIT_LOG_FILE"
+fi
+
+# rebase 충돌 시뮬레이션 (M3/AC4 — GIT_CONFLICT_MODE 설정 시)
+if [[ "\${1:-}" == "rebase" && -n "\${GIT_CONFLICT_MODE:-}" ]]; then
+  # --abort는 항상 pass-through (real git이 rebase 상태 아니라 fail해도 무시)
+  is_abort=0
+  is_x=0
+  for a in "\$@"; do
+    [[ "\$a" == "--abort" ]] && is_abort=1
+    [[ "\$a" == "-X" ]] && is_x=1
+  done
+
+  if [[ \$is_abort -eq 1 ]]; then
+    "$real_git" "\$@" 2>/dev/null || true
+    exit 0
+  fi
+
+  case "\$GIT_CONFLICT_MODE" in
+    auto-resolve)
+      if [[ \$is_x -eq 1 ]]; then
+        # 재시도(-X theirs)는 real git으로 위임 — 실제 worktree에는 충돌이 없으므로 fast-forward로 통과
+        exec "$real_git" "\$@"
+      else
+        # 첫 평범한 rebase는 충돌로 실패
+        echo "CONFLICT (content): Merge conflict simulated (mock — auto-resolve mode)" >&2
+        exit 1
+      fi
+      ;;
+    abort)
+      # 모든 rebase 시도가 실패 (자동 해결도 실패)
+      echo "CONFLICT (content): Merge conflict simulated (mock — abort mode)" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+exec "$real_git" "\$@"
+GIT_EOF
+  chmod +x "$mock_bin/git"
 }
 
 # argv 덤프 디렉토리에서 특정 subcommand 호출의 --body 인자 추출
@@ -208,8 +317,10 @@ count_calls() {
   ls "$call_dir" 2>/dev/null | grep -cF "$pattern" || true
 }
 
-echo "=== TEST 1: AC1 — request_review 미지정 시 PR phase skip (gh 호출 0회) ==="
-T1_NAME="optout-no-key"
+echo "=== TEST 1: AC1 — DONE 시 PR phase가 default로 실행 (request_review 키 없음) ==="
+# AC1 (SPEC 103): task가 DONE 상태로 종결될 때, 시스템은 별도 opt-in 플래그 없이
+# PR 생성 단계를 default로 수행한다. 기존 동작(키 미지정 → skip)은 역전됨.
+T1_NAME="default-pr-on-done"
 T1_PROJECT="$(make_project_with_remote "$T1_NAME")"
 T1_MOCK="$(make_mock_bin "${T1_NAME}-mock")"
 install_claude_done_mock "$T1_MOCK"
@@ -217,8 +328,8 @@ install_gh_record_mock "$T1_MOCK"
 T1_GH_LOG="$WORK_DIR/${T1_NAME}-gh.log"
 : > "$T1_GH_LOG"
 
-mkdir -p "$T1_PROJECT/milestones/regular/loops/optout-task"
-cat > "$T1_PROJECT/milestones/regular/loops/optout-task/SPEC.md" <<'EOF'
+mkdir -p "$T1_PROJECT/milestones/regular/loops/default-task"
+cat > "$T1_PROJECT/milestones/regular/loops/default-task/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -227,27 +338,76 @@ scope:
 verify: 'true'
 ---
 
-# Opt-out Task
+# Default PR Task
 
 ## 무엇을 만들 것인가
-opt-out 검증용.
+DONE 직후 PR 생성이 default로 실행되는지 검증.
 EOF
 
 (
   cd "$T1_PROJECT"
   GH_LOG_FILE="$T1_GH_LOG" PATH="$T1_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
-    bash "$LOOP_SH_SRC" start "optout-task" > "$WORK_DIR/${T1_NAME}.out" 2>&1
+    bash "$LOOP_SH_SRC" start "default-task" > "$WORK_DIR/${T1_NAME}.out" 2>&1
 )
 
-# gh 호출이 0회여야 함
+# AC1: gh 호출이 ≥1회 (PR phase가 default로 실행됨)
 [[ -f "$T1_GH_LOG" ]] || { echo "FAIL: gh log 파일 없음"; exit 1; }
 gh_calls_t1=$(wc -l < "$T1_GH_LOG" | tr -d ' ')
-[[ "$gh_calls_t1" -eq 0 ]] \
-  || { echo "FAIL: opt-out인데 gh가 ${gh_calls_t1}회 호출됨. log:"; cat "$T1_GH_LOG"; exit 1; }
+[[ "$gh_calls_t1" -ge 1 ]] \
+  || { echo "FAIL: default 동작인데 gh가 ${gh_calls_t1}회 호출 (≥1 기대). log:"; cat "$T1_GH_LOG"; echo "out:"; cat "$WORK_DIR/${T1_NAME}.out"; exit 1; }
 
-# DONE은 정상 생성됐어야 (기존 동작 회귀)
-[[ -f "$T1_PROJECT/milestones/regular/loops/optout-task/.worktree/DONE" ]] \
+# pr create가 호출됐어야 (PR 단계 진입 확인)
+grep -qE '^pr create ' "$T1_GH_LOG" \
+  || { echo "FAIL: default인데 pr create 호출 없음. log:"; cat "$T1_GH_LOG"; exit 1; }
+
+# DONE은 정상 생성됐어야
+[[ -f "$T1_PROJECT/milestones/regular/loops/default-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
+echo "OK"
+
+echo "=== TEST 1B: AC2 — --no-pr 플래그 사용 시 PR phase 건너뜀 ==="
+# AC2 (SPEC 103): 사용자가 PR 자동 생성 opt-out 플래그(--no-pr)를 지정한 경우,
+# 시스템은 PR 생성 단계를 건너뛴다.
+T1B_NAME="no-pr-opt-out"
+T1B_PROJECT="$(make_project_with_remote "$T1B_NAME")"
+T1B_MOCK="$(make_mock_bin "${T1B_NAME}-mock")"
+install_claude_done_mock "$T1B_MOCK"
+install_gh_record_mock "$T1B_MOCK"
+T1B_GH_LOG="$WORK_DIR/${T1B_NAME}-gh.log"
+: > "$T1B_GH_LOG"
+
+mkdir -p "$T1B_PROJECT/milestones/regular/loops/nopr-task"
+cat > "$T1B_PROJECT/milestones/regular/loops/nopr-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# No-PR Opt-out Task
+
+## 무엇을 만들 것인가
+--no-pr 플래그가 PR phase를 차단하는지 검증.
+EOF
+
+(
+  cd "$T1B_PROJECT"
+  GH_LOG_FILE="$T1B_GH_LOG" PATH="$T1B_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "nopr-task" --no-pr > "$WORK_DIR/${T1B_NAME}.out" 2>&1
+)
+
+# AC2: --no-pr이면 gh 호출 0회
+[[ -f "$T1B_GH_LOG" ]] || { echo "FAIL: gh log 파일 없음"; exit 1; }
+gh_calls_t1b=$(wc -l < "$T1B_GH_LOG" | tr -d ' ')
+[[ "$gh_calls_t1b" -eq 0 ]] \
+  || { echo "FAIL: --no-pr인데 gh가 ${gh_calls_t1b}회 호출됨. log:"; cat "$T1B_GH_LOG"; exit 1; }
+
+# DONE은 정상 생성됐어야
+[[ -f "$T1B_PROJECT/milestones/regular/loops/nopr-task/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
@@ -613,21 +773,20 @@ grep -qE "PR state:[[:space:]]*open" "$WORK_DIR/${T8_NAME}.out" \
 ) || { echo "FAIL: 워크트리의 HEAD 브랜치 미보존"; exit 1; }
 echo "OK"
 
-echo "=== TEST 9: M7 — request_review 키 이름이 SKILL.md·spec-template.md·driver 사이 동기화 ==="
-# 키 이름이 세 파일 중 어느 한쪽에서 누락·오타 나면 opt-in 자체가 동작 안 함.
-# 세 곳 모두에 정확히 `request_review` 토큰이 등장해야 함.
+echo "=== TEST 9: AC2 — --no-pr 플래그가 SKILL.md 문서·loop.sh driver 사이 동기화 ==="
+# AC2 (SPEC 103): --no-pr이 PR phase를 건너뛰는 공식 opt-out 인터페이스. SKILL.md
+# 문서·driver 모두에서 동일한 플래그 토큰이 등장해야 (오타·누락 방지).
 T9_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/loop/SKILL.md"
-T9_SPEC_TEMPLATE="$REPO_ROOT/plugins/autopilot/skills/spec/references/spec-template.md"
 T9_DRIVER_LOOP="$REPO_ROOT/plugins/autopilot/skills/loop/references/loop.sh"
 T9_DRIVER_PR="$REPO_ROOT/plugins/autopilot/skills/loop/references/pr-phase.sh"
 
-for f in "$T9_SKILL_MD" "$T9_SPEC_TEMPLATE" "$T9_DRIVER_LOOP"; do
+for f in "$T9_SKILL_MD" "$T9_DRIVER_LOOP"; do
   [[ -f "$f" ]] || { echo "FAIL: 파일 없음: $f"; exit 1; }
-  grep -qF 'request_review' "$f" \
-    || { echo "FAIL: $f 에 'request_review' 키 누락"; exit 1; }
+  grep -qF -- '--no-pr' "$f" \
+    || { echo "FAIL: $f 에 '--no-pr' 토큰 누락 (AC2 동기화 실패)"; exit 1; }
 done
 
-# pr-phase.sh는 caller가 opt-in 체크하므로 키 등장 불필요 — 존재만 확인.
+# pr-phase.sh는 caller가 PR 진입 여부를 결정하므로 토큰 등장 불필요 — 존재만 확인.
 [[ -f "$T9_DRIVER_PR" ]] || { echo "FAIL: pr-phase.sh 없음"; exit 1; }
 echo "OK"
 
@@ -702,6 +861,371 @@ fence_begin_count=$(printf '%s\n' "$t10_body" | grep -cF '<!-- autopilot:pr-body
 fence_end_count=$(printf '%s\n' "$t10_body" | grep -cF '<!-- autopilot:pr-body:end -->' || true)
 [[ "$fence_begin_count" == "1" && "$fence_end_count" == "1" ]] \
   || { echo "FAIL: fence 마커 개수 이상 (begin=$fence_begin_count, end=$fence_end_count). body:"; printf '%s\n' "$t10_body"; exit 1; }
+echo "OK"
+
+echo "=== TEST 11: AC3 — PR push 직전 origin/<base> fetch + rebase 수행 ==="
+# AC3 (SPEC 103): PR 생성을 수행할 때, 시스템은 그 직전에 PR base branch(default `main`)로부터
+# rebase를 수행한 뒤 PR을 생성한다. base가 최신일 때 fast-forward는 no-op으로 통과,
+# conflict 시 별도 충돌 핸들러(M3) 경로로 위임된다 (본 테스트는 fast-forward 경로만 검증).
+T11_NAME="rebase-before-push"
+T11_PROJECT="$(make_project_with_remote "$T11_NAME")"
+T11_MOCK="$(make_mock_bin "${T11_NAME}-mock")"
+install_claude_done_mock "$T11_MOCK"
+install_gh_record_mock "$T11_MOCK"
+install_git_record_mock "$T11_MOCK"
+T11_GH_LOG="$WORK_DIR/${T11_NAME}-gh.log"
+T11_GIT_LOG="$WORK_DIR/${T11_NAME}-git.log"
+: > "$T11_GH_LOG"
+: > "$T11_GIT_LOG"
+
+mkdir -p "$T11_PROJECT/milestones/regular/loops/rebase-task"
+cat > "$T11_PROJECT/milestones/regular/loops/rebase-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Rebase Before Push
+
+## 무엇을 만들 것인가
+PR push 직전 origin base 브랜치 fetch + rebase가 실행되는 회귀.
+EOF
+
+(
+  cd "$T11_PROJECT"
+  GH_LOG_FILE="$T11_GH_LOG" GIT_LOG_FILE="$T11_GIT_LOG" PATH="$T11_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "rebase-task" > "$WORK_DIR/${T11_NAME}.out" 2>&1
+)
+
+# AC3: fetch + rebase 행적 (PR phase 안에서 호출됐어야)
+grep -qE '^fetch origin( |$)' "$T11_GIT_LOG" \
+  || { echo "FAIL: 'git fetch origin <base>' 호출 기록 없음 (AC3 위반). git log tail:"; tail -30 "$T11_GIT_LOG"; exit 1; }
+grep -qE '^rebase origin/' "$T11_GIT_LOG" \
+  || { echo "FAIL: 'git rebase origin/<base>' 호출 기록 없음 (AC3 위반). git log tail:"; tail -30 "$T11_GIT_LOG"; exit 1; }
+
+# rebase가 push보다 먼저 — pr-phase가 정확한 순서로 호출해야 한다.
+rebase_line=$(grep -nE '^rebase origin/' "$T11_GIT_LOG" | head -1 | cut -d: -f1)
+push_line=$(grep -nE '^push .*origin' "$T11_GIT_LOG" | head -1 | cut -d: -f1)
+[[ -n "$rebase_line" && -n "$push_line" && "$rebase_line" -lt "$push_line" ]] \
+  || { echo "FAIL: rebase가 push보다 먼저여야 함 (rebase_line=$rebase_line push_line=$push_line). git log tail:"; tail -50 "$T11_GIT_LOG"; exit 1; }
+
+# rebase 후 PR 생성 정상 흐름 유지
+grep -qE '^pr create ' "$T11_GH_LOG" \
+  || { echo "FAIL: rebase 후 pr create 호출 안 됨. gh log:"; cat "$T11_GH_LOG"; exit 1; }
+[[ -f "$T11_PROJECT/milestones/regular/loops/rebase-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
+echo "OK"
+
+echo "=== TEST 12: AC4 — rebase 충돌 1회 자동 해결 성공 (-X theirs) + 정상 PR 생성 ==="
+# AC4 (SPEC 103): rebase 또는 머지 중 충돌이 발생하면, 시스템은 1회의 자동 해결을 시도한다.
+# 본 케이스: 평범한 rebase가 충돌로 실패하고, `-X theirs` 재시도가 성공해서 push·PR 생성으로 진행.
+T12_NAME="rebase-conflict-auto-resolve"
+T12_PROJECT="$(make_project_with_remote "$T12_NAME")"
+T12_MOCK="$(make_mock_bin "${T12_NAME}-mock")"
+install_claude_done_mock "$T12_MOCK"
+install_gh_record_mock "$T12_MOCK"
+install_git_record_mock "$T12_MOCK"
+T12_GH_LOG="$WORK_DIR/${T12_NAME}-gh.log"
+T12_GIT_LOG="$WORK_DIR/${T12_NAME}-git.log"
+: > "$T12_GH_LOG"
+: > "$T12_GIT_LOG"
+
+mkdir -p "$T12_PROJECT/milestones/regular/loops/conflict-auto-task"
+cat > "$T12_PROJECT/milestones/regular/loops/conflict-auto-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Rebase Conflict Auto-Resolve
+
+## 무엇을 만들 것인가
+첫 rebase 충돌 후 1회 -X theirs 재시도로 자동 해결되는 회귀.
+EOF
+
+(
+  cd "$T12_PROJECT"
+  GH_LOG_FILE="$T12_GH_LOG" GIT_LOG_FILE="$T12_GIT_LOG" \
+    GIT_CONFLICT_MODE=auto-resolve \
+    PATH="$T12_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "conflict-auto-task" > "$WORK_DIR/${T12_NAME}.out" 2>&1
+)
+
+# AC4: rebase 호출이 정확히 2회 발생 (1차 plain + 1회 -X theirs 재시도).
+rebase_total_t12=$(grep -cE '^rebase ' "$T12_GIT_LOG" || true)
+rebase_with_x_t12=$(grep -cE '^rebase .*\-X[[:space:]]+theirs ' "$T12_GIT_LOG" || true)
+rebase_plain_t12=$(grep -cE '^rebase origin/' "$T12_GIT_LOG" || true)
+[[ "$rebase_total_t12" -ge 2 ]] \
+  || { echo "FAIL: rebase 호출이 ${rebase_total_t12}회 (≥2 기대 — plain + -X theirs). git log tail:"; tail -50 "$T12_GIT_LOG"; echo "out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
+[[ "$rebase_with_x_t12" -ge 1 ]] \
+  || { echo "FAIL: '-X theirs' 재시도 미실행 (AC4 위반). git log tail:"; tail -50 "$T12_GIT_LOG"; exit 1; }
+[[ "$rebase_plain_t12" -ge 1 ]] \
+  || { echo "FAIL: 첫 plain 'rebase origin/<base>' 호출 기록 없음. git log tail:"; tail -50 "$T12_GIT_LOG"; exit 1; }
+
+# 자동 해결 시도 메시지가 출력에 있어야
+grep -qE "(자동 해결|충돌 1회|-X[[:space:]]+theirs)" "$WORK_DIR/${T12_NAME}.out" \
+  || { echo "FAIL: 자동 해결 시도 안내 메시지 없음. out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
+
+# 자동 해결 성공 후 정상 PR 생성 흐름이 이어져야
+grep -qE '^pr create ' "$T12_GH_LOG" \
+  || { echo "FAIL: 자동 해결 후 pr create 호출 안 됨. gh log:"; cat "$T12_GH_LOG"; echo "out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
+
+# DONE 보존
+[[ -f "$T12_PROJECT/milestones/regular/loops/conflict-auto-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
+echo "OK"
+
+echo "=== TEST 13: AC4 — rebase 충돌 자동 해결 실패(1회 시도 후 좌절) + abort + 사용자 알림 ==="
+# AC4 (SPEC 103): 자동 해결 시도가 실패한 경우 진행을 중단하고 사용자에게 명시적으로 알린다.
+# 본 케이스: plain rebase + -X theirs 재시도 모두 충돌 → loop abort + 명시 알림 + pr create 미호출.
+T13_NAME="rebase-conflict-abort"
+T13_PROJECT="$(make_project_with_remote "$T13_NAME")"
+T13_MOCK="$(make_mock_bin "${T13_NAME}-mock")"
+install_claude_done_mock "$T13_MOCK"
+install_gh_record_mock "$T13_MOCK"
+install_git_record_mock "$T13_MOCK"
+T13_GH_LOG="$WORK_DIR/${T13_NAME}-gh.log"
+T13_GIT_LOG="$WORK_DIR/${T13_NAME}-git.log"
+: > "$T13_GH_LOG"
+: > "$T13_GIT_LOG"
+
+mkdir -p "$T13_PROJECT/milestones/regular/loops/conflict-abort-task"
+cat > "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Rebase Conflict Abort
+
+## 무엇을 만들 것인가
+rebase 충돌 자동 해결 1회 시도가 실패해 사용자에게 위임되는 회귀.
+EOF
+
+set +e
+(
+  cd "$T13_PROJECT"
+  GH_LOG_FILE="$T13_GH_LOG" GIT_LOG_FILE="$T13_GIT_LOG" \
+    GIT_CONFLICT_MODE=abort \
+    PATH="$T13_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "conflict-abort-task" > "$WORK_DIR/${T13_NAME}.out" 2>&1
+)
+t13_exit=$?
+set -e
+
+# AC4: loop start exit ≠ 0 (rebase 충돌 자동 해결 실패로 PR phase가 abort)
+[[ $t13_exit -ne 0 ]] \
+  || { echo "FAIL: 자동 해결 실패에도 loop exit 0. out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
+
+# rebase 호출 2회 (plain + -X theirs) 후 좌절 — 3회 이상이면 1회 제한 위반
+rebase_total_t13=$(grep -cE '^rebase origin/|^rebase .*\-X[[:space:]]+theirs ' "$T13_GIT_LOG" || true)
+[[ "$rebase_total_t13" -eq 2 ]] \
+  || { echo "FAIL: rebase가 ${rebase_total_t13}회 호출 (정확히 2회 기대 — plain + -X theirs 한 번씩). git log tail:"; tail -50 "$T13_GIT_LOG"; exit 1; }
+
+# 자동 해결 실패 안내 메시지 — "자동 해결 실패" 또는 "1회 시도" 토큰 포함
+grep -qE "(자동 해결 실패|1회 시도|좌절)" "$WORK_DIR/${T13_NAME}.out" \
+  || { echo "FAIL: 자동 해결 실패 안내 메시지 없음 (사용자 위임 위반). out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
+
+# 사용자 수동 해결 안내 — "수동" 또는 "사용자" 명시
+grep -qE "(수동|사용자)" "$WORK_DIR/${T13_NAME}.out" \
+  || { echo "FAIL: 사용자 수동 해결 안내 없음. out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
+
+# pr create 호출 0회 (rebase 좌절 후 push·pr 단계 미진입)
+if grep -qE '^pr (create|edit) ' "$T13_GH_LOG"; then
+  echo "FAIL: rebase 좌절 후에도 pr create/edit 호출됨. gh log:"; cat "$T13_GH_LOG"; exit 1
+fi
+
+# 워크트리·DONE 보존 (사용자 수동 해결 가능하도록)
+[[ -d "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/.worktree" ]] \
+  || { echo "FAIL: 워크트리 미보존"; exit 1; }
+[[ -f "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미보존"; exit 1; }
+echo "OK"
+
+echo "=== TEST 14: AC5 — Monitor stuck PR check 재트리거 ≤3회 후 상한 알림 ==="
+# AC5 (SPEC 103): PR check가 success/failure로 완료됐으나 PR 상태가 review·done이 아닌
+# stuck 상태를 Monitor가 감지할 때, 시스템은 최대 3회 이내에서 check를 재트리거하며,
+# 상한에 도달하면 사용자에게 알린다.
+# 본 케이스: stub gh가 항상 "stuck" 응답 (state=OPEN, reviewDecision=빈값, checks=COMPLETED)을
+# 반환 → 드라이버가 `pr checks --rerun`을 정확히 3회 호출 + 상한 알림 메시지 + loop 정상 종료.
+T14_NAME="monitor-stuck-rerun"
+T14_PROJECT="$(make_project_with_remote "$T14_NAME")"
+T14_MOCK="$(make_mock_bin "${T14_NAME}-mock")"
+install_claude_done_mock "$T14_MOCK"
+install_gh_record_mock "$T14_MOCK"
+T14_GH_LOG="$WORK_DIR/${T14_NAME}-gh.log"
+: > "$T14_GH_LOG"
+
+mkdir -p "$T14_PROJECT/milestones/regular/loops/stuck-task"
+cat > "$T14_PROJECT/milestones/regular/loops/stuck-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Monitor Stuck Rerun
+
+## 무엇을 만들 것인가
+PR check가 stuck 상태일 때 Monitor가 최대 3회 재트리거 후 상한 알림.
+EOF
+
+(
+  cd "$T14_PROJECT"
+  GH_LOG_FILE="$T14_GH_LOG" \
+    GH_PR_STATE=OPEN \
+    GH_PR_REVIEW_DECISION="" \
+    GH_CHECKS_MODE=stuck \
+    LOOP_PR_RERUN_SLEEP_SECONDS=0 \
+    PATH="$T14_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "stuck-task" > "$WORK_DIR/${T14_NAME}.out" 2>&1
+)
+
+# AC5: pr checks --rerun 호출이 정확히 3회 (상한). 4회 이상이면 무한 루프 위험.
+rerun_count_t14=$(grep -cE '^pr checks .*--rerun' "$T14_GH_LOG" || true)
+[[ "$rerun_count_t14" -eq 3 ]] \
+  || { echo "FAIL: pr checks --rerun이 ${rerun_count_t14}회 호출 (정확히 3회 기대 — AC5 상한 위반). gh log:"; cat "$T14_GH_LOG"; echo "out:"; cat "$WORK_DIR/${T14_NAME}.out"; exit 1; }
+
+# AC5: 상한 도달 알림 메시지 — "재트리거 상한" 또는 "3회" 또는 "사용자 개입" 토큰 포함
+grep -qE "(재트리거 상한|3회|상한 도달|사용자 개입)" "$WORK_DIR/${T14_NAME}.out" \
+  || { echo "FAIL: 상한 도달 알림 메시지 없음 (AC5 위반). out:"; cat "$WORK_DIR/${T14_NAME}.out"; exit 1; }
+
+# pr create는 정상 호출됐어야 (Monitor는 PR 생성 이후 단계)
+grep -qE '^pr create ' "$T14_GH_LOG" \
+  || { echo "FAIL: stuck 진입 전 pr create 호출 없음. gh log:"; cat "$T14_GH_LOG"; exit 1; }
+
+# DONE 보존 + 정상 종료 (상한 도달은 에러가 아니라 경고 — loop 자체는 정상 종료)
+[[ -f "$T14_PROJECT/milestones/regular/loops/stuck-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
+echo "OK"
+
+echo "=== TEST 15: AC6 — PR MERGED 감지 시 cleanup 후보 안내 + 자동 삭제 안 함 ==="
+# AC6 (SPEC 103): PR이 merged 또는 closed 상태로 전이할 때, 시스템은 worktree·feat 브랜치
+# cleanup 여부를 사용자에게 명시적으로 확인하고, 명시적 승인이 없는 경우 어떤 항목도
+# 자동 삭제하지 않는다.
+# 본 케이스: stub gh가 state=MERGED 응답 → Monitor가 즉시 break하면서 cleanup 후보 안내
+# 메시지(승인 필요·자동 삭제 금지)를 명시 출력. worktree·feat 브랜치는 보존.
+T15_NAME="monitor-merged-cleanup-notice"
+T15_PROJECT="$(make_project_with_remote "$T15_NAME")"
+T15_MOCK="$(make_mock_bin "${T15_NAME}-mock")"
+install_claude_done_mock "$T15_MOCK"
+install_gh_record_mock "$T15_MOCK"
+T15_GH_LOG="$WORK_DIR/${T15_NAME}-gh.log"
+: > "$T15_GH_LOG"
+
+mkdir -p "$T15_PROJECT/milestones/regular/loops/merged-task"
+cat > "$T15_PROJECT/milestones/regular/loops/merged-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Monitor Merged Cleanup Notice
+
+## 무엇을 만들 것인가
+PR이 MERGED 상태로 전이될 때 cleanup 후보 안내만 출력하고 자동 삭제는 하지 않는 회귀.
+EOF
+
+(
+  cd "$T15_PROJECT"
+  GH_LOG_FILE="$T15_GH_LOG" \
+    GH_PR_STATE=MERGED \
+    PATH="$T15_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "merged-task" > "$WORK_DIR/${T15_NAME}.out" 2>&1
+)
+
+# AC6: cleanup 후보 안내 메시지 — "cleanup 후보" 또는 "loop.sh cleanup" 또는 "cleanup 승인" 토큰
+grep -qE "(cleanup 후보|loop\.sh cleanup|cleanup 승인)" "$WORK_DIR/${T15_NAME}.out" \
+  || { echo "FAIL: MERGED 상태인데 cleanup 후보 안내 메시지 없음 (AC6 위반). out:"; cat "$WORK_DIR/${T15_NAME}.out"; exit 1; }
+
+# AC6: 자동 삭제 차단 명시 — "자동 삭제하지 않" 또는 "수동" 또는 "명시 승인" 토큰
+grep -qE "(자동 삭제하지 않|수동|명시 승인)" "$WORK_DIR/${T15_NAME}.out" \
+  || { echo "FAIL: 자동 삭제 차단 안내 없음 (AC6 위반). out:"; cat "$WORK_DIR/${T15_NAME}.out"; exit 1; }
+
+# AC6: 자동 삭제 안 함 — worktree·DONE 보존
+[[ -d "$T15_PROJECT/milestones/regular/loops/merged-task/.worktree" ]] \
+  || { echo "FAIL: MERGED 감지 후 워크트리가 삭제됨 (AC6 위반 — 자동 삭제 금지)"; exit 1; }
+[[ -f "$T15_PROJECT/milestones/regular/loops/merged-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미보존"; exit 1; }
+
+# Monitor 진입 후 MERGED 감지로 즉시 break — pr checks --rerun 호출 0회
+if grep -qE '^pr checks .*--rerun' "$T15_GH_LOG"; then
+  echo "FAIL: MERGED 상태인데 pr checks --rerun 호출됨 (즉시 break 위반). gh log:"; cat "$T15_GH_LOG"; exit 1
+fi
+echo "OK"
+
+echo "=== TEST 16: AC5 회귀 — WAITING(환경 승인 대기)은 stuck 아님 → --rerun 0회 ==="
+# AC5 회귀 (PR #109 NIT 대응): gh pr checks의 state 값에 WAITING(환경 보호 승인 대기)이
+# 포함될 수 있는데, 이전 코드는 진행 상태 화이트리스트(PENDING|IN_PROGRESS|QUEUED|RUNNING)에
+# WAITING이 빠져 있어 stuck으로 오판해 불필요한 --rerun이 발생했다. 본 회귀: 화이트리스트
+# 대신 'COMPLETED만 stuck 후보' 블랙리스트로 판정하므로 WAITING 응답 시 --rerun 0회 + 정상 break.
+T16_NAME="monitor-waiting-not-stuck"
+T16_PROJECT="$(make_project_with_remote "$T16_NAME")"
+T16_MOCK="$(make_mock_bin "${T16_NAME}-mock")"
+install_claude_done_mock "$T16_MOCK"
+install_gh_record_mock "$T16_MOCK"
+T16_GH_LOG="$WORK_DIR/${T16_NAME}-gh.log"
+: > "$T16_GH_LOG"
+
+mkdir -p "$T16_PROJECT/milestones/regular/loops/waiting-task"
+cat > "$T16_PROJECT/milestones/regular/loops/waiting-task/SPEC.md" <<'EOF'
+---
+scope:
+  include:
+    - "**/*"
+  exclude: []
+verify: 'true'
+---
+
+# Monitor Waiting Not Stuck
+
+## 무엇을 만들 것인가
+WAITING(환경 승인 대기) 상태는 stuck 아님 — --rerun 호출 0회.
+EOF
+
+(
+  cd "$T16_PROJECT"
+  GH_LOG_FILE="$T16_GH_LOG" \
+    GH_PR_STATE=OPEN \
+    GH_PR_REVIEW_DECISION="" \
+    GH_CHECKS_MODE=waiting \
+    LOOP_PR_RERUN_SLEEP_SECONDS=0 \
+    PATH="$T16_MOCK:$PATH" \
+    MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
+    bash "$LOOP_SH_SRC" start "waiting-task" > "$WORK_DIR/${T16_NAME}.out" 2>&1
+)
+
+# AC5 회귀: WAITING은 진행 상태 → stuck 아님 → --rerun 호출 0회
+rerun_count_t16=$(grep -cE '^pr checks .*--rerun' "$T16_GH_LOG" || true)
+[[ "$rerun_count_t16" -eq 0 ]] \
+  || { echo "FAIL: WAITING 상태인데 pr checks --rerun ${rerun_count_t16}회 호출 (0회 기대). gh log:"; cat "$T16_GH_LOG"; echo "out:"; cat "$WORK_DIR/${T16_NAME}.out"; exit 1; }
+
+# Monitor 종료 메시지 (stuck 아님)
+grep -qE "(check 진행 중|stuck 아님)" "$WORK_DIR/${T16_NAME}.out" \
+  || { echo "FAIL: WAITING 시 'stuck 아님' 안내 메시지 없음. out:"; cat "$WORK_DIR/${T16_NAME}.out"; exit 1; }
+
+# DONE 보존 + 정상 종료
+[[ -f "$T16_PROJECT/milestones/regular/loops/waiting-task/.worktree/DONE" ]] \
+  || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
 echo ""
