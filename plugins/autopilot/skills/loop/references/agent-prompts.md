@@ -87,7 +87,7 @@ Agent({
 
 **메인 이터의 후속 처리:**
 - ✅ → §3.5 Self-Review 4축 단계로 진행
-- ❌ → NOTES.md에 발견 사항 추가, fix 후 다시 spec-compliance-reviewer 호출 (재호출 횟수 누적은 fix:symptom streak 검사 대상)
+- ❌ → task issue에 `[notes]` prefix comment로 발견 사항 추가, fix 후 다시 spec-compliance-reviewer 호출 (재호출 횟수 누적은 fix:symptom streak 검사 대상)
 
 ---
 
@@ -183,7 +183,7 @@ Agent({
 **메인 이터의 후속 처리:**
 - 예 → §3.5 Self-Review 4축 통과로 인정
 - 수정 후 진행 → Critical/Important 항목을 fix·재검토. fix 누적은 §4.2 조기 정지 조건 (3+ fix) 대상
-- 아니오 → DONE_WITH_CONCERNS 신호로 HANDOFF.md에 의심점 기록 후 종료
+- 아니오 → DONE_WITH_CONCERNS 신호로 task issue에 `[handoff]` prefix comment의 `## 의심점` 섹션에 기록 후 종료
 
 ---
 
