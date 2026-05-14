@@ -956,30 +956,41 @@ cmd_start() {
       if (( no_pr == 1 )); then
         echo "[$(now_iso)] --no-pr 플래그 감지 — PR phase 건너뜀"
       else
+        # ----- SPEC 123: request_review opt-in 감지 (PR phase 진입 *전*에 확정) -----
+        # AC#1·#3: opt-in 활성 시 PR phase 진입 *직전*에 pre-PR rebase 실행.
+        # AC#4·#12·#16·#17: opt-in 활성 시 PR phase 직후 review-fix-phase background dispatch.
+        local spec_md="$WT/$LOOPS_DIR_REL/SPEC.md"
+        local request_review_val=""
+        if [[ -f "$spec_md" ]]; then
+          if command -v yq >/dev/null 2>&1; then
+            request_review_val=$(sed -n '1,/^---$/{
+              1d
+              /^---$/d
+              p
+            }' "$spec_md" | yq '.request_review // false' 2>/dev/null | tr -d '[:space:]')
+          else
+            echo "WARN: yq 미설치 — SPEC frontmatter request_review 파싱 불가, opt-in 비활성으로 처리" >&2
+          fi
+        fi
+
+        # ----- AC#1·#3: pre-PR rebase (request_review opt-in 시) -----
+        if [[ "$request_review_val" == "true" ]]; then
+          echo "[$(now_iso)] request_review opt-in — pre-PR rebase (AC#1·#3)"
+          if ! bash "$SCRIPT_DIR/rebase-phase.sh" "$WT" "$BRANCH" "$PROJECT_ROOT"; then
+            echo "ERROR: pre-PR rebase 실패 — PR phase 건너뜀, 워크트리·브랜치 보존" >&2
+            exit 1
+          fi
+        fi
+
         echo "[$(now_iso)] PR phase 진입 (default — 건너뛰려면 --no-pr 사용)"
         if ! bash "$SCRIPT_DIR/pr-phase.sh" "$WT" "$BRANCH" "$TASK_ID" "$PROJECT_ROOT"; then
           echo "ERROR: PR phase 실패 — worktree·branch는 보존됨. 진단 후 재시도하세요." >&2
           exit 1
         fi
 
-        # ----- SPEC 123: request_review opt-in 감지 + review-fix 루프 dispatch -----
-        # PR 생성·재사용이 성공한 후 SPEC frontmatter에서 request_review: true를 검사.
-        # 활성 시 background로 review-fix-phase.sh를 띄워 폴링·자동 fix·자동 머지·
-        # cleanup·상태 전이를 자율 처리. loop.sh 자체는 정상 종료한다.
-        #
-        # 본 분기는 새 phase 3종(rebase-phase·review-fix-phase·cleanup-phase)을 참조한다.
+        # ----- AC#4: PR 생성 성공 후 review-fix 루프 background dispatch -----
         # review-fix-phase 내부에서 rebase-phase·cleanup-phase를 호출하므로 loop.sh는
         # 진입점인 review-fix-phase만 dispatch한다.
-        local spec_md="$WT/$LOOPS_DIR_REL/SPEC.md"
-        local request_review_val=""
-        if [[ -f "$spec_md" ]]; then
-          request_review_val=$(sed -n '1,/^---$/{
-            1d
-            /^---$/d
-            p
-          }' "$spec_md" | yq '.request_review // false' 2>/dev/null | tr -d '[:space:]')
-        fi
-
         if [[ "$request_review_val" == "true" ]]; then
           # PR 번호 추출 (head 브랜치로 조회)
           local pr_num

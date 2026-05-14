@@ -41,7 +41,8 @@ emit_escalation() { echo "ESCALATION cleanup-phase: $*"; }
 # 보통 status에 안 나타난다. 그래도 safety-net으로 staged·unstaged만 검사.
 dirty=$( cd "$WT" && git status --porcelain --untracked-files=no 2>/dev/null || true )
 if [[ -n "$dirty" ]]; then
-  emit_escalation "워크트리에 미커밋 변경 있음 — cleanup 거부\n$dirty"
+  # `echo`는 `\n`을 리터럴로 출력 — printf로 실제 개행 처리.
+  emit_escalation "$(printf '워크트리에 미커밋 변경 있음 — cleanup 거부\n%s' "$dirty")"
   exit 1
 fi
 

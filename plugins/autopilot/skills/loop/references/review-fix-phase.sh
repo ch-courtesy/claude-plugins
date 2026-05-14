@@ -49,7 +49,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 본 phase 외 fix iter에서 claude CLI 호출 시 사용할 allowed-tools.
 # caller(loop.sh)가 export한 AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS를 우선, 부재면 기본값.
 # 범위 최소: gh pr 관련 / git rebase·add·commit·push / Read·Edit·Write.
-ALLOWED_TOOLS_FIX="${AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS:-Bash(git:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh api:*),Read,Edit,Write,Glob,Grep}"
+ALLOWED_TOOLS_FIX="${AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS:-Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(git rebase:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh api repos/:*),Read,Edit,Write,Glob,Grep}"
 
 # ----- 상태 전이: Review (gh project item-edit) — AC12 -----
 if command -v gh >/dev/null 2>&1 \
@@ -76,6 +76,14 @@ mark_seen() { echo "$1" >> "$SEEN_FILE"; }
 
 # 반박 코멘트 1회 게시 가드 (AC10·AC11) — 본 phase 동안 1개만 허용.
 DISPUTE_FILE="$WT/.iterations/review-fix-dispute-posted"
+
+# owner cmd dedup — 매 폴링마다 동일 owner 코멘트 재처리 방지.
+OWNER_CMD_SEEN_FILE="$WT/.iterations/owner-cmd-seen-ids"
+touch "$OWNER_CMD_SEEN_FILE"
+
+# auto_merge 연속 실패 카운터 (back-off + 한계 도달 시 escalation)
+AUTO_MERGE_FAIL=0
+AUTO_MERGE_FAIL_MAX="${LOOP_REVIEW_AUTO_MERGE_FAIL_MAX:-5}"
 
 # ----- PR owner 식별 (owner cmd 검사용) -----
 PR_OWNER=$( cd "$WT" && gh pr view "$PR_NUMBER" --json author --jq '.author.login' 2>/dev/null || echo "" )
@@ -111,37 +119,36 @@ try_auto_merge() {
 # - Review summaries: gh pr view --json reviews
 # - Review threads (inline): gh pr view --json reviewThreads → 각 comment ID
 collect_new_events() {
+  # SPEC 제약 절: jq를 의존성으로 명시. base64 GraphQL node ID(=·+·/ 포함) 안전 파싱.
+  if ! command -v jq >/dev/null 2>&1; then
+    emit_escalation "jq 미설치 — collect_new_events 불가 (SPEC 제약 위반)"
+    return 1
+  fi
+
   local out=""
   local pr_json
   pr_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviews,reviewThreads,comments 2>/dev/null || echo '{}')
 
-  # PR-level comments (issue comments)
-  local ids
-  ids=$( printf '%s' "$pr_json" | sed -nE 's/.*"comments":\[(.*)\].*/\1/p' \
-          | grep -oE '"id":[[:space:]]*"?[A-Za-z0-9_-]+"?' \
-          | awk -F: '{gsub(/[" ]/,"",$2); print "comment:" $2}' )
-  while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
+  # PR-level comments (issue comments) — top-level .comments[].id only
+  while IFS= read -r raw_id; do
+    [[ -z "$raw_id" ]] && continue
+    local id="comment:$raw_id"
     is_seen "$id" || { mark_seen "$id"; out+="$id"$'\n'; }
-  done <<< "$ids"
+  done < <( printf '%s' "$pr_json" | jq -r '.comments[]?.id // empty' )
 
-  # Review summary entries
-  ids=$( printf '%s' "$pr_json" | sed -nE 's/.*"reviews":\[(.*)\],"review.*/\1/p' \
-          | grep -oE '"id":[[:space:]]*"?[A-Za-z0-9_-]+"?' \
-          | awk -F: '{gsub(/[" ]/,"",$2); print "review:" $2}' )
-  while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
+  # Review summary entries — top-level .reviews[].id only
+  while IFS= read -r raw_id; do
+    [[ -z "$raw_id" ]] && continue
+    local id="review:$raw_id"
     is_seen "$id" || { mark_seen "$id"; out+="$id"$'\n'; }
-  done <<< "$ids"
+  done < <( printf '%s' "$pr_json" | jq -r '.reviews[]?.id // empty' )
 
-  # Review threads inline comments
-  ids=$( printf '%s' "$pr_json" | grep -oE '"reviewThreads":\[.*\]' \
-          | grep -oE '"id":[[:space:]]*"?[A-Za-z0-9_-]+"?' \
-          | awk -F: '{gsub(/[" ]/,"",$2); print "thread:" $2}' )
-  while IFS= read -r id; do
-    [[ -z "$id" ]] && continue
+  # Review threads inline comments — .reviewThreads[].comments[].id (각 inline 코멘트)
+  while IFS= read -r raw_id; do
+    [[ -z "$raw_id" ]] && continue
+    local id="thread:$raw_id"
     is_seen "$id" || { mark_seen "$id"; out+="$id"$'\n'; }
-  done <<< "$ids"
+  done < <( printf '%s' "$pr_json" | jq -r '.reviewThreads[]?.comments[]?.id // empty' )
 
   printf '%s' "$out"
 }
@@ -165,29 +172,38 @@ while (( iter < MAX_ITER )); do
     exit 0
   fi
 
-  # (b) reviewDecision == APPROVED → 자동 머지
+  # (b) reviewDecision == APPROVED → 자동 머지 (연속 실패 시 linear back-off + 한계 escalation)
   review_decision=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviewDecision --jq '.reviewDecision' 2>/dev/null || echo "")
   if [[ "$review_decision" == "APPROVED" ]]; then
     if try_auto_merge "APPROVED"; then
       finalize_merged "APPROVED 후 머지" || exit 1
       exit 0
     fi
-    # try_auto_merge 실패 시 escalation emit하고 계속 폴링 — 사용자 수동 머지 후 merge 감지로 종료
-    sleep "$POLL_SECS"
+    AUTO_MERGE_FAIL=$((AUTO_MERGE_FAIL + 1))
+    if (( AUTO_MERGE_FAIL >= AUTO_MERGE_FAIL_MAX )); then
+      emit_escalation "auto_merge 연속 ${AUTO_MERGE_FAIL}회 실패 (한계 $AUTO_MERGE_FAIL_MAX) — 폴링 중단, 사용자 수동 머지 필요"
+      exit 1
+    fi
+    sleep $(( POLL_SECS * AUTO_MERGE_FAIL ))   # linear back-off (CI·branch protection 정상화 대기)
     continue
   fi
+  # APPROVED 외 분기 진입 시 카운터 리셋 (성공 path 복귀)
+  AUTO_MERGE_FAIL=0
 
-  # (c) owner cmd 검사: 최근 코멘트 본문에 /done · 합격 · 통과
+  # (c) owner cmd 검사: owner 코멘트 중 미본 것만 — dedup으로 재진입 차단
   if [[ -n "$PR_OWNER" ]]; then
-    owner_cmd_hit=$( cd "$WT" && gh pr view "$PR_NUMBER" --json comments \
-        --jq ".comments[] | select(.author.login==\"$PR_OWNER\") | .body" 2>/dev/null \
-        | grep -E '(^|[[:space:]])(/done|합격|통과)([[:space:]]|$)' | head -1 || true )
-    if [[ -n "$owner_cmd_hit" ]]; then
-      if try_auto_merge "owner cmd"; then
-        finalize_merged "owner cmd 후 머지" || exit 1
-        exit 0
+    while IFS=$'\t' read -r oc_id oc_body; do
+      [[ -z "$oc_id" ]] && continue
+      grep -qxF "$oc_id" "$OWNER_CMD_SEEN_FILE" 2>/dev/null && continue
+      echo "$oc_id" >> "$OWNER_CMD_SEEN_FILE"
+      if printf '%s' "$oc_body" | grep -qE '(^|[[:space:]])(/done|합격|통과)([[:space:]]|$)'; then
+        if try_auto_merge "owner cmd"; then
+          finalize_merged "owner cmd 후 머지" || exit 1
+          exit 0
+        fi
       fi
-    fi
+    done < <( cd "$WT" && gh pr view "$PR_NUMBER" --json comments \
+                --jq ".comments[]? | select(.author.login==\"$PR_OWNER\") | [.id, .body] | @tsv" 2>/dev/null )
   fi
 
   # (d) 신규 이벤트 수집·dispatch
@@ -246,9 +262,12 @@ EOF
   cd "$PROJECT_ROOT"
 
   # (iii) 코드 변경 있으면 commit + push (AC9)
-  if ( cd "$WT" && ! git diff --quiet ); then
+  # `git diff --quiet`는 unstaged 변경만 검사하므로 staged-only 변경을 놓친다.
+  # `git status --porcelain --untracked-files=no`로 staged+unstaged 모두 검사.
+  # untracked 파일은 fix iter 산출로 간주하지 않음 (claude가 의도 외 파일 생성 시 commit에서 제외).
+  if [[ -n "$( cd "$WT" && git status --porcelain --untracked-files=no 2>/dev/null )" ]]; then
     ( cd "$WT" \
-        && git add -A \
+        && git add -u \
         && git commit -q -m "fix:root review-fix iter $iter (PR #$PR_NUMBER)" \
         && git push origin "$BRANCH" ) \
       || { emit_escalation "fix commit/push 실패 (iter $iter)"; sleep "$POLL_SECS"; continue; }

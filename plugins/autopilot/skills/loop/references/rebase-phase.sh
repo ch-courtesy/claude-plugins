@@ -77,7 +77,7 @@ fi
 
 # claude 세션에 conflict marker가 있는 파일 목록 + diff를 stdin으로 넘긴다.
 # allowed-tools는 caller(loop.sh)에서 export한 환경 변수 또는 본 스크립트 기본값.
-ALLOWED_TOOLS_REBASE="${AUTOPILOT_REBASE_ALLOWED_TOOLS:-Bash(git:*),Bash(cat:*),Bash(ls:*),Read,Edit,Write}"
+ALLOWED_TOOLS_REBASE="${AUTOPILOT_REBASE_ALLOWED_TOOLS:-Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(cat:*),Bash(ls:*),Read,Edit,Write}"
 
 # claude 세션이 충돌을 해소할 수 있도록 작업 디렉토리·헌법(워크트리 CLAUDE.md)을 제공.
 # --dangerously-skip-permissions는 사용하지 않고 allowed-tools로 명시 범위 제한.
