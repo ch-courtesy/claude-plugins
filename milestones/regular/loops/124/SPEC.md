@@ -7,6 +7,8 @@ scope:
     - CLAUDE.md
 verify: '! grep -RnE ''(PLAN|NOTES|HANDOFF|RUN_LOG|ESCALATION)\.md'' plugins/autopilot/skills/loop/references/ plugins/autopilot/skills/loop/agents/ plugins/autopilot/skills/loop/SKILL.md plugins/autopilot/skills/loop/templates/ 2>/dev/null'
 ears_language: ko
+test_sweep_paths:
+  - "tests/autopilot/test-loop-sh.sh"
 ---
 
 # Loop 메타 파일 5종을 Task 코멘트로 이전
