@@ -146,7 +146,7 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 | `MAX_CONCURRENT` | — | 3 | 동시 실행 task 수 |
 | `MAX_ITERATIONS` | `--max-iterations N` | 30 | 이터 상한 |
 | `WALL_CLOCK_MINUTES` | `--wall-clock-minutes N` | 120 | 시계 캡(분) |
-| — | `--watch` | off | Project Status=`Blocked` 전이 시 정지 대신 polling 재개 대기 |
+| — | `--watch` | off | 차단 신호(Status=`Blocked` 또는 `[blocked]` prefix comment) 감지 시 정지 대신 polling 재개 대기. `task_status_is_blocked`의 OR 결합과 일치. |
 | `WATCH_TIMEOUT_HOURS` | — | 24 | --watch 모드에서 polling 최대 시간(시간 단위). 초과 시 exit 1 |
 
 워크트리 위치는 v0.2부터 메인 레포 내부 `milestones/<m>/loops/<c>/.worktree/`로 고정 — 외부 sibling 경로를 지정하는 환경 변수는 더 이상 제공하지 않습니다.
