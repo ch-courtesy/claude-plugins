@@ -74,7 +74,50 @@ task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 �
 
 `--no-pr` 플래그는 셸 드라이버(`loop.sh`)에 직접 전달되며, PR phase 진입 자체를 차단합니다. 이전 버전에서 `request_review: true`로 opt-in을 사용하던 호출자는 별도 마이그레이션이 필요 없습니다(default가 ON으로 변경됐으므로 동일 동작). 이전 버전에서 `request_review: false`(또는 키 미지정)로 PR을 차단하던 호출자는 `--no-pr`로 동일 동작을 재현해야 합니다.
 
-기존 PR body의 사용자 수기 편집 보호를 위해 자동 영역은 `<!-- autopilot:pr-body:begin --> ... <!-- autopilot:pr-body:end -->` marker fence 안에만 작성됩니다. 후속 단계(리뷰 모니터·자동 fix·worktree 정리)는 별도 task에서 다룹니다.
+기존 PR body의 사용자 수기 편집 보호를 위해 자동 영역은 `<!-- autopilot:pr-body:begin --> ... <!-- autopilot:pr-body:end -->` marker fence 안에만 작성됩니다.
+
+#### DONE 이후 PR 리뷰 자동 fix 루프 (SPEC 123, `request_review: true` opt-in)
+
+SPEC frontmatter에 `request_review: true`가 지정된 task만 본 흐름을 진입합니다. PR 생성·재사용이 성공한 직후 다음 sub-phase가 차례·일부 background로 실행됩니다:
+
+| 단계 | 스크립트 | 역할 |
+|---|---|---|
+| pre-PR rebase | `references/rebase-phase.sh` | default 브랜치로부터 워크트리 feat 브랜치 rebase. 충돌 시 claude CLI 1회 자동 해소, 실패 시 ESCALATION abort. |
+| review-fix 루프 (background) | `references/review-fix-phase.sh` | 30초 주기 폴링 (PR comments · review threads · summary). 새 이벤트마다 재-rebase → claude CLI fix → commit+push → (필요 시) 1개 반박 코멘트. |
+| 자동 머지 (auto-merge) | `references/review-fix-phase.sh` 내부 | reviewDecision `APPROVED` 또는 owner의 종료 코멘트(`/done`·`합격`·`통과`)로 `gh pr merge --squash` 수행. PR이 이미 `merged`이면 자동 머지 건너뜀. |
+| cleanup | `references/cleanup-phase.sh` | PR `merged` 후 worktree 제거 + 로컬 feat `branch -D` + origin feat `push --delete`. |
+
+##### 상태 전이 (Status field)
+
+`rules/context.md`의 추상 상태 어휘에 따라 외부 태스크 추적 시스템(GitHub Project)의 Status 필드를 다음 시점에 전이합니다:
+
+- PR 생성·재사용 성공 직후 → **Review** (review-fix-phase 진입 시점)
+- cleanup 성공 직후 → **Done**
+
+전이는 `gh project item-edit`로 수행하며, 환경 변수(`LOOP_PROJECT_ID` 등) 부재 시 무음 skip되어 phase 자체는 진행됩니다. 구체 값·매핑은 `rules/context.md` 단일 출처에 의존합니다.
+
+##### 종료 조건
+
+review-fix 루프는 다음 중 하나가 감지되면 종료합니다:
+
+1. PR `merged` → cleanup 진입 (자동 머지 skip — 이미 merged)
+2. PR `closed` (unmerged) → cleanup·상태 전이 모두 skip (사용자 판단 대기)
+3. reviewDecision `APPROVED` → 자동 머지 → cleanup
+4. owner 코멘트 `/done`·`합격`·`통과` → 자동 머지 → cleanup
+
+##### 게시 제약
+
+리뷰어가 틀렸다고 판명된 경우 1개의 반박(dispute) 코멘트만 PR에 게시합니다. inline reply, summary comment, title/description 편집 등 다른 어떤 GitHub 게시도 수행하지 않습니다.
+
+##### allowed-tools
+
+본 phase 그룹은 autopilot 워커의 새 claude CLI 세션 호출에 다음 도구만 허용합니다 (범위 최소화, 와일드카드 금지):
+
+- GitHub CLI: `gh pr merge`, `gh pr comment`, `gh pr view`, `gh api repos/.../pulls/*`·`repos/.../issues/*/comments`, `gh project item-edit`
+- Git: `git rebase`, `git push --delete`, `git branch -D`, `git worktree remove`, `git add`/`git commit`/`git status`/`git diff` (fix iter 본 작업)
+- Read·Edit·Write·Glob·Grep
+
+상수는 `loop.sh`의 `AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS` / `AUTOPILOT_REBASE_ALLOWED_TOOLS` 에 정의되며, 환경 변수로 자식 phase 스크립트에 export됩니다. 사용자 대화형 세션의 `settings.json`은 본 등록의 영향을 받지 않습니다 — autopilot 워커 컨텍스트에만 한정됩니다.
 
 요구: `gh` CLI 설치 + OAuth 인증.
 
