@@ -119,11 +119,16 @@ task_status_is_blocked() {
   fi
 
   # 2차: comment-only fallback. [blocked] 이후 [unblocked]/[resume] 유무로 판정.
+  # capture는 매치 실패 시 jq 에러를 던지므로 `?`로 흡수해 stream에서 제거하고,
+  # 매치된 prefix 값만 모은 배열의 마지막 요소를 선택. 비-prefix comment가 마지막에
+  # 추가돼도 그 요소는 배열에 들어가지 않으므로 false-unblock 발생 안 함.
   local last_prefix
   last_prefix=$(gh issue view "$issue" --json comments \
-    --jq '[.comments[] | (.body | split("\n")[0])
-            | capture("^\\[(?<p>blocked|unblocked|resume)\\]"; "x").p]
-          | reverse | .[0] // empty' 2>/dev/null || true)
+    --jq '[.comments[]
+            | (.body | split("\n")[0])
+            | (capture("^\\[(?<p>blocked|unblocked|resume)\\]") | .p)?
+            | select(. != null)]
+          | last // empty' 2>/dev/null || true)
   [[ "$last_prefix" == "blocked" ]] && return 0
   return 1
 }
