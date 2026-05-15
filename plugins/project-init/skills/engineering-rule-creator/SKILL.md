@@ -38,11 +38,10 @@ description: 현재 프로젝트에 맞는 엔지니어링 sub-룰(versioning �
 4-bis. **입력 수집 (동적).** 선택된 템플릿의 frontmatter에 `dynamic_inputs`가 있으면 각 항목을 순서대로 처리합니다. 동적 입력은 후보를 정적 옵션으로 적을 수 없고 target 프로젝트 디스크에서 그때그때 산출해야 하는 경우(예: 워치 디렉토리)에 사용합니다.
    - **후보 산출.** `candidate_source` 값에 따라 후보 목록을 만듭니다. 지원하는 값:
      - `depth1_dirs_filtered`: target 프로젝트 루트(`.`)의 **최상위(depth=1) 디렉토리**만 열거하되, 다음 패턴을 제외합니다 — `.*` (숨김 디렉토리), `node_modules`, `dist`, `build`, `target`. 권장 명령은 POSIX `find . -maxdepth 1 -mindepth 1 -type d` 또는 동등한 `ls -d */`이며, 결과에서 위 제외 패턴을 정확 일치(exact match)로 걸러냅니다. gitignore 존중 여부는 무시합니다.
-   - **사용자 선택.** 후보 산출 결과와 `free_input` 값의 조합에 따라 분기합니다 (`AskUserQuestion`은 옵션 최소 2개 요건이 있으므로 모든 분기를 명시적으로 처리).
+   - **사용자 선택.** 후보 산출 결과와 `free_input` 값의 조합에 따라 분기합니다. `AskUserQuestion`은 옵션 최소 2개 요건이 있고 CLAUDE.md 규칙상 *모든* 사용자 입력 수집은 `AskUserQuestion`을 거쳐야 하므로, 호출이 불가능한 분기는 자유 텍스트 수집도 불가능하다 — 후보 없음을 알리고 placeholder를 보존하는 것이 유일한 동작이다.
      - **호출 가능 (옵션 2개 이상 보장)**: 후보 2개 이상이거나, 후보 1개 + `free_input: true`("Other" 옵션 자동 추가) — `AskUserQuestion`을 호출합니다. `multi_select: true`면 다중 선택을 허용합니다. `free_input: true`면 "Other"로 자유 텍스트(개행 또는 콤마로 구분된 추가 경로·글로브 패턴)를 받아 선택 목록에 합칩니다.
      - **후보 정확히 1개 + `free_input: false`**: 묻지 않고 그 단일 후보를 자동 선택합니다 (옵션 1개뿐이라 호출 불가 — step 3의 "후보가 1개뿐이면 묻지 않고 자동 선택" 패턴과 동일).
-     - **후보 0개 + `free_input: true`**: `AskUserQuestion`을 건너뜁니다 ("Other" 단독으로는 옵션 1개뿐). 사용자에게 후보가 비어 있음을 알리고 자유 텍스트만 받아 처리합니다. 빈 응답이면 4단계의 "응답 누락 처리"와 동일하게 `{{name}}`을 그대로 남깁니다.
-     - **후보 0개 + `free_input: false`**: 묻지 않고 후보가 비어 있음을 사용자에게 알린 뒤 `{{name}}`을 그대로 남깁니다.
+     - **후보 0개** (`free_input` 무관): `AskUserQuestion`을 부르지 못하므로 사용자에게 후보가 비어 있음을 알리고 `{{name}}`을 그대로 남깁니다. `free_input: true`여도 옵션이 "Other" 하나뿐이라 호출 자체가 불가능 — 자유 텍스트 수집 경로 미정의.
    - **placeholder 치환.** `render` 값에 따라 최종 값을 만들어 본문의 `{{name}}`을 치환합니다. 지원하는 값:
      - `bullet_list`: 각 항목을 `- \`<path>\`` 마크다운 bullet 한 줄씩으로 변환해 결합. 항목 0개면 `(워치 대상 없음 — 검토 필요)` 한 줄로 대체합니다 (silent 빈 치환 금지).
    - **응답 누락 처리.** 사용자가 질문을 건너뛰거나 빈 응답을 반환하면 4단계와 동일하게 `{{name}}` 그대로 남깁니다.
