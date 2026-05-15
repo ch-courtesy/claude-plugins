@@ -100,13 +100,15 @@ finalize_merged() {
 }
 
 # ----- 자동 머지 (AC14) -----
+# 실패 시 caller가 retry 또는 한계 도달 escalation 결정. 본 함수 자체는 phase를
+# 중단하지 않으므로 ESCALATION 토큰 emit 금지 — WARN으로만 보고 (모니터링 오경보 방지).
 try_auto_merge() {
   local reason="$1"
   echo "[review-fix-phase] 자동 머지 시도: $reason"
   if ! ( cd "$WT" && gh pr merge "$PR_NUMBER" --auto --squash --delete-branch=false 2>&1 ); then
     # --auto가 안되면 즉시 머지 시도 (CI green 가정).
     if ! ( cd "$WT" && gh pr merge "$PR_NUMBER" --squash --delete-branch=false 2>&1 ); then
-      emit_escalation "gh pr merge 실패 (reason=$reason) — 사용자 수동 머지 필요"
+      echo "WARN: gh pr merge 실패 (reason=$reason) — caller가 retry 또는 한계 escalation 결정" >&2
       return 1
     fi
   fi
