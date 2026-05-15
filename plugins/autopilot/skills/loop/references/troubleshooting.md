@@ -1,6 +1,6 @@
 # ESCALATION 카테고리별 처리 가이드
 
-정지된 task의 `[blocked]` prefix comment 본문 `**카테고리**` 필드 별 사람의 처리 권장 흐름. comment 본문은 `gh issue view <task-issue> --comments`로 읽고, Blocked 해제는 GitHub Projects UI에서 task의 Status field를 "In Progress"로 수동 변경합니다(또는 `gh project item-edit --id <item-id> --project-id <project-id> --field-id <status-field-id> --single-select-option-id <in-progress-option-id>` — Projects v2 CLI의 정식 호출 형태는 field·option node ID를 사전 조회해야 하므로 UI가 더 단순).
+정지된 task의 `[blocked]` prefix comment 본문 `**카테고리**` 필드 별 사람의 처리 권장 흐름. comment 본문은 `gh issue view <task-issue> --comments`로 읽고, Blocked 해제는 task issue에 `[unblocked]` 또는 `[resume]` prefix comment를 발행합니다 — `gh issue comment <task-issue> --body '[unblocked] 해제 사유'`. (`task_status_is_blocked`가 가장 최근 매치된 prefix comment를 단일 진실원으로 보므로, GitHub Projects UI에서 Status를 변경하는 것만으로는 차단이 유지됩니다 — `[unblocked]`/`[resume]` comment 발행이 정식 절차.)
 
 ## config-gap (환경 설정·도구 부재)
 
@@ -9,7 +9,7 @@
 처리:
 1. `[blocked]` comment 본문 읽고 missing item 식별 (`gh issue view <task-issue> --comments`)
 2. target 프로젝트 환경 조정 (도구 설치, env var 설정 등)
-3. GitHub Projects UI에서 task의 Status를 "In Progress"로 변경해 Blocked 해제
+3. `gh issue comment <task-issue> --body '[unblocked] <해제 사유>'` 발행해 Blocked 해제 (`[resume]` prefix도 동등)
 4. `start <task-id>` 또는 watch 모드면 자동 재개
 
 ## spec-gap (SPEC.md 결함)
@@ -19,7 +19,7 @@
 처리:
 1. `[blocked]` comment 본문의 "필요한 결정" 섹션 검토
 2. 워크트리의 SPEC.md 직접 수정. 워크트리 루트는 `milestones/<m>/loops/<c>/.worktree`이고 그 안 SPEC 위치는 `milestones/<m>/loops/<c>/SPEC.md`. (SPEC 작성은 spec 스킬 사용: Skill(skill: "spec", args: "<task-id>"))
-3. Project Status를 Blocked에서 In Progress로 전이 후 재시작
+3. `gh issue comment <task-issue> --body '[unblocked] SPEC 보정 완료'` 발행해 Blocked 해제 후 재시작
 
 ## architecture-gap (코드 구조 변경 필요)
 

@@ -85,16 +85,18 @@ task_issue_number() {
   return 1
 }
 
-# task issue의 Project Status가 `Blocked`인지 검사 (헌법 §5·§12, SPEC AC4·8).
-# 결정 순서:
-#   1. AUTOPILOT_PROJECT_ITEM_ID가 설정돼 있으면 GraphQL로 Project Status를 1차 조회.
-#      "Blocked"면 blocked, 그 외(In Progress·Review·…)면 not blocked로 즉시 판정.
-#      `gh project item-edit … In Progress`로 사람이 unblock하는 문서화된 절차가
-#      실제로 동작해야 하므로 Status가 단일 출처다.
-#   2. Project ID 미설정·GraphQL 조회 실패 시에만 comment-only fallback:
-#      가장 최근 `[blocked]` 이후에 `[unblocked]`/`[resume]` prefix comment가 추가됐으면
-#      해제로 본다. 마지막 comment의 prefix만 보면 외부 사용자의 일반 comment 한 개로
-#      의도치 않은 재개가 발생할 수 있어 안전하지 않다.
+# task issue의 차단 신호 검사 (헌법 §5·§12, SPEC AC4·8).
+# Status·comment 두 신호의 OR 결합 — 어느 한쪽이라도 차단을 가리키면 blocked.
+#   1. AUTOPILOT_PROJECT_ITEM_ID가 설정돼 있고 GraphQL Status가 정확히 "Blocked"이면
+#      그 자리에서 0(blocked) 반환. early-exit short-circuit.
+#   2. 그 외 모든 경로(Status가 In Progress 등 / GraphQL 실패 / ITEM_ID 미설정)는
+#      comment fallback으로 fallthrough — 가장 최근에 매치된 prefix가 `[blocked]`이면
+#      0, `[unblocked]`/`[resume]`이면 1.
+# 자동 Status 전이가 미구현이므로 워커가 `[blocked]` comment를 발행해도 Status는
+# In Progress로 남는다. 따라서 차단 발효는 comment 신호가 단일 진실원이며, Status는
+# 사람의 명시적 Blocked 전이가 있을 때만 부가 신호로 기능한다. Unblock 절차도
+# `[unblocked]`/`[resume]` prefix comment 발행이 정식 — Status UI 변경만으로는
+# fallback이 여전히 `[blocked]`를 감지해 차단이 유지됨에 주의.
 # 반환: 0=blocked, 1=blocked 아님(판정 불가 포함).
 task_status_is_blocked() {
   local task_id="${1:-$TASK_ID}"
@@ -664,7 +666,7 @@ $reason
 다음 중 하나:
 1. 가설 점검 후 작업 명세(scope·verify) 조정
 2. 후속 메모를 \`[notes]\` prefix comment로 누적
-3. GitHub Projects UI에서 task의 Status를 "In Progress"로 변경해 Blocked 해제 후 재시작
+3. \`gh issue comment <task-issue> --body '[unblocked] <해제 사유>'\` 발행해 Blocked 해제 후 재시작 (\`[resume]\` prefix도 동등)
 
 자세한 내용은 워크트리 루트의 .iterations/ 디렉토리 최근 로그 참조.
 EOF
@@ -1004,7 +1006,7 @@ cmd_start() {
         local poll_count=0
         local max_polls=$(( watch_timeout_hours * 3600 / poll_interval ))
 
-        echo "[$(now_iso)] --watch 모드: Status=Blocked 해제 polling 중 (60초 간격, 최대 ${watch_timeout_hours}시간, Ctrl+C로 종료)..."
+        echo "[$(now_iso)] --watch 모드: 차단 신호 해제 polling 중 (60초 간격, 최대 ${watch_timeout_hours}시간, Ctrl+C로 종료)..."
         while task_status_is_blocked "$TASK_ID"; do
           sleep $poll_interval
           poll_count=$((poll_count + 1))
@@ -1018,7 +1020,7 @@ cmd_start() {
             exit 1
           fi
         done
-        echo "[$(now_iso)] Status=Blocked 해제 감지. 루프 재개."
+        echo "[$(now_iso)] 차단 신호 해제 감지. 루프 재개."
         continue
       fi
       exit 1
@@ -1348,25 +1350,27 @@ cmd_logs() {
 
   if [[ $tail_mode -eq 1 ]]; then
     # --tail: 60초 간격으로 새 comment polling (Ctrl+C로 종료). 매 polling마다
-    # last_seen createdAt 이후의 신규 comment만 출력 — 이전 `tail -f RUN_LOG.md`의
+    # last_seen createdAt 이후의 신규 comment만 출력 — 기존 로그 파일 tail의
     # 증분 스트리밍과 동등한 UX. 첫 라운드(last_seen 빈 값)는 기존 전체를 한 번 출력.
     local last_seen=""
     while true; do
-      local new_block
-      # gh의 `--jq`는 단일 jq 표현식 문자열만 받고 `--arg`를 통과시키지 않으므로
-      # comments 배열만 `--jq '.comments'`로 추출한 뒤 별도 jq pipe에서 `--arg`로
-      # since를 바인딩한다. jq -r로 raw 출력해 따옴표·escape 없이 그대로 표시.
-      new_block=$(gh issue view "$issue_num" --json comments \
-        --jq '.comments' 2>/dev/null \
-        | jq -r --arg since "$last_seen" \
+      # raw fetch 1회 → 같은 snapshot에서 new_block과 max_seen을 함께 계산해
+      # 두 호출 사이의 race(첫 호출과 두 번째 호출 사이 새 comment 도착 시 누락)를
+      # 제거. gh의 `--jq`는 `--arg`를 통과시키지 않으므로 comments 배열만 추출하고
+      # since 바인딩은 별도 jq pipe에서 처리.
+      local raw new_block max_seen
+      raw=$(gh issue view "$issue_num" --json comments --jq '.comments' 2>/dev/null || true)
+      if [[ -n "$raw" ]]; then
+        new_block=$(jq -r --arg since "$last_seen" \
           '[.[] | select($since == "" or .createdAt > $since)]
             | sort_by(.createdAt)
             | map("=== @\(.author.login) (\(.createdAt)) ===\n\(.body)\n")
-            | .[]' 2>/dev/null || true)
-      if [[ -n "$new_block" ]]; then
-        printf '%s\n' "$new_block"
-        last_seen=$(gh issue view "$issue_num" --json comments \
-          --jq '.comments | sort_by(.createdAt) | last | .createdAt // empty' 2>/dev/null || true)
+            | .[]' <<<"$raw" 2>/dev/null || true)
+        if [[ -n "$new_block" ]]; then
+          printf '%s\n' "$new_block"
+          max_seen=$(jq -r 'sort_by(.createdAt) | last | .createdAt // empty' <<<"$raw" 2>/dev/null || true)
+          [[ -n "$max_seen" ]] && last_seen="$max_seen"
+        fi
       fi
       sleep 60
     done

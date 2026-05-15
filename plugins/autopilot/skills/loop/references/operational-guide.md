@@ -120,10 +120,12 @@ gh issue view "$ISSUE" --comments | tail -n 60            # 최근 `[blocked]` c
 cd milestones/<m>/loops/<c>/.worktree
 $EDITOR "milestones/<m>/loops/<c>/SPEC.md"                # 필요 시 SPEC 보정
 gh issue comment "$ISSUE" --body "[notes] 후속 조치 메모"   # 결정 사항 누적
-# Blocked 해제 — GitHub Projects UI에서 task의 Status를 "In Progress"로 변경
-#   (Projects v2 CLI 정식 호출은 field·option node ID 사전 조회가 필요해 UI가 단순)
+gh issue comment "$ISSUE" --body "[unblocked] 후속 조치 완료"  # Blocked 해제
+#   ([resume] prefix도 동등. task_status_is_blocked가 가장 최근 매치된 prefix
+#    comment를 단일 진실원으로 보므로, Projects UI에서 Status만 바꾸는 것으로는
+#    fallback이 [blocked]를 계속 감지해 차단이 유지됨.)
 cd <project-root> && bash "$LOOP_SH" start <task-id>      # 재시작
-# --watch 모드면 Status가 Blocked에서 벗어나는 순간 자동 재개 (polling)
+# --watch 모드면 [unblocked]/[resume] comment로 차단 신호가 해제되는 순간 자동 재개 (polling)
 ```
 
 ## 동시 실행
