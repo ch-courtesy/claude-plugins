@@ -42,6 +42,14 @@ fi
 emit_escalation() { echo "ESCALATION review-fix-phase: $*"; }
 [[ -d "$WT" ]] || { emit_escalation "워크트리 없음: $WT"; exit 1; }
 
+# jq는 SPEC 제약 절의 명시적 의존성 — collect_new_events·owner cmd 파싱이 jq에
+# 직접 의존하므로 진입 시점에 사전 검사. 함수 내부 emit_escalation은 `$()` 캡처로
+# stdout에 도달하지 못해 모니터링이 ESCALATION을 감지 못 함.
+if ! command -v jq >/dev/null 2>&1; then
+  emit_escalation "jq 미설치 — SPEC 제약 위반, phase 진입 불가"
+  exit 1
+fi
+
 POLL_SECS="${LOOP_REVIEW_POLL_SECS:-30}"
 MAX_ITER="${LOOP_REVIEW_MAX_ITER:-480}"   # 30초 × 480 ≈ 4시간 cutoff
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -121,12 +129,7 @@ try_auto_merge() {
 # - Review summaries: gh pr view --json reviews
 # - Review threads (inline): gh pr view --json reviewThreads → 각 comment ID
 collect_new_events() {
-  # SPEC 제약 절: jq를 의존성으로 명시. base64 GraphQL node ID(=·+·/ 포함) 안전 파싱.
-  if ! command -v jq >/dev/null 2>&1; then
-    emit_escalation "jq 미설치 — collect_new_events 불가 (SPEC 제약 위반)"
-    return 1
-  fi
-
+  # jq 사전 검사는 진입부에서 완료됨 ($() 캡처로 stdout 누락 방지).
   local out=""
   local pr_json
   pr_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviews,reviewThreads,comments 2>/dev/null || echo '{}')
