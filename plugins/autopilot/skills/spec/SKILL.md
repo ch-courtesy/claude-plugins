@@ -215,8 +215,9 @@ subagent의 보고는 사실 수집·인용에 그치며, **결정·합성은 �
 
 SPEC.md 가 들어갈 디렉토리는 step 9.5.1 의 결정적 슬러그화 규칙을 step 7 에서 합의된 §1 H1 제목에 적용해 `<slug>` 를 먼저 산출한 뒤 다음 단일 컨벤션을 따른다:
 
-- `<slug>` 가 비-empty: `milestones/<m>/loops/<c>-<slug>/SPEC.md`
-- `<slug>` 가 빈 문자열로 환원: `milestones/<m>/loops/<c>/SPEC.md` (fallback)
+- `milestones/<m>/loops/<c>-<slug>/SPEC.md`
+
+`<slug>` 가 빈 문자열로 환원되면 fallback 경로를 만들지 않는다 — SPEC 116 EARS AC4 (단일 컨벤션, 다른 경로 fallback 없음) 위반이 되고, sibling pr-phase 도 같은 이유로 슬러그 없는 브랜치를 받으면 abort 한다. 빈 slug 발생 시 §9.5.1 의 실패 처리로 분기해 사용자에게 §1 H1 제목 수정 (step 7 재진입) 을 요청한다.
 
 여기서 `<c>` 는 본 스킬의 input task-id (단계 1 검증을 통과한 값). 본 디렉토리 이름이 곧 sibling `autopilot:loop` 이 발견하는 feat 브랜치 `feat/<c>-<slug>` 의 `<slug>` 와 동일해 spec→loop 라운드트립이 단일 컨벤션으로 정합한다.
 
@@ -253,7 +254,7 @@ SPEC §1 제목(첫 H1, `# ` 다음 텍스트)에서 `<slug>`를 도출:
 3. 연속된 `-`를 단일 `-`로 압축
 4. 시작·끝의 `-` 제거
 
-결과가 빈 문자열이면 `<slug>` 없이 `feat/<task-id>` 단독으로 fallback. 같은 SPEC 제목은 항상 같은 slug를 만든다.
+결과가 빈 문자열이면 fallback 브랜치(`feat/<c>` 단독)·fallback 디렉토리(`milestones/<m>/loops/<c>/`)를 만들지 않는다 — SPEC 116 EARS AC4 단일 컨벤션 위반이며 sibling pr-phase 도 동일 이유로 abort. 빈 slug 발생 시 §9.5.3 실패 처리로 분기해 사용자에게 §1 H1 제목 수정(step 7 재진입)을 요청한다. 같은 SPEC 제목은 항상 같은 slug 를 만든다.
 
 구현 예 (bash):
 
@@ -267,16 +268,14 @@ slug=$(printf '%s' "$title" \
 
 #### 9.5.2 브랜치 생성·commit 절차
 
-본 단계의 모든 경로 참조는 §8.1 에서 결정된 slug-bearing 디렉토리 — `milestones/<m>/loops/<c>-<slug>/SPEC.md` (slug 비-empty 시) 또는 `milestones/<m>/loops/<c>/SPEC.md` (slug fallback) — 와 정합하게 동일 `<slug>` 를 사용한다. 브랜치 이름의 `<slug>` 와 디렉토리 이름의 `<slug>` 는 반드시 같다.
+본 단계의 모든 경로 참조는 §8.1 에서 결정된 slug-bearing 디렉토리 — `milestones/<m>/loops/<c>-<slug>/SPEC.md` — 와 정합하게 동일 `<slug>` 를 사용한다. 브랜치 이름의 `<slug>` 와 디렉토리 이름의 `<slug>` 는 반드시 같다. `<slug>` 가 빈 문자열이면 §9.5.1 의 빈-slug 실패 처리로 사전 분기되므로 본 단계는 항상 non-empty `<slug>` 를 가정한다 (SPEC 116 단일 컨벤션, EARS AC4 — fallback 없음).
 
 1. `git status --porcelain`으로 main 작업트리 상태 스냅샷 캡처. unstaged·untracked가 있으면 그 사실을 인지 (다음 단계의 git 동작이 영향 안 주도록 명시적 경로 사용).
 2. 현재 브랜치 이름 보존: `orig_branch=$(git rev-parse --abbrev-ref HEAD)`.
-3. 브랜치 이름 결정 (§8.1 과 동일 `<slug>`):
-   - `branch="feat/<c>-<slug>"` (slug 비-empty 시)
-   - `branch="feat/<c>"` (slug fallback)
+3. 브랜치 이름 결정 (§8.1 과 동일 `<slug>`): `branch="feat/<c>-<slug>"`. (빈 slug 케이스는 §9.5.1 에서 이미 abort 되어 본 단계 진입 자체가 없다.)
 4. `git show-ref --verify --quiet "refs/heads/$branch"`로 충돌 확인. 이미 존재하면 사용자에게 알리고 `AskUserQuestion`으로 (덮어쓰기 / 새 이름 / 종료) 선택.
 5. `git checkout -b "$branch" main`으로 main에서 명시적으로 분기. base를 명시하지 않으면 호출 시점 HEAD에서 분기되어 비-main 브랜치에서 호출 시 엉뚱한 base로 feat 브랜치가 만들어진다. main 작업트리의 다른 변경은 그대로 따라옴 (이를 의도). SPEC.md만 add·commit하므로 다른 파일은 새 commit에 들어가지 않는다.
-6. SPEC.md 경로를 §8.1 의 slug-bearing 경로(`milestones/<m>/loops/<c>-<slug>/SPEC.md` 또는 fallback `milestones/<m>/loops/<c>/SPEC.md`)로 두고 `git add <spec_path>` 로 명시적으로 SPEC.md만 staging (`git add .` 절대 금지).
+6. SPEC.md 경로를 §8.1 의 slug-bearing 경로(`milestones/<m>/loops/<c>-<slug>/SPEC.md`)로 두고 `git add <spec_path>` 로 명시적으로 SPEC.md만 staging (`git add .` 절대 금지).
 7. `git commit -m "feat(spec): <c> — <title>" -- "<spec_path>"`로 SPEC만 commit. `-- <pathspec>` 형식이 다른 staged 파일을 commit에서 격리.
 8. `git checkout "$orig_branch"`로 원래 브랜치 복귀.
 9. 복귀 후 `git status --porcelain` 결과가 step 1과 동일한지 검증. 다르면 사용자에게 경고.
@@ -286,11 +285,12 @@ slug=$(printf '%s' "$title" \
 위 절차 중 어떤 단계라도 실패하면:
 - 부분 결과 정리: 생성된 feat 브랜치가 있으면 `git branch -D "$branch"`로 삭제 (단, 그 브랜치에 다른 commit이 없을 때만; 의심스러우면 사용자에게 알리고 수동 정리 안내).
 - 원래 브랜치 복귀: `git checkout "$orig_branch"`.
-- 사용자에게 명시적으로 실패 사유와 복구 방법 안내. SPEC.md는 `milestones/<m>/loops/<c>/SPEC.md`에 그대로 남기되, loop 진행은 다음 단계에서 사용자가 결정.
+- 사용자에게 명시적으로 실패 사유와 복구 방법 안내. SPEC.md는 `milestones/<m>/loops/<c>-<slug>/SPEC.md` 에 그대로 남기되, loop 진행은 다음 단계에서 사용자가 결정.
+- **빈 slug 케이스 (§9.5.1)**: 슬러그화 결과가 빈 문자열이면 본 §9.5.2 진입 전에 abort 한다. SPEC.md 는 step 8 의 §8.1 단일 경로 가정에 의해 빈 slug 에서는 작성되지 않으며, 사용자에게 §1 H1 제목 수정을 요청해 step 7 재진입한다 (SPEC 116 단일 컨벤션 — fallback 없음).
 
 ### 10. 사용자 최종 검토
 
-SPEC.md 경로(§8.1 에서 결정된 slug-bearing 경로 — `milestones/<m>/loops/<c>-<slug>/SPEC.md` 또는 fallback `milestones/<m>/loops/<c>/SPEC.md`)와 요약을 먼저 안내한 뒤, `AskUserQuestion`으로 **명시적 결정 입력**을 받는다 (자유 텍스트 안내·자유 텍스트 끝 질문 종결구 금지 — CLAUDE.md 규칙). 옵션은 다음 3개:
+SPEC.md 경로(§8.1 에서 결정된 slug-bearing 경로 — `milestones/<m>/loops/<c>-<slug>/SPEC.md`)와 요약을 먼저 안내한 뒤, `AskUserQuestion`으로 **명시적 결정 입력**을 받는다 (자유 텍스트 안내·자유 텍스트 끝 질문 종결구 금지 — CLAUDE.md 규칙). 옵션은 다음 3개:
 
 - **지금 loop start 호출** (Recommended) — 동일 task-id로 sibling 스킬을 자동 연계 호출: `Skill(skill: "loop", args: "start <m>/<c>")`. 사용자가 이 옵션을 선택하면 모델은 즉시 본 Skill 호출을 발행하며, 추가 모니터 결정 질문은 묻지 않고 loop 기본 동작(자동 Monitor 가설 포함, `plugins/autopilot/skills/loop/SKILL.md` 참조)을 그대로 적용한다. milestone이 default `regular`인 경우 `start <c>` 단축형도 동등 (loop.sh가 자동 정규화).
 - **SPEC만 확정** — 경로만 안내하고 종료. 사용자가 이후 별도 시점에 `Skill(skill: "loop", args: "start <m>/<c>")`를 직접 호출.

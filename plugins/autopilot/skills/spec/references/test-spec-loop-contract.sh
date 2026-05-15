@@ -89,6 +89,24 @@ grep -qF "sed -e 's/--*/-/g'" "$SPEC_SKILL_MD" \
 grep -qF "milestones/<m>/loops/<c>-<slug>" "$SPEC_SKILL_MD" \
   || { echo "FAIL T1e: SKILL.md missing slug-bearing directory reference (milestones/<m>/loops/<c>-<slug>)" >&2; exit 1; }
 
+# T1f: slug-less fallback 경로·브랜치가 SKILL.md 에 살아 있으면 SPEC 116 EARS AC4 위반.
+# 구 문구(회귀하면 fail):
+#   - "milestones/<m>/loops/<c>/SPEC.md` (fallback)" / "(slug fallback)"
+#   - "branch=\"feat/<c>\"" / "feat/<task-id>` 단독으로 fallback"
+T1F_BAN=(
+  'loops/<c>/SPEC.md` (fallback)'
+  'loops/<c>/SPEC.md` (slug fallback)'
+  'branch="feat/<c>"'
+  '`feat/<task-id>` 단독으로 fallback'
+)
+for pat in "${T1F_BAN[@]}"; do
+  if grep -qF "$pat" "$SPEC_SKILL_MD"; then
+    echo "FAIL T1f: SKILL.md 에 slug-less fallback 문구 회귀 — '$pat' 발견 (EARS AC4 위반)" >&2
+    grep -nF "$pat" "$SPEC_SKILL_MD" >&2 || true
+    exit 1
+  fi
+done
+
 echo "OK T1: slug 도출 결정성 + SKILL.md drift guard"
 
 # ──────────────────────────────────────────────────────────────────────────────
