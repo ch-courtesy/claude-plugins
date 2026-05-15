@@ -104,7 +104,11 @@ task_status_is_blocked() {
     return 1
   fi
 
-  # 1차: Project Status 조회 (정식 출처)
+  # 1차: Project Status가 명시적으로 Blocked이면 즉시 blocked 판정.
+  # non-Blocked·응답 비어있음·GraphQL 실패 → comment fallback으로 fallthrough.
+  # 이유: Status 자동 전이가 미구현이므로 워커가 [blocked] comment를 발행해도
+  # Status는 In Progress 그대로 남는다. 두 신호를 OR로 결합해야 ITEM_ID 설정
+  # 환경에서도 [blocked] comment 기반 차단이 작동한다 (SPEC AC5).
   if [[ -n "${AUTOPILOT_PROJECT_ITEM_ID:-}" ]]; then
     local status
     status=$(gh api graphql -f query='
@@ -112,10 +116,9 @@ task_status_is_blocked() {
         fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }' \
       -f id="$AUTOPILOT_PROJECT_ITEM_ID" \
       --jq '.data.node.fieldValueByName.name // empty' 2>/dev/null || true)
-    if [[ -n "$status" ]]; then
-      [[ "$status" == "Blocked" ]] && return 0 || return 1
+    if [[ "$status" == "Blocked" ]]; then
+      return 0
     fi
-    # GraphQL 응답 비었으면 comment fallback으로 흘러감 (네트워크·권한 일시 실패 대비)
   fi
 
   # 2차: comment-only fallback. [blocked] 이후 [unblocked]/[resume] 유무로 판정.
@@ -661,7 +664,7 @@ $reason
 다음 중 하나:
 1. 가설 점검 후 작업 명세(scope·verify) 조정
 2. 후속 메모를 \`[notes]\` prefix comment로 누적
-3. \`gh project item-edit --id <item-id> --field Status --value "In Progress"\`로 Blocked 해제 후 재시작
+3. GitHub Projects UI에서 task의 Status를 "In Progress"로 변경해 Blocked 해제 후 재시작
 
 자세한 내용은 워크트리 루트의 .iterations/ 디렉토리 최근 로그 참조.
 EOF

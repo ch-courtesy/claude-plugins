@@ -1,6 +1,6 @@
 # ESCALATION 카테고리별 처리 가이드
 
-정지된 task의 `[blocked]` prefix comment 본문 `**카테고리**` 필드 별 사람의 처리 권장 흐름. comment 본문은 `gh issue view <task-issue> --comments`로 읽고, Blocked 해제는 `gh project item-edit --id <item-id> --field Status --value "In Progress"`로 수행합니다.
+정지된 task의 `[blocked]` prefix comment 본문 `**카테고리**` 필드 별 사람의 처리 권장 흐름. comment 본문은 `gh issue view <task-issue> --comments`로 읽고, Blocked 해제는 GitHub Projects UI에서 task의 Status field를 "In Progress"로 수동 변경합니다(또는 `gh project item-edit --id <item-id> --project-id <project-id> --field-id <status-field-id> --single-select-option-id <in-progress-option-id>` — Projects v2 CLI의 정식 호출 형태는 field·option node ID를 사전 조회해야 하므로 UI가 더 단순).
 
 ## config-gap (환경 설정·도구 부재)
 
@@ -9,7 +9,7 @@
 처리:
 1. `[blocked]` comment 본문 읽고 missing item 식별 (`gh issue view <task-issue> --comments`)
 2. target 프로젝트 환경 조정 (도구 설치, env var 설정 등)
-3. `gh project item-edit --id <item-id> --field Status --value "In Progress"`로 Blocked 해제
+3. GitHub Projects UI에서 task의 Status를 "In Progress"로 변경해 Blocked 해제
 4. `start <task-id>` 또는 watch 모드면 자동 재개
 
 ## spec-gap (SPEC.md 결함)
