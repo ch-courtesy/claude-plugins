@@ -93,6 +93,113 @@ normalize_task_id() {
   fi
 }
 
+# ----- task ↔ GitHub issue 매핑 (헌법 §11, rules/context.md) -----
+# task-id의 마지막 컴포넌트(예: 'regular/124' → '124')가 숫자면 issue number로 직접 사용.
+# 그 외 문자열이면 `gh issue list --search`로 첫 매칭 lookup. 실패 시 빈 출력 + return 1.
+# 호출자(halt·iterate·cmd_status)는 매핑 실패 시 graceful degrade한다.
+# M4-b 인라인 — M4-c에서 재시도/backoff 추가.
+task_issue_number() {
+  local task_id="${1:-$TASK_ID}"
+  local child="${task_id##*/}"
+  if [[ "$child" =~ ^[0-9]+$ ]]; then
+    printf '%s\n' "$child"
+    return 0
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
+  fi
+  local n
+  n=$(gh issue list --search "$task_id" --json number --jq '.[0].number' 2>/dev/null || true)
+  if [[ -n "$n" && "$n" != "null" ]]; then
+    printf '%s\n' "$n"
+    return 0
+  fi
+  return 1
+}
+
+# task issue의 차단 신호 검사 (헌법 §5·§12, SPEC AC4·8).
+# Status·comment 두 신호의 OR 결합 — 어느 한쪽이라도 차단을 가리키면 blocked.
+#   1. AUTOPILOT_PROJECT_ITEM_ID가 설정돼 있고 GraphQL Status가 정확히 "Blocked"이면
+#      그 자리에서 0(blocked) 반환. early-exit short-circuit.
+#   2. 그 외 모든 경로(Status가 In Progress 등 / GraphQL 실패 / ITEM_ID 미설정)는
+#      comment fallback으로 fallthrough — 가장 최근에 매치된 prefix가 `[blocked]`이면
+#      0, `[unblocked]`/`[resume]`이면 1.
+# 자동 Status 전이가 미구현이므로 워커가 `[blocked]` comment를 발행해도 Status는
+# In Progress로 남는다. 따라서 차단 발효는 comment 신호가 단일 진실원이며, Status는
+# 사람의 명시적 Blocked 전이가 있을 때만 부가 신호로 기능한다. Unblock 절차도
+# `[unblocked]`/`[resume]` prefix comment 발행이 정식 — Status UI 변경만으로는
+# fallback이 여전히 `[blocked]`를 감지해 차단이 유지됨에 주의.
+# 반환: 0=blocked, 1=blocked 아님(판정 불가 포함).
+task_status_is_blocked() {
+  local task_id="${1:-$TASK_ID}"
+  local issue
+  issue=$(task_issue_number "$task_id" 2>/dev/null) || return 1
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
+  fi
+
+  # 1차: Project Status가 명시적으로 Blocked이면 즉시 blocked 판정.
+  # non-Blocked·응답 비어있음·GraphQL 실패 → comment fallback으로 fallthrough.
+  # 이유: Status 자동 전이가 미구현이므로 워커가 [blocked] comment를 발행해도
+  # Status는 In Progress 그대로 남는다. 두 신호를 OR로 결합해야 ITEM_ID 설정
+  # 환경에서도 [blocked] comment 기반 차단이 작동한다 (SPEC AC5).
+  if [[ -n "${AUTOPILOT_PROJECT_ITEM_ID:-}" ]]; then
+    local status
+    status=$(gh api graphql -f query='
+      query($id:ID!){ node(id:$id){ ... on ProjectV2Item {
+        fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }' \
+      -f id="$AUTOPILOT_PROJECT_ITEM_ID" \
+      --jq '.data.node.fieldValueByName.name // empty' 2>/dev/null || true)
+    if [[ "$status" == "Blocked" ]]; then
+      return 0
+    fi
+  fi
+
+  # 2차: comment-only fallback. [blocked] 이후 [unblocked]/[resume] 유무로 판정.
+  # capture는 매치 실패 시 jq 에러를 던지므로 `?`로 흡수해 stream에서 제거하고,
+  # 매치된 prefix 값만 모은 배열의 마지막 요소를 선택. 비-prefix comment가 마지막에
+  # 추가돼도 그 요소는 배열에 들어가지 않으므로 false-unblock 발생 안 함.
+  local last_prefix
+  last_prefix=$(gh issue view "$issue" --json comments \
+    --jq '[.comments[]
+            | (.body | split("\n")[0])
+            | (capture("^\\[(?<p>blocked|unblocked|resume)\\]") | .p)?
+            | select(. != null)]
+          | last // empty' 2>/dev/null || true)
+  [[ "$last_prefix" == "blocked" ]] && return 0
+  return 1
+}
+
+# 자동 `[blocked]` prefix comment 발행 + Project Status=Blocked 전이 시도 (헌법 §5.2).
+# AUTOPILOT_PROJECT_ITEM_ID env가 있으면 Status 전이도 시도, 없으면 comment만.
+# 둘 다 best-effort — gh 미설치·실패 시 stderr WARN으로 알리고 비차단 진행.
+gh_post_blocked_comment() {
+  local task_id="$1"
+  local body="$2"
+  local issue
+  if ! issue=$(task_issue_number "$task_id" 2>/dev/null); then
+    echo "[$(now_iso)] WARN: task '$task_id' issue 매핑 실패 — [blocked] comment 건너뜀 (수동 보고 필요)" >&2
+    return 1
+  fi
+  if ! command -v gh >/dev/null 2>&1; then
+    echo "[$(now_iso)] WARN: gh CLI 부재 — issue #$issue [blocked] comment 건너뜀" >&2
+    return 1
+  fi
+  if ! gh issue comment "$issue" --body "$body" >/dev/null 2>&1; then
+    echo "[$(now_iso)] WARN: gh issue comment 실패 (issue #$issue) — 수동 발행 필요" >&2
+    return 1
+  fi
+  echo "[$(now_iso)] [blocked] prefix comment 발행: issue #$issue" >&2
+  # NOTE: Project Status=Blocked 자동 전이는 미구현 (추후 도입). GraphQL mutation
+  # `updateProjectV2ItemFieldValue`에는 project_id·field_id·option_id 세 추가 식별자가
+  # 필요해 best-effort 수준의 env 한 개로는 호출 불가. 이전 구현의 `--field Status
+  # --value Blocked`는 gh CLI의 정식 플래그가 아니어서 항상 실패했으므로 정직하게 제거.
+  # 본 호출은 [blocked] comment 발행으로 차단 신호를 남기는 데 한정한다 — Status 전이는
+  # 사람이 수동으로 (또는 추후 도입할 별도 헬퍼로) 처리.
+  echo "[$(now_iso)] INFO: Project Status=Blocked 자동 전이는 미구현 — 수동 전이 필요 (issue #$issue)" >&2
+  return 0
+}
+
 now_iso() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
@@ -484,10 +591,11 @@ diff_vs_scope() {
     # 프레임워크 파일은 항상 scope 검사에서 제외 (워커 프레임워크 메타파일)
     # CLAUDE.md는 SPEC scope.exclude로 통제 — skip-worktree로 보통은 diff에 안 잡히지만,
     # 워커가 unskip + commit하면 여기서 정상 catch되어야 함 (워크트리 셋업 직후 자동 skip 처리).
-    # 메타 파일 5종 + SPEC.md는 milestones/<m>/loops/<c>/ 단일 트리 안에 있으므로
-    # 그 경로 패턴으로 제외 (드라이버 자동 메타 commit이 scope 게이트를 트리거하지 않게).
+    # SPEC.md(워커 명세)와 DONE(종료 신호)은 milestones/<m>/loops/<c>/ 단일 트리 안에 있으므로
+    # 그 경로 패턴으로 제외. 이터간 메타(handoff/notes/done/blocked)는 task issue
+    # body·prefix comments로 위임됐으므로 워크트리 파일이 존재하지 않는다 (헌법 §11).
     case "$file" in
-      milestones/*/loops/*/PLAN.md|milestones/*/loops/*/NOTES.md|milestones/*/loops/*/HANDOFF.md|milestones/*/loops/*/RUN_LOG.md|milestones/*/loops/*/ESCALATION.md|milestones/*/loops/*/SPEC.md|DONE) continue ;;
+      milestones/*/loops/*/SPEC.md|DONE) continue ;;
     esac
 
     # exclude 패턴 매칭 → 위반
@@ -526,16 +634,12 @@ diff_vs_scope() {
 
 grep_new_suppressors() {
   # 커밋된 diff(BASE..HEAD) + working tree 변경 양쪽 검사 (미커밋 suppressor도 catch).
-  # 메타 파일·SPEC은 워커 메모리·명세(헌법 인용 등 false positive 발생)이므로 검사 제외.
+  # SPEC.md는 워커 명세(헌법 인용 등 false positive 발생)이므로 검사 제외.
+  # 이터간 메타는 task issue body·prefix comments로 위임됐으므로 워크트리 파일 검사 대상 아님 (헌법 §11).
   # BASE..HEAD 근거는 diff_vs_scope 주석 참조 (SPEC 81).
   local base_sha="$1"
   cd "$WT" || return
   local meta_exclude=(
-    ':(exclude)milestones/*/loops/*/PLAN.md'
-    ':(exclude)milestones/*/loops/*/NOTES.md'
-    ':(exclude)milestones/*/loops/*/HANDOFF.md'
-    ':(exclude)milestones/*/loops/*/RUN_LOG.md'
-    ':(exclude)milestones/*/loops/*/ESCALATION.md'
     ':(exclude)milestones/*/loops/*/SPEC.md'
   )
   {
@@ -616,32 +720,36 @@ halt() {
     echo "  복구: cd $WT && git stash list / git stash pop" >&2
   fi
 
-  # 자동 ESCALATION 작성 — 단일 contract: milestones/<m>/loops/<c>/ESCALATION.md
-  mkdir -p "$WT/$LOOPS_DIR_REL"
-  cat > "$WT/$LOOPS_DIR_REL/ESCALATION.md" <<EOF
-# 에스컬레이션 보고 (드라이버 자동 작성)
+  # 자동 [blocked] prefix comment 발행 + Project Status=Blocked 전이 시도 (헌법 §5.2, SPEC AC5).
+  # 워크트리에 메타 파일을 쓰지 않는다 — 이터간 상태는 task issue body·comments에 위임.
+  local blocked_body
+  blocked_body=$(cat <<EOF
+[blocked] 에스컬레이션 보고 (드라이버 자동 작성)
 
 **작업**: $TASK_ID
 **이터레이션**: 자동 정지
+**카테고리**: config-gap | spec-gap | architecture-gap | environment-gap | other (사람 분류)
 **트리거**: 객관 게이트 위반 — $reason
 
-## 현재 상태
+### 현재 상태
 
 드라이버가 매 이터 후 게이트를 검사한 결과 위반이 감지되어 자동 정지함.
 
-## 문제
+### 문제
 
 $reason
 
-## 처리
+### 처리
 
 다음 중 하나:
 1. 가설 점검 후 작업 명세(scope·verify) 조정
-2. 메모리 파일(NOTES.md) 보강
-3. 본 ESCALATION.md 삭제 후 재시작
+2. 후속 메모를 \`[notes]\` prefix comment로 누적
+3. \`gh issue comment <task-issue> --body '[unblocked] <해제 사유>'\` 발행해 Blocked 해제 후 재시작 (\`[resume]\` prefix도 동등)
 
 자세한 내용은 워크트리 루트의 .iterations/ 디렉토리 최근 로그 참조.
 EOF
+)
+  gh_post_blocked_comment "$TASK_ID" "$blocked_body" || true
 
   exit 1
 }
@@ -686,30 +794,10 @@ iterate() {
   local claude_pid=$!
   wait "$claude_pid" || exit_code=$?
 
-  echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 메타 commit·게이트 검사..."
+  echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 게이트 검사..."
 
-  # 메타 파일 5종 변경분이 있으면 chore(loop): meta iter <n> 메시지로 자동 commit.
-  # pathspec 격리로 워커 코드 commit과 commit 단위가 섞이지 않음.
-  # 변경 없으면 commit 0건 (EARS 5).
-  local meta_paths=(
-    "$LOOPS_DIR_REL/PLAN.md"
-    "$LOOPS_DIR_REL/NOTES.md"
-    "$LOOPS_DIR_REL/HANDOFF.md"
-    "$LOOPS_DIR_REL/RUN_LOG.md"
-    "$LOOPS_DIR_REL/ESCALATION.md"
-  )
-  local existing_meta=()
-  local mp
-  for mp in "${meta_paths[@]}"; do
-    [[ -f "$WT/$mp" ]] && existing_meta+=("$mp")
-  done
-  if [[ ${#existing_meta[@]} -gt 0 ]]; then
-    ( cd "$WT" && git add -- "${existing_meta[@]}" >/dev/null 2>&1 ) || true
-    if ! ( cd "$WT" && git diff --cached --quiet -- "${existing_meta[@]}" 2>/dev/null ); then
-      ( cd "$WT" && git commit -q -m "chore(loop): meta iter $n" -- "${existing_meta[@]}" >/dev/null 2>&1 ) \
-        || echo "[$(now_iso)] WARN: 메타 commit 실패 (iter $n)" >&2
-    fi
-  fi
+  # 이터간 메타(handoff/notes/done/blocked)는 task issue body·prefix comments로 발행됨 (헌법 §11).
+  # 워크트리에는 메타 파일이 생성되지 않으므로 드라이버 자동 메타 commit 단계가 없다.
 
   if [[ $exit_code -ne 0 ]]; then
     CLAUDE_FAIL_STREAK=$((CLAUDE_FAIL_STREAK + 1))
@@ -725,8 +813,10 @@ iterate() {
   if [[ -f "$WT/DONE" ]]; then
     return 100   # 메인 루프에서 정상 종료 처리
   fi
-  if [[ -f "$WT/$LOOPS_DIR_REL/ESCALATION.md" ]]; then
-    return 101   # 메인 루프에서 ESCALATION 처리
+  # 워커가 진행 불가 보고 시 task issue에 [blocked] prefix comment + Status=Blocked 전이 (헌법 §5.2, SPEC AC5).
+  # 드라이버는 Project Status 또는 최신 comment prefix로 차단 신호를 감지한다 (SPEC AC4).
+  if task_status_is_blocked "$TASK_ID"; then
+    return 101   # 메인 루프에서 [blocked] 처리
   fi
 
   # 객관 게이트 9종
@@ -922,30 +1012,8 @@ cmd_start() {
         || die "skip-worktree 설정 실패: $WT/CLAUDE.md"
     fi
 
-    # 메타 파일 시드 — 단일 contract: milestones/<m>/loops/<c>/ 안에 직접 cp.
-    # feat 브랜치 체크아웃으로 LOOPS_DIR_REL 디렉토리는 이미 존재 (SPEC.md 포함).
-    # 메타 템플릿을 cp + baseline commit으로 tracked 상태로 진입.
-    cp "$SCRIPT_DIR/plan-template.md" "$WT/$LOOPS_DIR_REL/PLAN.md"
-    cp "$SCRIPT_DIR/notes-template.md" "$WT/$LOOPS_DIR_REL/NOTES.md"
-    cp "$SCRIPT_DIR/handoff-template.md" "$WT/$LOOPS_DIR_REL/HANDOFF.md"
-    cp "$SCRIPT_DIR/runlog-template.md" "$WT/$LOOPS_DIR_REL/RUN_LOG.md"
-
-    # 워크트리 baseline commit — 메타 템플릿 4종을 tracked 상태로 commit해
-    # 워커가 수정 시 git diff가 인식하고, 드라이버의 자동 메타 commit이 동작하게 한다.
-    # iter 1의 HEAD~1..HEAD diff가 부모 브랜치의 ensure_loops_setup chore commit 등
-    # setup history를 worker 변경으로 오인하지 않도록 분리.
-    ( cd "$WT" \
-      && git add -- \
-           "$LOOPS_DIR_REL/PLAN.md" \
-           "$LOOPS_DIR_REL/NOTES.md" \
-           "$LOOPS_DIR_REL/HANDOFF.md" \
-           "$LOOPS_DIR_REL/RUN_LOG.md" \
-      && git commit -q -m "chore: autopilot worktree baseline" -- \
-           "$LOOPS_DIR_REL/PLAN.md" \
-           "$LOOPS_DIR_REL/NOTES.md" \
-           "$LOOPS_DIR_REL/HANDOFF.md" \
-           "$LOOPS_DIR_REL/RUN_LOG.md" ) \
-      || die "워크트리 baseline commit 실패: $WT"
+    # 이터간 메타(handoff/notes/done/blocked)는 task issue body·prefix comments로 발행됨 (헌법 §11).
+    # 워크트리에는 메타 파일을 시드·commit하지 않는다 — feat 브랜치 HEAD가 그대로 BASE SHA가 된다.
 
     # 워크트리 로컬 비추적 등록 — .iterations/는 iter raw 로그, 어떤 git 브랜치에도
     # commit되지 않음. DONE은 종료 신호로 worktree-local.
@@ -1060,20 +1128,20 @@ cmd_start() {
       exit 0
     fi
     if [[ $iter_status -eq 101 ]]; then
-      echo "[$(now_iso)] ESCALATION.md 감지. 사람 처리 대기."
+      echo "[$(now_iso)] 차단 신호 감지 (Status=Blocked / [blocked] comment). 사람 처리 대기."
       if [[ $WATCH_MODE -eq 1 ]]; then
         local watch_timeout_hours="${WATCH_TIMEOUT_HOURS:-24}"
         local poll_interval=60
         local poll_count=0
         local max_polls=$(( watch_timeout_hours * 3600 / poll_interval ))
 
-        echo "[$(now_iso)] --watch 모드: ESCALATION.md 사라짐 polling 중 (60초 간격, 최대 ${watch_timeout_hours}시간, Ctrl+C로 종료)..."
-        while [[ -f "$WT/$LOOPS_DIR_REL/ESCALATION.md" ]]; do
+        echo "[$(now_iso)] --watch 모드: 차단 신호 해제 polling 중 (60초 간격, 최대 ${watch_timeout_hours}시간, Ctrl+C로 종료)..."
+        while task_status_is_blocked "$TASK_ID"; do
           sleep $poll_interval
           poll_count=$((poll_count + 1))
           # 매 5분(5 polls)마다 진행 표시
           if (( poll_count % 5 == 0 )); then
-            echo "[$(now_iso)] --watch: ESCALATION.md 대기 중 ($((poll_count * poll_interval / 60))분 경과)..."
+            echo "[$(now_iso)] --watch: Status=Blocked 대기 중 ($((poll_count * poll_interval / 60))분 경과)..."
           fi
           # timeout 검사
           if [[ $poll_count -ge $max_polls ]]; then
@@ -1081,7 +1149,7 @@ cmd_start() {
             exit 1
           fi
         done
-        echo "[$(now_iso)] ESCALATION.md 해제 감지. 루프 재개."
+        echo "[$(now_iso)] 차단 신호 해제 감지. 루프 재개."
         continue
       fi
       exit 1
@@ -1188,8 +1256,10 @@ cmd_status() {
     if [[ -f "$lock_file" ]]; then
       state="running"
     elif [[ -d "$wt" ]]; then
-      if [[ -f "$wt/$loops_dir_rel/ESCALATION.md" ]]; then
-        state="escalated"
+      # 차단 신호는 task issue의 Project Status=Blocked 또는 최신 [blocked] prefix comment.
+      # gh 부재·미설정 시 task_status_is_blocked가 1을 반환해 자연스럽게 idle로 떨어진다.
+      if task_status_is_blocked "$tid"; then
+        state="blocked"
       elif [[ -f "$wt/DONE" ]]; then
         state="done"
       else
@@ -1209,20 +1279,29 @@ cmd_status() {
       iterations="$cnt"
     fi
 
-    # 마지막 갱신 시각 — 워크트리 안의 RUN_LOG.md
-    local ref_file=""
-    if [[ -f "$wt/$loops_dir_rel/RUN_LOG.md" ]]; then
-      ref_file="$wt/$loops_dir_rel/RUN_LOG.md"
+    # 마지막 갱신 시각 — task issue의 최신 comment createdAt (헌법 §11).
+    # gh 부재·issue 매핑 실패 시 워크트리 안의 .iterations/ 최신 로그 mtime으로 fallback.
+    local issue_num last_at=""
+    if issue_num=$(task_issue_number "$tid" 2>/dev/null) && command -v gh >/dev/null 2>&1; then
+      last_at=$(gh issue view "$issue_num" --json comments \
+        --jq '.comments | sort_by(.createdAt) | last | .createdAt // empty' 2>/dev/null || true)
     fi
-    if [[ -n "$ref_file" ]] && [[ -f "$ref_file" ]]; then
-      local epoch=""
-      # macOS BSD: stat -f %m, Linux GNU: stat -c %Y
-      epoch=$(stat -f %m "$ref_file" 2>/dev/null || stat -c %Y "$ref_file" 2>/dev/null || echo "")
-      if [[ -n "$epoch" ]]; then
-        # macOS BSD: date -u -r <epoch>, Linux GNU: date -u -d "@<epoch>"
-        last_update=$(date -u -r "$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
-          || date -u -d "@$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
-          || echo "-")
+    if [[ -n "$last_at" ]]; then
+      last_update="$last_at"
+    elif [[ -d "$wt/.iterations" ]]; then
+      local ref_file
+      ref_file=$(find "$wt/.iterations" -name "*.log" -type f 2>/dev/null \
+        | sort | tail -n 1)
+      if [[ -n "$ref_file" && -f "$ref_file" ]]; then
+        local epoch=""
+        # macOS BSD: stat -f %m, Linux GNU: stat -c %Y
+        epoch=$(stat -f %m "$ref_file" 2>/dev/null || stat -c %Y "$ref_file" 2>/dev/null || echo "")
+        if [[ -n "$epoch" ]]; then
+          # macOS BSD: date -u -r <epoch>, Linux GNU: date -u -d "@<epoch>"
+          last_update=$(date -u -r "$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
+            || date -u -d "@$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null \
+            || echo "-")
+        fi
       fi
     fi
 
@@ -1409,16 +1488,44 @@ cmd_logs() {
     return 0
   fi
 
-  # RUN_LOG.md 단일 contract 경로: 워크트리 안의 milestones/<m>/loops/<c>/RUN_LOG.md.
-  local run_log="$WT/$LOOPS_DIR_REL/RUN_LOG.md"
-  if [[ ! -f "$run_log" ]]; then
-    die "RUN_LOG.md를 찾을 수 없습니다: $run_log (task-id 확인: $task_id)"
+  # 새 contract: 이터 흐름은 task issue의 comments에 저장 (헌법 §11). gh로 조회.
+  # raw 이터 로그는 위 --iter N 분기로 .iterations/<N>.log를 그대로 출력.
+  if ! command -v gh >/dev/null 2>&1; then
+    die "gh CLI가 필요합니다 (이터 흐름은 task issue comments에 저장됨). raw 이터 로그는 --iter N으로 조회 가능."
+  fi
+  local issue_num
+  if ! issue_num=$(task_issue_number "$task_id" 2>/dev/null); then
+    die "task '$task_id' issue 매핑 실패 — issue number 직접 지정 또는 raw 이터 로그(--iter N) 사용"
   fi
 
   if [[ $tail_mode -eq 1 ]]; then
-    tail -f "$run_log"
+    # --tail: 60초 간격으로 새 comment polling (Ctrl+C로 종료). 매 polling마다
+    # last_seen createdAt 이후의 신규 comment만 출력 — 기존 로그 파일 tail의
+    # 증분 스트리밍과 동등한 UX. 첫 라운드(last_seen 빈 값)는 기존 전체를 한 번 출력.
+    local last_seen=""
+    while true; do
+      # raw fetch 1회 → 같은 snapshot에서 new_block과 max_seen을 함께 계산해
+      # 두 호출 사이의 race(첫 호출과 두 번째 호출 사이 새 comment 도착 시 누락)를
+      # 제거. gh의 `--jq`는 `--arg`를 통과시키지 않으므로 comments 배열만 추출하고
+      # since 바인딩은 별도 jq pipe에서 처리.
+      local raw new_block max_seen
+      raw=$(gh issue view "$issue_num" --json comments --jq '.comments' 2>/dev/null || true)
+      if [[ -n "$raw" ]]; then
+        new_block=$(jq -r --arg since "$last_seen" \
+          '[.[] | select($since == "" or .createdAt > $since)]
+            | sort_by(.createdAt)
+            | map("=== @\(.author.login) (\(.createdAt)) ===\n\(.body)\n")
+            | .[]' <<<"$raw" 2>/dev/null || true)
+        if [[ -n "$new_block" ]]; then
+          printf '%s\n' "$new_block"
+          max_seen=$(jq -r 'sort_by(.createdAt) | last | .createdAt // empty' <<<"$raw" 2>/dev/null || true)
+          [[ -n "$max_seen" ]] && last_seen="$max_seen"
+        fi
+      fi
+      sleep 60
+    done
   else
-    cat "$run_log"
+    gh issue view "$issue_num" --comments
   fi
 }
 

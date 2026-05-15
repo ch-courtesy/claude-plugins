@@ -1,6 +1,6 @@
 ---
 name: loop
-description: 자율 수행 루프(랄프 루프) 운영 인터페이스. start/status/stop/list/cleanup/logs 서브커맨드로 자율 task의 lifecycle을 관리합니다. SPEC 작성은 별도 'autopilot:spec' 스킬을 사용. 본 스킬은 자기완결적이며 헌법·드라이버·템플릿을 모두 references/에 포함합니다.
+description: 자율 수행 루프(랄프 루프) 운영 인터페이스. start/status/stop/list/cleanup/logs 서브커맨드로 자율 task의 lifecycle을 관리합니다. SPEC 작성은 별도 'autopilot:spec' 스킬을 사용. 본 스킬은 자기완결적이며 헌법·드라이버를 모두 references/에 포함합니다.
 allowed-tools: Monitor
 ---
 
@@ -8,7 +8,7 @@ allowed-tools: Monitor
 
 자율 수행 루프의 통합 운영 인터페이스. 인자로 subcommand와 sub args를 받아 자율 task lifecycle을 관리합니다.
 
-본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`), 외부 셸 드라이버(`references/loop.sh`), SPEC·메모리 파일 템플릿이 모두 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태가 모두 `milestones/<m>/loops/<c>/` 단일 nested 트리 안에 생성됩니다 (워크트리 `.worktree/`, lock `.lock`, SPEC·메타 파일). ad-hoc 단일 task는 `regular` milestone(catch-all)로 자동 정규화됩니다.
+본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`)과 외부 셸 드라이버(`references/loop.sh`)가 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태가 모두 `milestones/<m>/loops/<c>/` 단일 nested 트리 안에 생성됩니다 (워크트리 `.worktree/`, lock `.lock`, SPEC). 이터간 메모(계획·교훈·인계·차단·완료)는 GitHub Issue body 계획 섹션과 prefix comment(`[handoff]`·`[notes]`·`[blocked]`·`[done]`)에 누적합니다 — 워크트리에는 메타 파일을 두지 않습니다 (rules/context.md 컨벤션). ad-hoc 단일 task는 `regular` milestone(catch-all)로 자동 정규화됩니다.
 
 ## 호출 방법
 
@@ -38,7 +38,6 @@ Skill(skill: "spec", args: "<task-id>")
 - 락 미보유 — lock 파일은 `milestones/<m>/loops/<c>/.lock`
 - 워크트리 없으면 생성 (메인 레포 내부 nested 위치 `milestones/<m>/loops/<c>/.worktree/` — `.gitignore`로 추적 차단)
 - 헌법(`references/constitution.md`)을 워크트리의 CLAUDE.md로 복사
-- 메모리 파일 스텁 시드
 - 락 획득 + 이터레이션 루프
 
 #### 자동 Monitor 가설 (기본 동작)
@@ -147,10 +146,10 @@ start 첫 호출에 자동:
 |---|---|
 | `constitution.md` | 워커 헌법. start 시점에 워크트리 CLAUDE.md로 복사 |
 | `loop.sh` | 외부 셸 드라이버. 모든 subcommand의 핵심 로직 |
-| `plan-template.md`, `notes-template.md`, `handoff-template.md`, `runlog-template.md`, `escalation-template.md` | 메모리 파일 스텁 |
+| `pr-phase.sh` | DONE 이후 PR 생성·재사용 단계 |
 | `operational-guide.md` | 사용자용 운영 가이드 (워크플로·환경 변수·객관 게이트 표·의존성) |
 | `status-format.md` | status 출력 형식 가이드 |
-| `troubleshooting.md` | ESCALATION 카테고리별 처리 가이드 |
+| `troubleshooting.md` | 차단 신호 카테고리별 처리 가이드 |
 | `agent-prompts.md` | 이터 내 Agent dispatch 브리프 양식 3종 (spec-compliance-reviewer · code-quality-reviewer · parallel-hypothesis-tester). 헌법 §11.6 참조 |
 
 ## 의존성 (target 프로젝트)

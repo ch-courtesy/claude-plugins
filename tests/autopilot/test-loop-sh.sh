@@ -43,7 +43,99 @@ touch DONE
 echo '{"result": "mock", "usage": {"input_tokens": 100, "output_tokens": 50}}'
 EOF
 chmod +x "$MOCK_BIN/claude"
+
+# gh mock — 신규 contract(SPEC 124)의 task-issue 인터페이스를 격리.
+# loop.sh의 task_issue_number·task_status_is_blocked·gh_post_blocked_comment 호출이
+# 외부 GitHub로 새지 않게 하고, 호출별 argv를 GH_CALL_DIR에 한 파일씩 덤프해 검사 가능하게 한다.
+# - issue list  → '99' (numeric issue 매핑) — task_issue_number의 search lookup 성공시킴
+# - issue view  → 빈 본문 (task_status_is_blocked가 항상 false-not-blocked 판정)
+# - issue comment → 0 exit (gh_post_blocked_comment 성공 — argv는 GH_CALL_DIR에 기록)
+# - project item-edit → 0 exit
+# GH_CALL_DIR이 설정돼 있으면 각 호출이 NNN-issue-comment.argv 같은 파일로 덤프된다.
+cat > "$MOCK_BIN/gh" <<'GH_EOF'
+#!/usr/bin/env bash
+# 호출별 argv 덤프 (multiline --body 본문 보존)
+if [[ -n "${GH_CALL_DIR:-}" ]]; then
+  mkdir -p "$GH_CALL_DIR"
+  __gh_idx=$(ls "$GH_CALL_DIR" 2>/dev/null | wc -l | tr -d ' ')
+  __gh_idx=$((__gh_idx + 1))
+  __gh_sub1="${1:-_}"
+  __gh_sub2="${2:-_}"
+  __gh_file=$(printf '%s/%03d-%s-%s.argv' "$GH_CALL_DIR" "$__gh_idx" "$__gh_sub1" "$__gh_sub2")
+  printf '%s\n' "$@" > "$__gh_file"
+fi
+
+case "${1:-}" in
+  issue)
+    case "${2:-}" in
+      list)
+        # gh issue list --search <q> --json number --jq '.[0].number'
+        # --jq 적용된 결과(.number 단일값)를 모방 — task_issue_number lookup 통과
+        for __arg in "$@"; do
+          case "$__arg" in
+            ".[0].number"|"--jq=.[0].number") echo "99"; exit 0 ;;
+          esac
+        done
+        echo '[{"number":99}]'
+        exit 0
+        ;;
+      view)
+        # gh issue view <num> --json comments --jq '... | last | .body'
+        # 빈 본문 반환 → task_status_is_blocked가 1(blocked 아님) 판정
+        for __arg in "$@"; do
+          case "$__arg" in
+            "--comments")
+              # gh issue view <num> --comments → 빈 출력 (cmd_logs용)
+              exit 0
+              ;;
+          esac
+        done
+        echo ""
+        exit 0
+        ;;
+      comment|edit)
+        # 0 exit (argv는 위에서 덤프됨)
+        exit 0
+        ;;
+    esac
+    ;;
+  project)
+    # project item-edit → 0 exit
+    exit 0
+    ;;
+esac
+exit 0
+GH_EOF
+chmod +x "$MOCK_BIN/gh"
+
 export PATH="$MOCK_BIN:$PATH"
+
+# 신규 contract halt 신호 검증: halt()가 gh_post_blocked_comment을 호출했는지 확인.
+# $1 = GH_CALL_DIR (생략 시 환경변수 GH_CALL_DIR 사용).
+# 검증: 그 디렉토리 안의 *-issue-comment.argv 파일 중 적어도 한 개의 본문이
+# `[blocked]` prefix로 시작해야 한다 (loop.sh halt()의 blocked_body heredoc 첫 줄).
+assert_blocked_comment_posted() {
+  local call_dir="${1:-${GH_CALL_DIR:-}}"
+  if [[ -z "$call_dir" || ! -d "$call_dir" ]]; then
+    echo "FAIL: gh 호출 디렉토리 부재 ($call_dir) — gh_post_blocked_comment 미실행 (구 contract ESCALATION.md 검사 대체)"
+    return 1
+  fi
+  local found=0
+  local f
+  for f in "$call_dir"/*-issue-comment.argv; do
+    [[ -f "$f" ]] || continue
+    if grep -q '^\[blocked\]' "$f"; then
+      found=1
+      break
+    fi
+  done
+  if [[ $found -eq 0 ]]; then
+    echo "FAIL: [blocked] prefix comment 호출 부재 in $call_dir — halt()의 gh issue comment 미발행"
+    ls -la "$call_dir" 2>/dev/null
+    return 1
+  fi
+  return 0
+}
 
 # yq 의존 확인
 command -v yq >/dev/null || { echo "SKIP: yq 미설치"; exit 0; }
@@ -146,7 +238,9 @@ MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start test-task-1
 [[ -d "$WT" ]] || { echo "FAIL: 워크트리 미생성"; exit 1; }
 [[ -f "$WT/CLAUDE.md" ]] || { echo "FAIL: CLAUDE.md 미복사"; exit 1; }
 [[ -f "$WT/$TEST3_LOOPS_REL/SPEC.md" ]] || { echo "FAIL: SPEC.md 미복사"; exit 1; }
-[[ -f "$WT/$TEST3_LOOPS_REL/PLAN.md" ]] || { echo "FAIL: PLAN.md 미시드"; exit 1; }
+# 신규 contract (SPEC 124): 드라이버는 더 이상 메타 파일 템플릿(PLAN.md 등)을 시드하지 않는다.
+# 이터간 상태는 task issue body·prefix comments로 위임 (헌법 §11).
+[[ ! -f "$WT/$TEST3_LOOPS_REL/PLAN.md" ]] || { echo "FAIL: 신규 contract인데 PLAN.md가 워크트리에 시드됨"; exit 1; }
 [[ -f "$WT/.iterations/1.log" ]] || { echo "FAIL: 이터 로그 미생성"; exit 1; }
 
 # .git/info/exclude 검증 — 단일 contract: --git-common-dir에 등록 (실제 git이 참조하는 경로).
@@ -503,15 +597,17 @@ git -C "$PROJECT" show "feat/regular/$MULTI_TASK:milestones/regular/loops/$MULTI
   || { echo "FAIL: feat 브랜치에 SPEC.md 없음"; exit 1; }
 echo "OK"
 
-echo "=== TEST 16: scope 게이트가 framework 파일(메타 파일·CLAUDE.md·DONE) 무시 ==="
-# 회귀 테스트: 모델이 메모리 파일과 함께 commit해도 scope 게이트가 발동 안 해야
+echo "=== TEST 16: scope 게이트가 framework 파일(SPEC.md·DONE) 무시 ==="
+# 회귀 테스트: 워커가 in-scope 코드 + framework 파일 활동을 함께 해도 scope 게이트가 발동 안 해야
 # (autopilot-smoke-STREAK 시나리오에서 발견된 버그의 regression 보호)
+# 신규 contract (SPEC 124): 이터간 메타는 task issue body·comments로 위임됐고
+# 워크트리 framework 파일은 SPEC.md·DONE으로 축소 (diff_vs_scope의 case 분기).
 
 SCOPE_TASK="scope-framework-test"
 mkdir -p "$PROJECT/milestones/regular/loops/$SCOPE_TASK"
 SCOPE_TASK_DIR="$PROJECT/milestones/regular/loops/$SCOPE_TASK"
 
-# 좁은 scope.include — app/만 (메타 파일은 명시 안 함)
+# 좁은 scope.include — app/만 (framework 파일은 명시 안 함)
 cat > "$SCOPE_TASK_DIR/SPEC.md" <<'EOF'
 ---
 scope:
@@ -534,23 +630,21 @@ scope.include = ["app/**"] 만 — framework 파일은 명시 안 함.
 EOF
 
 # scope 게이트가 framework 파일을 무시하는지 검증하는 mock
-# mock이: 1) app/main.py 생성+commit, 2) 메타 PLAN.md 변경 (드라이버가 chore(loop): meta iter로 commit)
-# 그 후 scope 게이트가 메타 파일을 위반으로 잡지 않아야 함.
+# mock: app/main.py 생성+commit + DONE 작성 (신규 contract: 메타 파일은 워크트리에 쓰지 않음).
+# DONE은 framework 파일이라 scope 게이트의 case 분기로 제외돼 위반으로 잡히면 안 됨.
 SCOPE_MOCK="$WORK_DIR/scope-mock-bin"
 SCOPE_LOOPS_REL="milestones/regular/loops/$SCOPE_TASK"
 mkdir -p "$SCOPE_MOCK"
 cat > "$SCOPE_MOCK/claude" <<MOCKEOF
 #!/usr/bin/env bash
 cat > /dev/null
-# 1. app/main.py 생성
+# 1. app/main.py 생성 (in-scope)
 mkdir -p app
 echo "print('hello')" > app/main.py
-# 2. 메타 파일도 변경 (시나리오 재현 — 워커가 uncommitted 상태로 두면 드라이버가 자동 commit)
-echo "# updated" >> "$SCOPE_LOOPS_REL/PLAN.md"
-# 3. 코드 파일만 워커 commit으로 (메타는 드라이버 자동 commit이 담당)
+# 2. 워커 commit으로 코드 파일 캡처
 git add app/main.py
 git commit -q -m "feat: hello" --no-verify 2>/dev/null
-# DONE 작성해 단일 이터 종료
+# DONE 작성해 단일 이터 종료 (DONE은 framework 파일 — scope 게이트 case 분기로 제외)
 touch DONE
 echo '{"result": "scope test mock", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
@@ -612,15 +706,18 @@ MOCKEOF
 chmod +x "$MOCK17/claude"
 
 setup_feat_with_spec "$PROJECT" "$TEST17_TASK"
+GH_CALLS_17="$WORK_DIR/gh-calls-17"
+rm -rf "$GH_CALLS_17"
 set +e
-output17=$(PATH="$MOCK17:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST17_TASK" 2>&1)
+output17=$(GH_CALL_DIR="$GH_CALLS_17" PATH="$MOCK17:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST17_TASK" 2>&1)
 result17=$?
 set -e
 [[ $result17 -ne 0 ]] || { echo "FAIL: 테스트 약화 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output17" | grep -q "HALT\|tests modified\|테스트 약화" \
   || { echo "FAIL: 테스트 약화 halt 메시지 없음. got: $output17"; exit 1; }
 WT17="$PROJECT/milestones/regular/loops/$TEST17_TASK/.worktree"
-[[ -f "$WT17/milestones/regular/loops/$TEST17_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+# 신규 contract (SPEC 124): halt()는 ESCALATION.md 대신 [blocked] prefix issue comment 발행
+assert_blocked_comment_posted "$GH_CALLS_17" || exit 1
 loop cleanup "$TEST17_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -667,15 +764,18 @@ MOCKEOF
 chmod +x "$MOCK18/claude"
 
 setup_feat_with_spec "$PROJECT" "$TEST18_TASK"
+GH_CALLS_18="$WORK_DIR/gh-calls-18"
+rm -rf "$GH_CALLS_18"
 set +e
-output18=$(PATH="$MOCK18:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST18_TASK" 2>&1)
+output18=$(GH_CALL_DIR="$GH_CALLS_18" PATH="$MOCK18:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST18_TASK" 2>&1)
 result18=$?
 set -e
 [[ $result18 -ne 0 ]] || { echo "FAIL: 의존성 변경 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output18" | grep -q "HALT\|deps modified\|의존성 변경" \
   || { echo "FAIL: 의존성 변경 halt 메시지 없음. got: $output18"; exit 1; }
 WT18="$PROJECT/milestones/regular/loops/$TEST18_TASK/.worktree"
-[[ -f "$WT18/milestones/regular/loops/$TEST18_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+# 신규 contract (SPEC 124): halt()는 [blocked] prefix issue comment 발행
+assert_blocked_comment_posted "$GH_CALLS_18" || exit 1
 loop cleanup "$TEST18_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -709,15 +809,18 @@ MOCKEOF
 chmod +x "$MOCK19/claude"
 
 setup_feat_with_spec "$PROJECT" "$TEST19_TASK"
+GH_CALLS_19="$WORK_DIR/gh-calls-19"
+rm -rf "$GH_CALLS_19"
 set +e
-output19=$(PATH="$MOCK19:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 loop start "$TEST19_TASK" 2>&1)
+output19=$(GH_CALL_DIR="$GH_CALLS_19" PATH="$MOCK19:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 loop start "$TEST19_TASK" 2>&1)
 result19=$?
 set -e
 [[ $result19 -ne 0 ]] || { echo "FAIL: suppressor 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output19" | grep -q "HALT\|Suppressor" \
   || { echo "FAIL: suppressor halt 메시지 없음. got: $output19"; exit 1; }
 WT19="$PROJECT/milestones/regular/loops/$TEST19_TASK/.worktree"
-[[ -f "$WT19/milestones/regular/loops/$TEST19_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+# 신규 contract (SPEC 124): halt()는 [blocked] prefix issue comment 발행
+assert_blocked_comment_posted "$GH_CALLS_19" || exit 1
 loop cleanup "$TEST19_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -764,15 +867,18 @@ MOCKEOF
 chmod +x "$MOCK20/claude"
 
 setup_feat_with_spec "$PROJECT" "$TEST20_TASK"
+GH_CALLS_20="$WORK_DIR/gh-calls-20"
+rm -rf "$GH_CALLS_20"
 set +e
-output20=$(PATH="$MOCK20:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST20_TASK" 2>&1)
+output20=$(GH_CALL_DIR="$GH_CALLS_20" PATH="$MOCK20:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST20_TASK" 2>&1)
 result20=$?
 set -e
 [[ $result20 -ne 0 ]] || { echo "FAIL: fix:symptom streak 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output20" | grep -q "HALT\|fix:symptom streak" \
   || { echo "FAIL: fix:symptom streak halt 메시지 없음. got: $output20"; exit 1; }
 WT20="$PROJECT/milestones/regular/loops/$TEST20_TASK/.worktree"
-[[ -f "$WT20/milestones/regular/loops/$TEST20_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+# 신규 contract (SPEC 124): halt()는 [blocked] prefix issue comment 발행
+assert_blocked_comment_posted "$GH_CALLS_20" || exit 1
 loop cleanup "$TEST20_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -819,15 +925,18 @@ MOCKEOF
 chmod +x "$MOCK21/claude"
 
 setup_feat_with_spec "$PROJECT" "$TEST21_TASK"
+GH_CALLS_21="$WORK_DIR/gh-calls-21"
+rm -rf "$GH_CALLS_21"
 set +e
-output21=$(PATH="$MOCK21:$PATH" MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=5 loop start "$TEST21_TASK" 2>&1)
+output21=$(GH_CALL_DIR="$GH_CALLS_21" PATH="$MOCK21:$PATH" MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=5 loop start "$TEST21_TASK" 2>&1)
 result21=$?
 set -e
 [[ $result21 -ne 0 ]] || { echo "FAIL: 진동 패턴 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output21" | grep -q "HALT\|진동 패턴" \
   || { echo "FAIL: 진동 패턴 halt 메시지 없음. got: $output21"; exit 1; }
 WT21="$PROJECT/milestones/regular/loops/$TEST21_TASK/.worktree"
-[[ -f "$WT21/milestones/regular/loops/$TEST21_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+# 신규 contract (SPEC 124): halt()는 [blocked] prefix issue comment 발행
+assert_blocked_comment_posted "$GH_CALLS_21" || exit 1
 loop cleanup "$TEST21_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -997,15 +1106,18 @@ MOCKEOF
 chmod +x "$MOCK27/claude"
 
 setup_feat_with_spec "$PROJECT" "$TEST27_TASK"
+GH_CALLS_27="$WORK_DIR/gh-calls-27"
+rm -rf "$GH_CALLS_27"
 set +e
-output27=$(PATH="$MOCK27:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST27_TASK" 2>&1)
+output27=$(GH_CALL_DIR="$GH_CALLS_27" PATH="$MOCK27:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST27_TASK" 2>&1)
 result27=$?
 set -e
 [[ $result27 -ne 0 ]] || { echo "FAIL: __tests__/ 게이트가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output27" | grep -q "HALT\|테스트 약화" \
   || { echo "FAIL: 테스트 약화 halt 메시지 없음. got: $output27"; exit 1; }
 WT27="$PROJECT/milestones/regular/loops/$TEST27_TASK/.worktree"
-[[ -f "$WT27/milestones/regular/loops/$TEST27_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+# 신규 contract (SPEC 124): halt()는 [blocked] prefix issue comment 발행
+assert_blocked_comment_posted "$GH_CALLS_27" || exit 1
 loop cleanup "$TEST27_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -1158,15 +1270,18 @@ MOCKEOF
 chmod +x "$MOCK30/claude"
 
 setup_feat_with_spec "$PROJECT" "$TEST30_TASK"
+GH_CALLS_30="$WORK_DIR/gh-calls-30"
+rm -rf "$GH_CALLS_30"
 set +e
-output30=$(PATH="$MOCK30:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST30_TASK" 2>&1)
+output30=$(GH_CALL_DIR="$GH_CALLS_30" PATH="$MOCK30:$PATH" MAX_ITERATIONS=5 WALL_CLOCK_MINUTES=5 loop start "$TEST30_TASK" 2>&1)
 result30=$?
 set -e
 [[ $result30 -ne 0 ]] || { echo "FAIL: 미커밋 suppressor가 halt하지 않음 (exit 0)"; exit 1; }
 echo "$output30" | grep -q "HALT\|Suppressor" \
   || { echo "FAIL: suppressor halt 메시지 없음. got: $output30"; exit 1; }
 WT30="$PROJECT/milestones/regular/loops/$TEST30_TASK/.worktree"
-[[ -f "$WT30/milestones/regular/loops/$TEST30_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+# 신규 contract (SPEC 124): halt()는 [blocked] prefix issue comment 발행
+assert_blocked_comment_posted "$GH_CALLS_30" || exit 1
 loop cleanup "$TEST30_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -1305,8 +1420,10 @@ MOCKEOF
 chmod +x "$MOCK33/claude"
 
 setup_feat_with_spec "$PROJECT" "$TEST33_TASK"
+GH_CALLS_33="$WORK_DIR/gh-calls-33"
+rm -rf "$GH_CALLS_33"
 set +e
-output33=$(PATH="$GITLEAKS_MOCK:$MOCK33:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
+output33=$(GH_CALL_DIR="$GH_CALLS_33" PATH="$GITLEAKS_MOCK:$MOCK33:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 \
   loop start "$TEST33_TASK" 2>&1)
 result33=$?
 set -e
@@ -1314,7 +1431,8 @@ set -e
 echo "$output33" | grep -q "HALT.*Secrets\|Secrets 의심" \
   || { echo "FAIL: secrets halt 메시지 없음. got: $output33"; exit 1; }
 WT33="$PROJECT/milestones/regular/loops/$TEST33_TASK/.worktree"
-[[ -f "$WT33/milestones/regular/loops/$TEST33_TASK/ESCALATION.md" ]] || { echo "FAIL: ESCALATION.md 미생성"; exit 1; }
+# 신규 contract (SPEC 124): halt()는 [blocked] prefix issue comment 발행
+assert_blocked_comment_posted "$GH_CALLS_33" || exit 1
 loop cleanup "$TEST33_TASK" --force > /dev/null 2>&1
 echo "OK"
 
@@ -2156,8 +2274,11 @@ EOF
 )
 echo "OK"
 
-echo "=== TEST 54: suppressor 게이트가 메타 파일(milestones/<m>/loops/<c>/) 워커 메모리는 검사 제외 ==="
-# 워커가 PLAN.md 등에 헌법 본문 인용 시 suppressor 패턴 문자열이 들어감 — false positive 방지
+echo "=== TEST 54: suppressor 게이트가 task issue comment 본문은 스캔 대상 아님 ==="
+# 신규 contract (SPEC 124): 이터간 메타(헌법 인용 포함)는 워크트리 파일이 아닌 task issue
+# body·prefix comments로 발행된다. suppressor 게이트는 워크트리 git diff만 스캔하므로
+# 헌법 인용 안의 suppressor 패턴 문자열이 comment 본문에 등장해도 false-positive halt가 트리거되지 않아야.
+# (OLD contract: PLAN.md 같은 메타 파일 안의 인용이 false-positive를 일으키지 않게 meta_exclude로 보호.)
 TEST54_TASK="gate-suppressor-meta-dir"
 mkdir -p "$PROJECT/milestones/regular/loops/$TEST54_TASK"
 cat > "$PROJECT/milestones/regular/loops/$TEST54_TASK/SPEC.md" <<'EOF'
@@ -2169,31 +2290,43 @@ scope:
 verify: 'true'
 ---
 
-# Gate Test — Meta Excluded from Suppressor Scan
+# Gate Test — Issue Comment Body Not Scanned for Suppressors
 EOF
 setup_feat_with_spec "$PROJECT" "$TEST54_TASK"
 
 MOCK54="$WORK_DIR/mock54-bin"
 T54_LOOPS_REL="milestones/regular/loops/$TEST54_TASK"
 mkdir -p "$MOCK54"
-cat > "$MOCK54/claude" <<MOCKEOF
+cat > "$MOCK54/claude" <<'MOCKEOF'
 #!/usr/bin/env bash
 cat > /dev/null
-# 워커가 PLAN.md에 헌법 본문 인용 (suppressor 패턴 문자열 포함). 드라이버가 chore(loop): meta iter로 자동 commit.
-cat > "$T54_LOOPS_REL/PLAN.md" <<'PLAN_EOF'
-- \`# noqa\`, \`@ts-ignore\`, \`eslint-disable\`, \`#pragma warning disable\` 등 경고 억제 지시어 신규 추가 금지
-PLAN_EOF
+# 워커가 헌법 본문(suppressor 패턴 문자열 포함)을 task issue comment로 발행.
+# gh mock이 GH_CALL_DIR에 argv를 덤프 — comment 본문은 워크트리에 닿지 않으므로
+# grep_new_suppressors의 git diff 스캔 대상에서 자연 제외된다.
+gh issue comment 99 --body '[notes] 헌법 §7 인용:
+- `# noqa`, `@ts-ignore`, `eslint-disable`, `#pragma warning disable` 등 경고 억제 지시어 신규 추가 금지'
 echo '{"result": "mock54", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
 chmod +x "$MOCK54/claude"
 
+GH_CALLS_54="$WORK_DIR/gh-calls-54"
+rm -rf "$GH_CALLS_54"
 set +e
-output54=$(PATH="$MOCK54:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start "$TEST54_TASK" 2>&1)
+output54=$(GH_CALL_DIR="$GH_CALLS_54" PATH="$MOCK54:$PATH" MAX_ITERATIONS=2 WALL_CLOCK_MINUTES=5 loop start "$TEST54_TASK" 2>&1)
 set -e
 echo "$output54" | grep -q "Suppressor 신규 추가" \
-  && { echo "FAIL: 메타 PLAN.md의 suppressor 패턴 인용이 false positive halt 트리거"; echo "$output54"; exit 1; }
+  && { echo "FAIL: task issue comment 본문의 suppressor 패턴 인용이 false positive halt 트리거"; echo "$output54"; exit 1; }
 echo "$output54" | grep -q "이터 상한 도달" \
   || { echo "FAIL: loop이 MAX_ITERATIONS까지 정상 진행 못함 — false positive 부재만으로 OK 판정하면 mock·환경 이슈에서 false OK 발생"; echo "$output54"; exit 1; }
+# 신규 contract: 워커가 gh issue comment를 실제로 호출했는지 확인 — 인용 본문이 worktree 밖에 머물렀음을 검증
+ls "$GH_CALLS_54"/*-issue-comment.argv >/dev/null 2>&1 \
+  || { echo "FAIL: worker mock의 gh issue comment 호출 기록 부재 — comment 발행 경로 점검"; ls -la "$GH_CALLS_54" 2>/dev/null; exit 1; }
+# 워크트리에 PLAN.md 등 메타 파일이 생성되지 않았어야 (신규 contract AC7 직접 검증)
+WT54="$PROJECT/$T54_LOOPS_REL/.worktree"
+for meta_f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
+  [[ ! -f "$WT54/$T54_LOOPS_REL/$meta_f" ]] \
+    || { echo "FAIL: 신규 contract인데 워크트리에 $meta_f 생성됨 — 워커가 메타를 파일에 쓴 상태"; exit 1; }
+done
 loop cleanup "$TEST54_TASK" --force > /dev/null 2>&1 || true
 echo "OK"
 
@@ -2617,9 +2750,10 @@ git -C "$T64_PROJECT" checkout -q "$T64_DEFAULT"
 )
 echo "OK"
 
-echo "=== TEST 65: SPEC 110 EARS 4 — 워커가 메타 파일 수정 → chore(loop): meta iter N commit 1건 추가 ==="
-# 셋업: 신규 contract + mock claude가 HANDOFF.md를 수정한 뒤 DONE 생성.
-# 기대: iter 종료 직후 feat 브랜치 HEAD에 'chore(loop): meta iter 1' commit이 추가됨.
+echo "=== TEST 65: SPEC 124 — 워커가 [handoff] gh issue comment 발행 → 드라이버 meta-commit 0건 ==="
+# 신규 contract (SPEC 124): 이터간 handoff은 task issue prefix comment로 발행된다.
+# 드라이버는 더 이상 워크트리 메타 파일을 commit하지 않으므로 'chore(loop): meta iter N' commit은 0건.
+# (OLD EARS 4: 메타 파일 → chore(loop) meta commit 1건. NEW contract: comment 발행 + commit 0건.)
 T65_PROJECT="$WORK_DIR/spec110-meta-commit"
 mkdir -p "$T65_PROJECT"
 git -C "$T65_PROJECT" init -q
@@ -2642,20 +2776,20 @@ scope:
 verify: 'true'
 ---
 
-# Spec 110 Test 65
+# Spec 124 Test 65 (NEW contract — issue comment handoff)
 EOF
 git -C "$T65_PROJECT" add "$T65_LOOPS_REL/SPEC.md"
-git -C "$T65_PROJECT" commit -q -m "feat(spec): n65 spec 110 test 65"
+git -C "$T65_PROJECT" commit -q -m "feat(spec): n65 spec 124 test 65"
 git -C "$T65_PROJECT" checkout -q "$T65_DEFAULT"
 
 MOCK65="$WORK_DIR/mock65-bin"
 mkdir -p "$MOCK65"
-# mock: HANDOFF.md를 수정 + DONE 생성 (commit은 안 함 — loop.sh가 메타 commit 발행 책임)
-cat > "$MOCK65/claude" <<MOCKEOF
+# mock: 신규 contract — 메타 파일 대신 task issue에 [handoff] prefix comment 발행 + DONE 생성.
+cat > "$MOCK65/claude" <<'MOCKEOF'
 #!/usr/bin/env bash
 cat > /dev/null
-# 워커는 워크트리 루트 cwd로 들어옴. 메타는 milestones/<m>/loops/<c>/ 경로.
-echo "next iter handoff content" >> "$T65_LOOPS_REL/HANDOFF.md"
+# 워커는 워크트리 루트 cwd로 들어옴. handoff는 task issue comment로 발행 (헌법 §11).
+gh issue comment 99 --body '[handoff] iter 1 결과: next iter handoff content'
 touch DONE
 echo '{"result": "mock65", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 MOCKEOF
@@ -2663,32 +2797,34 @@ chmod +x "$MOCK65/claude"
 
 (
   cd "$T65_PROJECT"
+  GH_CALLS_65="$WORK_DIR/gh-calls-65"
+  rm -rf "$GH_CALLS_65"
   set +e
-  output65=$(PATH="$MOCK65:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T65_ID" --no-pr 2>&1)
+  output65=$(GH_CALL_DIR="$GH_CALLS_65" PATH="$MOCK65:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T65_ID" --no-pr 2>&1)
   result65=$?
   set -e
   WT65="$T65_PROJECT/$T65_LOOPS_REL/.worktree"
   [[ $result65 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result65. got: $output65"; exit 1; }
-  # EARS 4: feat 브랜치 HEAD에 'chore(loop): meta iter 1' commit 정확히 1건
-  meta_count=$(git -C "$WT65" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter 1$' || true)
-  [[ "$meta_count" == "1" ]] || { echo "FAIL: 'chore(loop): meta iter 1' commit count=$meta_count (기대 1, EARS 4 위반)"; git -C "$WT65" log --oneline -10; exit 1; }
-  # EARS 4 (격리): 그 commit이 메타 파일만 건드렸어야 — git log subject로 SHA 추출
-  meta_sha=$(git -C "$WT65" log --pretty=tformat:'%H %s' | grep -E '^[0-9a-f]+ chore\(loop\): meta iter 1$' | awk '{print $1}' | head -1)
-  [[ -n "$meta_sha" ]] || { echo "FAIL: meta SHA 추출 실패 (commit count $meta_count)"; exit 1; }
-  changed_files=$(git -C "$WT65" show --pretty='' --name-only "$meta_sha")
-  # 비-메타 파일이 0건이어야 함 (메타 commit 격리). grep -v로 메타 패턴 제외 후 잔존 파일 검사.
-  non_meta=$(echo "$changed_files" | grep -v '^$' | grep -vE "^$T65_LOOPS_REL/(PLAN|NOTES|HANDOFF|RUN_LOG|ESCALATION)\.md$" || true)
-  [[ -z "$non_meta" ]] \
-    || { echo "FAIL: meta commit이 메타 파일 외 다른 파일 포함: $non_meta"; exit 1; }
-  # 메타 파일 최소 1개는 포함됐어야 (변경 있어 commit 발생함)
-  echo "$changed_files" | grep -qE "^$T65_LOOPS_REL/(PLAN|NOTES|HANDOFF|RUN_LOG|ESCALATION)\.md$" \
-    || { echo "FAIL: meta commit에 메타 파일이 하나도 없음: $changed_files"; exit 1; }
+  # 신규 contract: 드라이버는 메타 commit을 만들지 않는다 (M4-a로 iterate() auto-commit 블록 제거).
+  meta_count=$(git -C "$WT65" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter' || true)
+  [[ "$meta_count" == "0" ]] || { echo "FAIL: 신규 contract인데 'chore(loop): meta iter' commit count=$meta_count (기대 0)"; git -C "$WT65" log --oneline -10; exit 1; }
+  # 신규 contract: 워크트리에 메타 파일이 생성되지 않아야 (이터간 상태는 issue로 위임)
+  for meta_f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
+    [[ ! -f "$WT65/$T65_LOOPS_REL/$meta_f" ]] \
+      || { echo "FAIL: 워크트리에 $meta_f 잔존 — 신규 contract에선 task issue로 위임돼야"; exit 1; }
+  done
+  # 신규 contract: 워커가 [handoff] prefix comment를 실제로 발행했어야
+  ls "$GH_CALLS_65"/*-issue-comment.argv >/dev/null 2>&1 \
+    || { echo "FAIL: gh issue comment 호출 기록 부재 — worker mock의 handoff 발행 경로 점검"; ls -la "$GH_CALLS_65" 2>/dev/null; exit 1; }
+  grep -lq '^\[handoff\]' "$GH_CALLS_65"/*-issue-comment.argv \
+    || { echo "FAIL: [handoff] prefix comment 본문 부재 in $GH_CALLS_65"; ls -la "$GH_CALLS_65"; exit 1; }
 )
 echo "OK"
 
-echo "=== TEST 66: SPEC 110 EARS 5 — 워커가 메타 파일 미수정 → meta commit 0건 ==="
+echo "=== TEST 66: SPEC 124 — 메타 파일이 워크트리에 부재 + meta commit 0건 (워커가 메타 미수정) ==="
 # 셋업: 신규 contract + mock claude가 DONE만 만들고 메타 파일은 손대지 않음.
-# 기대: feat 브랜치에 'chore(loop): meta iter' commit이 0건.
+# 기대: feat 브랜치에 'chore(loop): meta iter' commit이 0건. 워크트리 메타 파일 부재.
+# (OLD EARS 5는 워커가 메타를 안 만지면 commit 0건. NEW contract는 항상 commit 0건.)
 T66_PROJECT="$WORK_DIR/spec110-no-meta"
 mkdir -p "$T66_PROJECT"
 git -C "$T66_PROJECT" init -q
@@ -2727,7 +2863,12 @@ git -C "$T66_PROJECT" checkout -q "$T66_DEFAULT"
   WT66="$T66_PROJECT/$T66_LOOPS_REL/.worktree"
   [[ $result66 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result66. got: $output66"; exit 1; }
   meta_count=$(git -C "$WT66" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter' || true)
-  [[ "$meta_count" == "0" ]] || { echo "FAIL: 메타 변경 0인데 meta iter commit count=$meta_count (기대 0, EARS 5 위반)"; git -C "$WT66" log --oneline -10; exit 1; }
+  [[ "$meta_count" == "0" ]] || { echo "FAIL: 메타 변경 0인데 meta iter commit count=$meta_count (기대 0)"; git -C "$WT66" log --oneline -10; exit 1; }
+  # 신규 contract (SPEC 124): 워크트리에 메타 파일이 자동 생성되지 않아야
+  for meta_f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
+    [[ ! -f "$WT66/$T66_LOOPS_REL/$meta_f" ]] \
+      || { echo "FAIL: 워크트리에 $meta_f 잔존 — 신규 contract에선 워크트리 메타 파일 부재"; exit 1; }
+  done
 )
 echo "OK"
 
@@ -2746,10 +2887,11 @@ grep -E 'SPEC_FILE.*milestones.*loops' "$SKILL_REFS/pr-phase.sh" >/dev/null \
   || { echo "FAIL: pr-phase.sh의 SPEC_FILE이 milestones/.../loops 패턴 아님 (EARS 12)"; exit 1; }
 echo "OK"
 
-echo "=== TEST 68: SPEC 110 EARS 13 — DONE feat 브랜치에 메타 commit + 워크트리 HEAD에 .loop/ 부재 + 메타는 milestones/ 경로에만 ==="
-# 셋업: 신규 contract + mock이 매 iter HANDOFF.md 갱신 + 2회째 DONE.
-# 기대: DONE 도달 시점에 'chore(loop): meta iter 1·2' commit 등장, 워크트리에 .loop/ 부재,
-# 메타 파일은 워크트리의 milestones/<m>/loops/<c>/ 경로에서만 발견.
+echo "=== TEST 68: SPEC 124 — DONE 시점에 워크트리에 메타 파일·.loop/ 부재 + meta commit 0건 + 매 iter [handoff] comment 발행 ==="
+# 셋업: 신규 contract + mock이 매 iter gh issue comment로 [handoff] 발행 + 2회째 DONE.
+# 기대: DONE 도달 시점에 'chore(loop): meta iter' commit 0건, 워크트리에 .loop/ 및 메타 파일 부재.
+# 매 iter mock이 발행한 [handoff] prefix comment가 GH_CALL_DIR에 기록됨 (≥2건).
+# (OLD EARS 13: meta commit ≥2, 메타는 milestones/ 경로에. NEW contract: commit 0, 메타 파일 부재, comment 발행.)
 T68_PROJECT="$WORK_DIR/spec110-final-state"
 mkdir -p "$T68_PROJECT"
 git -C "$T68_PROJECT" init -q
@@ -2772,10 +2914,10 @@ scope:
 verify: 'true'
 ---
 
-# Spec 110 Test 68
+# Spec 124 Test 68 (NEW contract — final state via issue comments)
 EOF
 git -C "$T68_PROJECT" add "$T68_LOOPS_REL/SPEC.md"
-git -C "$T68_PROJECT" commit -q -m "feat(spec): n68 spec 110 test 68"
+git -C "$T68_PROJECT" commit -q -m "feat(spec): n68 spec 124 test 68"
 git -C "$T68_PROJECT" checkout -q "$T68_DEFAULT"
 
 COUNTER68="$WORK_DIR/iter-count-68.txt"
@@ -2784,14 +2926,15 @@ export COUNTER68_PATH="$COUNTER68"
 
 MOCK68="$WORK_DIR/mock68-bin"
 mkdir -p "$MOCK68"
-cat > "$MOCK68/claude" <<MOCKEOF
+cat > "$MOCK68/claude" <<'MOCKEOF'
 #!/usr/bin/env bash
 cat > /dev/null
-n=\$(cat "\${COUNTER68_PATH}")
-n=\$((n + 1))
-echo "\$n" > "\${COUNTER68_PATH}"
-echo "iter \$n handoff" >> "$T68_LOOPS_REL/HANDOFF.md"
-if [[ \$n -ge 2 ]]; then
+n=$(cat "${COUNTER68_PATH}")
+n=$((n + 1))
+echo "$n" > "${COUNTER68_PATH}"
+# 신규 contract: handoff은 task issue prefix comment로 발행 (헌법 §11)
+gh issue comment 99 --body "[handoff] iter $n handoff"
+if [[ $n -ge 2 ]]; then
   touch DONE
 fi
 echo '{"result": "mock68", "usage": {"input_tokens": 1, "output_tokens": 1}}'
@@ -2800,21 +2943,28 @@ chmod +x "$MOCK68/claude"
 
 (
   cd "$T68_PROJECT"
+  GH_CALLS_68="$WORK_DIR/gh-calls-68"
+  rm -rf "$GH_CALLS_68"
   set +e
-  output68=$(PATH="$MOCK68:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T68_ID" --no-pr 2>&1)
+  output68=$(GH_CALL_DIR="$GH_CALLS_68" PATH="$MOCK68:$PATH" MAX_ITERATIONS=3 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T68_ID" --no-pr 2>&1)
   result68=$?
   set -e
   WT68="$T68_PROJECT/$T68_LOOPS_REL/.worktree"
   [[ $result68 -eq 0 ]] || { echo "FAIL: start 실패. exit=$result68. got: $output68"; exit 1; }
-  # EARS 13: 메타 commit이 메타 갱신 횟수(=2)만큼 등장
-  meta_count=$(git -C "$WT68" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter [0-9]+$' || true)
-  [[ "$meta_count" -ge 2 ]] || { echo "FAIL: meta iter commit count=$meta_count (기대 ≥2, EARS 13)"; git -C "$WT68" log --oneline -20; exit 1; }
-  # EARS 13: 워크트리 HEAD에 .loop/ 부재
-  [[ ! -d "$WT68/.loop" ]] || { echo "FAIL: DONE 시점에 .loop/ 잔존 (EARS 13)"; exit 1; }
-  # EARS 13: 메타 파일은 milestones/<m>/loops/<id>/에서만 발견
-  for meta_f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md; do
-    [[ -f "$WT68/$T68_LOOPS_REL/$meta_f" ]] || { echo "FAIL: 메타 파일 부재 ($T68_LOOPS_REL/$meta_f) — 워커가 milestones/ 경로에 못 씀 (EARS 13)"; exit 1; }
+  # 신규 contract: 'chore(loop): meta iter' commit 0건 (드라이버 auto-commit 제거됨)
+  meta_count=$(git -C "$WT68" log --pretty=format:%s | grep -cE '^chore\(loop\): meta iter' || true)
+  [[ "$meta_count" == "0" ]] || { echo "FAIL: meta iter commit count=$meta_count (기대 0 — 신규 contract auto-commit 제거)"; git -C "$WT68" log --oneline -20; exit 1; }
+  # 신규 contract: 워크트리 HEAD에 .loop/ 부재
+  [[ ! -d "$WT68/.loop" ]] || { echo "FAIL: DONE 시점에 .loop/ 잔존 — 신규 contract 위반"; exit 1; }
+  # 신규 contract: 메타 파일은 워크트리에 부재 (이터간 상태는 task issue로 위임)
+  for meta_f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
+    [[ ! -f "$WT68/$T68_LOOPS_REL/$meta_f" ]] \
+      || { echo "FAIL: 워크트리에 $meta_f 잔존 — 신규 contract 위반"; exit 1; }
   done
+  # 신규 contract: 매 iter 워커 mock이 [handoff] prefix comment를 발행 (≥2건)
+  handoff_count=$(grep -l '^\[handoff\]' "$GH_CALLS_68"/*-issue-comment.argv 2>/dev/null | wc -l | tr -d ' ')
+  [[ "$handoff_count" -ge 2 ]] \
+    || { echo "FAIL: [handoff] prefix comment 호출 count=$handoff_count (기대 ≥2 — iter당 1건)"; ls -la "$GH_CALLS_68" 2>/dev/null; exit 1; }
 )
 echo "OK"
 
@@ -2923,16 +3073,20 @@ chmod +x "$MOCK70/claude"
 
 (
   cd "$T70_PROJECT"
+  GH_CALLS_70="$WORK_DIR/gh-calls-70"
+  rm -rf "$GH_CALLS_70"
   set +e
-  output70=$(PATH="$MOCK70:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T70_ID" --no-pr 2>&1)
+  output70=$(GH_CALL_DIR="$GH_CALLS_70" PATH="$MOCK70:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 bash "$LOOP_SH_SRC" start "regular/$T70_ID" --no-pr 2>&1)
   result70=$?
   set -e
   WT70="$T70_PROJECT/$T70_LOOPS_REL/.worktree"
-  # AC2/AC4: out-of-scope bad.txt를 게이트가 catch → halt (exit≠0) + ESCALATION.md + 스코프 위반 메시지
+  # AC2/AC4: out-of-scope bad.txt를 게이트가 catch → halt (exit≠0) + [blocked] comment + 스코프 위반 메시지
+  # 신규 contract (SPEC 124): halt() → ESCALATION.md 파일 대신 [blocked] prefix issue comment 발행
   [[ $result70 -ne 0 ]] \
     || { echo "FAIL: out-of-scope 워커 commit + 메타 commit 2단 이후에도 halt 없이 0 exit — BASE..HEAD 미적용, false-negative (AC2/AC4)"; echo "$output70" | tail -20; exit 1; }
   echo "$output70" | grep -qE "Scope 위반|scope.*위반|bad\.txt" \
     || { echo "FAIL: scope 위반 메시지 없음 — bad.txt가 게이트 diff에 포함 안 됨 (AC2/AC4)"; echo "$output70" | tail -30; exit 1; }
+  assert_blocked_comment_posted "$GH_CALLS_70" || exit 1
 )
 echo "OK"
 
