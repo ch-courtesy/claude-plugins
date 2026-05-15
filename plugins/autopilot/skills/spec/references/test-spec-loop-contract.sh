@@ -157,6 +157,7 @@ WT_SPEC="$EXPECTED_WT/${DIR_REL}/SPEC.md"
   || { echo "FAIL T4a: worktree 안 SPEC.md 부재: $WT_SPEC" >&2; exit 1; }
 
 # pr-phase.sh 의 SPEC_FILE 도출 — feat 브랜치 이름의 slug를 사용해야 한다.
+# SPEC 116 EARS AC4: "다른 경로 fallback은 없다" — slug-less 경로는 미지원, 단일 컨벤션.
 # 동일 도출 로직을 본 테스트에서 재현해 결과가 slug-bearing 경로와 일치하는지 확인.
 PR_TASK_ID="regular/${INPUT_ID}"
 PR_BRANCH="feat/${INPUT_ID}-${SLUG}"
@@ -167,11 +168,11 @@ PR_PREFIX="feat/${PR_CHILD}"
 if [[ "$PR_BRANCH" == "${PR_PREFIX}-"* ]]; then
   PR_SLUG_FROM_BRANCH="${PR_BRANCH#${PR_PREFIX}-}"
 fi
-if [[ -n "$PR_SLUG_FROM_BRANCH" ]]; then
-  PR_DERIVED_SPEC="$EXPECTED_WT/milestones/${PR_MILESTONE}/loops/${PR_CHILD}-${PR_SLUG_FROM_BRANCH}/SPEC.md"
-else
-  PR_DERIVED_SPEC="$EXPECTED_WT/milestones/${PR_MILESTONE}/loops/${PR_CHILD}/SPEC.md"
+if [[ -z "$PR_SLUG_FROM_BRANCH" ]]; then
+  echo "FAIL T4b-pre: 테스트 fixture 의 PR_BRANCH 가 feat/${PR_CHILD}-<slug> 형식 아님 — fixture 결함" >&2
+  exit 1
 fi
+PR_DERIVED_SPEC="$EXPECTED_WT/milestones/${PR_MILESTONE}/loops/${PR_CHILD}-${PR_SLUG_FROM_BRANCH}/SPEC.md"
 [[ "$PR_DERIVED_SPEC" == "$WT_SPEC" ]] \
   || { echo "FAIL T4b: pr-phase 도출 경로 ≠ 실제 경로:" >&2
        echo "  derived: $PR_DERIVED_SPEC" >&2
@@ -186,7 +187,16 @@ if ! grep -qE '\$\{?BRANCH#' "$PR_PHASE_SH"; then
   exit 1
 fi
 
-echo "OK T4: SPEC.md 경로 정합 (slug-bearing 단일 컨벤션)"
+# T4d: pr-phase.sh 에 slug-less fallback 경로가 없는지 검사 — SPEC 116 EARS AC4 "다른 경로 fallback은 없다".
+# 구 fallback 패턴: `${SPEC_CHILD}/SPEC.md` (slug-bearing 분기의 else 측에서 SPEC_CHILD 만 사용).
+# 신 컨벤션: slug 추출 실패 시 즉시 abort, 다른 경로 시도 금지.
+if grep -nE 'SPEC_FILE=.*loops/\$\{?SPEC_CHILD\}?/SPEC\.md' "$PR_PHASE_SH" >/dev/null; then
+  echo "FAIL T4d: pr-phase.sh 에 slug-less fallback 경로(\${SPEC_CHILD}/SPEC.md) 존재 — EARS AC4 위반:" >&2
+  grep -nE 'SPEC_FILE=' "$PR_PHASE_SH" >&2 || true
+  exit 1
+fi
+
+echo "OK T4: SPEC.md 경로 정합 (slug-bearing 단일 컨벤션, fallback 없음)"
 
 # ──────────────────────────────────────────────────────────────────────────────
 # T5. 모호성 die — 동일 input-id 매칭 브랜치가 2+ 일 때

@@ -209,11 +209,7 @@ compute_paths() {
   # feat 브랜치 이름에서 slug 추출 — `feat/<child>-<slug>` 패턴의 suffix.
   local slug=""
   if [[ -n "$feat_branch" ]]; then
-    local prefix="feat/$child"
-    if [[ "$feat_branch" == "${prefix}-"* ]]; then
-      slug="${feat_branch#${prefix}-}"
-    fi
-    # feat_branch == "$prefix" (slug-less 브랜치) → slug 비어있음 유지
+    slug=$(slug_from_feat_branch "$child" "$feat_branch")
   fi
 
   local loop_dir_name="$child"
@@ -260,6 +256,18 @@ find_feat_branch() {
   fi
   printf '%s\n' "$matches"
   return 0
+}
+
+# feat 브랜치 이름에서 slug 추출. SPEC 116 단일 컨벤션 — `feat/<child>-<slug>` 패턴의 suffix.
+# 인자: $1 = child(input-id), $2 = branch 이름.
+# stdout: slug, 또는 빈 문자열(slug-less 브랜치·형식 불일치 시).
+slug_from_feat_branch() {
+  local child="$1"
+  local branch="$2"
+  local prefix="feat/$child"
+  if [[ "$branch" == "${prefix}-"* ]]; then
+    printf '%s\n' "${branch#${prefix}-}"
+  fi
 }
 
 # ----- 동시성 락 -----
@@ -1036,9 +1044,10 @@ cmd_status() {
       *) die "find_feat_branch 비정상 종료 (rc=$_frc)" ;;
     esac
     if [[ -n "$_ffeat" ]]; then
-      local _fprefix="feat/$_fchild"
-      if [[ "$_ffeat" == "${_fprefix}-"* ]]; then
-        filter_task_id="${_fmile}/${_fchild}-${_ffeat#${_fprefix}-}"
+      local _fslug
+      _fslug=$(slug_from_feat_branch "$_fchild" "$_ffeat")
+      if [[ -n "$_fslug" ]]; then
+        filter_task_id="${_fmile}/${_fchild}-${_fslug}"
       fi
     fi
   fi
