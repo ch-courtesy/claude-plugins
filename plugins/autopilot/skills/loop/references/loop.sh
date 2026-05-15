@@ -26,31 +26,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ----- allowed-tools (SPEC 123 AC18) -----
 #
-# DONE 이후 PR 생애주기 자동화 phase 그룹(rebase·review-fix·cleanup)의 명령 실행에
-# 필요한 도구 권한. autopilot 워커가 새 claude CLI 세션을 띄울 때(rebase 충돌 자동 해소,
-# review-fix iter) `--allowed-tools "$AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS"` 형태로
-# 전달된다. 범위 최소화 원칙:
-#   - GitHub CLI: PR 관련 서브커맨드만 (gh pr merge·comment·view, gh api repos/.../pulls/* ·
-#     issues/*/comments). gh issue *·gh repo * 등 PR 무관 명령은 허용 안 함.
-#   - GitHub Project: 정확히 gh project item-edit만.
-#   - Git: rebase·push --delete·branch -D·worktree remove만. git add·commit은
-#     fix iter 본 작업에 필요.
-# 와일드카드(gh *, git *) 사용 금지. 본 변수는 워커 phase 스크립트가 export해 자식
-# claude CLI 호출에 환경 변수로 주입한다.
+# DONE 이후 PR 생애주기 자동화 phase 그룹(rebase·review-fix·cleanup)의 *자식 claude CLI
+# 세션*(rebase 충돌 자동 해소, review-fix iter) 전용 도구 권한. review-fix-phase가
+# `--allowed-tools "$AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS"` 형태로 전달한다.
+#
+# 범위 최소화 원칙 (claude 세션 관점):
+#   - phase 셸 스크립트가 직접 실행하는 파괴적 명령(gh pr merge·gh pr comment·
+#     gh project item-edit·git rebase·git commit·git push·git push --delete·
+#     git branch -D·git worktree remove)은 claude 세션이 사용해선 안 되므로 *제거*.
+#   - claude 세션은 fix 코드 변경(Read·Edit·Write) + staging/진단(git add·status·diff)
+#     + PR 컨텍스트 조회(gh pr view·gh api repos/) 만 필요.
+#   - 와일드카드(gh *, git *) 사용 금지.
 AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS="\
-Bash(gh pr merge:*),\
-Bash(gh pr comment:*),\
-Bash(gh pr view:*),\
-Bash(gh api repos/:*),\
-Bash(gh project item-edit:*),\
-Bash(git rebase:*),\
-Bash(git push --delete:*),\
-Bash(git branch -D:*),\
-Bash(git worktree remove:*),\
 Bash(git add:*),\
-Bash(git commit:*),\
 Bash(git status:*),\
 Bash(git diff:*),\
+Bash(gh pr view:*),\
+Bash(gh api repos/:*),\
 Read,Edit,Write,Glob,Grep"
 export AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS
 

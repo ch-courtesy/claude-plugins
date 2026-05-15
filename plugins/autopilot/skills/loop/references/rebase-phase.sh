@@ -98,6 +98,7 @@ When done, output a single line: 'RESOLVED'.
 EOF
 )
 
+mkdir -p "$WT/.iterations" 2>/dev/null || true   # 독립 호출 시에도 로그 쓰기 보장
 claude_exit=0
 ( cd "$WT" && printf '%s' "$claude_prompt" | claude \
     --print \

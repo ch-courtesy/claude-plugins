@@ -57,7 +57,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # 본 phase 외 fix iter에서 claude CLI 호출 시 사용할 allowed-tools.
 # caller(loop.sh)가 export한 AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS를 우선, 부재면 기본값.
 # 범위 최소: gh pr 관련 / git rebase·add·commit·push / Read·Edit·Write.
-ALLOWED_TOOLS_FIX="${AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS:-Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(git rebase:*),Bash(git commit:*),Bash(git push:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh api repos/:*),Read,Edit,Write,Glob,Grep}"
+ALLOWED_TOOLS_FIX="${AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS:-Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(gh pr view:*),Bash(gh api repos/:*),Read,Edit,Write,Glob,Grep}"
 
 # ----- 상태 전이: Review (gh project item-edit) — AC12 -----
 if command -v gh >/dev/null 2>&1 \
