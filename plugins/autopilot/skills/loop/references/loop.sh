@@ -1339,15 +1339,22 @@ cmd_logs() {
   fi
 
   if [[ $tail_mode -eq 1 ]]; then
-    # --tail: 60초 간격으로 새 comment polling (Ctrl+C로 종료).
+    # --tail: 60초 간격으로 새 comment polling (Ctrl+C로 종료). 매 polling마다
+    # last_seen createdAt 이후의 신규 comment만 출력 — 이전 `tail -f RUN_LOG.md`의
+    # 증분 스트리밍과 동등한 UX. 첫 라운드(last_seen 빈 값)는 기존 전체를 한 번 출력.
     local last_seen=""
     while true; do
-      local cur
-      cur=$(gh issue view "$issue_num" --json comments \
-        --jq '.comments | sort_by(.createdAt) | last | .createdAt // empty' 2>/dev/null || true)
-      if [[ -n "$cur" && "$cur" != "$last_seen" ]]; then
-        gh issue view "$issue_num" --comments 2>/dev/null || true
-        last_seen="$cur"
+      local new_block
+      new_block=$(gh issue view "$issue_num" --json comments \
+        --jq --arg since "$last_seen" \
+        '[.comments[] | select($since == "" or .createdAt > $since)]
+          | sort_by(.createdAt)
+          | map("=== @\(.author.login) (\(.createdAt)) ===\n\(.body)\n")
+          | .[]' 2>/dev/null || true)
+      if [[ -n "$new_block" ]]; then
+        printf '%s\n' "$new_block"
+        last_seen=$(gh issue view "$issue_num" --json comments \
+          --jq '.comments | sort_by(.createdAt) | last | .createdAt // empty' 2>/dev/null || true)
       fi
       sleep 60
     done
