@@ -1353,12 +1353,16 @@ cmd_logs() {
     local last_seen=""
     while true; do
       local new_block
+      # gh의 `--jq`는 단일 jq 표현식 문자열만 받고 `--arg`를 통과시키지 않으므로
+      # comments 배열만 `--jq '.comments'`로 추출한 뒤 별도 jq pipe에서 `--arg`로
+      # since를 바인딩한다. jq -r로 raw 출력해 따옴표·escape 없이 그대로 표시.
       new_block=$(gh issue view "$issue_num" --json comments \
-        --jq --arg since "$last_seen" \
-        '[.comments[] | select($since == "" or .createdAt > $since)]
-          | sort_by(.createdAt)
-          | map("=== @\(.author.login) (\(.createdAt)) ===\n\(.body)\n")
-          | .[]' 2>/dev/null || true)
+        --jq '.comments' 2>/dev/null \
+        | jq -r --arg since "$last_seen" \
+          '[.[] | select($since == "" or .createdAt > $since)]
+            | sort_by(.createdAt)
+            | map("=== @\(.author.login) (\(.createdAt)) ===\n\(.body)\n")
+            | .[]' 2>/dev/null || true)
       if [[ -n "$new_block" ]]; then
         printf '%s\n' "$new_block"
         last_seen=$(gh issue view "$issue_num" --json comments \
