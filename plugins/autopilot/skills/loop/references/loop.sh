@@ -86,8 +86,16 @@ task_issue_number() {
 }
 
 # task issue의 Project Status가 `Blocked`인지 검사 (헌법 §5·§12, SPEC AC4·8).
-# Project 미설정 환경 fallback: 가장 최근 issue comment의 본문 첫 줄이 `[blocked]`
-# prefix면 blocked로 간주. 0=blocked, 1=blocked 아님(판정 불가 포함).
+# 결정 순서:
+#   1. AUTOPILOT_PROJECT_ITEM_ID가 설정돼 있으면 GraphQL로 Project Status를 1차 조회.
+#      "Blocked"면 blocked, 그 외(In Progress·Review·…)면 not blocked로 즉시 판정.
+#      `gh project item-edit … In Progress`로 사람이 unblock하는 문서화된 절차가
+#      실제로 동작해야 하므로 Status가 단일 출처다.
+#   2. Project ID 미설정·GraphQL 조회 실패 시에만 comment-only fallback:
+#      가장 최근 `[blocked]` 이후에 `[unblocked]`/`[resume]` prefix comment가 추가됐으면
+#      해제로 본다. 마지막 comment의 prefix만 보면 외부 사용자의 일반 comment 한 개로
+#      의도치 않은 재개가 발생할 수 있어 안전하지 않다.
+# 반환: 0=blocked, 1=blocked 아님(판정 불가 포함).
 task_status_is_blocked() {
   local task_id="${1:-$TASK_ID}"
   local issue
@@ -95,12 +103,28 @@ task_status_is_blocked() {
   if ! command -v gh >/dev/null 2>&1; then
     return 1
   fi
-  local last_body
-  last_body=$(gh issue view "$issue" --json comments \
-    --jq '.comments | sort_by(.createdAt) | last | .body' 2>/dev/null || true)
-  if [[ -n "$last_body" ]] && printf '%s' "$last_body" | head -n 1 | grep -q '^\[blocked\]'; then
-    return 0
+
+  # 1차: Project Status 조회 (정식 출처)
+  if [[ -n "${AUTOPILOT_PROJECT_ITEM_ID:-}" ]]; then
+    local status
+    status=$(gh api graphql -f query='
+      query($id:ID!){ node(id:$id){ ... on ProjectV2Item {
+        fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }' \
+      -f id="$AUTOPILOT_PROJECT_ITEM_ID" \
+      --jq '.data.node.fieldValueByName.name // empty' 2>/dev/null || true)
+    if [[ -n "$status" ]]; then
+      [[ "$status" == "Blocked" ]] && return 0 || return 1
+    fi
+    # GraphQL 응답 비었으면 comment fallback으로 흘러감 (네트워크·권한 일시 실패 대비)
   fi
+
+  # 2차: comment-only fallback. [blocked] 이후 [unblocked]/[resume] 유무로 판정.
+  local last_prefix
+  last_prefix=$(gh issue view "$issue" --json comments \
+    --jq '[.comments[] | (.body | split("\n")[0])
+            | capture("^\\[(?<p>blocked|unblocked|resume)\\]"; "x").p]
+          | reverse | .[0] // empty' 2>/dev/null || true)
+  [[ "$last_prefix" == "blocked" ]] && return 0
   return 1
 }
 
@@ -124,16 +148,13 @@ gh_post_blocked_comment() {
     return 1
   fi
   echo "[$(now_iso)] [blocked] prefix comment 발행: issue #$issue" >&2
-  if [[ -n "${AUTOPILOT_PROJECT_ITEM_ID:-}" ]]; then
-    if ! gh project item-edit \
-        --id "$AUTOPILOT_PROJECT_ITEM_ID" \
-        --field Status \
-        --value Blocked >/dev/null 2>&1; then
-      echo "[$(now_iso)] WARN: gh project item-edit 실패 (item=$AUTOPILOT_PROJECT_ITEM_ID) — comment는 발행됨" >&2
-    fi
-  else
-    echo "[$(now_iso)] INFO: AUTOPILOT_PROJECT_ITEM_ID 미설정 — Status=Blocked 전이 생략 (수동 전이 필요)" >&2
-  fi
+  # NOTE: Project Status=Blocked 자동 전이는 미구현 (추후 도입). GraphQL mutation
+  # `updateProjectV2ItemFieldValue`에는 project_id·field_id·option_id 세 추가 식별자가
+  # 필요해 best-effort 수준의 env 한 개로는 호출 불가. 이전 구현의 `--field Status
+  # --value Blocked`는 gh CLI의 정식 플래그가 아니어서 항상 실패했으므로 정직하게 제거.
+  # 본 호출은 [blocked] comment 발행으로 차단 신호를 남기는 데 한정한다 — Status 전이는
+  # 사람이 수동으로 (또는 추후 도입할 별도 헬퍼로) 처리.
+  echo "[$(now_iso)] INFO: Project Status=Blocked 자동 전이는 미구현 — 수동 전이 필요 (issue #$issue)" >&2
   return 0
 }
 
