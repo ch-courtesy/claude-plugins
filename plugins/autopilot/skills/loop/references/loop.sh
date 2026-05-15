@@ -986,7 +986,9 @@ cmd_start() {
         if [[ "$request_review_val" == "true" ]]; then
           # PR 번호 추출 (head 브랜치로 조회)
           local pr_num
-          pr_num=$( cd "$WT" && gh pr list --head "$BRANCH" --state all \
+          # pr-phase.sh가 방금 생성·재사용한 open PR만 매칭 — `--state all`은
+          # 동일 head 브랜치의 과거 closed PR을 잘못 반환할 위험.
+          pr_num=$( cd "$WT" && gh pr list --head "$BRANCH" --state open \
                       --json number --jq '.[0].number' 2>/dev/null || echo "")
           if [[ -z "$pr_num" ]]; then
             echo "WARN: request_review: true 인데 PR 번호 조회 실패 — review-fix 루프 dispatch skip" >&2

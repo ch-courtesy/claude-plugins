@@ -129,33 +129,42 @@ try_auto_merge() {
 # - Review summaries: gh pr view --json reviews
 # - Review threads (inline): gh pr view --json reviewThreads → 각 comment ID
 collect_new_events() {
-  # jq 사전 검사는 진입부에서 완료됨 ($() 캡처로 stdout 누락 방지).
-  local out=""
+  # 후보 ID만 emit (mark_seen은 caller가 성공 후에 별도 호출). 본 함수는 `$()`로
+  # 호출돼 stdout이 변수로 캡처되므로 여기서 mark_seen하면 caller가 fix 실패해도
+  # 이미 영구히 seen 처리됨 — rebase·claude·commit 중 실패 시 재시도 불가능.
+  # jq 사전 검사는 진입부에서 완료됨.
   local pr_json
   pr_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviews,reviewThreads,comments 2>/dev/null || echo '{}')
 
-  # PR-level comments (issue comments) — top-level .comments[].id only
+  # PR-level comments (issue comments)
   while IFS= read -r raw_id; do
     [[ -z "$raw_id" ]] && continue
     local id="comment:$raw_id"
-    is_seen "$id" || { mark_seen "$id"; out+="$id"$'\n'; }
+    is_seen "$id" || echo "$id"
   done < <( printf '%s' "$pr_json" | jq -r '.comments[]?.id // empty' )
 
-  # Review summary entries — top-level .reviews[].id only
+  # Review summary entries
   while IFS= read -r raw_id; do
     [[ -z "$raw_id" ]] && continue
     local id="review:$raw_id"
-    is_seen "$id" || { mark_seen "$id"; out+="$id"$'\n'; }
+    is_seen "$id" || echo "$id"
   done < <( printf '%s' "$pr_json" | jq -r '.reviews[]?.id // empty' )
 
-  # Review threads inline comments — .reviewThreads[].comments[].id (각 inline 코멘트)
+  # Review threads inline comments
   while IFS= read -r raw_id; do
     [[ -z "$raw_id" ]] && continue
     local id="thread:$raw_id"
-    is_seen "$id" || { mark_seen "$id"; out+="$id"$'\n'; }
+    is_seen "$id" || echo "$id"
   done < <( printf '%s' "$pr_json" | jq -r '.reviewThreads[]?.comments[]?.id // empty' )
+}
 
-  printf '%s' "$out"
+# fix iter 성공 후 한 묶음으로 seen 마킹 — 실패 분기에서는 호출되지 않으므로 다음
+# iter의 collect_new_events가 동일 ID를 재발견해 재시도 가능.
+mark_events_seen() {
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    mark_seen "$id"
+  done
 }
 
 # ----- 메인 폴링 루프 -----
@@ -292,6 +301,9 @@ EOF
       echo "WARN: gh pr comment 실패 (반박 게시) — 다음 iter 재시도 (phase 계속)" >&2
     fi
   fi
+
+  # 모든 단계 성공 — 본 iter의 new_events ID들을 seen 마킹 (실패 분기에서는 미도달)
+  printf '%s\n' "$new_events" | mark_events_seen
 
   sleep "$POLL_SECS"
 done
