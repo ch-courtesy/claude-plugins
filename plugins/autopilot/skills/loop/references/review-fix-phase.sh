@@ -204,17 +204,27 @@ while (( iter < MAX_ITER )); do
   # APPROVED 외 분기 진입 시 카운터 리셋 (성공 path 복귀)
   AUTO_MERGE_FAIL=0
 
-  # (c) owner cmd 검사: owner 코멘트 중 미본 것만 — dedup으로 재진입 차단
+  # (c) owner cmd 검사: owner 코멘트 중 미본 것만 — dedup으로 재진입 차단.
+  # 머지 실패 시 재시도 가능하도록 cmd-bearing 코멘트는 머지 *성공 후*에만 seen 마킹.
+  # 비-cmd 코멘트는 즉시 seen 마킹 (재검사 불필요).
   if [[ -n "$PR_OWNER" ]]; then
     while IFS=$'\t' read -r oc_id oc_body; do
       [[ -z "$oc_id" ]] && continue
       grep -qxF "$oc_id" "$OWNER_CMD_SEEN_FILE" 2>/dev/null && continue
-      echo "$oc_id" >> "$OWNER_CMD_SEEN_FILE"
+      # @tsv는 본문 내 실제 개행(`\n`)을 리터럴 두 글자 `\n`으로 이스케이프함 —
+      # grep `[[:space:]]`가 이를 못 매칭하므로 실제 개행으로 복원.
+      oc_body="${oc_body//\\n/$'\n'}"
       if printf '%s' "$oc_body" | grep -qE '(^|[[:space:]])(/done|합격|통과)([[:space:]]|$)'; then
+        # cmd 검출 — 머지 성공 시에만 seen, 실패 시 다음 iter 재시도
         if try_auto_merge "owner cmd"; then
+          echo "$oc_id" >> "$OWNER_CMD_SEEN_FILE"
           finalize_merged "owner cmd 후 머지" || exit 1
           exit 0
         fi
+        # 머지 실패 — seen 마킹 보류, 다음 iter에서 try_auto_merge 재시도
+      else
+        # 비-cmd 코멘트 — 재검사 불필요, 즉시 seen
+        echo "$oc_id" >> "$OWNER_CMD_SEEN_FILE"
       fi
     done < <( cd "$WT" && gh pr view "$PR_NUMBER" --json comments \
                 --jq ".comments[]? | select(.author.login==\"$PR_OWNER\") | [.id, .body] | @tsv" 2>/dev/null )
