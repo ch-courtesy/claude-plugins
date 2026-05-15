@@ -41,7 +41,7 @@ AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS="\
 Bash(gh pr merge:*),\
 Bash(gh pr comment:*),\
 Bash(gh pr view:*),\
-Bash(gh api repos/*),\
+Bash(gh api repos/:*),\
 Bash(gh project item-edit:*),\
 Bash(git rebase:*),\
 Bash(git push --delete:*),\

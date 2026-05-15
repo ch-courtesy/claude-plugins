@@ -221,9 +221,9 @@ while (( iter < MAX_ITER )); do
     [[ -n "$e" ]] && echo "  - $e"
   done
 
-  # (i) 재-rebase (AC7)
+  # (i) 재-rebase (AC7) — 실패 시 다음 iter에서 재시도 (recoverable)
   if ! bash "$SCRIPT_DIR/rebase-phase.sh" "$WT" "$BRANCH" "$PROJECT_ROOT"; then
-    emit_escalation "fix iter 내 rebase 실패 — 폴링 계속 (다음 iter 시 재시도)"
+    echo "WARN: fix iter 내 rebase 실패 — 다음 iter 시 재시도 (phase 계속)" >&2
     sleep "$POLL_SECS"
     continue
   fi
@@ -256,7 +256,8 @@ EOF
         --add-dir . \
         --allowed-tools "$ALLOWED_TOOLS_FIX" \
         --output-format text > "$fix_log" 2>&1; then
-    emit_escalation "claude fix 세션 실패 (iter $iter)"
+    # recoverable: 다음 iter에서 재시도
+    echo "WARN: claude fix 세션 실패 (iter $iter) — 다음 iter 재시도 (phase 계속)" >&2
     sleep "$POLL_SECS"
     cd "$PROJECT_ROOT"
     continue
@@ -270,9 +271,9 @@ EOF
   if [[ -n "$( cd "$WT" && git status --porcelain --untracked-files=no 2>/dev/null )" ]]; then
     ( cd "$WT" \
         && git add -u \
-        && git commit -q -m "fix:root review-fix iter $iter (PR #$PR_NUMBER)" \
+        && git commit -q -m "fix(review-fix): iter $iter (PR #$PR_NUMBER)" \
         && git push origin "$BRANCH" ) \
-      || { emit_escalation "fix commit/push 실패 (iter $iter)"; sleep "$POLL_SECS"; continue; }
+      || { echo "WARN: fix commit/push 실패 (iter $iter) — 다음 iter 재시도 (phase 계속)" >&2; sleep "$POLL_SECS"; continue; }
   fi
 
   # (iv) DISPUTE 본문 감지 → PR 코멘트 1회 게시 (AC10·AC11)
@@ -284,7 +285,8 @@ EOF
     if ( cd "$WT" && gh pr comment "$PR_NUMBER" --body "[autopilot:dispute] $dispute_body" 2>&1 ); then
       touch "$DISPUTE_FILE"
     else
-      emit_escalation "gh pr comment 실패 (반박 게시)"
+      # recoverable: 다음 iter에서 재시도 가능 (DISPUTE_FILE 없으므로 동일 dispute 재시도)
+      echo "WARN: gh pr comment 실패 (반박 게시) — 다음 iter 재시도 (phase 계속)" >&2
     fi
   fi
 
