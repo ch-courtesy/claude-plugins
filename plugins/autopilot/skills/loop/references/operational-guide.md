@@ -112,7 +112,7 @@ bash "$LOOP_SH" logs auth-refactor [--tail | --iter N]
 
 ## ESCALATION 처리
 
-카테고리별 처리 흐름: `references/troubleshooting.md` 참조.
+카테고리별 처리 흐름: `references/troubleshooting.md` 참조. 아래 단계의 추상 동작(task 메모리 조회·신호 발행 등)을 현 backing에서 실행하는 구체 명령 매핑은 헌법 §11 (이터간 컨텍스트 운영) 참조.
 
 1. task 메모리에서 task 식별자로 조회해 최근 차단 신호 본문 확인
 2. 워크트리(`milestones/<m>/loops/<c>/.worktree`)로 이동, 필요 시 SPEC 보정 (`milestones/<m>/loops/<c>/SPEC.md`)
