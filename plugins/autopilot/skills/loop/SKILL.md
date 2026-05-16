@@ -8,7 +8,7 @@ allowed-tools: Monitor
 
 자율 수행 루프의 통합 운영 인터페이스. 인자로 subcommand와 sub args를 받아 자율 task lifecycle을 관리합니다.
 
-본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`)과 외부 셸 드라이버(`references/loop.sh`)가 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태가 모두 `milestones/<m>/loops/<c>/` 단일 nested 트리 안에 생성됩니다 (워크트리 `.worktree/`, lock `.lock`, SPEC). 이터간 메모(계획·교훈·인계·차단·완료)는 GitHub Issue body 계획 섹션과 prefix comment(`[handoff]`·`[notes]`·`[blocked]`·`[done]`)에 누적합니다 — 워크트리에는 메타 파일을 두지 않습니다 (rules/context.md 컨벤션). ad-hoc 단일 task는 `regular` milestone(catch-all)로 자동 정규화됩니다.
+본 스킬은 **자기완결적**입니다 — 워커 헌법(`references/constitution.md`)과 외부 셸 드라이버(`references/loop.sh`)가 이 스킬 패키지에 포함됩니다. target 프로젝트에는 런타임 상태가 모두 `milestones/<m>/loops/<c>/` 단일 nested 트리 안에 생성됩니다 (워크트리 `.worktree/`, lock `.lock`, SPEC). 이터간 메모(계획·교훈·인계·차단·완료)는 **task 메모리**의 계획 섹션과 누적된 **task 신호**(`handoff`·`notes`·`blocked`·`done`)에 모입니다 — 워크트리에는 메타 파일을 두지 않습니다. 추상 어휘는 헌법 §추상 어휘를 단일 출처로 따르고, 본 프로젝트의 백엔드 매핑(메시지 매체·식별자·필드 등)은 `rules/context.md`가 책임집니다. ad-hoc 단일 task는 `regular` milestone(catch-all)로 자동 정규화됩니다.
 
 ## 호출 방법
 
@@ -86,14 +86,14 @@ SPEC frontmatter에 `request_review: true`가 지정된 task만 본 흐름을 �
 | 자동 머지 (auto-merge) | `references/review-fix-phase.sh` 내부 | reviewDecision `APPROVED` 또는 owner의 종료 코멘트(`/done`·`합격`·`통과`)로 `gh pr merge --squash` 수행. PR이 이미 `merged`이면 자동 머지 건너뜀. |
 | cleanup | `references/cleanup-phase.sh` | PR `merged` 후 worktree 제거 + 로컬 feat `branch -D` + origin feat `push --delete`. |
 
-##### 상태 전이 (Status field)
+##### 상태 전이
 
-`rules/context.md`의 추상 상태 어휘에 따라 외부 태스크 추적 시스템(GitHub Project)의 Status 필드를 다음 시점에 전이합니다:
+헌법 §추상 어휘의 **task 상태** 어휘에 따라 다음 시점에 전이합니다:
 
-- PR 생성·재사용 성공 직후 → **Review** (review-fix-phase 진입 시점)
-- cleanup 성공 직후 → **Done**
+- PR 생성·재사용 성공 직후 → task 상태를 `review`로 전이 (review-fix-phase 진입 시점)
+- cleanup 성공 직후 → task 상태를 `done`으로 전이
 
-전이는 `gh project item-edit`로 수행하며, 환경 변수(`LOOP_PROJECT_ID` 등) 부재 시 무음 skip되어 phase 자체는 진행됩니다. 구체 값·매핑은 `rules/context.md` 단일 출처에 의존합니다.
+전이의 구체 명령·환경 변수·라벨 매핑(필요 설정 부재 시 무음 skip 포함)은 `rules/context.md` 단일 출처에 위임됩니다 — phase 자체는 매핑 부재 시에도 진행됩니다.
 
 ##### 종료 조건
 
