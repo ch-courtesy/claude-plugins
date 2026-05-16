@@ -190,56 +190,31 @@ task_status_is_done() {
   task_label_present "$task_id" "$LOOP_DONE_LABEL"
 }
 
-# task issue의 차단 신호 검사 (헌법 §5·§12, SPEC AC4·8).
-# Status·comment 두 신호의 OR 결합 — 어느 한쪽이라도 차단을 가리키면 blocked.
-#   1. AUTOPILOT_PROJECT_ITEM_ID가 설정돼 있고 GraphQL Status가 정확히 "Blocked"이면
-#      그 자리에서 0(blocked) 반환. early-exit short-circuit.
-#   2. 그 외 모든 경로(Status가 In Progress 등 / GraphQL 실패 / ITEM_ID 미설정)는
-#      comment fallback으로 fallthrough — 가장 최근에 매치된 prefix가 `[blocked]`이면
-#      0, `[unblocked]`/`[resume]`이면 1.
-# 자동 Status 전이가 미구현이므로 워커가 `[blocked]` comment를 발행해도 Status는
-# In Progress로 남는다. 따라서 차단 발효는 comment 신호가 단일 진실원이며, Status는
-# 사람의 명시적 Blocked 전이가 있을 때만 부가 신호로 기능한다. Unblock 절차도
-# `[unblocked]`/`[resume]` prefix comment 발행이 정식 — Status UI 변경만으로는
-# fallback이 여전히 `[blocked]`를 감지해 차단이 유지됨에 주의.
+# task issue의 차단 신호 검사 (헌법 §5·§12, SPEC 134 §제약).
+# 정식 검출 키: Project Status field 값(`Blocked`) 단일 의존. comment 본문은 가독·
+# 로그 채널이며 판정에 사용되지 않는다 — 워커가 [blocked] prefix comment 발행과
+# 함께 Status=Blocked 전이 두 동작을 모두 수행해야 0(blocked)을 반환한다.
+# graceful degradation: AUTOPILOT_PROJECT_ITEM_ID 미설정·gh 부재·GraphQL 실패는
+# best-effort로 stderr WARN + 1(판정 불가) 반환 — 검출 키를 comment로 이중화하지
+# 않는다 (SPEC 134 §제약 "판정 키는 label·status 단일 의존을 깨지 않는다").
 # 반환: 0=blocked, 1=blocked 아님(판정 불가 포함).
 task_status_is_blocked() {
-  local task_id="${1:-$TASK_ID}"
-  local issue
-  issue=$(task_issue_number "$task_id" 2>/dev/null) || return 1
+  # task-id 매개변수는 시그니처 유지 위해 받지만 Status는 ITEM_ID 기반이라 직접
+  # 사용하지 않는다 (label·issue 매핑 없음).
+  : "${1:-${TASK_ID:-}}"
   if ! command -v gh >/dev/null 2>&1; then
     return 1
   fi
-
-  # 1차: Project Status가 명시적으로 Blocked이면 즉시 blocked 판정.
-  # non-Blocked·응답 비어있음·GraphQL 실패 → comment fallback으로 fallthrough.
-  # 이유: Status 자동 전이가 미구현이므로 워커가 [blocked] comment를 발행해도
-  # Status는 In Progress 그대로 남는다. 두 신호를 OR로 결합해야 ITEM_ID 설정
-  # 환경에서도 [blocked] comment 기반 차단이 작동한다 (SPEC AC5).
-  if [[ -n "${AUTOPILOT_PROJECT_ITEM_ID:-}" ]]; then
-    local status
-    status=$(gh api graphql -f query='
-      query($id:ID!){ node(id:$id){ ... on ProjectV2Item {
-        fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }' \
-      -f id="$AUTOPILOT_PROJECT_ITEM_ID" \
-      --jq '.data.node.fieldValueByName.name // empty' 2>/dev/null || true)
-    if [[ "$status" == "Blocked" ]]; then
-      return 0
-    fi
+  if [[ -z "${AUTOPILOT_PROJECT_ITEM_ID:-}" ]]; then
+    return 1
   fi
-
-  # 2차: comment-only fallback. [blocked] 이후 [unblocked]/[resume] 유무로 판정.
-  # capture는 매치 실패 시 jq 에러를 던지므로 `?`로 흡수해 stream에서 제거하고,
-  # 매치된 prefix 값만 모은 배열의 마지막 요소를 선택. 비-prefix comment가 마지막에
-  # 추가돼도 그 요소는 배열에 들어가지 않으므로 false-unblock 발생 안 함.
-  local last_prefix
-  last_prefix=$(gh issue view "$issue" --json comments \
-    --jq '[.comments[]
-            | (.body | split("\n")[0])
-            | (capture("^\\[(?<p>blocked|unblocked|resume)\\]") | .p)?
-            | select(. != null)]
-          | last // empty' 2>/dev/null || true)
-  [[ "$last_prefix" == "blocked" ]] && return 0
+  local status
+  status=$(gh api graphql -f query='
+    query($id:ID!){ node(id:$id){ ... on ProjectV2Item {
+      fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }' \
+    -f id="$AUTOPILOT_PROJECT_ITEM_ID" \
+    --jq '.data.node.fieldValueByName.name // empty' 2>/dev/null || true)
+  [[ "$status" == "Blocked" ]] && return 0
   return 1
 }
 
