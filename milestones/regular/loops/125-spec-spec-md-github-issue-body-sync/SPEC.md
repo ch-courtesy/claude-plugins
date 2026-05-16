@@ -47,6 +47,6 @@ bash -c 'set -e; \
 - `rules/context.md`의 Issue body 구조 규약을 손상하지 않는다 — step 2가 설치한 자리표시 2줄은 첫 sync 이후에도 유지된다.
 
 ## 위험
-- Issue body가 sync fence(`<!-- autopilot:spec-sync:begin/end -->`)를 포함하지 않는 (비표준) 상태일 경우 sync 동작이 정의되지 않음 — 본 SPEC 범위는 spec 스킬이 step 2에서 만든 표준 구조의 issue로 한정. 비표준 입력은 abort.
+- Issue body의 첫 두 줄이 step 2가 박은 자리표시 패턴이 아닌 경우(= step 2 미경유 수동 생성 issue) sync 동작이 정의되지 않음 — 본 SPEC 범위는 spec 스킬이 step 2에서 만든 표준 구조의 issue로 한정. 비표준 입력은 abort. 첫 sync 시점에 sync fence(`<!-- autopilot:spec-sync:begin/end -->`)가 부재한 것은 정상 first-run으로 처리되어 새로 fence를 박는다 (abort 트리거 아님).
 - 큰 SPEC.md의 경우 Issue body 길이 한도(GitHub 65536 chars)를 초과할 가능성. 일반 SPEC 규모로는 드물지만, 초과 시 abort + 사용자 안내.
 - 동일 task에 다중 spec 호출이 동시 실행되면 Issue body update 순서에 경쟁 조건. 일반적으로 spec 호출은 대화형으로 직렬화되므로 실무 발생 확률 낮음 — 경쟁 탐지·잠금은 본 SPEC 범위 외.
