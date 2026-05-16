@@ -56,6 +56,15 @@ Bash(ls:*),\
 Read,Edit,Write,Glob,Grep"
 export AUTOPILOT_REBASE_ALLOWED_TOOLS
 
+# ----- task storage 검출 키 (SPEC 134 AC4) -----
+#
+# 완료 신호의 검출 키는 task 식별자에 부속된 label 이름이다 (헌법 §12, SKILL.md).
+# 워커가 완료 시 `[done]` prefix comment(가독·로그)와 본 label 추가(검출 키)를 모두
+# 수행해야 드라이버가 done으로 판정한다. comment 본문은 더 이상 단일 검출 키가 아니다.
+# 환경 변수 override 허용 — 단, label 이름은 프로젝트 수준에서 단일 위치에 고정되어
+# task storage adapter 다중 분기를 만들지 않는다 (SPEC 134 §비-목표).
+LOOP_DONE_LABEL="${LOOP_DONE_LABEL:-loop:done}"
+
 # ----- 헬퍼 -----
 
 die() {
@@ -117,56 +126,98 @@ task_issue_number() {
   return 1
 }
 
-# task issue의 차단 신호 검사 (헌법 §5·§12, SPEC AC4·8).
-# Status·comment 두 신호의 OR 결합 — 어느 한쪽이라도 차단을 가리키면 blocked.
-#   1. AUTOPILOT_PROJECT_ITEM_ID가 설정돼 있고 GraphQL Status가 정확히 "Blocked"이면
-#      그 자리에서 0(blocked) 반환. early-exit short-circuit.
-#   2. 그 외 모든 경로(Status가 In Progress 등 / GraphQL 실패 / ITEM_ID 미설정)는
-#      comment fallback으로 fallthrough — 가장 최근에 매치된 prefix가 `[blocked]`이면
-#      0, `[unblocked]`/`[resume]`이면 1.
-# 자동 Status 전이가 미구현이므로 워커가 `[blocked]` comment를 발행해도 Status는
-# In Progress로 남는다. 따라서 차단 발효는 comment 신호가 단일 진실원이며, Status는
-# 사람의 명시적 Blocked 전이가 있을 때만 부가 신호로 기능한다. Unblock 절차도
-# `[unblocked]`/`[resume]` prefix comment 발행이 정식 — Status UI 변경만으로는
-# fallback이 여전히 `[blocked]`를 감지해 차단이 유지됨에 주의.
-# 반환: 0=blocked, 1=blocked 아님(판정 불가 포함).
-task_status_is_blocked() {
+# task issue에 특정 label이 붙어 있는지 boolean 검사 (SPEC 134 AC3).
+# 인자: $1=task-id (생략 시 $TASK_ID), $2=label 이름 (필수).
+# 반환: 0=label 존재, 1=label 부재 또는 판정 불가 (issue 매핑 실패·gh 부재 포함).
+# 구현은 단일 GitHub 호출(`gh issue view --json labels`)로 한정 — adapter 인터페이스
+# 신설 없음 (SPEC 134 §비-목표).
+task_label_present() {
   local task_id="${1:-$TASK_ID}"
+  local label="${2:-}"
+  [[ -z "$label" ]] && return 1
   local issue
   issue=$(task_issue_number "$task_id" 2>/dev/null) || return 1
   if ! command -v gh >/dev/null 2>&1; then
     return 1
   fi
+  # gh CLI의 `--jq`는 단일 expression 인자만 받아 jq의 `--arg`를 통과시키지 않으므로
+  # name 목록만 추출해 셸에서 정확 일치 비교 (grep -F -x).
+  local names
+  names=$(gh issue view "$issue" --json labels \
+    --jq '.labels[].name' 2>/dev/null || true)
+  [[ -z "$names" ]] && return 1
+  printf '%s\n' "$names" | grep -qxF "$label" && return 0
+  return 1
+}
 
-  # 1차: Project Status가 명시적으로 Blocked이면 즉시 blocked 판정.
-  # non-Blocked·응답 비어있음·GraphQL 실패 → comment fallback으로 fallthrough.
-  # 이유: Status 자동 전이가 미구현이므로 워커가 [blocked] comment를 발행해도
-  # Status는 In Progress 그대로 남는다. 두 신호를 OR로 결합해야 ITEM_ID 설정
-  # 환경에서도 [blocked] comment 기반 차단이 작동한다 (SPEC AC5).
-  if [[ -n "${AUTOPILOT_PROJECT_ITEM_ID:-}" ]]; then
-    local status
-    status=$(gh api graphql -f query='
-      query($id:ID!){ node(id:$id){ ... on ProjectV2Item {
-        fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }' \
-      -f id="$AUTOPILOT_PROJECT_ITEM_ID" \
-      --jq '.data.node.fieldValueByName.name // empty' 2>/dev/null || true)
-    if [[ "$status" == "Blocked" ]]; then
-      return 0
-    fi
+# task storage에 label이 존재하는지 확인하고, 없으면 자동 생성 (SPEC 134 AC5).
+# 인자: $1=label 이름 (필수).
+# 권한 부족·gh 부재 시 best-effort로 stderr WARN + 비-0 반환 (비차단 진행).
+# SPEC 134 §위험 "label 자동 생성 권한 부족" — runtime 실패는 verify 범위 밖.
+ensure_label_exists() {
+  local label="${1:-}"
+  [[ -z "$label" ]] && return 1
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
   fi
+  # 존재 여부 확인 — `gh label list --search`는 prefix·substring을 함께 반환할 수
+  # 있으므로 name 목록만 추출 후 셸에서 정확 일치 비교 (gh `--jq`는 jq `--arg`를
+  # 통과시키지 않아 셸 비교가 안전).
+  local names
+  names=$(gh label list --search "$label" --json name \
+    --jq '.[].name' 2>/dev/null || true)
+  if [[ -n "$names" ]] && printf '%s\n' "$names" | grep -qxF "$label"; then
+    return 0
+  fi
+  # 미존재 — 생성 시도. race 또는 권한 부족 시 WARN.
+  if ! gh label create "$label" \
+        --description "autopilot loop 완료 신호 (드라이버 검출 키)" \
+        >/dev/null 2>&1; then
+    echo "[$(now_iso)] WARN: label '$label' 자동 생성 실패 — 권한 부족·race·gh 응답 비정상. 수동 생성 필요." >&2
+    return 1
+  fi
+  echo "[$(now_iso)] label '$label' 자동 생성 완료." >&2
+  return 0
+}
 
-  # 2차: comment-only fallback. [blocked] 이후 [unblocked]/[resume] 유무로 판정.
-  # capture는 매치 실패 시 jq 에러를 던지므로 `?`로 흡수해 stream에서 제거하고,
-  # 매치된 prefix 값만 모은 배열의 마지막 요소를 선택. 비-prefix comment가 마지막에
-  # 추가돼도 그 요소는 배열에 들어가지 않으므로 false-unblock 발생 안 함.
-  local last_prefix
-  last_prefix=$(gh issue view "$issue" --json comments \
-    --jq '[.comments[]
-            | (.body | split("\n")[0])
-            | (capture("^\\[(?<p>blocked|unblocked|resume)\\]") | .p)?
-            | select(. != null)]
-          | last // empty' 2>/dev/null || true)
-  [[ "$last_prefix" == "blocked" ]] && return 0
+# task issue의 완료 신호 검사 (헌법 §12, SPEC 134 AC2).
+# 정식 검출 키: task issue에 LOOP_DONE_LABEL 값과 일치하는 label이 붙어 있는지.
+# comment 본문은 가독·로그 채널이며 판정에 사용되지 않는다 — 워커가 [done] prefix
+# comment 발행과 함께 label 추가 두 동작을 모두 수행해야 0(done)을 반환한다.
+# 반환: 0=done, 1=done 아님(판정 불가 포함).
+task_status_is_done() {
+  local task_id="${1:-$TASK_ID}"
+  task_label_present "$task_id" "$LOOP_DONE_LABEL"
+}
+
+# task issue의 차단 신호 검사 (헌법 §5·§12, SPEC 134 §제약).
+# 정식 검출 키: Project Status field 값(`Blocked`) 단일 의존. comment 본문은 가독·
+# 로그 채널이며 판정에 사용되지 않는다 — 워커가 [blocked] prefix comment 발행과
+# 함께 Status=Blocked 전이 두 동작을 모두 수행해야 0(blocked)을 반환한다.
+# graceful degradation: AUTOPILOT_PROJECT_ITEM_ID 미설정·gh 부재·GraphQL 실패는
+# 1(판정 불가)로 조용히 폴백한다 (검출 키를 comment로 이중화하지 않는다 — SPEC 134
+# §제약 "판정 키는 label·status 단일 의존을 깨지 않는다"). 침묵 폴백 이유: 본 함수는
+# `list` 서브커맨드의 task별 순회와 `--watch` 모드의 60초 polling 루프에서 호출되어
+# WARN을 매번 출력하면 로그 플러딩 — 미설정 환경에서 idle 판정으로 자연 폴백하는 게
+# 설계 의도다. 디버깅 시 `gh api graphql` 직접 호출로 원인 분리.
+# 반환: 0=blocked, 1=blocked 아님(판정 불가 포함).
+task_status_is_blocked() {
+  # task-id 매개변수는 시그니처 유지 위해 받지만 Status는 ITEM_ID 기반이라 직접
+  # 사용하지 않는다 (label·issue 매핑 없음).
+  : "${1:-${TASK_ID:-}}"
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
+  fi
+  if [[ -z "${AUTOPILOT_PROJECT_ITEM_ID:-}" ]]; then
+    return 1
+  fi
+  local status
+  status=$(gh api graphql -f query='
+    query($id:ID!){ node(id:$id){ ... on ProjectV2Item {
+      fieldValueByName(name:"Status"){ ... on ProjectV2ItemFieldSingleSelectValue { name } } } } }' \
+    -f id="$AUTOPILOT_PROJECT_ITEM_ID" \
+    --jq '.data.node.fieldValueByName.name // empty' 2>/dev/null || true)
+  [[ "$status" == "Blocked" ]] && return 0
   return 1
 }
 
@@ -809,8 +860,11 @@ iterate() {
     CLAUDE_FAIL_STREAK=0
   fi
 
-  # 종료 신호 검사 (먼저)
-  if [[ -f "$WT/DONE" ]]; then
+  # 종료 신호 검사 (먼저) — 헌법 §12, SPEC 134 AC2.
+  # 정식 검출 키: task issue에 LOOP_DONE_LABEL이 붙어 있는지 (task_status_is_done).
+  # 호환 OR 결합: 0.2.0 잔존 $WT/DONE 파일 신호도 수용 — milestone 종료 후
+  # 사용자 결정으로 제거 예정 (SPEC 134 §제약 "호환 OR 결합 유지").
+  if task_status_is_done "$TASK_ID" || [[ -f "$WT/DONE" ]]; then
     return 100   # 메인 루프에서 정상 종료 처리
   fi
   # 워커가 진행 불가 보고 시 task issue에 [blocked] prefix comment + Status=Blocked 전이 (헌법 §5.2, SPEC AC5).
@@ -969,6 +1023,12 @@ cmd_start() {
 
   # 5. 락 획득
   acquire_lock
+
+  # 5.5. 완료 신호 label self-bootstrap (SPEC 134 AC5).
+  # task storage에 LOOP_DONE_LABEL이 없으면 자동 생성. 권한 부족·gh 부재 시
+  # WARN 후 비차단 — 워커가 label 추가에 실패해도 $WT/DONE 호환 OR 결합으로
+  # 완료 감지가 깨지지 않는다.
+  ensure_label_exists "$LOOP_DONE_LABEL" || true
 
   # 6. 워크트리 생성 (없는 경우)
   if [[ ! -d "$WT" ]]; then
