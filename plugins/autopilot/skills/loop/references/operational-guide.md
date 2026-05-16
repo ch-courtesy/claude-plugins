@@ -32,7 +32,7 @@ milestones/<m>/loops/<c>/
     ├── .iterations/<n>.log    # 매 이터 stdout 캡처 (gitignored, worktree-local)
     └── milestones/<m>/loops/<c>/
         └── SPEC.md            # feat 브랜치 commit으로 자연 노출
-# 이터간 상태(계획·교훈·인계·차단·완료)는 워크트리에 두지 않고 task issue body·prefix comments로 위임 (헌법 §11)
+# 이터간 상태(계획·교훈·인계·차단·완료)는 워크트리에 두지 않고 task 메모리·task 신호로 위임 (헌법 §11)
 ```
 
 단일 task는 `<m>=regular`로 정규화 — `regular/<task-id>`. `.gitignore` 무시 패턴은 `milestones/**/loops/**/.worktree/`와 `milestones/**/loops/**/.lock`.
@@ -61,7 +61,7 @@ LOOP_SH="$HOME/.claude/plugins/autopilot/skills/loop/references/loop.sh"
 Skill(skill: "spec", args: "auth-refactor")   # 대화형 SPEC.md 생성
 bash "$LOOP_SH" start auth-refactor           # 루프 시작
 bash "$LOOP_SH" logs auth-refactor --tail  # 별도 터미널에서 모니터링
-# 정지: Ctrl+C, DONE 파일 생성, 또는 `[done]`/`[blocked]` prefix comment 작성 시 자동 종료
+# 정지: Ctrl+C, DONE 파일 생성, 또는 완료·차단 신호 발행 시 자동 종료
 ```
 
 ## 외부 SPEC 파일 전달 (--spec 플래그)
@@ -108,25 +108,20 @@ bash "$LOOP_SH" logs auth-refactor [--tail | --iter N]
 
 ## DONE_WITH_CONCERNS 처리
 
-이터가 verify는 통과했으나 self-review에서 의심점을 발견하면 `[done]` comment 대신 `[handoff]` prefix comment 본문에 `## 의심점` 섹션을 포함시켜 작성하고 정상 종료합니다. 사용자 개입은 보통 불필요 — 다음 이터가 의심점을 읽고 검증·해소한 후 깨끗한 `[done]` prefix comment를 작성합니다.
+이터가 verify는 통과했으나 self-review에서 의심점을 발견하면 완료 신호 대신 `[handoff]` 신호 본문에 `## 의심점` 섹션을 포함시켜 작성하고 정상 종료합니다. 사용자 개입은 보통 불필요 — 다음 이터가 의심점을 읽고 검증·해소한 후 깨끗한 완료 신호를 발행합니다.
 
 ## ESCALATION 처리
 
 카테고리별 처리 흐름: `references/troubleshooting.md` 참조.
 
-```bash
-ISSUE=<task-issue-number>                                 # task-id가 숫자면 issue number와 동일
-gh issue view "$ISSUE" --comments | tail -n 60            # 최근 `[blocked]` comment 본문 확인
-cd milestones/<m>/loops/<c>/.worktree
-$EDITOR "milestones/<m>/loops/<c>/SPEC.md"                # 필요 시 SPEC 보정
-gh issue comment "$ISSUE" --body "[notes] 후속 조치 메모"   # 결정 사항 누적
-gh issue comment "$ISSUE" --body "[unblocked] 후속 조치 완료"  # Blocked 해제
-#   ([resume] prefix도 동등. task_status_is_blocked가 가장 최근 매치된 prefix
-#    comment를 단일 진실원으로 보므로, Projects UI에서 Status만 바꾸는 것으로는
-#    fallback이 [blocked]를 계속 감지해 차단이 유지됨.)
-cd <project-root> && bash "$LOOP_SH" start <task-id>      # 재시작
-# --watch 모드면 [unblocked]/[resume] comment로 차단 신호가 해제되는 순간 자동 재개 (polling)
-```
+1. task 메모리에서 task 식별자로 조회해 최근 차단 신호 본문 확인
+2. 워크트리(`milestones/<m>/loops/<c>/.worktree`)로 이동, 필요 시 SPEC 보정 (`milestones/<m>/loops/<c>/SPEC.md`)
+3. task 메모리에 `[notes] 후속 조치 메모` 누적
+4. `[unblocked] 후속 조치 완료` 신호 발행해 차단 해제 (`[resume]` 신호도 동등)
+5. `<project-root>`에서 `bash "$LOOP_SH" start <task-id>` 로 재시작
+   - `--watch` 모드면 `[unblocked]`/`[resume]` 신호로 차단 신호가 해제되는 순간 자동 재개 (polling)
+
+차단 해제는 신호 발행이 정식 절차 — `task_status_is_blocked`가 가장 최근 매치된 신호를 단일 진실원으로 보므로, task 상태 UI에서 상태만 변경해도 fallback이 차단 신호를 계속 감지해 차단이 유지됩니다.
 
 ## 동시 실행
 
@@ -146,14 +141,14 @@ MAX_CONCURRENT=5 bash "$LOOP_SH" start new-task &   # 캡 상향
 | `MAX_CONCURRENT` | — | 3 | 동시 실행 task 수 |
 | `MAX_ITERATIONS` | `--max-iterations N` | 30 | 이터 상한 |
 | `WALL_CLOCK_MINUTES` | `--wall-clock-minutes N` | 120 | 시계 캡(분) |
-| — | `--watch` | off | 차단 신호(Status=`Blocked` 또는 `[blocked]` prefix comment) 감지 시 정지 대신 polling 재개 대기. `task_status_is_blocked`의 OR 결합과 일치. |
+| — | `--watch` | off | 차단 신호(task 상태가 `Blocked`이거나 차단 신호가 발행됨) 감지 시 정지 대신 polling 재개 대기. `task_status_is_blocked`의 OR 결합과 일치. |
 | `WATCH_TIMEOUT_HOURS` | — | 24 | --watch 모드에서 polling 최대 시간(시간 단위). 초과 시 exit 1 |
 
 워크트리 위치는 v0.2부터 메인 레포 내부 `milestones/<m>/loops/<c>/.worktree/`로 고정 — 외부 sibling 경로를 지정하는 환경 변수는 더 이상 제공하지 않습니다.
 
 ## 객관 게이트
 
-드라이버가 매 이터 후 다음을 검사합니다. 위반 시 자동 halt + 자동 `[blocked]` prefix comment 작성·Project Status=`Blocked` 전이:
+드라이버가 매 이터 후 다음을 검사합니다. 위반 시 자동 halt + 자동 차단 신호 발행·task 상태=`Blocked` 전이:
 
 | 가드 | 기준 |
 |---|---|
