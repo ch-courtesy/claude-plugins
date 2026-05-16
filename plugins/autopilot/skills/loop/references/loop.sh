@@ -860,11 +860,9 @@ iterate() {
     CLAUDE_FAIL_STREAK=0
   fi
 
-  # 종료 신호 검사 (먼저) — 헌법 §12, SPEC 134 AC2.
-  # 정식 검출 키: task issue에 LOOP_DONE_LABEL이 붙어 있는지 (task_status_is_done).
-  # 호환 OR 결합: 0.2.0 잔존 $WT/DONE 파일 신호도 수용 — milestone 종료 후
-  # 사용자 결정으로 제거 예정 (SPEC 134 §제약 "호환 OR 결합 유지").
-  if task_status_is_done "$TASK_ID" || [[ -f "$WT/DONE" ]]; then
+  # 종료 신호 검사 (먼저) — 헌법 §12, SPEC 150.
+  # 검출 키: task 저장소에 LOOP_DONE_LABEL이 붙어 있는지 (task_status_is_done) 단일 의존.
+  if task_status_is_done "$TASK_ID"; then
     return 100   # 메인 루프에서 정상 종료 처리
   fi
   # 워커가 진행 불가 보고 시 task issue에 [blocked] prefix comment + Status=Blocked 전이 (헌법 §5.2).
@@ -1026,8 +1024,8 @@ cmd_start() {
 
   # 5.5. 완료 신호 label self-bootstrap (SPEC 134 AC5).
   # task storage에 LOOP_DONE_LABEL이 없으면 자동 생성. 권한 부족·gh 부재 시
-  # WARN 후 비차단 — 워커가 label 추가에 실패해도 $WT/DONE 호환 OR 결합으로
-  # 완료 감지가 깨지지 않는다.
+  # WARN 후 비차단 — 워커가 label 추가에 실패하면 완료 검출이 누락되므로
+  # 헌법 §11.2가 워커에게 label 부착 동작을 강제한다 (SPEC 150).
   ensure_label_exists "$LOOP_DONE_LABEL" || true
 
   # 6. 워크트리 생성 (없는 경우)
@@ -1491,9 +1489,9 @@ cmd_cleanup() {
     *) die "워크트리 경로 형식 부적절 (기대: */milestones/<m>/loops/<c>/.worktree): $WT" ;;
   esac
 
-  # 3. DONE 확인
-  if [[ ! -f "$WT/DONE" ]] && [[ $force -eq 0 ]]; then
-    die "task $task_id 에 DONE 신호가 없습니다.\n--force 없이 cleanup하려면 먼저 DONE 파일이 필요합니다: $0 cleanup $task_id --force"
+  # 3. 완료 확인 — task 저장소 label 단일 의존 (SPEC 150).
+  if ! task_status_is_done "$task_id" && [[ $force -eq 0 ]]; then
+    die "task $task_id 에 완료 신호가 없습니다 (LOOP_DONE_LABEL 미부착).\n--force 없이 cleanup하려면 먼저 task 저장소에 label이 붙어야 합니다: $0 cleanup $task_id --force"
   fi
 
   # 3.5. 단일 contract: worktree HEAD 브랜치가 feat/... 이어야 함 (사전 검증).
