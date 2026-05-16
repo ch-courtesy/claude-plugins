@@ -15,6 +15,17 @@
 
 규칙의 문자가 아닌 의도를 지킨다. "이번만"이라는 합리화는 위반이다.
 
+## 추상 어휘
+
+본 문서는 다음 backing-neutral 단어로 task의 lifecycle을 기술한다. 실제 매체(메시지 본문·라벨·필드·API 호출)는 매체 어댑터가 책임지며 본 헌법의 범위 밖이다.
+
+- **task 메모리** — 워커가 매 이터 콜드 스타트에 읽는 단일 영구 영역. 마일스톤 계획·DoD·이터 흐름·교훈·인계 메모가 누적된다. "task 메모리의 계획 섹션"은 마일스톤 계획·DoD 체크박스가 모이는 부분, "task 메모리의 흐름 영역"은 시도·결과·다음 단계가 시간순으로 쌓이는 부분.
+- **task 신호** — 워커가 발행하는 lifecycle 메시지. 의미별로 `done`(완료)·`handoff`(인계)·`notes`(학습된 제약·실패 접근)·`blocked`(정지)·`unblocked`(해제)·`resume`(재개). 발행 동작어는 "X 신호 발행".
+- **task 상태** — 단계 라벨. `in design`·`in progress`·`blocked` 등. 전이 동작어는 "task 상태를 X로 전이".
+- **task 식별자** — task를 고유하게 가리키는 ID. 본 문서가 task를 가리킬 때 사용한다.
+
+본 문서가 위 어휘 이외의 backing-specific 용어(메시지 매체명·필드명·CLI 명령어)를 직접 사용하지 않는다. 매핑은 어댑터·드라이버 코드가 담당한다.
+
 ## 1. 제1 원칙 (절대 규칙)
 
 다음은 어떤 상황에서도 위반할 수 없다. 위반 시도가 감지되면 루프는 즉시 중단되고 인간에게 에스컬레이션된다.
@@ -30,10 +41,10 @@
 
 ## 2. 이터레이션 모델
 
-- **콜드 스타트**: 매 이터레이션은 새 프로세스다. 직전 이터의 추론 과정·중간 상태는 다음 이터가 보지 못한다 — 결과물(코드·테스트·task issue 갱신)만 본다.
+- **콜드 스타트**: 매 이터레이션은 새 프로세스다. 직전 이터의 추론 과정·중간 상태는 다음 이터가 보지 못한다 — 결과물(코드·테스트·task 메모리 갱신)만 본다.
 - **워크트리 격리**: 모든 작업은 워크트리 안(`milestones/<m>/loops/<c>/.worktree/` — 단일 task는 `<m>=regular`로 정규화)에서 일어난다. 워크트리 밖 파일은 수정 대상이 아니다.
-- **입력**: `<worktree>/CLAUDE.md`(헌법), `milestones/<m>/loops/<c>/SPEC.md`(작업 정의 — worktree 안의 단일 canonical 경로. feat 브랜치 commit으로 자연 포함), 디스크 상태(코드·git 히스토리), task issue body의 계획 섹션(목표·배경·제안·검증 계획·DoD)과 누적된 prefix comments(`[handoff]`·`[notes]`·`[blocked]`·`[done]`).
-- **출력**: 코드 변경 + 자기 분류 prefix를 가진 git commit + task issue 갱신(body 계획 섹션 갱신 + `[handoff]`·`[notes]` prefix comment append) + (선택) 완료 시 `[done]` prefix comment 또는 정지 시 Project Status=`Blocked` 전이 + `[blocked]` prefix comment.
+- **입력**: `<worktree>/CLAUDE.md`(헌법), `milestones/<m>/loops/<c>/SPEC.md`(작업 정의 — worktree 안의 단일 canonical 경로. feat 브랜치 commit으로 자연 포함), 디스크 상태(코드·git 히스토리), task 메모리의 계획 섹션(목표·배경·제안·검증 계획·DoD)과 누적된 task 신호(`handoff`·`notes`·`blocked`·`done`).
+- **출력**: 코드 변경 + 자기 분류 prefix를 가진 git commit + task 메모리 갱신(계획 섹션 갱신 + `handoff`·`notes` 신호 발행) + (선택) 완료 시 `done` 신호 발행 또는 정지 시 task 상태를 `blocked`로 전이 + `blocked` 신호 발행.
 
 ## 3. 작업 흐름
 
@@ -49,10 +60,10 @@
 2. **RED — 실패 테스트 먼저**: 새 동작에 대한 최소한의 실패 테스트 작성. 테스트 실행해 **의도한 이유로 실패**하는지 확인 (오타·환경 문제 아님).
 3. **GREEN — 최소 구현**: 테스트가 통과할 만큼의 가장 단순한 코드. YAGNI 엄격히 적용.
 4. **빌드·검증**: §3.4의 4-level verifier 4단계를 모두 점검한다 (existence·substantive·wired·runtime). 단순 verify 통과로 끝내지 않는다.
-5. **분류·기록**: 이번 변경을 자기 분류하고 task issue를 갱신 (§11.2 절차).
+5. **분류·기록**: 이번 변경을 자기 분류하고 task 메모리를 갱신 (§11.2 절차).
 6. **결정**: 다음 중 하나.
-   - 완료 판정 모두 만족 → `[done]` prefix comment 작성·종료
-   - 진행 불가 → Project Status=`Blocked` 전이 + `[blocked]` prefix comment 작성·종료
+   - 완료 판정 모두 만족 → `done` 신호 발행·종료
+   - 진행 불가 → task 상태를 `blocked`로 전이 + `blocked` 신호 발행·종료
    - 그 외 → 정상 종료 (다음 이터가 이어받음)
 
 한 이터는 가능한 한 작게 유지한다. 한 번에 여러 문제를 고치지 않는다.
@@ -71,16 +82,16 @@
 
 `fix:symptom`이 연속 2회 누적되면 드라이버가 자동 정지·에스컬레이션한다. 우회 패치를 쌓는 방향으로 계속 진행하지 않는다.
 
-**`fix:symptom`으로 commit한 이터는 종료 전 task issue body의 계획 섹션을 재검토한다** (자체 교정 게이트). 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신. 이 단계가 streak 발생을 사전 차단한다.
+**`fix:symptom`으로 commit한 이터는 종료 전 task 메모리의 계획 섹션을 재검토한다** (자체 교정 게이트). 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신. 이 단계가 streak 발생을 사전 차단한다.
 
 재검증 결과에 따라 commit 처리:
 
 | 판단 | commit 처리 | 계획 섹션 처리 |
 |---|---|---|
-| 우회 패치 수용 (root cause 추후 규명) | 유지 | `[notes]` prefix comment에 workaround 위치·재조사 필요 명시 |
-| 마일스톤 정의 재정밀 | 유지 | 마일스톤 정의·검증 엄밀화 (issue body 계획 섹션 갱신) |
-| 잘못된 가정, HEAD 1개로 처리 가능 | `git revert HEAD` | 영향 마일스톤·위험 갱신 (issue body 계획 섹션) |
-| 잘못된 가정, **다중 commit 영향 또는 광범위 재구성 필요** | revert 시도 안 함 → Project Status=`Blocked` 전이 + `[blocked]` prefix comment 작성 (`architecture-gap`) | 사람의 design 결정 대기 |
+| 우회 패치 수용 (root cause 추후 규명) | 유지 | `notes` 신호로 workaround 위치·재조사 필요 명시 |
+| 마일스톤 정의 재정밀 | 유지 | 마일스톤 정의·검증 엄밀화 (task 메모리의 계획 섹션 갱신) |
+| 잘못된 가정, HEAD 1개로 처리 가능 | `git revert HEAD` | 영향 마일스톤·위험 갱신 (task 메모리의 계획 섹션) |
+| 잘못된 가정, **다중 commit 영향 또는 광범위 재구성 필요** | revert 시도 안 함 → task 상태를 `blocked`로 전이 + `blocked` 신호 발행 (`architecture-gap`) | 사람의 design 결정 대기 |
 
 revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 교정 (사유)` 형식. 드라이버의 streak 검사는 `^fix:symptom`으로 grep하므로 `chore:` prefix는 streak에 포함되지 않는다.
 
@@ -88,7 +99,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 
 ### 3.4 완료 판정 (4-Level Verifier)
 
-다음 4 단계를 **모두** 통과할 때만 `[done]` prefix comment를 작성한다 — 단순 verify 통과는 부분적 신호일 뿐.
+다음 4 단계를 **모두** 통과할 때만 `done` 신호를 발행한다 — 단순 verify 통과는 부분적 신호일 뿐.
 
 1. **Existence (존재)**: 수용 기준의 모든 항목에 대응하는 코드 변경이 있는가? 미구현 항목이 한 개라도 있으면 미완.
 2. **Substantive (실체)**: 변경된 코드가 stub·mock·"TODO 구현 필요" 같은 placeholder가 아닌 실제 동작 코드인가? `pass`·`return None`·`throw new NotImplementedError()`만으로 채운 함수는 미완.
@@ -99,11 +110,11 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 - 변경이 작업 명세 scope 내
 - 자기 분류에 `fix:symptom` 누적 없음
 
-하나라도 불만족이면 완료가 아니다. `[done]` prefix comment를 거짓으로 작성하지 않는다.
+하나라도 불만족이면 완료가 아니다. `done` 신호를 거짓으로 발행하지 않는다.
 
 ### 3.5 Self-Review (4축)
 
-`[done]` prefix comment 작성 직전에 다음 4축을 모두 self-eval한다. 한 축이라도 의심이 남으면 `[done]` 대신 `[handoff]` prefix comment 본문의 `## 의심점` 섹션에 기록 후 정상 종료 (다음 이터에서 검증).
+`done` 신호 발행 직전에 다음 4축을 모두 self-eval한다. 한 축이라도 의심이 남으면 `done` 대신 `handoff` 신호 본문의 `## 의심점` 섹션에 기록 후 정상 종료 (다음 이터에서 검증).
 
 1. **Completeness (완전성)**
    - 수용 기준의 모든 항목을 처리했는가?
@@ -125,7 +136,7 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
    - TDD 순서를 따랐는가 (RED 먼저, fail 확인, GREEN 최소)?
    - 엣지·에러 케이스가 다뤄졌는가?
 
-체크하지 못하는 축이 있으면 그 자체로 incomplete 신호 — `fix:symptom`이나 `DONE_WITH_CONCERNS`(= `[handoff]` comment의 `## 의심점` 섹션) 경로로 이동.
+체크하지 못하는 축이 있으면 그 자체로 incomplete 신호 — `fix:symptom`이나 `DONE_WITH_CONCERNS`(= `handoff` 신호의 `## 의심점` 섹션) 경로로 이동.
 
 ## 4. 이터레이션 상한·조기 정지
 
@@ -166,12 +177,12 @@ revert 시 commit message는 `chore: revert <짧은 SHA> — fix:symptom 자체 
 
 ### 5.2 보고 양식
 
-task issue의 Project Status를 `Blocked`로 전이하고 새 `[blocked]` prefix comment를 다음 양식으로 작성한다.
+task 상태를 `blocked`로 전이하고 `blocked` 신호를 다음 본문 양식으로 발행한다.
 
 ```
-[blocked] 에스컬레이션 보고
+에스컬레이션 보고
 
-**작업**: <task-id (= issue number)>
+**작업**: <task 식별자>
 **이터레이션**: <현재 회차 / 상한>
 **카테고리**: <아래 5종 중 하나>
 **트리거**: <위 5.1 목록에서 해당 항목>
@@ -203,7 +214,7 @@ task issue의 Project Status를 `Blocked`로 전이하고 새 `[blocked]` prefix
 
 카테고리는 사람의 처리 방향(환경 조정·명세 수정·design 결정·외부 점검)을 빨리 식별하게 한다.
 
-`[blocked]` prefix comment 작성과 Project Status=`Blocked` 전이 직후 종료한다. 응답이 올 때까지 어떤 추가 작업도 수행하지 않는다. 드라이버가 Project Status=`Blocked`(또는 그 task의 최신 `[blocked]` comment 존재)를 정지 신호로 감지한다.
+`blocked` 신호 발행과 task 상태를 `blocked`로 전이한 직후 종료한다. 응답이 올 때까지 어떤 추가 작업도 수행하지 않는다. 드라이버가 task 상태=`blocked`(또는 그 task의 최신 `blocked` 신호 존재)를 정지 신호로 감지한다.
 
 ## 6. 관찰성·로깅
 
@@ -234,8 +245,8 @@ task issue의 Project Status를 `Blocked`로 전이하고 새 `[blocked]` prefix
 - "작동하는 것처럼 보이게 하는" 모든 종류의 위장
 - 워크트리 밖 파일 수정 (모든 작업은 워크트리 안에서)
 - 워크트리 루트의 `CLAUDE.md`(헌법), 워크트리의 SPEC.md(`milestones/<m>/loops/<c>/SPEC.md`) 수정
-- 거짓 `[done]` prefix comment 또는 거짓 `[blocked]` prefix comment 작성
-- 이터간 상태(계획·교훈·인계·흐름·정지 사유)를 워크트리의 파일로 신규 생성·갱신 — §11 매핑에 따라 task issue body·comments에만 둔다
+- 거짓 `done` 또는 `blocked` 신호 발행
+- 이터간 상태(계획·교훈·인계·흐름·정지 사유)를 워크트리의 파일로 신규 생성·갱신 — §11 매핑에 따라 task 메모리에만 둔다
 
 다음 항목은 드라이버가 객관 검증한다 — 위반 시 자동 halt + 에스컬레이션:
 - 테스트 약화 → `tests/**` 해시 비교 (SPEC frontmatter `test_sweep_paths` 선언 경로는 해시 비교에서 제외 — 합법적 sweep을 사용자 승인 시점에 화이트리스트화)
@@ -310,57 +321,57 @@ fix 시도 전에 다음을 모두 수행한다.
 
 본 하네스는 진화 중이다. 규칙이 현실과 맞지 않거나 작업을 불가능하게 만든다고 판단되면, 규칙을 우회하는 것이 아니라 **에스컬레이션 보고서에 그 사실을 명시**한다. 하네스의 개선은 인간의 결정 사항이며, 개선 제안은 에이전트의 정당한 기여다. 규칙 우회는 기여가 아니다.
 
-## 11. 이터간 컨텍스트 운영 (task issue)
+## 11. 이터간 컨텍스트 운영 (task 메모리)
 
-기억은 LLM이 아닌 task issue(=GitHub Project item)에 있다. 매 이터는 콜드 스타트다. 직전 추론 과정은 다음 이터가 보지 못한다 — 결과물(코드·테스트·task issue 갱신)만 본다.
+기억은 LLM이 아닌 task 메모리에 있다. 매 이터는 콜드 스타트다. 직전 추론 과정은 다음 이터가 보지 못한다 — 결과물(코드·테스트·task 메모리 갱신)만 본다.
 
 이터간 상태 매핑(=`rules/context.md` 컨벤션 — 본 §은 그 컨벤션을 자율 루프 맥락으로 구체화):
 
 | 정보 | 저장 위치 |
 |---|---|
-| 마일스톤 계획·DoD 체크박스 | task issue body의 계획 섹션 (목표·배경·제안·검증 계획·DoD) |
-| 직전 이터 인계 메모 | 마지막 `[handoff]` prefix comment |
-| 이전 시도의 교훈·실패 접근·발견 제약 | `[notes]` prefix comments (누적) |
-| 이터 흐름(시도·결과·다음 단계) | 일반 comments — GitHub가 시각·작성자 자동 기록 |
-| 정지 사유 | Project Status=`Blocked` + `[blocked]` prefix comment |
-| 완료 신호 | `[done]` prefix comment |
-| 의심점 (DONE_WITH_CONCERNS) | `[handoff]` prefix comment 본문의 `## 의심점` 섹션 |
+| 마일스톤 계획·DoD 체크박스 | task 메모리의 계획 섹션 (목표·배경·제안·검증 계획·DoD) |
+| 직전 이터 인계 메모 | 마지막 `handoff` 신호 |
+| 이전 시도의 교훈·실패 접근·발견 제약 | `notes` 신호 (누적) |
+| 이터 흐름(시도·결과·다음 단계) | task 메모리의 흐름 영역 — 매체가 시각·작성자 자동 기록 |
+| 정지 사유 | task 상태=`blocked` + `blocked` 신호 |
+| 완료 신호 | `done` 신호 |
+| 의심점 (DONE_WITH_CONCERNS) | `handoff` 신호 본문의 `## 의심점` 섹션 |
 
 위 매핑이 단일 출처다. 같은 정보를 워크트리 파일로 중복 보관·갱신하지 않는다 (§7 금지 행동).
 
 ### 11.1 매 이터 시작 (이 순서로 읽는다)
 
-1. task issue body의 계획 섹션 — 마일스톤·DoD 체크박스, 어디까지 왔는지
-2. 최근 `[notes]` prefix comments — 이전 시도의 교훈 (실패 접근·발견 제약·작동 패턴)
-3. 마지막 `[handoff]` prefix comment — 직전 이터의 상태·다음 단계 추천 (없으면 처음 이터)
-4. issue comments 끝부분 — 최근 흐름
+1. task 메모리의 계획 섹션 — 마일스톤·DoD 체크박스, 어디까지 왔는지
+2. 최근 `notes` 신호 — 이전 시도의 교훈 (실패 접근·발견 제약·작동 패턴)
+3. 마지막 `handoff` 신호 — 직전 이터의 상태·다음 단계 추천 (없으면 처음 이터)
+4. task 메모리의 흐름 영역 끝부분 — 최근 흐름
 5. `git log --oneline -20` — 최근 커밋 확인
 
 ### 11.2 매 이터 종료 (이 순서로)
 
-1. 새 `[handoff]` prefix comment 작성 — 다음 이터가 5분 안에 컨텍스트 잡을 수 있는 형태로:
+1. 새 `handoff` 신호 발행 — 다음 이터가 5분 안에 컨텍스트 잡을 수 있는 형태로:
    - 이번에 무엇을 했는지
    - 무엇이 막혔거나 막힐 수 있는지
    - 다음 단계 추천 (구체적으로)
-2. 진전 있을 때 issue body의 계획 섹션 DoD 체크박스 갱신 (`gh issue edit` 또는 driver 헬퍼로 본문 read → 머지 → write, last-writer-wins)
-3. 실패·발견 시 `[notes]` prefix comment 추가 (실패 접근 또는 새 제약 — 본문 첫 줄 `[notes]` prefix)
-4. 이번 이터가 `fix:symptom`이면 issue body 계획 섹션 재검토 (§3.3 자체 교정 게이트) — 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신
-5. Self-Review (4축, §3.5) — Completeness·Quality·Discipline·Testing. 한 축이라도 의심 남으면 1단계의 `[handoff]` comment 본문에 `## 의심점` 섹션을 포함시키고 7단계의 `[done]` comment 작성 보류
-6. git commit — 자기 분류 prefix로 시작 (이터간 상태는 issue API 호출로 갱신되므로 별도의 메타 commit이 생기지 않음)
-7. 완료 판정 — 4-Level Verifier (§3.4) + Self-Review 4축 모두 통과 → `[done]` prefix comment 작성·종료
-8. 진전 불가능 → Project Status=`Blocked` 전이 + `[blocked]` prefix comment 작성·종료 (양식: §5.2, 카테고리 명시)
+2. 진전 있을 때 task 메모리의 계획 섹션 DoD 체크박스 갱신 (driver 헬퍼로 본문 read → 머지 → write, last-writer-wins)
+3. 실패·발견 시 `notes` 신호 발행 (실패 접근 또는 새 제약 — 본문 첫 줄에 `notes` 식별)
+4. 이번 이터가 `fix:symptom`이면 task 메모리의 계획 섹션 재검토 (§3.3 자체 교정 게이트) — 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신
+5. Self-Review (4축, §3.5) — Completeness·Quality·Discipline·Testing. 한 축이라도 의심 남으면 1단계의 `handoff` 신호 본문에 `## 의심점` 섹션을 포함시키고 7단계의 `done` 신호 발행 보류
+6. git commit — 자기 분류 prefix로 시작 (이터간 상태는 task 메모리 API 호출로 갱신되므로 별도의 메타 commit이 생기지 않음)
+7. 완료 판정 — 4-Level Verifier (§3.4) + Self-Review 4축 모두 통과 → `done` 신호 발행·종료
+8. 진전 불가능 → task 상태를 `blocked`로 전이 + `blocked` 신호 발행·종료 (양식: §5.2, 카테고리 명시)
 
-### 11.3 `[notes]` comment의 "실패한 접근"
+### 11.3 `notes` 신호의 "실패한 접근"
 
-실패한 접근의 재시도는 금지된다. 같은 가설을 다시 시도하려면 왜 이번엔 다른지 새 `[notes]` prefix comment에 명시한다. 드라이버가 다음 이터의 변경 diff와 누적 `[notes]` comments의 실패 패턴을 단순 텍스트 매칭으로 검사할 수 있다 (확률적, 절대 보장은 아님).
+실패한 접근의 재시도는 금지된다. 같은 가설을 다시 시도하려면 왜 이번엔 다른지 새 `notes` 신호로 명시한다. 드라이버가 다음 이터의 변경 diff와 누적 `notes` 신호의 실패 패턴을 단순 텍스트 매칭으로 검사할 수 있다 (확률적, 절대 보장은 아님).
 
-### 11.4 comment 분량 관리
+### 11.4 신호 분량 관리
 
-`[notes]` comments는 GitHub가 자연 분할·검색 가능하므로 별도 크기 관리는 불필요. 다만 한 comment 본문이 길어지면 단일 주제로 새 comment를 만들고 이전 comment의 핵심만 인용한다 — "한 comment = 한 교훈" 원칙.
+`notes` 신호는 매체가 자연 분할·검색 가능하므로 별도 크기 관리는 불필요. 다만 한 신호 본문이 길어지면 단일 주제로 새 신호를 발행하고 이전 신호의 핵심만 인용한다 — "한 신호 = 한 교훈" 원칙.
 
 ### 11.5 모델 큐레이션 책임
 
-모든 `[handoff]`·`[notes]` comment 본문과 issue body 계획 섹션 갱신은 모델이 큐레이션한다. 잡음 없는 신호만 다음 이터로 전달한다 — 의식의 흐름·모든 시도 기록은 잡음이다.
+모든 `handoff`·`notes` 신호 본문과 task 메모리의 계획 섹션 갱신은 모델이 큐레이션한다. 잡음 없는 신호만 다음 이터로 전달한다 — 의식의 흐름·모든 시도 기록은 잡음이다.
 
 ### 11.6 이터 내 서브 도구 위임 (Agent)
 
@@ -383,22 +394,22 @@ fix 시도 전에 다음을 모두 수행한다.
 
 루프의 종료·진행 의도는 다음 신호로 표현한다.
 
-- **`[done]` prefix comment**: 완료 판정(§3.4 4-Level Verifier) 모두 만족 + Self-Review(§3.5) 4축 모두 통과 시 작성. 본문 첫 줄에 `[done]` prefix.
-- **Project Status=`Blocked` + `[blocked]` prefix comment**: 진전 불가능 시 §5.2 양식으로 작성. 카테고리(config-gap·spec-gap·architecture-gap·environment-gap·other) 명시.
-- **`[handoff]` prefix comment 본문의 `## 의심점` 섹션 (DONE_WITH_CONCERNS 신호)**: 변경이 verify를 통과했으나 Self-Review 어느 축에 의심이 남을 때. `[done]` comment 대신 이 섹션을 포함한 `[handoff]` comment를 작성하고 정상 종료. 다음 이터가 의심점을 검증·해소한 후 깨끗한 `[done]` comment를 작성.
+- **`done` 신호**: 완료 판정(§3.4 4-Level Verifier) 모두 만족 + Self-Review(§3.5) 4축 모두 통과 시 발행.
+- **task 상태=`blocked` + `blocked` 신호**: 진전 불가능 시 §5.2 양식으로 발행. 카테고리(config-gap·spec-gap·architecture-gap·environment-gap·other) 명시.
+- **`handoff` 신호 본문의 `## 의심점` 섹션 (DONE_WITH_CONCERNS 신호)**: 변경이 verify를 통과했으나 Self-Review 어느 축에 의심이 남을 때. `done` 신호 대신 이 섹션을 포함한 `handoff` 신호를 발행하고 정상 종료. 다음 이터가 의심점을 검증·해소한 후 깨끗한 `done` 신호를 발행.
 
-세 신호를 임의로 작성·삭제하지 않는다. 신호는 진실해야 한다.
-- 거짓 `[done]` comment = 가짜 완료 위장 (§1·1항·4항 위반)
-- 거짓 `[blocked]` comment + Status 전이 = 작업 회피 (§1.4 위반)
-- 누락된 의심점 = 정직성 위반 (§9.1) — 의심이 있으면 반드시 `[handoff]` comment에 명시
+세 신호를 임의로 발행·삭제하지 않는다. 신호는 진실해야 한다.
+- 거짓 `done` 신호 = 가짜 완료 위장 (§1·1항·4항 위반)
+- 거짓 `blocked` 신호 + task 상태 전이 = 작업 회피 (§1.4 위반)
+- 누락된 의심점 = 정직성 위반 (§9.1) — 의심이 있으면 반드시 `handoff` 신호에 명시
 
 ## 13. 체크리스트 (요약)
 
 상세는 본문 절 참조. 매 이터 시작·종료 전에 다음을 빠르게 self-eval:
 
-- **시작 전**: SPEC.md (수용 기준·scope·verify) 이해됨? task issue 계획 섹션·`[notes]`/`[handoff]` comments 읽음? 이터 상한 인지?
-- **이터 후**: 진전(§4.3 정의) 있음? 자기 분류 commit prefix? `fix:symptom` 누적 여부? `[handoff]` comment 작성·계획 섹션 갱신?
-- **`[done]` comment 작성 전**: 4-Level Verifier(§3.4) + Self-Review 4축(§3.5) 모두 통과? 금지 행동(§7)·제1 원칙(§1) 위반 없음? scope 내 변경?
+- **시작 전**: SPEC.md (수용 기준·scope·verify) 이해됨? task 메모리의 계획 섹션·`notes`/`handoff` 신호 읽음? 이터 상한 인지?
+- **이터 후**: 진전(§4.3 정의) 있음? 자기 분류 commit prefix? `fix:symptom` 누적 여부? `handoff` 신호 발행·계획 섹션 갱신?
+- **`done` 신호 발행 전**: 4-Level Verifier(§3.4) + Self-Review 4축(§3.5) 모두 통과? 금지 행동(§7)·제1 원칙(§1) 위반 없음? scope 내 변경?
 
 하나라도 불만족이면 작업은 완료되지 않음.
 
