@@ -7,6 +7,7 @@ scope:
     - CLAUDE.md
 verify: "bash -c 'set -e; C=plugins/autopilot/skills/loop/references/constitution.md; L=plugins/autopilot/skills/loop/references/loop.sh; test -f \"$C\" && test -f \"$L\" && bash -n \"$L\" && grep -qE \"LOOP_DONE_LABEL|loop:done\" \"$C\" && grep -qE \"Status[^a-zA-Z0-9_]+Blocked|상태.*Blocked|Blocked.*전이\" \"$C\" && ! grep -qE \"WT/DONE\" \"$L\"'"
 ears_language: ko
+request_review: true
 ---
 
 # constitution.md 워커 신호 매체 부착 동작 명시 (done·blocked)
