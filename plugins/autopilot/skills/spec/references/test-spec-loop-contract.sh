@@ -20,7 +20,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 LOOP_SH="$REPO_ROOT/plugins/autopilot/skills/loop/references/loop.sh"
 PR_PHASE_SH="$REPO_ROOT/plugins/autopilot/skills/loop/references/pr-phase.sh"
 SPEC_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/spec/SKILL.md"
-# 슬러그 도출 코드 조각의 단일 출처 — SPEC 130 이관 후의 새 자리 (SKILL.md §9.5 → references/feat-branch-commit.md).
+# 슬러그 도출 코드 조각의 단일 출처 (SKILL.md §9.5 → references/feat-branch-commit.md).
 SPEC_FEAT_REF="$REPO_ROOT/plugins/autopilot/skills/spec/references/feat-branch-commit.md"
 
 [[ -f "$LOOP_SH" ]]      || { echo "FAIL setup: loop.sh missing: $LOOP_SH" >&2; exit 1; }
@@ -32,8 +32,8 @@ SPEC_FEAT_REF="$REPO_ROOT/plugins/autopilot/skills/spec/references/feat-branch-c
 command -v yq >/dev/null 2>&1 \
   || { echo "SKIP: yq 미설치 — verify 실행 불가" >&2; exit 0; }
 
-# Canonical slug 알고리즘 (SKILL.md §9.5.1 단일 출처). 이 함수가 변하면
-# SKILL.md 문서·loop 코드 추출 로직과 함께 변경해야 한다.
+# Canonical slug 알고리즘 (feat-branch-commit.md §9.5.1 단일 출처). 이 함수가 변하면
+# feat-branch-commit.md §9.5.1·loop 코드 추출 로직과 함께 변경해야 한다.
 canonical_slug() {
   local title="$1"
   printf '%s' "$title" \
@@ -81,7 +81,7 @@ DIR_REL="milestones/regular/loops/${INPUT_ID}-${SLUG}"
   || { echo "FAIL T1a: canonical_slug 'Foo Bar' = '$SLUG', want 'foo-bar'" >&2; exit 1; }
 
 # 단일 출처 검사 — canonical bash 알고리즘 라인이 references/feat-branch-commit.md 에 그대로 박혀 있어야 한다.
-# (SPEC 130 이관 후 단일 출처는 SKILL.md §9.5 가 아니라 references/feat-branch-commit.md §9.5.1 코드 블록.)
+# (단일 출처는 SKILL.md §9.5 가 아니라 references/feat-branch-commit.md §9.5.1 코드 블록.)
 grep -qF "LC_ALL=C tr '[:upper:]' '[:lower:]'" "$SPEC_FEAT_REF" \
   || { echo "FAIL T1b: feat-branch-commit.md missing canonical lowercase step" >&2; exit 1; }
 grep -qF "LC_ALL=C tr -c 'a-z0-9-' '-'" "$SPEC_FEAT_REF" \
