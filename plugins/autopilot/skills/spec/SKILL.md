@@ -215,9 +215,9 @@ SPEC.md 가 들어갈 디렉토리는 step 9.5.1 의 결정적 슬러그화 규�
 
 `mkdir -p <위 경로의 디렉토리>` 후 그 안의 `SPEC.md` 로 기록.
 
-기록 직후 §8.1 «SPEC.md write → Issue body sync» 절차가 단일 trigger로 발동된다.
+기록 직후 §8.2 «SPEC.md write → Issue body sync» 절차가 단일 trigger로 발동된다.
 
-### 8.1 SPEC.md write → Issue body sync (단일 trigger)
+### 8.2 SPEC.md write → Issue body sync (단일 trigger)
 
 SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점에서 본 절차가 단일 trigger로 발동된다. 발동 경로:
 
@@ -241,7 +241,7 @@ SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점
 
 동기화 블록의 경계는 **고유 HTML 코멘트 fence** — `<!-- autopilot:spec-sync:begin -->` ~ `<!-- autopilot:spec-sync:end -->` — 로만 식별한다. SPEC.md가 YAML frontmatter(`---` … `---`)를 포함해도 본문 안의 `---`를 경계로 오해할 여지가 없다. fence는 GitHub Markdown에 렌더되지 않으므로 사용자 가독성에는 영향이 없다.
 
-#### 8.1.1 절차
+#### 8.2.1 절차
 
 1. `gh issue view <task-id> --json body --jq .body`로 현재 Issue body를 읽는다.
 2. `milestones/<m>/loops/<c>/SPEC.md`에서 SPEC.md 전문을 읽는다.
@@ -260,22 +260,22 @@ SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점
 
 5. 호출이 0이 아닌 exit으로 실패하면 step 2의 기존 `gh` 실패 처리와 동일하게 명확한 에러 메시지와 함께 **abort(중단)**. 자동 roll-back은 수행하지 않으며 disk의 SPEC.md는 그대로 두고 Issue body만 옛 상태로 남는 부분 상태를 사용자에게 명시적으로 알린다. tempfile은 abort 경로에서도 `rm -f`로 정리한다.
 
-#### 8.1.2 한도·경쟁·범위 외
+#### 8.2.2 한도·경쟁·범위 외
 
 - 큰 SPEC.md가 GitHub Issue body 길이 한도(65536 chars)를 초과하면 step 4와 동일하게 abort + 사용자 안내. 일반 SPEC 규모로는 드문 케이스.
 - 동일 task에 spec 호출이 동시 실행되는 경우 Issue body update 순서에 경쟁 조건이 발생할 수 있다 — spec 호출은 일반적으로 대화형으로 직렬화되므로 실무 발생 확률 낮음. 경쟁 탐지·잠금은 본 SPEC 범위 외.
 - 기존 비표준 Issue body(수동 생성·구분자 없음)의 retroactive migration은 본 SPEC 범위 외 — abort + 사용자 안내로 처리.
 - 역방향 sync(Issue body → SPEC.md), 라벨·assignee 등 다른 metadata 변경은 본 SPEC 범위 외.
 
-#### 8.1.3 Self-referential 규약과 현재 호출 면제
+#### 8.2.3 Self-referential 규약과 현재 호출 면제
 
-본 스킬은 자기 자신에게도 적용된다 — 본 §8.1 규약을 정의하는 SPEC.md가 이후 `--resume`되거나 다른 task의 spec 호출이 일어나면 그 시점부터는 자기 issue body도 sync 대상이다.
+본 스킬은 자기 자신에게도 적용된다 — 본 §8.2 규약을 정의하는 SPEC.md가 이후 `--resume`되거나 다른 task의 spec 호출이 일어나면 그 시점부터는 자기 issue body도 sync 대상이다.
 
 다만 **메모리 노트 `feedback_no_self_apply_during_spec`에 따라**, 본 SPEC.md를 작성하는 *현재 호출*에서는 새 contract를 선행 적용하지 않고 현 스킬 규칙으로 마친다 — 새 동작은 다음 spec 호출부터 적용된다. (self-referential SPEC를 같은 호출의 산출물에 미리 선행 적용하지 않는 규약, 단 현재 호출 면제.)
 
 ### 9. 자체 검토
 
-`references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 또는 `[NEEDS CLARIFICATION]` 마커만 — 사용자 Q&A 없음(단계 10에서 일괄 해결). 재루프 없음. 수정·마커 후 SPEC.md 재기록 — 재기록 직후 §8.1 sync trigger가 다시 발동된다.
+`references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 또는 `[NEEDS CLARIFICATION]` 마커만 — 사용자 Q&A 없음(단계 10에서 일괄 해결). 재루프 없음. 수정·마커 후 SPEC.md 재기록 — 재기록 직후 §8.2 sync trigger가 다시 발동된다.
 
 #### 9.1 subagent 위임 (선택)
 
@@ -356,7 +356,7 @@ SPEC.md 경로(§8.1 에서 결정된 slug-bearing 경로 — `milestones/<m>/lo
 - 4: 생략 (이미 SPEC 존재)
 - 5, 6: 마커 위치 기준으로 좁힘
 - 7: 마커 박힌 섹션만
-- 8 / 8.1: SPEC.md를 재기록하므로 §8.1 sync trigger가 동일하게 발동된다.
+- 8 / 8.1: SPEC.md를 재기록하므로 §8.2 sync trigger가 동일하게 발동된다.
 - 나머지 동일
 
 ## 모듈 구성 (references/)
