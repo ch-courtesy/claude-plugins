@@ -56,6 +56,15 @@ Bash(ls:*),\
 Read,Edit,Write,Glob,Grep"
 export AUTOPILOT_REBASE_ALLOWED_TOOLS
 
+# ----- task storage 검출 키 (SPEC 134 AC4) -----
+#
+# 완료 신호의 검출 키는 task 식별자에 부속된 label 이름이다 (헌법 §12, SKILL.md).
+# 워커가 완료 시 `[done]` prefix comment(가독·로그)와 본 label 추가(검출 키)를 모두
+# 수행해야 드라이버가 done으로 판정한다. comment 본문은 더 이상 단일 검출 키가 아니다.
+# 환경 변수 override 허용 — 단, label 이름은 프로젝트 수준에서 단일 위치에 고정되어
+# task storage adapter 다중 분기를 만들지 않는다 (SPEC 134 §비-목표).
+LOOP_DONE_LABEL="${LOOP_DONE_LABEL:-loop:done}"
+
 # ----- 헬퍼 -----
 
 die() {
@@ -115,6 +124,70 @@ task_issue_number() {
     return 0
   fi
   return 1
+}
+
+# task issue에 특정 label이 붙어 있는지 boolean 검사 (SPEC 134 AC3).
+# 인자: $1=task-id (생략 시 $TASK_ID), $2=label 이름 (필수).
+# 반환: 0=label 존재, 1=label 부재 또는 판정 불가 (issue 매핑 실패·gh 부재 포함).
+# 구현은 단일 GitHub 호출(`gh issue view --json labels`)로 한정 — adapter 인터페이스
+# 신설 없음 (SPEC 134 §비-목표).
+task_label_present() {
+  local task_id="${1:-$TASK_ID}"
+  local label="${2:-}"
+  [[ -z "$label" ]] && return 1
+  local issue
+  issue=$(task_issue_number "$task_id" 2>/dev/null) || return 1
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
+  fi
+  # gh CLI의 `--jq`는 단일 expression 인자만 받아 jq의 `--arg`를 통과시키지 않으므로
+  # name 목록만 추출해 셸에서 정확 일치 비교 (grep -F -x).
+  local names
+  names=$(gh issue view "$issue" --json labels \
+    --jq '.labels[].name' 2>/dev/null || true)
+  [[ -z "$names" ]] && return 1
+  printf '%s\n' "$names" | grep -qxF "$label" && return 0
+  return 1
+}
+
+# task storage에 label이 존재하는지 확인하고, 없으면 자동 생성 (SPEC 134 AC5).
+# 인자: $1=label 이름 (필수).
+# 권한 부족·gh 부재 시 best-effort로 stderr WARN + 비-0 반환 (비차단 진행).
+# SPEC 134 §위험 "label 자동 생성 권한 부족" — runtime 실패는 verify 범위 밖.
+ensure_label_exists() {
+  local label="${1:-}"
+  [[ -z "$label" ]] && return 1
+  if ! command -v gh >/dev/null 2>&1; then
+    return 1
+  fi
+  # 존재 여부 확인 — `gh label list --search`는 prefix·substring을 함께 반환할 수
+  # 있으므로 name 목록만 추출 후 셸에서 정확 일치 비교 (gh `--jq`는 jq `--arg`를
+  # 통과시키지 않아 셸 비교가 안전).
+  local names
+  names=$(gh label list --search "$label" --json name \
+    --jq '.[].name' 2>/dev/null || true)
+  if [[ -n "$names" ]] && printf '%s\n' "$names" | grep -qxF "$label"; then
+    return 0
+  fi
+  # 미존재 — 생성 시도. race 또는 권한 부족 시 WARN.
+  if ! gh label create "$label" \
+        --description "autopilot loop 완료 신호 (드라이버 검출 키)" \
+        >/dev/null 2>&1; then
+    echo "[$(now_iso)] WARN: label '$label' 자동 생성 실패 — 권한 부족·race·gh 응답 비정상. 수동 생성 필요." >&2
+    return 1
+  fi
+  echo "[$(now_iso)] label '$label' 자동 생성 완료." >&2
+  return 0
+}
+
+# task issue의 완료 신호 검사 (헌법 §12, SPEC 134 AC2).
+# 정식 검출 키: task issue에 LOOP_DONE_LABEL 값과 일치하는 label이 붙어 있는지.
+# comment 본문은 가독·로그 채널이며 판정에 사용되지 않는다 — 워커가 [done] prefix
+# comment 발행과 함께 label 추가 두 동작을 모두 수행해야 0(done)을 반환한다.
+# 반환: 0=done, 1=done 아님(판정 불가 포함).
+task_status_is_done() {
+  local task_id="${1:-$TASK_ID}"
+  task_label_present "$task_id" "$LOOP_DONE_LABEL"
 }
 
 # task issue의 차단 신호 검사 (헌법 §5·§12, SPEC AC4·8).
@@ -809,8 +882,11 @@ iterate() {
     CLAUDE_FAIL_STREAK=0
   fi
 
-  # 종료 신호 검사 (먼저)
-  if [[ -f "$WT/DONE" ]]; then
+  # 종료 신호 검사 (먼저) — 헌법 §12, SPEC 134 AC2.
+  # 정식 검출 키: task issue에 LOOP_DONE_LABEL이 붙어 있는지 (task_status_is_done).
+  # 호환 OR 결합: 0.2.0 잔존 $WT/DONE 파일 신호도 수용 — milestone 종료 후
+  # 사용자 결정으로 제거 예정 (SPEC 134 §제약 "호환 OR 결합 유지").
+  if task_status_is_done "$TASK_ID" || [[ -f "$WT/DONE" ]]; then
     return 100   # 메인 루프에서 정상 종료 처리
   fi
   # 워커가 진행 불가 보고 시 task issue에 [blocked] prefix comment + Status=Blocked 전이 (헌법 §5.2, SPEC AC5).
@@ -969,6 +1045,12 @@ cmd_start() {
 
   # 5. 락 획득
   acquire_lock
+
+  # 5.5. 완료 신호 label self-bootstrap (SPEC 134 AC5).
+  # task storage에 LOOP_DONE_LABEL이 없으면 자동 생성. 권한 부족·gh 부재 시
+  # WARN 후 비차단 — 워커가 label 추가에 실패해도 $WT/DONE 호환 OR 결합으로
+  # 완료 감지가 깨지지 않는다.
+  ensure_label_exists "$LOOP_DONE_LABEL" || true
 
   # 6. 워크트리 생성 (없는 경우)
   if [[ ! -d "$WT" ]]; then
