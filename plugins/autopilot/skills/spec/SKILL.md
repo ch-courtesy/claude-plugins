@@ -36,7 +36,7 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 #### 1.2 사전 명확화 라운드 (요약)
 
-(b) 선택 시 진입. step 5 메커니즘을 task-id 확보 *전*으로 앞당겨 재사용(별도 phase·모듈 없음). 수집은 task 미정의 상태에 맞춰 `문제·목표·범위·제약`으로 확장. 매 라운드 "충분" 종결·명시적 취소 안전 종료 포함. 규모 분기: 단일 task → 프로젝트 issue 컨벤션으로 task 생성 후 step 2 재진입, 마일스톤 규모 → `AskUserQuestion` 명시 승인 후 PRD 스킬 invoke. 수집 항목·라운드 규칙·1.2.1/1.2.2 분기 상세는 `references/pre-clarification.md` §1.2 참조.
+(b) 선택 시 진입. step 5 메커니즘을 task-id 확보 *전*으로 앞당겨 재사용(별도 phase·모듈 없음). 수집은 task 미정의 상태에 맞춰 `문제·목표·범위·제약`으로 확장. 매 라운드 "충분" 종결·명시적 취소 안전 종료 포함. 규모 분기: 단일 task → 프로젝트 태스크 트래커 컨벤션으로 task 생성 후 step 2 재진입, 마일스톤 규모 → `AskUserQuestion` 명시 승인 후 PRD 스킬 invoke. 수집 항목·라운드 규칙·1.2.1/1.2.2 분기 상세는 `references/pre-clarification.md` §1.2 참조.
 
 ### 2. task 상태 정합 (일반·--resume 두 모드 공통)
 
