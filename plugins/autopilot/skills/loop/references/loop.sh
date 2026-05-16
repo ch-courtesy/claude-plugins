@@ -867,8 +867,8 @@ iterate() {
   if task_status_is_done "$TASK_ID" || [[ -f "$WT/DONE" ]]; then
     return 100   # 메인 루프에서 정상 종료 처리
   fi
-  # 워커가 진행 불가 보고 시 task issue에 [blocked] prefix comment + Status=Blocked 전이 (헌법 §5.2, SPEC AC5).
-  # 드라이버는 Project Status 또는 최신 comment prefix로 차단 신호를 감지한다 (SPEC AC4).
+  # 워커가 진행 불가 보고 시 task issue에 [blocked] prefix comment + Status=Blocked 전이 (헌법 §5.2).
+  # 드라이버는 Project Status=Blocked 단일 의존으로 차단 신호를 감지한다 (SPEC 134 §제약).
   if task_status_is_blocked "$TASK_ID"; then
     return 101   # 메인 루프에서 [blocked] 처리
   fi
@@ -1316,7 +1316,7 @@ cmd_status() {
     if [[ -f "$lock_file" ]]; then
       state="running"
     elif [[ -d "$wt" ]]; then
-      # 차단 신호는 task issue의 Project Status=Blocked 또는 최신 [blocked] prefix comment.
+      # 차단 신호는 task issue의 Project Status=Blocked 단일 의존 (SPEC 134 §제약).
       # gh 부재·미설정 시 task_status_is_blocked가 1을 반환해 자연스럽게 idle로 떨어진다.
       if task_status_is_blocked "$tid"; then
         state="blocked"
