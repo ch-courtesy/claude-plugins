@@ -195,8 +195,11 @@ task_status_is_done() {
 # 로그 채널이며 판정에 사용되지 않는다 — 워커가 [blocked] prefix comment 발행과
 # 함께 Status=Blocked 전이 두 동작을 모두 수행해야 0(blocked)을 반환한다.
 # graceful degradation: AUTOPILOT_PROJECT_ITEM_ID 미설정·gh 부재·GraphQL 실패는
-# best-effort로 stderr WARN + 1(판정 불가) 반환 — 검출 키를 comment로 이중화하지
-# 않는다 (SPEC 134 §제약 "판정 키는 label·status 단일 의존을 깨지 않는다").
+# 1(판정 불가)로 조용히 폴백한다 (검출 키를 comment로 이중화하지 않는다 — SPEC 134
+# §제약 "판정 키는 label·status 단일 의존을 깨지 않는다"). 침묵 폴백 이유: 본 함수는
+# `list` 서브커맨드의 task별 순회와 `--watch` 모드의 60초 polling 루프에서 호출되어
+# WARN을 매번 출력하면 로그 플러딩 — 미설정 환경에서 idle 판정으로 자연 폴백하는 게
+# 설계 의도다. 디버깅 시 `gh api graphql` 직접 호출로 원인 분리.
 # 반환: 0=blocked, 1=blocked 아님(판정 불가 포함).
 task_status_is_blocked() {
   # task-id 매개변수는 시그니처 유지 위해 받지만 Status는 ITEM_ID 기반이라 직접
