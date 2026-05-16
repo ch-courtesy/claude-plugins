@@ -28,11 +28,17 @@ verify: "{{verify_command}}"
 #   3모드 정의·예시는 references/ears-patterns.md "EARS 작성 언어" 절 참조.
 # ears_language: ko
 #
-# request_review (선택): true 지정 시 loop이 task DONE 직후 같은 워크트리에서
-#   PR 생성·재사용 단계를 자동 실행 (push → default 브랜치 자동 감지 → open PR 있으면 갱신,
-#   없으면 새 PR 생성). 제목은 SPEC H1, body는 "무엇을 만들 것인가" + base..HEAD commit log.
-#   숫자 task-id면 body 마지막에 `Closes #<id>` 자동 추가. reviewer·label·assignee는 미설정.
-#   미지정 또는 false면 PR 단계 skip. 자세한 동작은 plugins/autopilot/skills/loop/SKILL.md 참조.
+# request_review (선택): true 지정 시 loop이 task DONE 직후 PR **자동 리뷰·머지 루프**를
+#   활성화한다. PR 생성·재사용 자체는 default ON으로 본 키와 무관하며, 차단하려면 `--no-pr`
+#   플래그를 쓴다. 본 키가 true면 PR 생성·재사용 직후 추가로:
+#     1) pre-PR rebase (default 브랜치 기준, 충돌 시 1회 자동 해소),
+#     2) review-fix 백그라운드 루프 (30s 폴링 — 새 PR 코멘트·리뷰마다 재-rebase → 자동 fix
+#        → commit·push, 필요 시 1개 반박 코멘트),
+#     3) 자동 머지 (reviewDecision `APPROVED` 또는 owner `/done`·`합격`·`통과` 코멘트 →
+#        `gh pr merge --squash`),
+#     4) cleanup (머지 후 worktree 제거 + 로컬·origin feat 브랜치 삭제).
+#   미지정 또는 false면 PR 생성·재사용까지만 실행 후 정지 (자동 fix·머지·cleanup 없음).
+#   요구: `gh` CLI(OAuth 인증) + `yq`. 자세한 동작은 plugins/autopilot/skills/loop/SKILL.md 참조.
 # request_review: true
 ---
 
