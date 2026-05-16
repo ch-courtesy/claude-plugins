@@ -232,14 +232,14 @@ SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점
 <step 2가 박은 자리표시 1줄 — spec 워크플로우 step 2에서 자동 생성. 본문은 SPEC.md 작성·승인 후 갱신될 예정.>
 <step 2가 박은 자리표시 2줄 — SPEC: milestones/<m>/loops/<task-id>/SPEC.md>
 
----
-
+<!-- autopilot:spec-sync:begin -->
 ## SPEC.md (auto-synced)
 
 <SPEC.md 전문 그대로>
-
----
+<!-- autopilot:spec-sync:end -->
 ```
+
+동기화 블록의 경계는 **고유 HTML 코멘트 fence** — `<!-- autopilot:spec-sync:begin -->` ~ `<!-- autopilot:spec-sync:end -->` — 로만 식별한다. SPEC.md가 YAML frontmatter(`---` … `---`)를 포함해도 본문 안의 `---`를 경계로 오해할 여지가 없다. fence는 GitHub Markdown에 렌더되지 않으므로 사용자 가독성에는 영향이 없다.
 
 #### 8.1.1 절차
 
@@ -247,10 +247,18 @@ SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점
 2. `milestones/<m>/loops/<c>/SPEC.md`에서 SPEC.md 전문을 읽는다.
 3. 새 body를 구성한다:
    - **자리표시 2줄은 step 2에서 박은 그대로 유지(placeholder 유지·보존)한다.** 첫 두 줄이 자리표시 패턴이 아니면 비표준 입력으로 보고 즉시 abort — 본 SPEC 범위는 step 2가 만든 표준 구조의 issue로 한정.
-   - 자리표시 2줄 아래에 빈 줄 · `---` · 빈 줄 · `## SPEC.md (auto-synced)` 헤딩 · 빈 줄 · SPEC.md 전문 · 빈 줄 · 닫는 `---`를 둔다.
-   - 기존 body에 동기화 블록(`## SPEC.md (auto-synced)` 헤딩으로 시작하고 닫는 `---`로 끝나는 묶음)이 이미 존재하면 그 블록만 replace한다. 동기화 블록 *바깥*의 사용자 추가 내용(자리표시 2줄, 닫는 `---` 이후 추가 섹션 등)은 그대로 보존한다.
-4. `gh issue edit <task-id> --body "<new-body>"`로 update.
-5. 호출이 0이 아닌 exit으로 실패하면 step 2의 기존 `gh` 실패 처리와 동일하게 명확한 에러 메시지와 함께 **abort(중단)**. 자동 roll-back은 수행하지 않으며 disk의 SPEC.md는 그대로 두고 Issue body만 옛 상태로 남는 부분 상태를 사용자에게 명시적으로 알린다.
+   - 자리표시 2줄 아래에 빈 줄 · `<!-- autopilot:spec-sync:begin -->` · `## SPEC.md (auto-synced)` 헤딩 · 빈 줄 · SPEC.md 전문 · `<!-- autopilot:spec-sync:end -->`를 둔다.
+   - 기존 body에 동기화 블록(`<!-- autopilot:spec-sync:begin -->`로 시작해 `<!-- autopilot:spec-sync:end -->`로 끝나는 묶음)이 이미 존재하면 그 fence 사이만 replace한다. 동기화 블록 *바깥*의 사용자 추가 내용(자리표시 2줄, end fence 이후 추가 섹션 등)은 그대로 보존한다.
+4. `gh issue edit <task-id> --body-file <tempfile>`로 update. SPEC.md 전문은 멀티라인·frontmatter·backtick을 포함하므로 인라인 `--body "..."`로 셸 전달하면 파싱이 실패한다. 반드시 임시 파일을 거친다:
+
+   ```bash
+   tmp=$(mktemp)
+   printf '%s' "$new_body" > "$tmp"
+   gh issue edit <task-id> --body-file "$tmp"
+   rm -f "$tmp"
+   ```
+
+5. 호출이 0이 아닌 exit으로 실패하면 step 2의 기존 `gh` 실패 처리와 동일하게 명확한 에러 메시지와 함께 **abort(중단)**. 자동 roll-back은 수행하지 않으며 disk의 SPEC.md는 그대로 두고 Issue body만 옛 상태로 남는 부분 상태를 사용자에게 명시적으로 알린다. tempfile은 abort 경로에서도 `rm -f`로 정리한다.
 
 #### 8.1.2 한도·경쟁·범위 외
 

@@ -5,7 +5,7 @@ scope:
     - rules/**
     - milestones/**
     - CLAUDE.md
-verify: "bash -c 'set -e; test -f plugins/autopilot/skills/spec/SKILL.md && grep -qE \"auto-synced|BEGIN SPEC\" plugins/autopilot/skills/spec/SKILL.md && grep -qE \"자리표시 2줄|placeholder.*유지|placeholder.*보존\" plugins/autopilot/skills/spec/SKILL.md && grep -qE \"abort|중단\" plugins/autopilot/skills/spec/SKILL.md && grep -qE \"feedback_no_self_apply_during_spec|현재 호출.*선행\" plugins/autopilot/skills/spec/SKILL.md'"
+verify: "bash -c 'set -e; test -f plugins/autopilot/skills/spec/SKILL.md && grep -qE \"auto-synced\" plugins/autopilot/skills/spec/SKILL.md && grep -qE \"자리표시 2줄|placeholder.*유지|placeholder.*보존\" plugins/autopilot/skills/spec/SKILL.md && grep -qE \"abort|중단\" plugins/autopilot/skills/spec/SKILL.md && grep -qE \"feedback_no_self_apply_during_spec|현재 호출.*선행\" plugins/autopilot/skills/spec/SKILL.md'"
 ---
 
 # spec: SPEC.md 작성·갱신 시 GitHub Issue body 자동 sync
@@ -35,7 +35,7 @@ verify: "bash -c 'set -e; test -f plugins/autopilot/skills/spec/SKILL.md && grep
 ```bash
 bash -c 'set -e; \
   test -f plugins/autopilot/skills/spec/SKILL.md && \
-  grep -qE "auto-synced|BEGIN SPEC" plugins/autopilot/skills/spec/SKILL.md && \
+  grep -qE "auto-synced" plugins/autopilot/skills/spec/SKILL.md && \
   grep -qE "자리표시 2줄|placeholder.*유지|placeholder.*보존" plugins/autopilot/skills/spec/SKILL.md && \
   grep -qE "abort|중단" plugins/autopilot/skills/spec/SKILL.md && \
   grep -qE "feedback_no_self_apply_during_spec|현재 호출.*선행" plugins/autopilot/skills/spec/SKILL.md'
