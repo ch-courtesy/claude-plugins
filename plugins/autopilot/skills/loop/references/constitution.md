@@ -17,14 +17,14 @@
 
 ## 추상 어휘
 
-본 문서는 다음 backing-neutral 단어로 task의 lifecycle을 기술한다. 실제 매체(메시지 본문·라벨·필드·API 호출)는 매체 어댑터가 책임지며 본 헌법의 범위 밖이다.
+본 문서는 다음 backing-neutral 단어로 task의 lifecycle을 기술한다. 실제 매체(메시지 본문·라벨·필드·API 호출)는 드라이버 코드가 책임지며 본 헌법의 범위 밖이다.
 
 - **task 메모리** — 워커가 매 이터 콜드 스타트에 읽는 단일 영구 영역. 마일스톤 계획·DoD·이터 흐름·교훈·인계 메모가 누적된다. "task 메모리의 계획 섹션"은 마일스톤 계획·DoD 체크박스가 모이는 부분, "task 메모리의 흐름 영역"은 시도·결과·다음 단계가 시간순으로 쌓이는 부분.
 - **task 신호** — 워커가 발행하는 lifecycle 메시지. 의미별로 `done`(완료)·`handoff`(인계)·`notes`(학습된 제약·실패 접근)·`blocked`(정지)·`unblocked`(해제)·`resume`(재개). 발행 동작어는 "X 신호 발행".
 - **task 상태** — 단계 라벨. `in design`·`in progress`·`blocked` 등. 전이 동작어는 "task 상태를 X로 전이".
 - **task 식별자** — task를 고유하게 가리키는 ID. 본 문서가 task를 가리킬 때 사용한다.
 
-본 문서가 위 어휘 이외의 backing-specific 용어(메시지 매체명·필드명·CLI 명령어)를 직접 사용하지 않는다. 매핑은 어댑터·드라이버 코드가 담당한다.
+본 문서가 위 어휘 이외의 backing-specific 용어(메시지 매체명·필드명·CLI 명령어)를 직접 사용하지 않는다. 매핑은 드라이버 코드가 담당한다.
 
 ## 1. 제1 원칙 (절대 규칙)
 
@@ -354,10 +354,10 @@ fix 시도 전에 다음을 모두 수행한다.
    - 무엇이 막혔거나 막힐 수 있는지
    - 다음 단계 추천 (구체적으로)
 2. 진전 있을 때 task 메모리의 계획 섹션 DoD 체크박스 갱신 (driver 헬퍼로 본문 read → 머지 → write, last-writer-wins)
-3. 실패·발견 시 `notes` 신호 발행 (실패 접근 또는 새 제약 — 본문 첫 줄에 `notes` 식별)
+3. 실패·발견 시 `notes` 신호 발행 — 실패 접근 또는 새 제약. 신호 식별 형식은 드라이버 SPEC이 정의
 4. 이번 이터가 `fix:symptom`이면 task 메모리의 계획 섹션 재검토 (§3.3 자체 교정 게이트) — 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신
 5. Self-Review (4축, §3.5) — Completeness·Quality·Discipline·Testing. 한 축이라도 의심 남으면 1단계의 `handoff` 신호 본문에 `## 의심점` 섹션을 포함시키고 7단계의 `done` 신호 발행 보류
-6. git commit — 자기 분류 prefix로 시작 (이터간 상태는 task 메모리 API 호출로 갱신되므로 별도의 메타 commit이 생기지 않음)
+6. git commit — 자기 분류 prefix로 시작 (이터간 상태는 task 메모리 갱신으로 처리되므로 별도의 메타 commit이 생기지 않음)
 7. 완료 판정 — 4-Level Verifier (§3.4) + Self-Review 4축 모두 통과 → `done` 신호 발행·종료
 8. 진전 불가능 → task 상태를 `blocked`로 전이 + `blocked` 신호 발행·종료 (양식: §5.2, 카테고리 명시)
 
