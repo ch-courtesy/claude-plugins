@@ -40,11 +40,11 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 ### 2. task 상태 정합 (일반·--resume 두 모드 공통)
 
-**사전 검사 통과 직후** 실행. task-id로 식별되는 외부 task를 조회해 4갈래 분기로 설계 상태(`In Design`)로 정합. 일반·`--resume` 모드 공통.
+**사전 검사 통과 직후** 실행. task-id로 식별되는 외부 task를 조회해 4갈래 분기로 설계 상태로 정합. 일반·`--resume` 모드 공통.
 
-4갈래 요약: **(a)** task 부재 → 새 issue 생성·Project 추가·`In Design` 설정·task-id 교체·사전 검사 재적용. **(b)** 기존 `In Design` → 변경 없이 진행(resume). **(c)** 기존 `Backlog` → `In Design`으로 전이. **(d)** 기존 `In Progress`·`Review`·`Done` 등 → 새 issue 생성·task-id 교체(a와 동일).
+4갈래 요약: **(a)** task 부재 → 새 task 생성·task 상태를 설계 상태로 설정·task-id 교체·사전 검사 재적용. **(b)** 기존 설계 상태 → 변경 없이 진행(resume). **(c)** 기존 설계 이전 상태 → 설계 상태로 전이. **(d)** 기존 설계 이후 상태 → 새 task 생성·task-id 교체(a와 동일).
 
-백킹(GitHub Project + Issue) 매핑, 조회 절차(`gh issue view`/`gh issue list --search`/`gh project item-list`), (a)·(d) 새 issue title/body 수집(고정 2줄 본문, `<m>`/`<new-task-id>` 2단계 치환), 호출 실패 abort, 범위 외(loop start `In Design → In Progress`는 본 단계 책임 아님)의 전체 절차는 `references/task-state-alignment.md` 참조.
+백엔드 매핑 위임(추상 ↔ 구체 매핑은 `rules/context.md` 단일 출처), 조회·생성·편집·상태 전이 호출의 추상화, (a)·(d) 새 task title/body 수집(고정 2줄 본문, `<m>`/`<new-task-id>` 2단계 치환), 호출 실패 abort, 범위 외(loop start 설계 상태 → 진행 상태 전이는 본 단계 책임 아님)의 전체 절차는 `references/task-state-alignment.md` 참조.
 
 ### 3. 컨텍스트 탐색
 
@@ -153,7 +153,7 @@ SPEC.md 경로(§8.1 slug-bearing)·요약 안내 후 `AskUserQuestion`으로 **
 ## --resume 모드 요약
 
 - 1: 마커 0개 시 즉시 종료
-- 2: 일반 모드와 동일(보통 (b) `In Design` 분기로 변경 없이 통과)
+- 2: 일반 모드와 동일(보통 (b) 설계 상태 분기로 변경 없이 통과)
 - 4: 생략 (이미 SPEC 존재)
 - 5, 6, 7: 마커 박힌 섹션만
 - 나머지 동일
