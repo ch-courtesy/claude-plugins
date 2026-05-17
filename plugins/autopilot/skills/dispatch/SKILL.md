@@ -1,6 +1,6 @@
 ---
 name: dispatch
-description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave) 단위로 loop을 병렬 실행하는 오케스트레이션 인터페이스. start/status/stop/list/cleanup/logs/resume 서브커맨드로 milestone lifecycle ops도 책임. PRD 입력 검증·게이트 3종(분해 plan·spec 위임·최종 확인)·sentinel watch + fail-fast 포함."
+description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave) 단위로 loop을 병렬 실행하는 오케스트레이션 인터페이스. start/status/stop/list/cleanup/logs/resume 서브커맨드로 milestone lifecycle ops도 책임. PRD 입력 검증·게이트 3종(분해 plan·최종 확인·spec 위임)·sentinel watch + fail-fast 포함."
 ---
 
 # dispatch
@@ -25,11 +25,12 @@ description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave
    → 분해 (단위 후보 추출 + 3 조건 검사 + 하드 캡 검사)
    → 게이트 ① 분해 plan 승인 (사용자 AskUserQuestion)
    → DAG.md 작성 (milestones/<m>/dispatch/DAG.md)
-   → 게이트 ② spec 위임 (각 child에 대해 Skill(skill: "spec", args: "<m>/<c>"))
-   → 게이트 ③ 최종 확인 (SPEC 경로·verify 명령·의존성 표 + 사용자 승인)
-   → wave 단위 병렬 실행 (각 child에 Bash(loop start <m>/<c>, run_in_background: true) 호출, sentinel은 Bash(dispatch.sh watch_wave ...))
-   → sentinel watch (DONE/ESCALATION.md)
-   → fail-fast (ESCALATION 시 같은 wave 다른 child들 loop stop)
+   → 게이트 ② 최종 확인 (DAG 레벨 wave·child·예상 verify·의존성 표 + 사용자 승인. SPEC 자체는 각 wave 진입 시 비로소 작성)
+   → wave 단위 순차 실행 (wave 안 child 간은 병렬):
+     · 게이트 ③ spec 위임 (per-wave): 그 wave 의 각 child 분해 plan 항목에 Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>") — task-id 는 spec 이 task 생성 단계에서 결정. spec 의 dispatch-위임 모드 auto-loop-start 로 그 wave 의 child loop 가 자동 시작
+     · sentinel watch (Bash(dispatch.sh watch_wave ...)) — 이 wave 의 DONE/ESCALATION 감시
+     · 성공 시 다음 wave 의 게이트 ③ per-wave 로 진행. wave 끝까지 반복
+       (sentinel watch · fail-fast 는 per-wave 단계에 포함 — 마일스톤 레벨 별도 sentinel 없음)
    → wave 모두 통과 후 최종 보고
 ```
 
@@ -65,31 +66,35 @@ wave 2 (depends on wave 1): [child-c]
 
 승인 시 `references/dag-template.md` 치환해 `milestones/<m>/dispatch/DAG.md` 기록 (`mkdir -p milestones/<m>/dispatch/` 후).
 
-### 게이트 ② spec 위임
+### 게이트 ② 최종 확인 (DAG 레벨)
 
-승인된 DAG의 각 child에 대해 `Skill(skill: "spec", args: "<m>/<c>")` 호출. 입력 컨텍스트로 PRD 본문 + 분해 plan 항목 전달 (자연어 안내).
-
-spec 스킬은 자체적으로 9-step 대화 진행. 사용자가 SPEC 작성에 직접 참여.
-
-### 게이트 ③ 최종 확인
-
-모든 SPEC 작성 후 표 재제시:
+모든 wave 의 plan 표를 재제시. SPEC 자체는 wave 별 spec 위임 시점에 비로소 작성되므로, 본 표는 분해 plan 단계에서 추출한 child 한 줄 요약·예상 verify 명령·DAG 의존성을 보여준다 (실제 SPEC 경로는 wave 별 위임 직후 DISPATCH_LOG 에 기록):
 ```
-| child   | SPEC 경로                                | verify 명령           | 의존성    |
-|---------|------------------------------------------|-----------------------|-----------|
-| child-a | milestones/<m>/loops/child-a/SPEC.md     | pytest tests/a        | 없음      |
-| child-b | milestones/<m>/loops/child-b/SPEC.md     | pytest tests/b        | 없음      |
-| child-c | milestones/<m>/loops/child-c/SPEC.md     | pytest tests/c        | child-a   |
+| wave | child   | 한 줄 요약          | 예상 verify 명령      | 의존성    |
+|------|---------|---------------------|-----------------------|-----------|
+| 1    | child-a | <한 줄>             | pytest tests/a        | 없음      |
+| 1    | child-b | <한 줄>             | pytest tests/b        | 없음      |
+| 2    | child-c | <한 줄>             | pytest tests/c        | child-a   |
 ```
 
-`AskUserQuestion` 옵션: `(a) 실행 시작`, `(b) 취소`. 승인 시 wave 1부터 실행.
+`AskUserQuestion` 옵션: `(a) 실행 시작`, `(b) 취소`. 승인 시 wave 1 의 게이트 ③ per-wave spec 위임 → `watch_wave` 순차 실행 시작.
 
-## 실행 (wave 단위 병렬)
+### 게이트 ③ spec 위임 (wave 단위 순차)
+
+dispatch 는 spec 위임을 **wave 단위로 순차** 실행한다 — wave 1 부터 시작해 직전 wave 의 `watch_wave` 가 성공 (exit 100) 으로 종료한 직후 다음 wave 로 진행. 한 wave 안에서는 그 wave 의 child 분해 plan 항목들에 대해 `Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>")` 를 호출한다 (한 wave 안 child 위임은 병렬·순서 무관) — milestone 은 명시 플래그로, child 식별자 (task-id) 는 dispatch 가 보유하지 않고 spec 이 task 생성 단계에서 결정한다. PRD 본문·분해 plan 항목은 자연어 인자 안에 포함해 전달.
+
+**child 명세 경로 식별 (스냅샷 차이)** — dispatch 는 각 위임 호출 직전에 `milestones/<m>/loops/` 디렉토리 스냅샷을 찍고, 호출 직후 스냅샷 차이로 새로 생성된 `milestones/<m>/loops/<c>-<slug>/SPEC.md` 경로만 식별한다. `<c>` 자체는 dispatch 가 참조하지 않으며, 이후 단계(`watch_wave` 인자·DISPATCH_LOG)는 식별한 명세 경로로 작동.
+
+spec 스킬은 dispatch 위임 모드를 인식해 step 10 사용자 최종 검토의 세 옵션 질문을 생략하고 후속 자율 루프 자동 시작까지 단일 호출에서 완수(상세는 `plugins/autopilot/skills/spec/SKILL.md` §호출 방법 — dispatch 위임 모드). **즉 한 wave 의 spec 위임 호출 시점에 그 wave 의 child loop 가 자동 시작되며, 이후 같은 wave 의 실행 섹션은 sentinel watch 전용 — `loop start` 중복 호출 금지**. wave 순서 보장은 start-time 게이팅이 아닌 **spec 위임 자체를 wave 단위로 순차화** 함으로써 강제된다 — wave 2+ child loop 는 의존 wave 의 `watch_wave` 가 성공으로 종료한 *후* 비로소 spec 위임을 통해 시작되므로, `loop/SKILL.md` 에 별도 inter-wave runtime 의존성 검사 메커니즘이 없어도 dependency 순서가 깨지지 않는다.
+
+## 실행 (wave 단위 순차, wave 안 child 병렬)
 
 ```
 for wave in waves:
-  for child in wave:
-    Bash(loop start <m>/<c>, run_in_background: true)  # 비동기 시작 — watch_wave가 sentinel 폴링. run_in_background 없이는 동기 블로킹이라 wave 병렬 안 됨
+  # 1) per-wave 게이트 ③ spec 위임: 그 wave 의 각 child 에 Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>") 호출.
+  #    spec 의 dispatch-위임 모드 auto-loop-start 로 그 wave 의 child loop 가 자동 시작된다.
+  #    이전 wave 들의 loop 는 그 wave 의 watch_wave 가 이미 DONE 으로 종료한 상태 — 의존 산출물 준비 완료.
+  #    dispatch 는 별도 `loop start` 호출 없이 sentinel watch 만 수행 (중복 시작 방지).
 
   while wave 진행 중:
     # references/dispatch.sh watch_wave <m> child1 child2 ...
@@ -104,7 +109,7 @@ for wave in waves:
       다음 wave 차단 + 종료 (재계획은 사용자)
 
     모두 DONE (watch_wave exit 100):
-      DISPATCH_LOG.md 기록 → 다음 wave
+      DISPATCH_LOG.md 기록 → 다음 wave 의 per-wave 게이트 ③ spec 위임으로 진입
 
     타임아웃 (watch_wave exit 102):
       watch_wave가 진행 중 child들에 kill -TERM (orphan 방지, 자동)
@@ -189,7 +194,7 @@ for wave in waves:
 ## 규칙
 
 - 본 스킬은 target 프로젝트의 `milestones/<m>/dispatch/` 디렉터리만 직접 작성한다 (DAG.md·DISPATCH_LOG.md).
-- spec 위임은 항상 `Skill(skill: "spec", args: "<m>/<c>")` 형식 — 2-컴포넌트 task-id.
-- loop 실행은 항상 `<m>/<c>` 2-컴포넌트 task-id로.
+- spec 위임은 항상 `Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>")` 형식 — milestone 플래그 + 자연어 본문, task-id 는 spec 이 task 생성 단계에서 결정. child 식별은 호출 전후 `milestones/<m>/loops/` 디렉토리 스냅샷 차이로.
+- loop 실행은 항상 `<m>/<c>` 2-컴포넌트 task-id로 (child 식별 후).
 - `regular` milestone-id는 ad-hoc 단일 task catch-all이므로 PRD가 없고 `dispatch start regular`는 거부.
 - 모든 결정·승인은 `AskUserQuestion`으로 (CLAUDE.md 규칙).
