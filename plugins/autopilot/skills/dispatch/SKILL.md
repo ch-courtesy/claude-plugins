@@ -71,7 +71,7 @@ wave 2 (depends on wave 1): [child-c]
 
 **child 명세 경로 식별 (스냅샷 차이)** — dispatch 는 각 위임 호출 직전에 `milestones/<m>/loops/` 디렉토리 스냅샷을 찍고, 호출 직후 스냅샷 차이로 새로 생성된 `milestones/<m>/loops/<c>-<slug>/SPEC.md` 경로만 식별한다. `<c>` 자체는 dispatch 가 참조하지 않으며, 이후 단계(게이트 ③ 표·실행)는 식별한 명세 경로로 작동.
 
-spec 스킬은 dispatch 위임 모드를 인식해 step 10 사용자 최종 검토의 세 옵션 질문을 생략하고 후속 자율 루프 자동 시작까지 단일 호출에서 완수(상세는 `plugins/autopilot/skills/spec/SKILL.md` §호출 방법 — dispatch 위임 모드).
+spec 스킬은 dispatch 위임 모드를 인식해 step 10 사용자 최종 검토의 세 옵션 질문을 생략하고 후속 자율 루프 자동 시작까지 단일 호출에서 완수(상세는 `plugins/autopilot/skills/spec/SKILL.md` §호출 방법 — dispatch 위임 모드). **즉 위임 호출 시점에 child 의 loop 가 이미 자동 시작되며, 이후 wave 실행 섹션은 sentinel watch 전용 — `loop start` 중복 호출 금지**. wave 순서 보장은 start-time 게이팅이 아닌 wave 별 watch_wave + fail-fast 스코프로 강제되므로, wave 2+ child 도 spec 위임 시점에 함께 시작된다(wave 1 결과를 입력으로 요구하는 wave 2 child 는 그 child loop 자체의 의존성 검사로 대응).
 
 ### 게이트 ③ 최종 확인
 
@@ -90,8 +90,7 @@ spec 스킬은 dispatch 위임 모드를 인식해 step 10 사용자 최종 검�
 
 ```
 for wave in waves:
-  for child in wave:
-    Bash(loop start <m>/<c>, run_in_background: true)  # 비동기 시작 — watch_wave가 sentinel 폴링. run_in_background 없이는 동기 블로킹이라 wave 병렬 안 됨
+  # child loop 는 게이트 ② 의 spec 위임 시점에 이미 자동 시작됨 (spec dispatch-위임 모드의 auto-loop-start). dispatch 는 별도 `loop start` 호출 없이 sentinel watch 만 수행 — 중복 시작 방지.
 
   while wave 진행 중:
     # references/dispatch.sh watch_wave <m> child1 child2 ...
