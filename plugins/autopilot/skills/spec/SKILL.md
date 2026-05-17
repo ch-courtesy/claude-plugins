@@ -1,7 +1,63 @@
 ---
 name: spec
 description: "기능 추가·동작 수정·지침 작성·새로 만들 등 새 코드 변경을 정의하는 자연어 신호에 대응. autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 생성. 한 질문씩 명확화·섹션별 승인·EARS 포맷·[NEEDS CLARIFICATION] 마커로 자율 loop이 도중 질문 없이 완수 가능한 자기완결적 SPEC을 만듭니다. 이 레포 표준 워크플로우는 자기완결적 SPEC.md 작성 → feat 브랜치 분기·SPEC commit → autopilot loop 실행 → PR. SPEC.md 작성 후 결정적 슬러그화 규칙(ASCII 영숫자·하이픈만)으로 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·SPEC.md를 commit해 loop·PR 흐름이 단일 feature 브랜치로 통합되게 합니다. 호출 'Skill(skill=\"spec\", args=\"<task-id> [--milestone <m>] [--resume]\")'. milestone 미지정 시 `regular`(catch-all)을 default로 적용."
-allowed-tools: AskUserQuestion, Read, Write, Skill, Agent, Bash(git log:*), Bash(git status:*), Bash(git rev-parse:*), Bash(git checkout:*), Bash(git branch:*), Bash(git add:*), Bash(git commit:*), Bash(git show-ref:*), Bash(git for-each-ref:*), Bash(ls:*), Bash(cat:*), Bash(find:*), Bash(mkdir:*), Bash(grep:*), Bash(echo:*), Bash(head:*), Bash(tr:*), Bash(sed:*), Bash(gh:*)
+allowed-tools:
+  - AskUserQuestion
+  - Read
+  - Write
+  - Skill
+  - Agent
+  # 기존 단축 prefix 패턴 (보존)
+  - Bash(git log:*)
+  - Bash(git status:*)
+  - Bash(git rev-parse:*)
+  - Bash(git checkout:*)
+  - Bash(git branch:*)
+  - Bash(git add:*)
+  - Bash(git commit:*)
+  - Bash(git show-ref:*)
+  - Bash(git for-each-ref:*)
+  - Bash(ls:*)
+  - Bash(cat:*)
+  - Bash(find:*)
+  - Bash(mkdir:*)
+  - Bash(grep:*)
+  - Bash(echo:*)
+  - Bash(head:*)
+  # SPEC 113 — issue #113 본문 `autopilot:spec` 섹션 (직전 세션 실측)
+  - Bash(git -C * rev-parse *)
+  - Bash(git -C * status --porcelain)
+  - Bash(git -C * log *)
+  - Bash(git -C * branch *)
+  - Bash(git -C * show-ref *)
+  - Bash(git -C * for-each-ref *)
+  - Bash(git -C * ls-files *)
+  - Bash(git -C * diff *)
+  - Bash(git -C * checkout *)
+  - Bash(git -C * checkout -b *)
+  - Bash(git -C * add *)
+  - Bash(git -C * commit *)
+  - Bash(git update-ref *)
+  - Bash(git branch *)
+  - Bash(git -C * hash-object -w *)
+  - Bash(GIT_INDEX_FILE=* git -C * read-tree *)
+  - Bash(GIT_INDEX_FILE=* git -C * update-index --add --cacheinfo *)
+  - Bash(GIT_INDEX_FILE=* git -C * write-tree)
+  - Bash(git -C * commit-tree * -p *)
+  - Bash(mkdir -p milestones/**)
+  - Bash(awk *)
+  - Bash(sed *)
+  - Bash(tr *)
+  - Bash(grep -rE * plugins/autopilot/**)
+  - Bash(grep -rln * plugins/autopilot/**)
+  # SPEC 113 — issue #113 본문 `공통·보조` 섹션
+  - Bash(git -C * stash list)
+  - Bash(git -C * stash pop *)
+  - Bash(git -C * stash show *)
+  - Bash(rm */ESCALATION.md)
+  - Bash(rm */DONE)
+  - Bash(ps -p *)
+  - Bash(cat */*.lock)
 ---
 
 # spec
