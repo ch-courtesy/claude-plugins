@@ -20,17 +20,20 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 LOOP_SH="$REPO_ROOT/plugins/autopilot/skills/loop/references/loop.sh"
 PR_PHASE_SH="$REPO_ROOT/plugins/autopilot/skills/loop/references/pr-phase.sh"
 SPEC_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/spec/SKILL.md"
+# 슬러그 도출 코드 조각의 단일 출처 (SKILL.md §9.5 → references/feat-branch-commit.md).
+SPEC_FEAT_REF="$REPO_ROOT/plugins/autopilot/skills/spec/references/feat-branch-commit.md"
 
 [[ -f "$LOOP_SH" ]]      || { echo "FAIL setup: loop.sh missing: $LOOP_SH" >&2; exit 1; }
 [[ -f "$PR_PHASE_SH" ]]  || { echo "FAIL setup: pr-phase.sh missing: $PR_PHASE_SH" >&2; exit 1; }
 [[ -f "$SPEC_SKILL_MD" ]]|| { echo "FAIL setup: SKILL.md missing: $SPEC_SKILL_MD" >&2; exit 1; }
+[[ -f "$SPEC_FEAT_REF" ]]|| { echo "FAIL setup: feat-branch-commit.md missing: $SPEC_FEAT_REF" >&2; exit 1; }
 
 # yq 의존 — 없으면 cmd_start가 scope.include 파싱 단계에서 die.
 command -v yq >/dev/null 2>&1 \
   || { echo "SKIP: yq 미설치 — verify 실행 불가" >&2; exit 0; }
 
-# Canonical slug 알고리즘 (SKILL.md §9.5.1 단일 출처). 이 함수가 변하면
-# SKILL.md 문서·loop 코드 추출 로직과 함께 변경해야 한다.
+# Canonical slug 알고리즘 (feat-branch-commit.md §9.5.1 단일 출처). 이 함수가 변하면
+# feat-branch-commit.md §9.5.1·loop 코드 추출 로직과 함께 변경해야 한다.
 canonical_slug() {
   local title="$1"
   printf '%s' "$title" \
@@ -77,13 +80,14 @@ DIR_REL="milestones/regular/loops/${INPUT_ID}-${SLUG}"
 [[ "$SLUG" == "foo-bar" ]] \
   || { echo "FAIL T1a: canonical_slug 'Foo Bar' = '$SLUG', want 'foo-bar'" >&2; exit 1; }
 
-# SKILL.md 단일 출처 검사 — canonical bash 알고리즘 라인이 그대로 박혀 있어야 한다.
-grep -qF "LC_ALL=C tr '[:upper:]' '[:lower:]'" "$SPEC_SKILL_MD" \
-  || { echo "FAIL T1b: SKILL.md missing canonical lowercase step" >&2; exit 1; }
-grep -qF "LC_ALL=C tr -c 'a-z0-9-' '-'" "$SPEC_SKILL_MD" \
-  || { echo "FAIL T1c: SKILL.md missing canonical char-replacement step" >&2; exit 1; }
-grep -qF "sed -e 's/--*/-/g'" "$SPEC_SKILL_MD" \
-  || { echo "FAIL T1d: SKILL.md missing canonical collapse step" >&2; exit 1; }
+# 단일 출처 검사 — canonical bash 알고리즘 라인이 references/feat-branch-commit.md 에 그대로 박혀 있어야 한다.
+# (단일 출처는 SKILL.md §9.5 가 아니라 references/feat-branch-commit.md §9.5.1 코드 블록.)
+grep -qF "LC_ALL=C tr '[:upper:]' '[:lower:]'" "$SPEC_FEAT_REF" \
+  || { echo "FAIL T1b: feat-branch-commit.md missing canonical lowercase step" >&2; exit 1; }
+grep -qF "LC_ALL=C tr -c 'a-z0-9-' '-'" "$SPEC_FEAT_REF" \
+  || { echo "FAIL T1c: feat-branch-commit.md missing canonical char-replacement step" >&2; exit 1; }
+grep -qF "sed -e 's/--*/-/g'" "$SPEC_FEAT_REF" \
+  || { echo "FAIL T1d: feat-branch-commit.md missing canonical collapse step" >&2; exit 1; }
 
 # SKILL.md 가 slug-bearing SPEC.md 경로 컨벤션을 참조해야 한다 (단일 컨벤션 선언).
 grep -qF "milestones/<m>/loops/<c>-<slug>" "$SPEC_SKILL_MD" \
