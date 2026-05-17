@@ -1,6 +1,6 @@
 ---
 scope:
-  include: ["plugins/autopilot/skills/spec/**", "plugins/autopilot/skills/loop/**", "tests/autopilot/**"]
+  include: ["plugins/autopilot/skills/spec/**", "plugins/autopilot/skills/loop/**", "plugins/autopilot/.claude-plugin/plugin.json", "tests/autopilot/**"]
   exclude:
     - rules/**
     - milestones/**

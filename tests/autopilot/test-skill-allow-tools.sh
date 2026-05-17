@@ -111,7 +111,7 @@ check_gh_only_pr() {
         inner="${inner%)}"
         # gh 패턴 검사
         case "$inner" in
-          gh\ pr*|'gh pr'*)
+          gh\ pr*)
             : # 허용
             ;;
           gh\ *|gh:*)
