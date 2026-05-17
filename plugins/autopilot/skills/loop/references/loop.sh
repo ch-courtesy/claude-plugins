@@ -1318,7 +1318,7 @@ cmd_status() {
       # gh 부재·미설정 시 task_status_is_blocked가 1을 반환해 자연스럽게 idle로 떨어진다.
       if task_status_is_blocked "$tid"; then
         state="blocked"
-      elif [[ -f "$wt/DONE" ]]; then
+      elif task_status_is_done "$tid"; then
         state="done"
       else
         state="idle"
