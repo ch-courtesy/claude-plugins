@@ -182,6 +182,7 @@ LOOP_REQ=(
   'Bash(bash * loop.sh cleanup *)'
   'Bash(bash * loop.sh logs *)'
   'Bash(tail -F /private/tmp/* | grep -E --line-buffered *)'
+  'Bash(tail -F /tmp/* | grep -E --line-buffered *)'
 )
 
 # issue #113 본문의 `공통·보조` 섹션 패턴 (gh 패턴 제외)
