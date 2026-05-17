@@ -293,8 +293,12 @@ while (( iter < MAX_ITER )); do
                           --jq '[.statusCheckRollup[]? | select((.status // "COMPLETED") != "COMPLETED")] | length' 2>/dev/null || echo "" )
       total_reviews=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviews --jq '.reviews | length' 2>/dev/null || echo "" )
       total_comments=$( cd "$WT" && gh pr view "$PR_NUMBER" --json comments --jq '.comments | length' 2>/dev/null || echo "" )
-      if [[ "$pending_checks" == "0" && "$total_reviews" == "0" && "$total_comments" == "0" ]]; then
-        emit_escalation "silent-fail 감지 (stuck): ${CONSECUTIVE_IDLE}회 연속 idle + PR check 완료 + 리뷰·코멘트·owner cmd 모두 부재 — 사용자 개입 필요 (PR #$PR_NUMBER)"
+      # inline review thread comments는 `/pulls/{n}/comments` REST endpoint에 별도로 산다 —
+      # `gh pr view --json comments`는 `/issues/{n}/comments`(PR-level conversation)만 반영하므로
+      # claude-review가 inline만 게시한 케이스에서 false-positive ESCALATION을 막으려면 추가 체크.
+      total_inline=$( cd "$WT" && gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/comments" --jq 'length' 2>/dev/null || echo "" )
+      if [[ "$pending_checks" == "0" && "$total_reviews" == "0" && "$total_comments" == "0" && "$total_inline" == "0" ]]; then
+        emit_escalation "silent-fail 감지 (stuck): ${CONSECUTIVE_IDLE}회 연속 idle + PR check 완료 + 리뷰·코멘트·inline·owner cmd 모두 부재 — 사용자 개입 필요 (PR #$PR_NUMBER)"
         exit 1
       fi
       # 자연 idle (리뷰어 응답 대기 등) — 카운터만 리셋, 폴링 계속
@@ -333,7 +337,7 @@ You are a fix worker for PR #$PR_NUMBER on branch '$BRANCH'.
 New review events:
 $new_events
 
-Full PR comment/review JSON (for reference):
+Full PR comment/review context (for reference):
 $fix_prompt_body
 
 Goal:
