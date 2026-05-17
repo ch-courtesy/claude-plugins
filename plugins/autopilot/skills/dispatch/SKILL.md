@@ -30,8 +30,7 @@ description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave
      · 게이트 ③ spec 위임 (per-wave): 그 wave 의 각 child 분해 plan 항목에 Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>") — task-id 는 spec 이 task 생성 단계에서 결정. spec 의 dispatch-위임 모드 auto-loop-start 로 그 wave 의 child loop 가 자동 시작
      · sentinel watch (Bash(dispatch.sh watch_wave ...)) — 이 wave 의 DONE/ESCALATION 감시
      · 성공 시 다음 wave 의 게이트 ③ per-wave 로 진행. wave 끝까지 반복
-   → sentinel watch (DONE/ESCALATION.md)
-   → fail-fast (ESCALATION 시 같은 wave 다른 child들 loop stop)
+       (sentinel watch · fail-fast 는 per-wave 단계에 포함 — 마일스톤 레벨 별도 sentinel 없음)
    → wave 모두 통과 후 최종 보고
 ```
 
