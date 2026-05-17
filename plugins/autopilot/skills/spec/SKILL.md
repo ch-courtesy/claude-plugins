@@ -156,10 +156,25 @@ SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점
 
 1. `gh issue view <task-id> --json body --jq .body`로 현재 Issue body를 읽는다.
 2. `milestones/<m>/loops/<c>/SPEC.md`에서 SPEC.md 전문을 읽는다.
-3. 새 body를 구성한다:
-   - **자리표시 2줄은 step 2에서 박은 그대로 유지(placeholder 유지·보존)한다.** 첫 두 줄이 자리표시 패턴이 아니면 비표준 입력으로 보고 즉시 abort — 본 SPEC 범위는 step 2가 만든 표준 구조의 issue로 한정.
-   - 자리표시 2줄 아래에 빈 줄 · `<!-- autopilot:spec-sync:begin -->` · `## SPEC.md (auto-synced)` 헤딩 · 빈 줄 · SPEC.md 전문 · `<!-- autopilot:spec-sync:end -->`를 둔다.
-   - 기존 body에 동기화 블록(`<!-- autopilot:spec-sync:begin -->`로 시작해 `<!-- autopilot:spec-sync:end -->`로 끝나는 묶음)이 이미 존재하면 그 fence 사이만 replace한다. 동기화 블록 *바깥*의 사용자 추가 내용(자리표시 2줄, end fence 이후 추가 섹션 등)은 그대로 보존한다.
+3. 새 body를 구성한다 — 다음 두 하위 단계를 순서대로 적용:
+
+   **3-a. 자리표시 2줄 검증 (abort 게이트)**
+
+   `references/task-state-alignment.md`가 정의한 step 2 자리표시 2줄 패턴을 기준으로 Issue body의 첫 두 줄이 다음과 정확히 일치하는지 확인 (placeholder 유지·보존). 두 줄 모두 정규식과 일치해야 한다:
+
+   - **line 1**: `^spec 워크플로우 step 2에서 자동 생성\.` 로 시작
+   - **line 2**: `^SPEC: milestones/[^/]+/loops/[^/]+/SPEC\.md$`
+
+   하나라도 불일치 시 비표준 입력으로 즉시 **abort** — 본 SPEC 범위는 step 2가 만든 표준 구조의 issue로 한정.
+
+   **3-b. first-sync vs re-sync 분기**
+
+   기존 body 안에 `<!-- autopilot:spec-sync:begin -->` ~ `<!-- autopilot:spec-sync:end -->` fence 쌍이 존재하는지 검사한 결과로 분기:
+
+   - **first-sync (fence 부재)**: 자리표시 2줄을 그대로 유지한 채, 그 *아래에* 빈 줄 · `<!-- autopilot:spec-sync:begin -->` · `## SPEC.md (auto-synced)` 헤딩 · 빈 줄 · SPEC.md 전문 · `<!-- autopilot:spec-sync:end -->` 를 *append*. 기존 body의 자리표시 2줄 이후 사용자 추가 섹션이 있으면(드문 케이스이나 가능), end fence 이후로 그대로 밀어 보존한다 — 덮어쓰지 않는다.
+   - **re-sync (fence 쌍 존재)**: begin/end fence *사이*만 새 헤딩·빈 줄·SPEC.md 전문으로 replace. fence 자체와 fence *바깥* 모든 내용(자리표시 2줄, end fence 이후 사용자 추가 섹션 등)은 그대로 보존한다.
+
+   두 분기 모두 동기화 블록 바깥의 사용자 추가 내용은 보존이 원칙이며, 어느 분기에서도 덮어쓰지 않는다.
 4. `gh issue edit <task-id> --body-file <tempfile>`로 update. SPEC.md 전문은 멀티라인·frontmatter·backtick을 포함하므로 인라인 `--body "..."`로 셸 전달하면 파싱이 실패한다. 반드시 임시 파일을 거친다:
 
    ```bash
