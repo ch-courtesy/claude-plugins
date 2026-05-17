@@ -82,8 +82,17 @@ touch "$SEEN_FILE"
 is_seen() { grep -qxF "$1" "$SEEN_FILE" 2>/dev/null; }
 mark_seen() { echo "$1" >> "$SEEN_FILE"; }
 
-# 반박 코멘트 1회 게시 가드 (AC10·AC11) — 본 phase 동안 1개만 허용.
+# 반박 코멘트 1회 게시 가드 — PR-level dispute에 한정 (AC6 기존 동작 보존).
+# 인라인 thread reply는 별도 REPLIED_THREADS_FILE로 thread 단위 dedup (SPEC 153 AC4·AC5).
 DISPUTE_FILE="$WT/.iterations/review-fix-dispute-posted"
+
+# 인라인 thread reply dedup — 본 phase 사이클 동안 같은 thread에 최대 1개 reply (AC4).
+# 서로 다른 thread는 각각 reply 허용 (AC5: phase 단위 상한 없음).
+REPLIED_THREADS_FILE="$WT/.iterations/review-fix-replied-threads"
+touch "$REPLIED_THREADS_FILE"
+
+is_thread_replied() { grep -qxF "$1" "$REPLIED_THREADS_FILE" 2>/dev/null; }
+mark_thread_replied() { echo "$1" >> "$REPLIED_THREADS_FILE"; }
 
 # owner cmd dedup — 매 폴링마다 동일 owner 코멘트 재처리 방지.
 OWNER_CMD_SEEN_FILE="$WT/.iterations/owner-cmd-seen-ids"
@@ -95,6 +104,10 @@ AUTO_MERGE_FAIL_MAX="${LOOP_REVIEW_AUTO_MERGE_FAIL_MAX:-5}"
 
 # ----- PR owner 식별 (owner cmd 검사용) -----
 PR_OWNER=$( cd "$WT" && gh pr view "$PR_NUMBER" --json author --jq '.author.login' 2>/dev/null || echo "" )
+
+# ----- OWNER/REPO 식별 (인라인 thread reply용 gh api URL 구성) -----
+# `repos/<owner>/<repo>/pulls/<n>/comments`에 in_reply_to=<comment-id>로 POST 시 사용.
+OWNER_REPO=$( cd "$WT" && gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || echo "" )
 
 # ----- 종료 시 cleanup-phase 호출 헬퍼 -----
 finalize_merged() {
@@ -156,6 +169,62 @@ collect_new_events() {
     local id="thread:$raw_id"
     is_seen "$id" || echo "$id"
   done < <( printf '%s' "$pr_json" | jq -r '.reviewThreads[]?.comments[]?.id // empty' )
+}
+
+# 신규 인라인 thread comments 수집 (SPEC 153 AC1·AC2·AC3·AC4).
+#
+# 출력: 새로운 inline thread comment마다 TSV 한 줄 — `<thread_id>\t<comment_id>\t<body>`
+# (본문 내 탭/개행은 공백으로 정규화).
+#
+# `collect_new_events`가 emit하는 `thread:<comment_id>` 라인(SEEN_FILE dedup용)과
+# 짝을 이룬다. 이 함수의 TSV는 본 phase가 (a) per-inline-comment 단위 응답 분기
+# (b) thread_id 기반 reply dedup(REPLIED_THREADS_FILE) 적용에 필요한 메타데이터를
+# 제공한다.
+collect_new_inline_thread_comments() {
+  local pr_json
+  pr_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviewThreads 2>/dev/null || echo '{}')
+  printf '%s' "$pr_json" | jq -r '
+    .reviewThreads[]?
+    | . as $t
+    | .comments[]?
+    | [
+        ($t.id // ""),
+        (.id // "" | tostring),
+        (.body // "" | gsub("\t"; " ") | gsub("\n"; " "))
+      ]
+    | @tsv
+  ' | while IFS=$'\t' read -r tid cid body; do
+    [[ -z "$cid" ]] && continue
+    local seen_id="thread:$cid"
+    if ! is_seen "$seen_id"; then
+      printf '%s\t%s\t%s\n' "$tid" "$cid" "$body"
+    fi
+  done
+}
+
+# 인라인 thread reply 게시 (SPEC 153 AC3). thread 단위 dedup(AC4) 적용.
+# 성공 시 0, 실패 시 1 — caller가 다음 iter 재시도 여부 결정.
+post_inline_thread_reply() {
+  local tid="$1" cid="$2" body="$3"
+  if [[ -z "$OWNER_REPO" ]]; then
+    echo "WARN: OWNER_REPO 미식별 — 인라인 thread reply 게시 불가 (thread=$tid)" >&2
+    return 1
+  fi
+  if is_thread_replied "$tid"; then
+    echo "[review-fix-phase] thread $tid 이미 reply 게시됨 — skip (AC4 thread dedup)"
+    return 0
+  fi
+  echo "[review-fix-phase] 인라인 thread reply 게시: thread=$tid comment=$cid"
+  if ( cd "$WT" && gh api \
+         --method POST \
+         "repos/$OWNER_REPO/pulls/$PR_NUMBER/comments" \
+         -f body="[autopilot:dispute] $body" \
+         -F in_reply_to="$cid" >/dev/null 2>&1 ); then
+    mark_thread_replied "$tid"
+    return 0
+  fi
+  echo "WARN: gh api inline thread reply 실패 (thread=$tid comment=$cid) — 다음 iter 재시도" >&2
+  return 1
 }
 
 # fix iter 성공 후 한 묶음으로 seen 마킹 — 실패 분기에서는 호출되지 않으므로 다음
@@ -232,7 +301,10 @@ while (( iter < MAX_ITER )); do
 
   # (d) 신규 이벤트 수집·dispatch
   new_events="$( collect_new_events )"
-  if [[ -z "$new_events" ]]; then
+  # 인라인 thread comments는 별도 TSV로도 수집 — 본 phase가 thread/comment ID와 본문을
+  # 알아야 (1) per-comment 분기 verdict 해석, (2) thread 단위 reply dedup 적용이 가능.
+  new_inline_tsv="$( collect_new_inline_thread_comments )"
+  if [[ -z "$new_events" && -z "$new_inline_tsv" ]]; then
     sleep "$POLL_SECS"
     continue
   fi
@@ -242,6 +314,13 @@ while (( iter < MAX_ITER )); do
   printf '%s\n' "$new_events" | while IFS= read -r e; do
     [[ -n "$e" ]] && echo "  - $e"
   done
+  if [[ -n "$new_inline_tsv" ]]; then
+    echo "  inline thread comments:"
+    while IFS=$'\t' read -r tid cid body; do
+      [[ -z "$cid" ]] && continue
+      echo "    - thread=$tid comment=$cid"
+    done <<< "$new_inline_tsv"
+  fi
 
   # (i) 재-rebase (AC7) — 실패 시 다음 iter에서 재시도 (recoverable)
   if ! bash "$SCRIPT_DIR/rebase-phase.sh" "$WT" "$BRANCH" "$PROJECT_ROOT"; then
@@ -250,23 +329,38 @@ while (( iter < MAX_ITER )); do
     continue
   fi
 
-  # (ii) claude CLI fix 세션 (AC8) — 새 이벤트 본문을 stdin으로 전달
+  # (ii) claude CLI fix 세션 (AC8) — 새 이벤트 본문을 stdin으로 전달.
+  # SPEC 153: 인라인 thread comment는 per-comment 단위로 verdict를 요구한다 — FIX는
+  # 그 코멘트가 가리키는 코드를 직접 수정, DISPUTE는 해당 inline thread 안에 reply.
+  # PR-level comment·review summary는 기존 batch 'DISPUTE: ' 프로토콜 보존 (AC6).
   fix_prompt_body=$( cd "$WT" && gh pr view "$PR_NUMBER" --json comments,reviews,reviewThreads 2>/dev/null || echo "")
   claude_prompt=$(cat <<EOF
 You are a fix worker for PR #$PR_NUMBER on branch '$BRANCH'.
-New review events:
+
+New review events (PR-level comments + review summaries + inline thread comment ids):
 $new_events
+
+Inline thread comments (TSV: <thread_id>\t<comment_id>\t<body>):
+$new_inline_tsv
 
 Full PR comment/review JSON (for reference):
 $fix_prompt_body
 
-Goal:
-  - For each new event, decide if reviewer is correct → fix the code (Edit/Write).
-  - If reviewer is wrong → output a single line starting with 'DISPUTE: ' followed by
-    a short dispute body (the caller will post it as ONE PR comment via gh pr comment).
-  - DO NOT push, commit, or create PRs yourself. DO NOT post comments yourself.
+PROTOCOL:
+  For PR-level comments and review summaries (batched, collective decision):
+    - If you accept → fix the code (Edit/Write).
+    - If reviewer is wrong → output a single line starting with 'DISPUTE: ' followed by
+      a short dispute body (the caller will post it as ONE PR-level comment).
+  For EACH inline thread comment listed above (per-comment 1:1 response):
+    - If reviewer is correct → fix the referenced code AND output:
+        INLINE <thread_id> <comment_id> FIX
+    - If reviewer is wrong → output:
+        INLINE <thread_id> <comment_id> DISPUTE <one-line dispute body>
+    - Take a CONSERVATIVE stance: when uncertain whether the reviewer is right,
+      prefer FIX over DISPUTE (reviewer-bot 갈등 완화).
+  DO NOT push, commit, or post comments yourself.
 
-After working, output 'DONE' on the last line (or 'DISPUTE: ...' if disputing).
+After working, output 'DONE' on the last line.
 EOF
 )
 
@@ -298,19 +392,33 @@ EOF
       || { echo "WARN: fix commit/push 실패 (iter $iter) — 다음 iter 재시도 (phase 계속)" >&2; sleep "$POLL_SECS"; continue; }
   fi
 
-  # (iv) DISPUTE 본문 감지 → PR 코멘트 1회 게시 (AC10·AC11)
+  # (iv-A) PR-level DISPUTE 본문 감지 → PR 코멘트 1회 게시 (AC6 기존 동작 보존).
+  # SPEC 153 AC6: PR-level comment 처리 경로는 변경 없이 보존된다 — phase당 1회 가드 유지.
   dispute_line=$( grep -m1 -E '^DISPUTE:' "$WT/$fix_log" 2>/dev/null || true )
   if [[ -n "$dispute_line" && ! -f "$DISPUTE_FILE" ]]; then
     dispute_body="${dispute_line#DISPUTE: }"
-    # 반박 게시 — gh pr comment (AC10): 1개 코멘트만.
-    echo "[review-fix-phase] 반박 코멘트 게시 (dispute)"
+    # 반박 게시 — gh pr comment: PR-level 1개 코멘트.
+    echo "[review-fix-phase] PR-level 반박 코멘트 게시 (dispute)"
     if ( cd "$WT" && gh pr comment "$PR_NUMBER" --body "[autopilot:dispute] $dispute_body" 2>&1 ); then
       touch "$DISPUTE_FILE"
     else
       # recoverable: 다음 iter에서 재시도 가능 (DISPUTE_FILE 없으므로 동일 dispute 재시도)
-      echo "WARN: gh pr comment 실패 (반박 게시) — 다음 iter 재시도 (phase 계속)" >&2
+      echo "WARN: gh pr comment 실패 (PR-level 반박 게시) — 다음 iter 재시도 (phase 계속)" >&2
     fi
   fi
+
+  # (iv-B) 인라인 thread comment per-comment verdict 파싱·dispatch (SPEC 153 AC1·AC3·AC4·AC5).
+  # 라인 형식: `INLINE <thread_id> <comment_id> DISPUTE <body...>`
+  # FIX verdict는 본 단계에서 별도 동작 없음 — 코드 변경은 (iii) commit/push가 이미 처리.
+  # DISPUTE verdict는 해당 inline thread 안에 reply 1개 게시 (thread 단위 dedup).
+  # phase 단위 횟수 상한 없음 — 서로 다른 thread들에 각각 reply 가능 (AC5).
+  while IFS= read -r ln; do
+    [[ "$ln" =~ ^INLINE[[:space:]]+([^[:space:]]+)[[:space:]]+([^[:space:]]+)[[:space:]]+DISPUTE[[:space:]]+(.*)$ ]] || continue
+    tid="${BASH_REMATCH[1]}"
+    cid="${BASH_REMATCH[2]}"
+    body="${BASH_REMATCH[3]}"
+    post_inline_thread_reply "$tid" "$cid" "$body" || true
+  done < "$WT/$fix_log"
 
   # 모든 단계 성공 — 본 iter의 new_events ID들을 seen 마킹 (실패 분기에서는 미도달)
   printf '%s\n' "$new_events" | mark_events_seen
