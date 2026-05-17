@@ -126,9 +126,82 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 `<c>` 는 input task-id (단계 1 통과값). 본 디렉토리 이름의 `<slug>` 가 sibling `autopilot:loop` 이 발견하는 feat 브랜치 `feat/<c>-<slug>` 의 `<slug>` 와 동일해 spec→loop 라운드트립이 단일 컨벤션으로 정합. `mkdir -p` 후 `SPEC.md` 기록.
 
+기록 직후 §8.2 «SPEC.md write → Issue body sync» 절차가 단일 trigger로 발동된다.
+
+### 8.2 SPEC.md write → Issue body sync (단일 trigger)
+
+SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점에서 본 절차가 단일 trigger로 발동된다. 발동 경로:
+
+- step 8 최초 작성 직후
+- step 9 자체 검토 인라인 수정으로 SPEC.md를 재기록한 직후
+- step 10 "변경" 분기 → step 7/8 재진입 후 재기록한 직후
+- `--resume` 모드에서의 마커 해결 후 재기록한 직후
+
+발동 시점에 task-id에 해당하는 GitHub Issue body를 다음 구조로 갱신한다 (`rules/context.md`의 Issue body 구조 규약과 step 2가 박은 자리표시를 모두 유지):
+
+```
+<step 2가 박은 자리표시 1줄 — spec 워크플로우 step 2에서 자동 생성. 본문은 SPEC.md 작성·승인 후 갱신될 예정.>
+<step 2가 박은 자리표시 2줄 — SPEC: milestones/<m>/loops/<task-id>/SPEC.md>
+
+<!-- autopilot:spec-sync:begin -->
+## SPEC.md (auto-synced)
+
+<SPEC.md 전문 그대로>
+<!-- autopilot:spec-sync:end -->
+```
+
+동기화 블록의 경계는 **고유 HTML 코멘트 fence** — `<!-- autopilot:spec-sync:begin -->` ~ `<!-- autopilot:spec-sync:end -->` — 로만 식별한다. SPEC.md가 YAML frontmatter(`---` … `---`)를 포함해도 본문 안의 `---`를 경계로 오해할 여지가 없다. fence는 GitHub Markdown에 렌더되지 않으므로 사용자 가독성에는 영향이 없다.
+
+#### 8.2.1 절차
+
+1. `gh issue view <task-id> --json body --jq .body`로 현재 Issue body를 읽는다.
+2. `milestones/<m>/loops/<c>/SPEC.md`에서 SPEC.md 전문을 읽는다.
+3. 새 body를 구성한다 — 다음 두 하위 단계를 순서대로 적용:
+
+   **3-a. 자리표시 2줄 검증 (abort 게이트)**
+
+   `references/task-state-alignment.md`가 정의한 step 2 자리표시 2줄 패턴을 기준으로 Issue body의 첫 두 줄이 다음과 정확히 일치하는지 확인 (placeholder 유지·보존). 두 줄 모두 정규식과 일치해야 한다:
+
+   - **line 1**: `^spec 워크플로우 step 2에서 자동 생성\.` 로 시작
+   - **line 2**: `^SPEC: milestones/[^/]+/loops/[^/]+/SPEC\.md$`
+
+   하나라도 불일치 시 비표준 입력으로 즉시 **abort** — 본 SPEC 범위는 step 2가 만든 표준 구조의 issue로 한정.
+
+   **3-b. first-sync vs re-sync 분기**
+
+   기존 body 안에 `<!-- autopilot:spec-sync:begin -->` ~ `<!-- autopilot:spec-sync:end -->` fence 쌍이 존재하는지 검사한 결과로 분기:
+
+   - **first-sync (fence 부재)**: 자리표시 2줄을 그대로 유지한 채, 그 *아래에* 빈 줄 · `<!-- autopilot:spec-sync:begin -->` · `## SPEC.md (auto-synced)` 헤딩 · 빈 줄 · SPEC.md 전문 · `<!-- autopilot:spec-sync:end -->` 를 *append*. 기존 body의 자리표시 2줄 이후 사용자 추가 섹션이 있으면(드문 케이스이나 가능), end fence 이후로 그대로 밀어 보존한다 — 덮어쓰지 않는다.
+   - **re-sync (fence 쌍 존재)**: begin/end fence *사이*만 새 헤딩·빈 줄·SPEC.md 전문으로 replace. fence 자체와 fence *바깥* 모든 내용(자리표시 2줄, end fence 이후 사용자 추가 섹션 등)은 그대로 보존한다.
+
+   두 분기 모두 동기화 블록 바깥의 사용자 추가 내용은 보존이 원칙이며, 어느 분기에서도 덮어쓰지 않는다.
+4. `gh issue edit <task-id> --body-file <tempfile>`로 update. SPEC.md 전문은 멀티라인·frontmatter·backtick을 포함하므로 인라인 `--body "..."`로 셸 전달하면 파싱이 실패한다. 반드시 임시 파일을 거친다:
+
+   ```bash
+   tmp=$(mktemp)
+   printf '%s' "$new_body" > "$tmp"
+   gh issue edit <task-id> --body-file "$tmp"
+   rm -f "$tmp"
+   ```
+
+5. 호출이 0이 아닌 exit으로 실패하면 step 2의 기존 `gh` 실패 처리와 동일하게 명확한 에러 메시지와 함께 **abort(중단)**. 자동 roll-back은 수행하지 않으며 disk의 SPEC.md는 그대로 두고 Issue body만 옛 상태로 남는 부분 상태를 사용자에게 명시적으로 알린다. tempfile은 abort 경로에서도 `rm -f`로 정리한다.
+
+#### 8.2.2 한도·경쟁·범위 외
+
+- 큰 SPEC.md가 GitHub Issue body 길이 한도(65536 chars)를 초과하면 step 4와 동일하게 abort + 사용자 안내. 일반 SPEC 규모로는 드문 케이스.
+- 동일 task에 spec 호출이 동시 실행되는 경우 Issue body update 순서에 경쟁 조건이 발생할 수 있다 — spec 호출은 일반적으로 대화형으로 직렬화되므로 실무 발생 확률 낮음. 경쟁 탐지·잠금은 본 SPEC 범위 외.
+- 기존 비표준 Issue body(수동 생성·구분자 없음)의 retroactive migration은 본 SPEC 범위 외 — abort + 사용자 안내로 처리.
+- 역방향 sync(Issue body → SPEC.md), 라벨·assignee 등 다른 metadata 변경은 본 SPEC 범위 외.
+
+#### 8.2.3 Self-referential 규약과 현재 호출 면제
+
+본 스킬은 자기 자신에게도 적용된다 — 본 §8.2 규약을 정의하는 SPEC.md가 이후 `--resume`되거나 다른 task의 spec 호출이 일어나면 그 시점부터는 자기 issue body도 sync 대상이다.
+
+다만 **메모리 노트 `feedback_no_self_apply_during_spec`에 따라**, 본 SPEC.md를 작성하는 *현재 호출*에서는 새 contract를 선행 적용하지 않고 현 스킬 규칙으로 마친다 — 새 동작은 다음 spec 호출부터 적용된다. (self-referential SPEC를 같은 호출의 산출물에 미리 선행 적용하지 않는 규약, 단 현재 호출 면제.)
+
 ### 9. 자체 검토
 
-`references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 또는 `[NEEDS CLARIFICATION]` 마커만 — 사용자 Q&A 없음(단계 10에서 일괄 해결). 재루프 없음. 수정·마커 후 SPEC.md 재기록.
+`references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 또는 `[NEEDS CLARIFICATION]` 마커만 — 사용자 Q&A 없음(단계 10에서 일괄 해결). 재루프 없음. 수정·마커 후 SPEC.md 재기록 — 재기록 직후 §8.2 sync trigger가 다시 발동된다.
 
 #### 9.1 subagent 위임 (선택)
 
@@ -156,6 +229,7 @@ SPEC.md 경로(§8.1 slug-bearing)·요약 안내 후 `AskUserQuestion`으로 **
 - 2: 일반 모드와 동일(보통 (b) 설계 상태 분기로 변경 없이 통과)
 - 4: 생략 (이미 SPEC 존재)
 - 5, 6, 7: 마커 박힌 섹션만
+- 8 / 8.1: SPEC.md를 재기록하므로 §8.2 sync trigger가 동일하게 발동된다.
 - 나머지 동일
 
 ## 모듈 구성 (references/)
