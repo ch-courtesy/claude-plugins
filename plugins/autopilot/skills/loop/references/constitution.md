@@ -358,8 +358,8 @@ fix 시도 전에 다음을 모두 수행한다.
 4. 이번 이터가 `fix:symptom`이면 task 메모리의 계획 섹션 재검토 (§3.3 자체 교정 게이트) — 영향 마일스톤의 정의·검증·영향 영역·위험을 다시 보고 가정이 깨졌으면 갱신
 5. Self-Review (4축, §3.5) — Completeness·Quality·Discipline·Testing. 한 축이라도 의심 남으면 1단계의 `handoff` 신호 본문에 `## 의심점` 섹션을 포함시키고 7단계의 `done` 신호 발행 보류
 6. git commit — 자기 분류 prefix로 시작 (이터간 상태는 task 메모리 갱신으로 처리되므로 별도의 메타 commit이 생기지 않음)
-7. 완료 판정 — 4-Level Verifier (§3.4) + Self-Review 4축 모두 통과 → `done` 신호 발행·종료
-8. 진전 불가능 → task 상태를 `blocked`로 전이 + `blocked` 신호 발행·종료 (양식: §5.2, 카테고리 명시)
+7. 완료 판정 — 4-Level Verifier (§3.4) + Self-Review 4축 모두 통과 → `done` 신호 발행·종료. 발행 시점에 task 저장소에 드라이버의 `LOOP_DONE_LABEL`(기본값 `loop:done`) 값과 일치하는 label을 함께 부착한다 — 드라이버가 이 label 존재를 완료 검출 키로 사용하므로 누락되면 완료가 감지되지 않는다.
+8. 진전 불가능 → task 상태를 `blocked`로 전이 + `blocked` 신호 발행·종료 (양식: §5.2, 카테고리 명시). 전이 시점에 task 상태 field 값을 `Blocked`로 설정한다 — 드라이버가 Status=Blocked를 정지 검출 키로 사용한다.
 
 ### 11.3 `notes` 신호의 "실패한 접근"
 
