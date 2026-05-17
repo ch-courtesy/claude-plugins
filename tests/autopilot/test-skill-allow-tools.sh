@@ -12,6 +12,11 @@
 #
 # 비교 기준 집합(AC7·AC8)은 SPEC 작성 시점의 issue body를 frozen reference로
 # 본 스크립트에 박는다. 외부 API 호출은 수행하지 않는다.
+#
+# 의존성:
+#   - yq (mikefarah Go 구현) — frontmatter YAML parse용.
+#       macOS: brew install yq
+#       Linux: apt install yq  /  snap install yq  /  https://github.com/mikefarah/yq/releases
 
 set -euo pipefail
 
@@ -22,7 +27,7 @@ LOOP_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/loop/SKILL.md"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
 
-command -v yq >/dev/null 2>&1 || fail "yq (mikefarah) 필요 — target 프로젝트 의존성"
+command -v yq >/dev/null 2>&1 || fail "yq (mikefarah) 필요 — target 프로젝트 의존성. 설치: macOS \`brew install yq\` / Linux \`apt install yq\` 또는 https://github.com/mikefarah/yq/releases"
 
 [[ -f "$SPEC_SKILL_MD" ]] || fail "$SPEC_SKILL_MD 부재"
 [[ -f "$LOOP_SKILL_MD" ]] || fail "$LOOP_SKILL_MD 부재"

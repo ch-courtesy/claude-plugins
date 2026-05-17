@@ -24,8 +24,6 @@ allowed-tools:
   - Bash(grep:*)
   - Bash(echo:*)
   - Bash(head:*)
-  - Bash(tr:*)
-  - Bash(sed:*)
   # SPEC 113 — issue #113 본문 `autopilot:spec` 섹션 (직전 세션 실측)
   - Bash(git -C * rev-parse *)
   - Bash(git -C * status --porcelain)

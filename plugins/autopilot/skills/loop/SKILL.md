@@ -11,6 +11,7 @@ allowed-tools:
   - Bash(bash * loop.sh cleanup *)
   - Bash(bash * loop.sh logs *)
   - Bash(tail -F /private/tmp/* | grep -E --line-buffered *)
+  - Bash(tail -F /tmp/* | grep -E --line-buffered *)
   # SPEC 113 — issue #113 본문 `공통·보조` 섹션
   - Bash(git -C * stash list)
   - Bash(git -C * stash pop *)
