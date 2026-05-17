@@ -111,7 +111,10 @@ UX·시각 신호가 없으면 본 step은 "해당 없음" 한 줄 통과 — �
 
 판정 결과:
 - **단일 PRD로 충분** → 통과, step 4로 진행
-- **분해 필요** → `AskUserQuestion`으로 사용자에게 알리고 PRD 작성을 중단. 권고: "이 milestone을 milestone A·B로 쪼개고, A부터 `Skill(skill: \"prd\", args: \"<A>\")`를 다시 호출하세요."
+- **분해 필요** → `AskUserQuestion`으로 사용자에게 판정 근거를 안내하고 3옵션을 받는다 (step 1의 3옵션 패턴과 동일):
+  - (a) 분해 후 재시작 — 권고. PRD 작성을 중단하고 "이 milestone을 milestone A·B로 쪼갠 뒤, A부터 `Skill(skill: \"prd\", args: \"<A>\")`를 다시 호출하세요" 안내 후 종료
+  - (b) 그래도 단일 PRD로 계속 — 사용자가 판정을 override. "분해 필요로 판정됐으나 사용자 결정으로 단일 PRD 진행" 한 줄을 자체 기록으로 남기고 step 4로 진행
+  - (c) 범위 줄여 다시 판정 — step 3 명확화 라운드의 범위 항목으로 되돌아가 축소 합의 후 본 step을 재실행
 
 **dispatch 분해와의 책임 분리** (사용자 인터랙션 중복 회피):
 - 본 step의 milestone-fit은 *PRD 자체의 결착 가능성*만 본다 — "이 milestone-id가 단일 PRD 한 장으로 끝낼 수 있는가"
