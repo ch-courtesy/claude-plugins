@@ -123,39 +123,69 @@ try_auto_merge() {
   return 0
 }
 
-# ----- 새 이벤트 수집 (PR comments + review threads + review summary) -----
+# ----- 새 이벤트 수집 (3 소스 *독립 호출*) -----
 # 3 소스의 모든 항목 ID 화이트리스트 후 SEEN_FILE에 없는 것만 new로 분류.
-# - PR-level comments: gh api repos/{owner}/{repo}/issues/{n}/comments
-# - Review summaries: gh pr view --json reviews
-# - Review threads (inline): gh pr view --json reviewThreads → 각 comment ID
+# 한 소스 fetch 실패가 다른 소스를 차단하지 않도록 *각각 독립 호출*. 단일
+# `gh pr view --json reviews,...,comments` 묶음 호출은 일부 gh CLI 버전이
+# 특정 필드(예: 과거의 inline review-thread 필드)를 지원하지 않을 때 호출
+# 전체가 비-zero exit으로 실패하고 fallback이 빈 JSON으로 묻혀 silent-fail의
+# 원인이 되었음.
+# - PR-level issue comments         : gh api repos/{owner}/{repo}/issues/{n}/comments
+# - Review summaries                : gh api repos/{owner}/{repo}/pulls/{n}/reviews
+# - Review thread inline comments   : gh api repos/{owner}/{repo}/pulls/{n}/comments
+# (REST endpoint로 통일해 gh CLI 버전 의존성을 최소화.)
+#
+# 호출 실패는 caller(폴링 루프)의 silent-fail / stuck 감지에 사용되므로
+# FETCH_FAIL_FILE에 0|1 한 줄로 기록한다 — `$()` 캡처로 stdout이 변수에 묶이는
+# 본 함수의 구조상 함수의 반환값을 이용해 fetch 실패를 전달할 수 없기 때문.
+FETCH_FAIL_FILE="$WT/.iterations/review-fix-last-fetch-fail"
 collect_new_events() {
   # 후보 ID만 emit (mark_seen은 caller가 성공 후에 별도 호출). 본 함수는 `$()`로
   # 호출돼 stdout이 변수로 캡처되므로 여기서 mark_seen하면 caller가 fix 실패해도
   # 이미 영구히 seen 처리됨 — rebase·claude·commit 중 실패 시 재시도 불가능.
   # jq 사전 검사는 진입부에서 완료됨.
-  local pr_json
-  pr_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviews,reviewThreads,comments 2>/dev/null || echo '{}')
+  local fetch_fail=0
+  local raw
 
-  # PR-level comments (issue comments)
-  while IFS= read -r raw_id; do
-    [[ -z "$raw_id" ]] && continue
-    local id="comment:$raw_id"
-    is_seen "$id" || echo "$id"
-  done < <( printf '%s' "$pr_json" | jq -r '.comments[]?.id // empty' )
+  # (1) PR-level issue comments
+  if raw=$( cd "$WT" && gh api "repos/{owner}/{repo}/issues/$PR_NUMBER/comments" 2>/dev/null ); then
+    while IFS= read -r raw_id; do
+      [[ -z "$raw_id" ]] && continue
+      local id="comment:$raw_id"
+      is_seen "$id" || echo "$id"
+    done < <( printf '%s' "$raw" | jq -r '.[]?.id // empty' 2>/dev/null )
+  else
+    fetch_fail=1
+  fi
 
-  # Review summary entries
-  while IFS= read -r raw_id; do
-    [[ -z "$raw_id" ]] && continue
-    local id="review:$raw_id"
-    is_seen "$id" || echo "$id"
-  done < <( printf '%s' "$pr_json" | jq -r '.reviews[]?.id // empty' )
+  # (2) Review summary entries
+  if raw=$( cd "$WT" && gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/reviews" 2>/dev/null ); then
+    while IFS= read -r raw_id; do
+      [[ -z "$raw_id" ]] && continue
+      local id="review:$raw_id"
+      is_seen "$id" || echo "$id"
+    done < <( printf '%s' "$raw" | jq -r '.[]?.id // empty' 2>/dev/null )
+  else
+    fetch_fail=1
+  fi
 
-  # Review threads inline comments
-  while IFS= read -r raw_id; do
-    [[ -z "$raw_id" ]] && continue
-    local id="thread:$raw_id"
-    is_seen "$id" || echo "$id"
-  done < <( printf '%s' "$pr_json" | jq -r '.reviewThreads[]?.comments[]?.id // empty' )
+  # (3) Review thread inline comments — REST endpoint (gh CLI 버전 비의존)
+  if raw=$( cd "$WT" && gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/comments" 2>/dev/null ); then
+    while IFS= read -r raw_id; do
+      [[ -z "$raw_id" ]] && continue
+      local id="thread:$raw_id"
+      is_seen "$id" || echo "$id"
+    done < <( printf '%s' "$raw" | jq -r '.[]?.id // empty' 2>/dev/null )
+  else
+    fetch_fail=1
+  fi
+
+  # 이번 호출의 fetch 실패 여부 기록 — 폴링 루프가 silent-fail / stuck 감지에 사용
+  if (( fetch_fail )); then
+    echo 1 > "$FETCH_FAIL_FILE" 2>/dev/null || true
+  else
+    echo 0 > "$FETCH_FAIL_FILE" 2>/dev/null || true
+  fi
 }
 
 # fix iter 성공 후 한 묶음으로 seen 마킹 — 실패 분기에서는 호출되지 않으므로 다음
@@ -166,6 +196,22 @@ mark_events_seen() {
     mark_seen "$id"
   done
 }
+
+# ----- silent-fail / consecutive-idle 감지 (stuck) -----
+# 폴링이 연속 N회(>=3) 동안 새 이벤트 0건이면 silent-fail 패턴을 검사:
+#   (i)  최근 collect_new_events 호출에서 한 소스라도 fetch 실패 — gh CLI 호환성·
+#        토큰 권한·네트워크 문제로 이벤트를 못 가져왔는데 fallback이 묻혀 0건으로
+#        보이는 경우 (stuck).
+#   (ii) PR check 완료(pending 0) + 리뷰 0 + 코멘트 0 — 리뷰 흐름이 시작도 안 됐고
+#        owner 의사 표시도 없음 (stuck).
+# 위 두 조건 중 하나라도 해당하면 ESCALATION 토큰 emit 후 종료. 어디도 해당 안 되면
+# 자연 idle(리뷰어 응답 대기 등)로 간주하고 카운터만 리셋해 다음 임계까지 계속
+# 폴링한다 — false positive 방지. 임계 N은 envvar로 조정 가능하되 floor 3.
+CONSECUTIVE_IDLE=0
+CONSECUTIVE_IDLE_THRESHOLD="${LOOP_REVIEW_IDLE_THRESHOLD:-3}"
+if (( CONSECUTIVE_IDLE_THRESHOLD < 3 )); then
+  CONSECUTIVE_IDLE_THRESHOLD=3
+fi
 
 # ----- 메인 폴링 루프 -----
 iter=0
@@ -233,9 +279,32 @@ while (( iter < MAX_ITER )); do
   # (d) 신규 이벤트 수집·dispatch
   new_events="$( collect_new_events )"
   if [[ -z "$new_events" ]]; then
+    CONSECUTIVE_IDLE=$((CONSECUTIVE_IDLE + 1))
+    if (( CONSECUTIVE_IDLE >= CONSECUTIVE_IDLE_THRESHOLD )); then
+      # silent-fail / stuck 패턴 검사 — false positive 방지를 위해 두 패턴으로 분리.
+      last_fetch_fail=$( cat "$FETCH_FAIL_FILE" 2>/dev/null || echo 0 )
+      if [[ "$last_fetch_fail" == "1" ]]; then
+        emit_escalation "silent-fail 감지 (stuck): ${CONSECUTIVE_IDLE}회 연속 idle 중 이벤트 fetch 호출 실패 — 사용자 개입 필요 (PR #$PR_NUMBER)"
+        exit 1
+      fi
+      # PR check 완료 + 활동 부재 — 셋 다 명시적으로 "0"일 때만 trigger (값이 비어
+      # 있으면 자체 fetch 실패이므로 위 분기에서 처리; 안전을 위해 false 처리).
+      pending_checks=$( cd "$WT" && gh pr view "$PR_NUMBER" --json statusCheckRollup \
+                          --jq '[.statusCheckRollup[]? | select((.status // "COMPLETED") != "COMPLETED")] | length' 2>/dev/null || echo "" )
+      total_reviews=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviews --jq '.reviews | length' 2>/dev/null || echo "" )
+      total_comments=$( cd "$WT" && gh pr view "$PR_NUMBER" --json comments --jq '.comments | length' 2>/dev/null || echo "" )
+      if [[ "$pending_checks" == "0" && "$total_reviews" == "0" && "$total_comments" == "0" ]]; then
+        emit_escalation "silent-fail 감지 (stuck): ${CONSECUTIVE_IDLE}회 연속 idle + PR check 완료 + 리뷰·코멘트·owner cmd 모두 부재 — 사용자 개입 필요 (PR #$PR_NUMBER)"
+        exit 1
+      fi
+      # 자연 idle (리뷰어 응답 대기 등) — 카운터만 리셋, 폴링 계속
+      CONSECUTIVE_IDLE=0
+    fi
     sleep "$POLL_SECS"
     continue
   fi
+  # 진전 (새 이벤트 감지) — idle 카운터 리셋
+  CONSECUTIVE_IDLE=0
 
   # 새 이벤트 요약 emit (AC6)
   echo "[review-fix-phase] 새 이벤트 감지:"
@@ -251,7 +320,14 @@ while (( iter < MAX_ITER )); do
   fi
 
   # (ii) claude CLI fix 세션 (AC8) — 새 이벤트 본문을 stdin으로 전달
-  fix_prompt_body=$( cd "$WT" && gh pr view "$PR_NUMBER" --json comments,reviews,reviewThreads 2>/dev/null || echo "")
+  # PR header(comments + reviews)와 review thread inline 코멘트를 분리 fetch —
+  # 단일 `--json` 묶음 호출에 thread 필드를 포함시키면 gh CLI 버전에 따라
+  # silent-fail 가능. 호출 실패 시 fallback은 의도적으로 "{}" / "[]"로 유지
+  # (collect_new_events의 FETCH_FAIL_FILE이 silent-fail 감지를 책임지므로,
+  # 본 위치에서 또 한번 escalation을 emit하면 중복·잡음).
+  fix_prompt_header=$( cd "$WT" && gh pr view "$PR_NUMBER" --json comments,reviews 2>/dev/null || echo "{}" )
+  fix_prompt_threads=$( cd "$WT" && gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/comments" 2>/dev/null || echo "[]" )
+  fix_prompt_body=$(printf 'PR comments + reviews:\n%s\n\nReview thread inline comments:\n%s\n' "$fix_prompt_header" "$fix_prompt_threads")
   claude_prompt=$(cat <<EOF
 You are a fix worker for PR #$PR_NUMBER on branch '$BRANCH'.
 New review events:
