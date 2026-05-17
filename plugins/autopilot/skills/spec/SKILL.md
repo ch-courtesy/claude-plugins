@@ -21,7 +21,7 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 `autopilot:dispatch` 가 본 스킬을 위임 호출할 때는 단일 args 형식 `--milestone <m> <자연어 task 설명>` 으로 전달한다 — task 식별자는 dispatch 가 보유하지 않으며 본 스킬이 step 2 task 생성 단계에서 결정한다. dispatch 의 위임 호출로 인식한 경우, step 10 최종 검토의 세 옵션 사용자 질문을 생략하고 후속 **자율 루프를 자동** 시작한다(`Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계). 사용자가 본 스킬을 직접 호출한 경우에는 step 10 의 세 옵션 (loop start · SPEC 만 확정 · 변경) 이 그대로 유지된다.
 
-위임 호출 인식 휴리스틱: args 본문이 task-id 패턴이 아닌 자연어이고 호출 컨텍스트(상위 Skill 호출 체인)에 `autopilot:dispatch` 가 존재. 모호 시 사용자 직접 호출로 간주(safe-default).
+위임 호출 인식 휴리스틱: args 본문이 task-id 패턴이 아닌 자연어이고, **현재 Skill 호출의 직접 부모(immediate caller)가 `autopilot:dispatch`** 인 경우 — 같은 대화 히스토리 안에서 과거 턴에 dispatch 가 사용됐다 해도 현재 호출의 직접 부모가 아니면 위임 모드가 아니다. 모호 시 사용자 직접 호출로 간주(safe-default 가 직접 부모 판별 불가 케이스를 커버).
 
 ## 10단계 워크플로
 
@@ -29,7 +29,7 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 ### 1. 사전 검사
 
-- args 본문(플래그 제외) 형식 검증 (loop.sh의 `validate_task_id` 동일 규칙): 비어 있거나 `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 실패. **args 본문에 슬래시(`/`) 포함 시 거부** — milestone 은 항상 `--milestone <m>` 플래그로만 전달하고, args 본문에는 task 식별자 또는 자연어 task 설명 한 값만 들어간다(한 정보는 한 위치). 과거 컨벤션이던 `<m>/<c>` 본문 형식은 폐기. spec·loop 이 같은 (milestone, task-id) 쌍을 받아야 `--resume` 라운드트립이 성립.
+- args 본문(플래그 제외) 형식 검증 (loop.sh 의 `validate_task_id` 와 **동일한 기본 규칙 + 슬래시 추가 제약**): 비어 있거나 `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 실패. **args 본문에 슬래시(`/`) 포함 시 거부** — `validate_task_id` 자체는 nested task-id 표기를 위해 슬래시를 허용하지만, spec 본문은 슬래시를 거부하는 추가 제약을 둔다. milestone 은 항상 `--milestone <m>` 플래그로만 전달하고, args 본문에는 task 식별자 또는 자연어 task 설명 한 값만 들어간다(한 정보는 한 위치). 과거 컨벤션이던 `<m>/<c>` 본문 형식은 폐기. spec·loop 이 같은 (milestone, task-id) 쌍을 받아야 `--resume` 라운드트립이 성립.
 - milestone 인자 파싱: `--milestone <m>` 명시 시 `<m>` 사용, 미지정 시 **기본 milestone (`regular`)** 적용 — sibling `autopilot:loop` 이 단일 컴포넌트 task-id 를 `regular/<task-id>` 로 정규화하는 컨벤션과 일치. milestone 에도 동일 형식 검증 적용 (단일 컴포넌트 — `/` 미허용).
 - 자연어 입력 감지: args 본문이 task-id 패턴이 아닌 자연어 문장(물음표·따옴표·문장 부호 다중, 길이 ≥ 40자 등 휴리스틱)이면 task 생성 입력으로 분류 — 사용자 직접 호출 시 아래 **검증 실패 라우팅**, dispatch 위임 호출(§호출 방법 — dispatch 위임 모드)에서는 자연어 본문이 정상 입력이므로 task 생성 단계로 바로 진입.
 - 어떤 형태의 검증 실패든 직접 abort/die 하지 않고 라우팅으로 분기. 통과 시 일반/--resume 모드 분기로 진행.
