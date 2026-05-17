@@ -17,21 +17,15 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 또는 사용자가 자연어로 의도 전달 시 모델이 자동 호출.
 
-### dispatch 위임 모드
-
-`autopilot:dispatch` 가 본 스킬을 위임 호출할 때는 단일 args 형식 `--milestone <m> <자연어 task 설명>` 으로 전달한다 — task 식별자는 dispatch 가 보유하지 않으며 본 스킬이 step 2 task 생성 단계에서 결정한다. dispatch 의 위임 호출로 인식한 경우, step 10 최종 검토의 세 옵션 사용자 질문을 생략하고 후속 **자율 루프를 자동** 시작한다(`Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계). 사용자가 본 스킬을 직접 호출한 경우에는 step 10 의 세 옵션 (loop start · SPEC 만 확정 · 변경) 이 그대로 유지된다.
-
-위임 호출 인식 휴리스틱: args 본문이 task-id 패턴이 아닌 자연어이고 호출 컨텍스트(상위 Skill 호출 체인)에 `autopilot:dispatch` 가 존재. 모호 시 사용자 직접 호출로 간주(safe-default).
-
 ## 10단계 워크플로
 
 호출 시 다음 10단계를 TodoWrite로 등록·실행. 각 단계는 사용자 결정·승인을 `AskUserQuestion`으로 받습니다.
 
 ### 1. 사전 검사
 
-- args 본문(플래그 제외) 형식 검증 (loop.sh의 `validate_task_id` 동일 규칙): 비어 있거나 `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 실패. **args 본문에 슬래시(`/`) 포함 시 거부** — milestone 은 항상 `--milestone <m>` 플래그로만 전달하고, args 본문에는 task 식별자 또는 자연어 task 설명 한 값만 들어간다(한 정보는 한 위치). 과거 컨벤션이던 `<m>/<c>` 본문 형식은 폐기. spec·loop 이 같은 (milestone, task-id) 쌍을 받아야 `--resume` 라운드트립이 성립.
-- milestone 인자 파싱: `--milestone <m>` 명시 시 `<m>` 사용, 미지정 시 **기본 milestone (`regular`)** 적용 — sibling `autopilot:loop` 이 단일 컴포넌트 task-id 를 `regular/<task-id>` 로 정규화하는 컨벤션과 일치. milestone 에도 동일 형식 검증 적용 (단일 컴포넌트 — `/` 미허용).
-- 자연어 입력 감지: args 본문이 task-id 패턴이 아닌 자연어 문장(물음표·따옴표·문장 부호 다중, 길이 ≥ 40자 등 휴리스틱)이면 task 생성 입력으로 분류 — 사용자 직접 호출 시 아래 **검증 실패 라우팅**, dispatch 위임 호출(§호출 방법 — dispatch 위임 모드)에서는 자연어 본문이 정상 입력이므로 task 생성 단계로 바로 진입.
+- task-id 형식 검증 (loop.sh의 `validate_task_id` 동일 규칙): 비어 있거나 `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 실패. 슬래시(`/`)는 `--milestone <m>` 명시 시에만 허용 — nested task-id(`sub-area/child` 등)가 정상 사용 사례. `--milestone` 미지정 + 슬래시 포함은 실패(loop.sh의 `normalize_task_id`가 첫 컴포넌트를 milestone으로 해석해 spec default `regular`와 어긋남 → `--resume` 라운드트립 깨짐). spec·loop이 같은 (milestone, task-id) 쌍을 받아야 `--resume` 라운드트립이 성립.
+- milestone 인자 파싱: `--milestone <m>` 명시 시 `<m>` 사용, 미지정 시 default `regular`. milestone에도 동일 형식 검증 적용 (단일 컴포넌트 — `/` 미허용).
+- 자연어 입력 감지: 인자가 task-id 패턴이 아닌 자연어 문장(물음표·따옴표·문장 부호 다중, 길이 ≥ 40자 등 휴리스틱)이면 검증 실패로 분류 — 즉시 abort 대신 아래 **검증 실패 라우팅**.
 - 어떤 형태의 검증 실패든 직접 abort/die 하지 않고 라우팅으로 분기. 통과 시 일반/--resume 모드 분기로 진행.
 - **일반 모드**: `milestones/<m>/loops/<c>/` 존재 시 abort + `AskUserQuestion` 3옵션 (다른 task-id / `--resume` / 백업 후 새로). 이하 `<c>`는 task-id 지칭.
 - **--resume 모드**: `milestones/<m>/loops/<c>/SPEC.md` 부재 시 abort. 잔존 `[NEEDS CLARIFICATION` 마커 0개 시 "해결할 마커 없음" 안내 후 종료
@@ -223,14 +217,11 @@ SPEC.md 작성·자체 검토 후 sibling `autopilot:loop`의 worktree base가 �
 
 ### 10. 사용자 최종 검토
 
-**호출 모드 분기**:
+SPEC.md 경로(§8.1 slug-bearing)·요약 안내 후 `AskUserQuestion`으로 **명시적 결정 입력**(자유 텍스트 종결구 금지 — CLAUDE.md 규칙). 옵션 3개(상호배타):
 
-- **dispatch 위임 모드** (§호출 방법 — dispatch 위임 모드): 본 단계의 세 옵션 사용자 질문을 생략하고 `Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계 — task 생성 → SPEC 작성 → 설계 브랜치 준비 → 자율 루프 자동 시작까지 단일 호출에서 완수.
-- **사용자 직접 호출 모드** (default): SPEC.md 경로(§8.1 slug-bearing)·요약 안내 후 `AskUserQuestion`으로 **명시적 결정 입력**(자유 텍스트 종결구 금지 — CLAUDE.md 규칙). 옵션 3개(상호배타):
-
-  - **지금 loop start 호출** (Recommended) — `Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계. 모니터 추가 질문 없이 loop 기본 동작(자동 Monitor 가설 포함, `plugins/autopilot/skills/loop/SKILL.md`) 적용. default `regular`이면 `start <c>` 단축형 동등.
-  - **SPEC만 확정** — 경로 안내·종료. 사용자가 별도 시점에 `Skill(skill: "loop", args: "start <m>/<c>")` 직접 호출.
-  - **변경** — 변경 섹션을 묻고 단계 7/8 재진입.
+- **지금 loop start 호출** (Recommended) — `Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계. 모니터 추가 질문 없이 loop 기본 동작(자동 Monitor 가설 포함, `plugins/autopilot/skills/loop/SKILL.md`) 적용. default `regular`이면 `start <c>` 단축형 동등.
+- **SPEC만 확정** — 경로 안내·종료. 사용자가 별도 시점에 `Skill(skill: "loop", args: "start <m>/<c>")` 직접 호출.
+- **변경** — 변경 섹션을 묻고 단계 7/8 재진입.
 
 ## --resume 모드 요약
 

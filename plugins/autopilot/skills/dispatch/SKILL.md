@@ -25,7 +25,7 @@ description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave
    → 분해 (단위 후보 추출 + 3 조건 검사 + 하드 캡 검사)
    → 게이트 ① 분해 plan 승인 (사용자 AskUserQuestion)
    → DAG.md 작성 (milestones/<m>/dispatch/DAG.md)
-   → 게이트 ② spec 위임 (각 child 분해 plan 항목에 대해 Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>") — task-id 는 spec 이 task 생성 단계에서 결정)
+   → 게이트 ② spec 위임 (각 child에 대해 Skill(skill: "spec", args: "<m>/<c>"))
    → 게이트 ③ 최종 확인 (SPEC 경로·verify 명령·의존성 표 + 사용자 승인)
    → wave 단위 병렬 실행 (각 child에 Bash(loop start <m>/<c>, run_in_background: true) 호출, sentinel은 Bash(dispatch.sh watch_wave ...))
    → sentinel watch (DONE/ESCALATION.md)
@@ -67,11 +67,9 @@ wave 2 (depends on wave 1): [child-c]
 
 ### 게이트 ② spec 위임
 
-승인된 DAG의 각 child 분해 plan 항목에 대해 `Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>")` 호출 — milestone 은 명시 플래그로, child 식별자 (task-id) 는 dispatch 가 보유하지 않고 spec 이 task 생성 단계에서 결정한다. PRD 본문·분해 plan 항목은 자연어 인자 안에 포함해 전달.
+승인된 DAG의 각 child에 대해 `Skill(skill: "spec", args: "<m>/<c>")` 호출. 입력 컨텍스트로 PRD 본문 + 분해 plan 항목 전달 (자연어 안내).
 
-**child 명세 경로 식별 (스냅샷 차이)** — dispatch 는 각 위임 호출 직전에 `milestones/<m>/loops/` 디렉토리 스냅샷을 찍고, 호출 직후 스냅샷 차이로 새로 생성된 `milestones/<m>/loops/<c>-<slug>/SPEC.md` 경로만 식별한다. `<c>` 자체는 dispatch 가 참조하지 않으며, 이후 단계(게이트 ③ 표·실행)는 식별한 명세 경로로 작동.
-
-spec 스킬은 dispatch 위임 모드를 인식해 step 10 사용자 최종 검토의 세 옵션 질문을 생략하고 후속 자율 루프 자동 시작까지 단일 호출에서 완수(상세는 `plugins/autopilot/skills/spec/SKILL.md` §호출 방법 — dispatch 위임 모드).
+spec 스킬은 자체적으로 9-step 대화 진행. 사용자가 SPEC 작성에 직접 참여.
 
 ### 게이트 ③ 최종 확인
 
@@ -191,7 +189,7 @@ for wave in waves:
 ## 규칙
 
 - 본 스킬은 target 프로젝트의 `milestones/<m>/dispatch/` 디렉터리만 직접 작성한다 (DAG.md·DISPATCH_LOG.md).
-- spec 위임은 항상 `Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>")` 형식 — milestone 플래그 + 자연어 본문, task-id 는 spec 이 task 생성 단계에서 결정. child 식별은 호출 전후 `milestones/<m>/loops/` 디렉토리 스냅샷 차이로.
-- loop 실행은 항상 `<m>/<c>` 2-컴포넌트 task-id로 (child 식별 후).
+- spec 위임은 항상 `Skill(skill: "spec", args: "<m>/<c>")` 형식 — 2-컴포넌트 task-id.
+- loop 실행은 항상 `<m>/<c>` 2-컴포넌트 task-id로.
 - `regular` milestone-id는 ad-hoc 단일 task catch-all이므로 PRD가 없고 `dispatch start regular`는 거부.
 - 모든 결정·승인은 `AskUserQuestion`으로 (CLAUDE.md 규칙).
