@@ -55,7 +55,6 @@ allowed-tools:
   - Bash(git -C * stash pop *)
   - Bash(git -C * stash show *)
   - Bash(rm */ESCALATION.md)
-  - Bash(rm */DONE)
   - Bash(ps -p *)
   - Bash(cat */*.lock)
 ---

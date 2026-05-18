@@ -3,7 +3,7 @@
 #
 # 책임:
 #   - milestone-level ops (status/stop/list/cleanup/logs)
-#   - sentinel watch (wave 내 child loop들의 DONE/.loop/ESCALATION.md 폴링)
+#   - sentinel watch (wave 내 child loop 들의 완료 라벨·.loop/ESCALATION.md 폴링)
 #   - DISPATCH_LOG.md 기록
 #
 # **하지 않는 일**:
@@ -31,6 +31,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# task 저장소 라벨 헬퍼 공유 (SPEC 175 AC6) — loop.sh 와 동일한
+# task_status_is_done·task_label_present·LOOP_DONE_LABEL 단일 출처를 source.
+# 위치: plugins/autopilot/skills/loop/references/task-storage.sh.
+# shellcheck source=../../loop/references/task-storage.sh
+source "$SCRIPT_DIR/../../loop/references/task-storage.sh"
 
 # ----- 헬퍼 -----
 
@@ -93,14 +99,19 @@ child_archive_path() {
   echo "$PROJECT_ROOT/milestones/$milestone/loops/$child"
 }
 
-# child의 sentinel 상태: done / escalated / running / idle / missing
+# child 의 sentinel 상태: done / escalated / running / idle / missing.
+# 완료(`done`) 검출은 task 저장소(GitHub Issue)의 LOOP_DONE_LABEL 라벨 단일 의존
+# (SPEC 175 AC1). loop.sh 와 동일 helper(task_status_is_done) 를 source 해 공유.
+# ESCALATION 은 워크트리 안의 .loop/ESCALATION.md 파일 sentinel 유지 (SPEC 175 비-목표).
 child_state() {
   local milestone="$1"
   local child="$2"
   local wt="$(child_wt_path "$milestone" "$child")"
   local lock="$(child_lock_path "$milestone" "$child")"
 
-  if [[ -f "$wt/DONE" ]]; then
+  # done 신호 — task 저장소 라벨 단일 의존. gh 부재·매핑 실패는 task_status_is_done
+  # 가 1(판정 불가) 로 폴백하므로 자연스럽게 다음 분기로 떨어진다.
+  if task_status_is_done "$milestone/$child" 2>/dev/null; then
     echo "done"
     return
   fi
@@ -325,8 +336,9 @@ cmd_cleanup() {
             continue
             ;;
         esac
-        if [[ -f "$wt/DONE" ]]; then
-          echo "[$(now_iso)] cleanup $m/$child (DONE 신호 있음, archival 포함)"
+        # cleanup 대상은 done 상태 child — 검출은 child_state(라벨 단일 의존, SPEC 175).
+        if [[ "$(child_state "$m" "$child")" == "done" ]]; then
+          echo "[$(now_iso)] cleanup $m/$child (완료 라벨 부착, archival 포함)"
           # 메타 파일 archival — loop.sh cmd_cleanup의 step 4와 동일 로직.
           # loop.sh delegation 대신 inline 재구현 — git worktree로 등록되지
           # 않은 mock·legacy 워크트리에서도 정리가 일관되게 동작하도록.
@@ -389,7 +401,7 @@ cmd_log_event() {
 #
 # 여러 child의 sentinel 파일을 폴링.
 # 한 명이라도 ESCALATION.md를 만들면 다른 child들 stop + exit 101.
-# 모두 DONE이면 exit 100.
+# 모두 완료 라벨(LOOP_DONE_LABEL) 부착이면 exit 100.
 # 타임아웃 시 exit 102.
 
 cmd_watch_wave() {
@@ -452,7 +464,7 @@ cmd_watch_wave() {
     fi
 
     if [[ $all_done -eq 1 ]]; then
-      log_event_internal "watch_wave ALL DONE children=[${children[*]}]"
+      log_event_internal "watch_wave ALL DONE (LOOP_DONE_LABEL) children=[${children[*]}]"
       exit 100
     fi
 
