@@ -189,26 +189,15 @@ LOOP_REQ=(
 )
 
 # issue #113 본문의 `공통·보조` 섹션 패턴 (gh 패턴 제외).
-# trailing wildcard가 없는 항목은 두 SKILL.md 공용.
-COMMON_REQ_NO_WILDCARD=(
+# SPEC 108·170 머지 이후 두 SKILL.md 모두 `:*` trailing wildcard로 통일됨.
+COMMON_REQ=(
   'Bash(git -C * stash list)'
-  'Bash(rm */ESCALATION.md)'
-  'Bash(rm */DONE)'
-  'Bash(cat */*.lock)'
-)
-
-# trailing wildcard가 있는 공통 패턴은 SKILL별 형식이 분리된다:
-#   - loop/SKILL.md: SPEC 170 적용 → `:*`
-#   - spec/SKILL.md: SPEC 108 적용 전 → ` *` (SPEC 108 머지 후 통일)
-SPEC_COMMON_WILDCARD=(
-  'Bash(git -C * stash pop *)'
-  'Bash(git -C * stash show *)'
-  'Bash(ps -p *)'
-)
-LOOP_COMMON_WILDCARD=(
   'Bash(git -C * stash pop:*)'
   'Bash(git -C * stash show:*)'
+  'Bash(rm */ESCALATION.md)'
+  'Bash(rm */DONE)'
   'Bash(ps -p:*)'
+  'Bash(cat */*.lock)'
 )
 
 check_contains_all() {
@@ -227,11 +216,11 @@ check_contains_all() {
 }
 
 check_contains_all "spec/SKILL.md" "$spec_items" \
-  "${SPEC_REQ[@]}" "${COMMON_REQ_NO_WILDCARD[@]}" "${SPEC_COMMON_WILDCARD[@]}"
+  "${SPEC_REQ[@]}" "${COMMON_REQ[@]}"
 ok "AC7: spec SKILL.md 에 issue spec 섹션 + 공통·보조 섹션 패턴 모두 포함"
 
 check_contains_all "loop/SKILL.md" "$loop_items" \
-  "${LOOP_REQ[@]}" "${COMMON_REQ_NO_WILDCARD[@]}" "${LOOP_COMMON_WILDCARD[@]}"
+  "${LOOP_REQ[@]}" "${COMMON_REQ[@]}"
 ok "AC8: loop SKILL.md 에 issue loop 섹션 + 공통·보조 섹션 패턴 모두 포함"
 
 echo ""
