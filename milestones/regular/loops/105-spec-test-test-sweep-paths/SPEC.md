@@ -6,6 +6,7 @@ scope:
     - milestones/**
     - CLAUDE.md
 verify: "bash tests/autopilot/test-spec-skill.sh"
+request_review: true
 ---
 
 # spec 스킬에 test 코드 변경 감지·test_sweep_paths 자동 설정 절차 추가
