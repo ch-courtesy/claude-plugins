@@ -28,18 +28,19 @@ verify: "{{verify_command}}"
 #   3모드 정의·예시는 references/ears-patterns.md "EARS 작성 언어" 절 참조.
 # ears_language: ko
 #
-# request_review (선택): true 지정 시 loop이 task DONE 직후 PR **자동 리뷰·머지 루프**를
+# request_review (default true): loop이 task DONE 직후 PR **자동 리뷰·머지 루프**를
 #   활성화한다. PR 생성·재사용 자체는 default ON으로 본 키와 무관하며, 차단하려면 `--no-pr`
-#   플래그를 쓴다. 본 키가 true면 PR 생성·재사용 직후 추가로:
+#   플래그를 쓴다. true면 PR 생성·재사용 직후 추가로:
 #     1) pre-PR rebase (default 브랜치 기준, 충돌 시 1회 자동 해소),
 #     2) review-fix 백그라운드 루프 (30s 폴링 — 새 PR 코멘트·리뷰마다 재-rebase → 자동 fix
 #        → commit·push, 필요 시 1개 반박 코멘트),
 #     3) 자동 머지 (reviewDecision `APPROVED` 또는 owner `/done`·`합격`·`통과` 코멘트 →
 #        `gh pr merge --squash`),
 #     4) cleanup (머지 후 worktree 제거 + 로컬·origin feat 브랜치 삭제).
-#   미지정 또는 false면 PR 생성·재사용까지만 실행 후 정지 (자동 fix·머지·cleanup 없음).
+#   비활성화하려면 `request_review: false`로 명시. 키 자체를 생략하면 loop의 yq fallback에
+#   따라 false로 처리됨 (이전 동작 보존 — 기존 SPEC들 영향 없음).
 #   요구: `gh` CLI(OAuth 인증) + `yq`. 자세한 동작은 plugins/autopilot/skills/loop/SKILL.md 참조.
-# request_review: true
+request_review: true
 ---
 
 # {{task_title}}
