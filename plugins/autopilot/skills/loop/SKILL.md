@@ -3,22 +3,24 @@ name: loop
 description: 자율 수행 루프(랄프 루프) 운영 인터페이스. start/status/stop/list/cleanup/logs 서브커맨드로 자율 task의 lifecycle을 관리합니다. SPEC 작성은 별도 'autopilot:spec' 스킬을 사용. 본 스킬은 자기완결적이며 헌법·드라이버를 모두 references/에 포함합니다.
 allowed-tools:
   - Monitor
+  - Read
   # SPEC 113 — issue #113 본문 `autopilot:loop` 섹션 (직전 세션 실측)
-  - Bash(bash * loop.sh start *)
-  - Bash(bash * loop.sh status *)
-  - Bash(bash * loop.sh stop *)
+  # SPEC 170 — trailing wildcard 형식을 ` *`(공백+별표) → `:*` 로 정규화
+  - Bash(bash * loop.sh start:*)
+  - Bash(bash * loop.sh status:*)
+  - Bash(bash * loop.sh stop:*)
   - Bash(bash * loop.sh list)
-  - Bash(bash * loop.sh cleanup *)
-  - Bash(bash * loop.sh logs *)
-  - Bash(tail -F /private/tmp/* | grep -E --line-buffered *)
-  - Bash(tail -F /tmp/* | grep -E --line-buffered *)
+  - Bash(bash * loop.sh cleanup:*)
+  - Bash(bash * loop.sh logs:*)
+  - Bash(tail -F /private/tmp/* | grep -E --line-buffered:*)
+  - Bash(tail -F /tmp/* | grep -E --line-buffered:*)
   # SPEC 113 — issue #113 본문 `공통·보조` 섹션
   - Bash(git -C * stash list)
-  - Bash(git -C * stash pop *)
-  - Bash(git -C * stash show *)
+  - Bash(git -C * stash pop:*)
+  - Bash(git -C * stash show:*)
   - Bash(rm */ESCALATION.md)
   - Bash(rm */DONE)
-  - Bash(ps -p *)
+  - Bash(ps -p:*)
   - Bash(cat */*.lock)
 ---
 
