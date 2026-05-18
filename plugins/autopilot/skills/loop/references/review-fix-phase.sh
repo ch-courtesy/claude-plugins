@@ -406,6 +406,8 @@ EOF
       [[ -z "$inline_line" ]] && continue
       # 토큰 분리: INLINE <thread_id> <comment_id> <action> <body...>
       # 마지막 변수가 나머지 토큰을 모두 흡수 (body 내 공백 보존).
+      # NOTE: comment_id는 디버그 로그 전용 — `in_reply_to`에는 항상 thread_id 사용
+      # (thread root에 reply, AC3). 케이스 (c)처럼 두 값이 다를 수 있어도 reply 대상은 root.
       read -r _tag thread_id comment_id action inline_body <<<"$inline_line"
       [[ "$_tag" != "INLINE" ]] && continue
       [[ "$action" != "DISPUTE" ]] && continue   # FIX는 (iii)에서 이미 처리
