@@ -77,7 +77,10 @@ task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 �
 
 활성화 시 동작:
 - default 브랜치 자동 감지 (`gh repo view` → `git symbolic-ref refs/remotes/origin/HEAD`)
-- push 직전에 `origin/<base>`로부터 `git fetch` + `git rebase` 수행 (SPEC 103 AC3) — base 최신 변경분을 흡수, fast-forward 가능하면 no-op. 첫 rebase가 충돌로 실패하면 `-X theirs`(feat 브랜치 우선) 전략으로 정확히 1회 자동 해결 시도(SPEC 103 AC4). 재시도도 실패하면 `git rebase --abort`로 워크트리 복구 + 명시적 사용자 알림 + non-zero exit (보수적 좌절 — 사용자 수동 해결 필요)
+- push 직전에 `origin/<base>`로부터 `git fetch` + 단일 sync helper(`references/rebase-phase.sh`)로 base 동기화 (SPEC 169) — helper가 `git ls-remote --heads origin <branch>`로 원격 트래킹 브랜치 존재 여부를 판정해 두 경로로 분기한다:
+  - **부재 → rebase 경로**: `git rebase origin/<base>`로 history 재배치 (첫 PR 진입 전 깨끗한 linear history)
+  - **존재 → merge 경로**: `git merge --ff-only` → 실패 시 non-ff `git merge --no-edit`로 base 변경분만 흡수 (자기 commit SHA 보존, force push 회피)
+- 어떤 경로에서도 force push(`--force`·`--force-with-lease` 포함)는 도입되지 않는다 (SPEC 169 AC4). 충돌 시 claude CLI 세션 1회로 자동 해소 시도(SPEC 169 AC5), 실패 시 해당 모드의 `--abort`로 워크트리 복구 + non-zero exit (보수적 좌절, SPEC 169 AC6)
 - 현재 브랜치를 `origin`으로 push
 - 동일 head 브랜치에 open PR이 없으면 **새 PR 생성**, 있으면 **기존 PR을 in-place로 갱신** (제목·body 동기화)
 - PR 제목 = SPEC 문서의 H1, body = SPEC "무엇을 만들 것인가" 본문 + base..HEAD commit log
@@ -99,8 +102,8 @@ SPEC frontmatter에 `request_review: true`가 지정된 task만 본 흐름을 �
 
 | 단계 | 스크립트 | 역할 |
 |---|---|---|
-| pre-PR rebase | `references/rebase-phase.sh` | default 브랜치로부터 워크트리 feat 브랜치 rebase. 충돌 시 claude CLI 1회 자동 해소, 실패 시 ESCALATION abort. |
-| review-fix 루프 (background) | `references/review-fix-phase.sh` | 30초 주기 폴링 (PR comments · review threads · summary). 새 이벤트마다 재-rebase → claude CLI fix → commit+push → (필요 시) 1개 반박 코멘트. |
+| pre-PR sync | `references/rebase-phase.sh` | default 브랜치로부터 워크트리 feat 브랜치 동기화 (SPEC 169). 원격 트래킹 부재면 rebase, 존재면 merge 경로. 충돌 시 claude CLI 1회 자동 해소, 실패 시 해당 모드의 `--abort`로 복구 + ESCALATION abort. |
+| review-fix 루프 (background) | `references/review-fix-phase.sh` | 30초 주기 폴링 (PR comments · review threads · summary). 새 이벤트마다 base 재동기화(sync helper — merge 경로) → claude CLI fix → commit+push → (필요 시) 1개 반박 코멘트. |
 | 자동 머지 (auto-merge) | `references/review-fix-phase.sh` 내부 | reviewDecision `APPROVED` 또는 owner의 종료 코멘트(`/done`·`합격`·`통과`)로 `gh pr merge --squash` 수행. PR이 이미 `merged`이면 자동 머지 건너뜀. |
 | cleanup | `references/cleanup-phase.sh` | PR `merged` 후 worktree 제거 + 로컬 feat `branch -D` + origin feat `push --delete`. |
 
