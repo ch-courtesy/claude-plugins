@@ -1,8 +1,8 @@
-# spec step 9.5 — feat 브랜치 + SPEC.md commit (자동, main 작업트리 무손상)
+# spec step 9.5 — feat 브랜치 + SPEC.md commit + default 브랜치 자동 ff-merge (자동, main 작업트리 무손상)
 
-SPEC.md 작성과 자체 검토가 끝나면, sibling `autopilot:loop`이 worktree base로 사용할 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·생성하고 SPEC.md를 그 브랜치에 commit한다. main 작업트리 상태(staged/unstaged/untracked)는 변경되지 않아야 한다.
+SPEC.md 작성과 자체 검토가 끝나면, sibling `autopilot:loop`이 worktree base로 사용할 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·생성하고 SPEC.md를 그 브랜치에 commit한다. 직후 동일 호출에서 default 브랜치(main)·feat 브랜치를 원격 default 브랜치(`origin/main`) 최신 위로 정렬해 default 브랜치에도 SPEC.md commit이 fast-forward 형태로 반영되고 원격 저장소에 즉시 push되게 한다. main 작업트리 상태(staged/unstaged/untracked)는 호출 이전과 동일하게 유지되어야 하며, 전체 흐름이 끝나면 호출 시점의 원래 브랜치로 복귀한다.
 
-이 단계를 단계 10의 사용자 최종 검토 *전*에 수행해 SPEC.md가 이미 git history에 반영된 상태에서 사용자가 결정을 내리도록 한다. 사용자가 단계 10에서 "변경" 옵션을 선택하면 단계 7/8 재진입 후 본 단계의 commit을 amend하거나 새 commit을 쌓는다 (자동 처리).
+이 단계를 단계 10의 사용자 최종 검토 *전*에 수행해 SPEC.md가 이미 git history(local + remote default)에 반영된 상태에서 사용자가 결정을 내리도록 한다. 사용자가 단계 10에서 "변경" 옵션을 선택하면 단계 7/8 재진입 후 본 단계의 commit을 amend하거나 새 commit을 쌓는다 (자동 처리, 후속 §9.5.4 재실행 포함).
 
 본 문서만 읽고도 단계를 끝까지 수행할 수 있게 자기완결적으로 기술한다.
 
@@ -43,8 +43,57 @@ slug=$(printf '%s' "$title" \
 
 ## 9.5.3 실패 처리
 
-위 절차 중 어떤 단계라도 실패하면:
+§9.5.2 절차(브랜치 생성·SPEC.md commit) 중 어떤 단계라도 실패하면:
 - 부분 결과 정리: 생성된 feat 브랜치가 있으면 `git branch -D "$branch"`로 삭제 (단, 그 브랜치에 다른 commit이 없을 때만; 의심스러우면 사용자에게 알리고 수동 정리 안내).
 - 원래 브랜치 복귀: `git checkout "$orig_branch"`.
 - 사용자에게 명시적으로 실패 사유와 복구 방법 안내. SPEC.md는 `milestones/<m>/loops/<c>-<slug>/SPEC.md` 에 그대로 남기되, loop 진행은 다음 단계에서 사용자가 결정.
 - **빈 slug 케이스 (§9.5.1)**: 슬러그화 결과가 빈 문자열이면 본 §9.5.2 진입 전에 abort 한다. SPEC.md 는 step 8 의 §8.1 단일 경로 가정에 의해 빈 slug 에서는 작성되지 않으며, 사용자에게 §1 H1 제목 수정을 요청해 step 7 재진입한다 (SPEC 116 단일 컨벤션 — fallback 없음).
+
+§9.5.4 절차(원격 default 브랜치 동기화·fast-forward merge·원격 push) 중 실패 분기:
+
+- **rebase 충돌** (`git rebase origin/main` 단계에서 conflict marker 발생 또는 비-zero exit):
+  1. `git rebase --abort`로 rebase 중단 — 작업트리·인덱스는 rebase 직전 상태(feat 브랜치 HEAD = SPEC commit)로 자동 복구된다.
+  2. `git checkout "$orig_branch"`로 호출 시점 원래 브랜치 복귀 — default 브랜치는 절대 전환 안 됨 (전환은 rebase 성공 후에만 일어나므로 충돌 단계에서는 default 브랜치 작업트리가 손대지지 않음, AC8).
+  3. 사용자에게 충돌 사실과 함께 **수동 복구 방법** 안내: feat 브랜치 SPEC commit은 그대로 살아 있으며 (`git log feat/<c>-<slug>` 로 확인 가능), 사용자가 직접 rebase 충돌을 해소하거나 `feat/<c>-<slug>` 를 PR로 올리는 별도 흐름으로 전환 가능. 강제 push 시도 금지.
+
+- **push 거부** (`git push origin <branch>` 가 non-fast-forward·protected branch·권한 부족 등으로 reject):
+  1. **`--force`·`--force-with-lease` 등 강제 push 절대 시도 안 함** — 본 단계의 모든 push는 일반 push 만 허용. push 명령은 단 한 번만 시도하고 실패하면 즉시 abort.
+  2. 호출 이전 상태 보존: feat 브랜치 SPEC commit 보존, default 브랜치는 fast-forward merge 가 이미 *로컬*에는 적용된 상태이지만 *원격*과의 일관성이 깨지므로 사용자에게 명시적으로 알린다. 로컬 default 브랜치 HEAD 와 원격 default 브랜치 HEAD 가 분기된 상태이며, 사용자가 수동으로 `git reset --hard origin/main` 으로 로컬 되돌림 또는 PR 흐름으로 전환할 수 있음을 안내.
+  3. `git checkout "$orig_branch"`로 호출 시점 원래 브랜치 복귀.
+  4. 사용자에게 push 거부 사실(어느 브랜치 push 가 어떤 사유로 거부됐는지)과 복구 방법 안내. SPEC.md disk 사본은 그대로 보존.
+
+- **fetch 실패** (`git fetch origin` 자체가 네트워크·인증 문제로 실패): §9.5.4 전체를 abort하고 `git checkout "$orig_branch"`로 복귀. SPEC.md commit 은 feat 브랜치에 그대로 남으며, 원격 동기화는 사용자가 네트워크 복구 후 수동 재시도 또는 다음 spec 호출에서 자동 재실행.
+
+모든 §9.5.4 실패 분기에서 공통:
+- `git status --porcelain` 결과가 §9.5.2 step 1 의 스냅샷과 동일한지 검증. 다르면 사용자에게 경고와 함께 어떤 파일이 추가/수정됐는지 표시.
+- 사용자에게 **자동 흐름이 어디까지 진행됐는지** 명시적으로 보고 (feat 브랜치 SPEC commit O/X, default 브랜치 ff-merge 적용 O/X, 원격 default push O/X, 원격 feat push O/X).
+
+## 9.5.4 default 브랜치 자동 fast-forward merge·원격 push 절차
+
+§9.5.2 가 성공해 feat 브랜치에 SPEC.md commit 이 만들어진 직후, 같은 호출 안에서 default 브랜치(`main`)·feat 브랜치를 원격 default 브랜치(`origin/main`) 최신 위로 정렬·동기화한다. 모든 단계는 비-zero exit 발생 시 즉시 §9.5.3 의 해당 분기로 이행한다 (강제 push 시도 금지, abort + 원상태 복구 우선).
+
+본 단계 진입 시점의 사전 조건:
+- `$orig_branch` = §9.5.2 step 2 에서 캡처한 호출 시점 원래 브랜치 이름.
+- `$branch` = `feat/<c>-<slug>` (§9.5.2 에서 생성·SPEC commit 적용된 브랜치).
+- 현재 HEAD = `$orig_branch` (§9.5.2 step 8 에서 복귀 완료).
+- default 브랜치 작업트리는 호출 이전과 동일 (§9.5.2 의 명시적 경로 staging 으로 보존됨).
+
+절차 (총 6 단계, AC1–AC9 매핑):
+
+1. **(AC1) 원격 default 브랜치 fetch**: `git fetch origin main`. 네트워크·인증·remote 부재로 비-zero exit 시 §9.5.3 «fetch 실패» 분기. 성공 시 `origin/main` ref 가 원격 최신 commit 을 가리킨다.
+
+2. **(AC2) feat 브랜치를 origin/main 위로 rebase**: `git checkout "$branch"` 후 `git rebase origin/main`. rebase 가 conflict marker 없이 0 exit 으로 끝나야 한다. conflict 또는 비-zero exit 시 §9.5.3 «rebase 충돌» 분기 (rebase --abort + orig branch 복귀). SPEC.md 만 들어 있는 commit 이라 conflict 가능성은 낮으나, 동시 `--milestone` 작업 또는 base 분기 시점 이후의 원격 변경과 SPEC 디렉토리가 겹치면 발생 가능.
+
+3. **(AC3) default 브랜치로 전환 후 feat 브랜치를 fast-forward merge**: `git checkout main` 후 `git merge --ff-only "$branch"`. `--ff-only` 플래그가 핵심 — fast-forward 가 불가능한 경우 (default 브랜치가 origin/main 보다 앞서 있거나, 호출 이전 staged 변경이 default HEAD 와 diverge 등) 비-zero exit 으로 fail 하고, **이 시점에 merge commit 이 생성되지 않으므로 default 브랜치 HEAD 는 그대로 유지된다**. 비-zero exit 시 §9.5.3 «push 거부» 와 동일 분기로 처리 (default 브랜치 작업트리 보존 + 사용자 안내 + orig branch 복귀). step 2 가 성공했으면 feat 브랜치 = origin/main + (SPEC commit) 이고 default 브랜치 = origin/main 또는 그 이전이므로 일반적으로 fast-forward 가능.
+
+4. **(AC4) 원격 default 브랜치 push**: `git push origin main`. push 가 거부되면 §9.5.3 «push 거부» 분기로 이행 — `--force` 금지. 일반 push 성공 시 0 exit, `origin/main` 이 default 브랜치 HEAD 와 같아진다.
+
+5. **(AC4) 원격 feat 브랜치 push**: `git push origin "$branch"`. 같은 SHA 가 이미 default 브랜치 push 로 원격에 도달했으므로 사실상 ref 등록 수준의 push 이지만, sibling `autopilot:loop` 이 feat 브랜치를 원격에서 fetch·worktree base 로 사용할 수 있게 필수. 거부 시 §9.5.3 «push 거부» 분기.
+
+6. **(AC7·AC8) 원래 브랜치 복귀·작업트리 검증**: `git checkout "$orig_branch"` 로 호출 시점 원래 브랜치 복귀. 직후 `git status --porcelain` 결과가 §9.5.2 step 1 의 스냅샷과 동일한지 검증. 다르면 사용자에게 경고 (staged·unstaged·untracked 변동이 있다면 어떤 파일인지 표시) 하되, default 브랜치 HEAD 와 feat 브랜치 HEAD 는 이미 원격에 push 되었으므로 disk 상태 차이는 호출 이전 작업트리의 untracked 변경이 step 8 §8.1 의 SPEC.md write 결과로 추적 상태가 바뀌었을 가능성이 가장 높음.
+
+본 단계는 사용자 재확인 없이 (AC4 의 "사용자 재확인 없이") 자동 실행된다 — 단계 10 의 사용자 최종 검토는 본 단계 *후*에 일어나므로 사용자는 SPEC.md 가 이미 default 브랜치 + 원격에 push 된 상태를 전제로 결정한다.
+
+## 9.5.5 self-referential 호출 면제
+
+본 §9.5.4 절차를 정의·도입하는 SPEC (예: SPEC 149) 을 작성·수락하는 *현재* spec 호출 자체에는 본 §9.5.4 새 동작을 적용하지 않는다 — 메모리 노트 `feedback_no_self_apply_during_spec` 의 일반 규약을 본 단계에도 그대로 따른다. 현재 호출은 §9.5.2 까지만 (feat 브랜치 분기·SPEC commit·원래 브랜치 복귀) 수행하고, default 브랜치 ff-merge·원격 push 는 본 SPEC 이 merge 된 후의 다음 spec 호출부터 적용된다.

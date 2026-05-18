@@ -67,6 +67,38 @@ touch DONE
 echo '{"result":"mock","usage":{"input_tokens":1,"output_tokens":1}}'
 MOCKEOF
 chmod +x "$MOCK_BIN/claude"
+
+# mock gh — task_status_is_done 를 만족시키는 최소 stub.
+# 배경: loop.sh 는 done 신호를 task 저장소의 `loop:done` label 단일 의존으로 감지한다
+#       (SPEC 134/150). mock claude 가 `DONE` 파일을 만들어도 loop.sh 는 보지 않는다.
+#       본 테스트는 real GitHub 이 없으므로 gh stub 으로 label 존재를 흉내내 iter #1
+#       직후 task_status_is_done 이 0(done) 을 반환하도록 한다.
+# 처리:
+#   - gh issue list  : "1" (task_issue_number 가 lookup 성공하게)
+#   - gh issue view  : "loop:done" (task_label_present 가 hit)
+#   - gh label list  : "loop:done" (ensure_label_exists 가 idempotent 통과)
+#   - gh label create / gh issue comment / gh api graphql / etc : silent 0
+cat > "$MOCK_BIN/gh" <<'GHEOF'
+#!/usr/bin/env bash
+case "$1" in
+  issue)
+    case "$2" in
+      list) echo "1" ;;
+      view) echo "loop:done" ;;
+      *) ;;
+    esac
+    ;;
+  label)
+    case "$2" in
+      list) echo "loop:done" ;;
+      *) ;;
+    esac
+    ;;
+  *) ;;
+esac
+exit 0
+GHEOF
+chmod +x "$MOCK_BIN/gh"
 export PATH="$MOCK_BIN:$PATH"
 
 INPUT_ID="test123"
