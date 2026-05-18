@@ -56,9 +56,14 @@ slug=$(printf '%s' "$title" \
   2. `git checkout "$orig_branch"`로 호출 시점 원래 브랜치 복귀 — default 브랜치는 절대 전환 안 됨 (전환은 rebase 성공 후에만 일어나므로 충돌 단계에서는 default 브랜치 작업트리가 손대지지 않음, AC8).
   3. 사용자에게 충돌 사실과 함께 **수동 복구 방법** 안내: feat 브랜치 SPEC commit은 그대로 살아 있으며 (`git log feat/<c>-<slug>` 로 확인 가능), 사용자가 직접 rebase 충돌을 해소하거나 `feat/<c>-<slug>` 를 PR로 올리는 별도 흐름으로 전환 가능. 강제 push 시도 금지.
 
-- **push 거부** (`git push origin <branch>` 가 non-fast-forward·protected branch·권한 부족 등으로 reject):
+- **ff-merge 거부** (§9.5.4 step 3 `git merge --ff-only "$branch"` 가 비-zero exit — default 브랜치가 origin/main 보다 앞서 있거나, 호출 이전 staged·local commit 으로 default HEAD 와 feat 가 diverge):
+  1. **이 분기 시점의 상태 전제**: `--ff-only` 가 fail 했으므로 merge commit 은 생성되지 않았다 — default 브랜치 HEAD·작업트리는 step 3 진입 시점과 동일하게 보존돼 있다 (로컬 변경 없음, 원격과의 일관성도 깨지지 않음). 따라서 push 거부 분기처럼 `git reset --hard origin/main` 형태의 "로컬 되돌림" 안내를 출력하지 않는다 — 되돌릴 로컬 변경이 없다.
+  2. `git checkout "$orig_branch"` 로 호출 시점 원래 브랜치 복귀. 원격 default·feat push 는 시도 자체를 하지 않는다 (강제 push 금지 원칙과 별개로, step 4·5 에 도달하지 않음).
+  3. 사용자에게 ff-merge 가 거부된 사실과 **그 근본 원인 후보**(default 브랜치가 origin/main 보다 앞선 로컬 commit·미push 변경 보유, 또는 base 가 diverge) 와 **수동 복구 방법** 안내: default 브랜치 상태를 `git log main..origin/main` / `git log origin/main..main` 으로 점검하고, 정렬 후 다음 spec 호출에서 자동 재실행 또는 PR 흐름으로 전환. SPEC.md commit 은 feat 브랜치에 그대로 살아 있다.
+
+- **push 거부** (§9.5.4 step 4·5 `git push origin main` / `git push origin <branch>` 가 non-fast-forward·protected branch·권한 부족 등으로 reject — step 3 ff-merge 가 이미 성공해 default 브랜치 HEAD 가 로컬에서 갱신된 *후* 의 단계):
   1. **`--force`·`--force-with-lease` 등 강제 push 절대 시도 안 함** — 본 단계의 모든 push는 일반 push 만 허용. push 명령은 단 한 번만 시도하고 실패하면 즉시 abort.
-  2. 호출 이전 상태 보존: feat 브랜치 SPEC commit 보존, default 브랜치는 fast-forward merge 가 이미 *로컬*에는 적용된 상태이지만 *원격*과의 일관성이 깨지므로 사용자에게 명시적으로 알린다. 로컬 default 브랜치 HEAD 와 원격 default 브랜치 HEAD 가 분기된 상태이며, 사용자가 수동으로 `git reset --hard origin/main` 으로 로컬 되돌림 또는 PR 흐름으로 전환할 수 있음을 안내.
+  2. **이 분기 시점의 상태 전제**: step 3 ff-merge 가 이미 성공했으므로 로컬 default 브랜치 HEAD 는 feat SPEC commit 까지 fast-forward 적용된 상태인데 원격 push 가 거부됐다 — 즉 로컬 default HEAD 와 원격 default HEAD 가 분기되어 일관성이 깨졌다. (이 전제는 ff-merge 거부 분기와 다른 점이다.) 사용자에게 명시적으로 알리고, `git reset --hard origin/main` 으로 로컬 default 를 원격에 맞춰 되돌리거나 PR 흐름으로 전환할 수 있음을 안내. feat 브랜치 SPEC commit 은 보존.
   3. `git checkout "$orig_branch"`로 호출 시점 원래 브랜치 복귀.
   4. 사용자에게 push 거부 사실(어느 브랜치 push 가 어떤 사유로 거부됐는지)과 복구 방법 안내. SPEC.md disk 사본은 그대로 보존.
 
@@ -84,7 +89,7 @@ slug=$(printf '%s' "$title" \
 
 2. **(AC2) feat 브랜치를 origin/main 위로 rebase**: `git checkout "$branch"` 후 `git rebase origin/main`. rebase 가 conflict marker 없이 0 exit 으로 끝나야 한다. conflict 또는 비-zero exit 시 §9.5.3 «rebase 충돌» 분기 (rebase --abort + orig branch 복귀). SPEC.md 만 들어 있는 commit 이라 conflict 가능성은 낮으나, 동시 `--milestone` 작업 또는 base 분기 시점 이후의 원격 변경과 SPEC 디렉토리가 겹치면 발생 가능.
 
-3. **(AC3) default 브랜치로 전환 후 feat 브랜치를 fast-forward merge**: `git checkout main` 후 `git merge --ff-only "$branch"`. `--ff-only` 플래그가 핵심 — fast-forward 가 불가능한 경우 (default 브랜치가 origin/main 보다 앞서 있거나, 호출 이전 staged 변경이 default HEAD 와 diverge 등) 비-zero exit 으로 fail 하고, **이 시점에 merge commit 이 생성되지 않으므로 default 브랜치 HEAD 는 그대로 유지된다**. 비-zero exit 시 §9.5.3 «push 거부» 와 동일 분기로 처리 (default 브랜치 작업트리 보존 + 사용자 안내 + orig branch 복귀). step 2 가 성공했으면 feat 브랜치 = origin/main + (SPEC commit) 이고 default 브랜치 = origin/main 또는 그 이전이므로 일반적으로 fast-forward 가능.
+3. **(AC3) default 브랜치로 전환 후 feat 브랜치를 fast-forward merge**: `git checkout main` 후 `git merge --ff-only "$branch"`. `--ff-only` 플래그가 핵심 — fast-forward 가 불가능한 경우 (default 브랜치가 origin/main 보다 앞서 있거나, 호출 이전 staged 변경이 default HEAD 와 diverge 등) 비-zero exit 으로 fail 하고, **이 시점에 merge commit 이 생성되지 않으므로 default 브랜치 HEAD 는 그대로 유지된다**. 비-zero exit 시 §9.5.3 «ff-merge 거부» 분기로 처리 (default 브랜치 HEAD·작업트리 보존 + 사용자 안내 + orig branch 복귀). step 2 가 성공했으면 feat 브랜치 = origin/main + (SPEC commit) 이고 default 브랜치 = origin/main 또는 그 이전이므로 일반적으로 fast-forward 가능.
 
 4. **(AC4) 원격 default 브랜치 push**: `git push origin main`. push 가 거부되면 §9.5.3 «push 거부» 분기로 이행 — `--force` 금지. 일반 push 성공 시 0 exit, `origin/main` 이 default 브랜치 HEAD 와 같아진다.
 
@@ -96,4 +101,4 @@ slug=$(printf '%s' "$title" \
 
 ## 9.5.5 self-referential 호출 면제
 
-본 §9.5.4 절차를 정의·도입하는 SPEC (예: SPEC 149) 을 작성·수락하는 *현재* spec 호출 자체에는 본 §9.5.4 새 동작을 적용하지 않는다 — 메모리 노트 `feedback_no_self_apply_during_spec` 의 일반 규약을 본 단계에도 그대로 따른다. 현재 호출은 §9.5.2 까지만 (feat 브랜치 분기·SPEC commit·원래 브랜치 복귀) 수행하고, default 브랜치 ff-merge·원격 push 는 본 SPEC 이 merge 된 후의 다음 spec 호출부터 적용된다.
+본 §9.5.4 절차를 정의·도입하는 SPEC (예: SPEC 149) 을 작성·수락하는 *현재* spec 호출 자체에는 본 §9.5.4 새 동작을 적용하지 않는다. 이는 다음 일반 규약을 따른 것이다: **spec 호출이 정의·도입하는 새 contract 는 그 호출의 산출물(경로·브랜치·동작)에 선행 적용하지 않으며, 새 contract 는 해당 SPEC 이 default 브랜치에 merge 된 후의 다음 spec 호출부터 적용된다**. 따라서 현재 호출은 §9.5.2 까지만 (feat 브랜치 분기·SPEC commit·원래 브랜치 복귀) 수행하고, default 브랜치 ff-merge·원격 push 는 본 SPEC 이 merge 된 후의 다음 spec 호출부터 적용된다.
