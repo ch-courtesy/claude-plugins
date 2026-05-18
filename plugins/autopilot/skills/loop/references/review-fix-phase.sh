@@ -441,6 +441,12 @@ EOF
       [[ "$_tag" != "INLINE" ]] && continue
       [[ "$action" != "DISPUTE" ]] && continue   # FIX는 (iii)에서 이미 처리
       [[ -z "$thread_id" ]] && continue
+      # 방어: thread_id가 정수가 아니면 skip — `gh api -F in_reply_to=<int>` REST 요구사항.
+      # 비-수치값이 흘러들면 422를 받으므로 사전 차단(claude 출력 형식 위반 케이스 격리).
+      if ! [[ "$thread_id" =~ ^[0-9]+$ ]]; then
+        echo "WARN: INLINE thread_id 비-수치 ('$thread_id') — skip (in_reply_to 정수 요구)" >&2
+        continue
+      fi
       if is_thread_replied "$thread_id"; then
         continue   # AC4: 같은 thread 동일 phase 사이클 내 중복 reply 차단
       fi

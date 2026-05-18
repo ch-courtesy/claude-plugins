@@ -46,6 +46,18 @@ test_spec_verify_command() {
   grep -qE 'review-fix|rebase|cleanup' "$S/SKILL.md"                       || fail "SKILL.md: phase 어휘 부재"
   grep -qE '상태 전이|Status'          "$S/SKILL.md"                       || fail "SKILL.md: 상태 어휘 부재"
   grep -qE '자동 머지|auto[- ]?merge'  "$S/SKILL.md"                       || fail "SKILL.md: 자동 머지 어휘 부재"
+  # SPEC 153 prompt → 파서 contract 정적 검증 — claude mock이 stdin을 무시하므로
+  # 런타임 테스트만으로는 prompt가 INLINE 포맷 출력을 지시하는지 확인 불가.
+  # production source에서 prompt-출력 contract의 양쪽이 모두 INLINE 어휘를 갖는지 grep.
+  grep -qE 'INLINE[[:space:]]+<thread_id>'  "$S/references/review-fix-phase.sh" \
+    || fail "review-fix: claude prompt에 INLINE <thread_id> 포맷 지시 부재 — (iv-A) 파서가 dead code 위험"
+  grep -qE '^[[:space:]]*read.*INLINE|grep.*\^INLINE' "$S/references/review-fix-phase.sh" \
+    || fail "review-fix: INLINE 라인 파서 부재 (read/grep ^INLINE 없음)"
+  # in_reply_to 타입 검증 — REST API는 정수 필드. `-F`(typed) 사용 강제.
+  grep -qE '\-F[[:space:]]+"in_reply_to=' "$S/references/review-fix-phase.sh" \
+    || fail "review-fix: in_reply_to에 -F (typed integer) 사용 부재 (REST 422 위험)"
+  ! grep -qE '\-f[[:space:]]+"in_reply_to=' "$S/references/review-fix-phase.sh" \
+    || fail "review-fix: in_reply_to에 -f (string) 사용 — REST API가 422 반환"
   pass "SPEC 검증 명령 통과"
 }
 
@@ -309,7 +321,22 @@ case "${1:-}/${2:-}" in
   api/*)
     url="${2:-}"
     if [[ "$method" == "POST" && "$url" == *"/pulls/"*"/comments" ]]; then
-      # inline thread reply POST — log은 위에서 이미 기록됨.
+      # inline thread reply POST. 실 GitHub REST API의 타입 검증을 모방:
+      #   - `in_reply_to`는 정수 필드 → `-F`(typed) 필수, `-f`(string)면 422.
+      #   - `body`는 문자열 → `-f`/`-F` 둘 다 허용 (검증 안 함).
+      # `-f in_reply_to=<val>`이 인자에 포함되면 mock도 422-equivalent로 fail.
+      bad_inreplyto=0
+      for ((k=1; k<=$#; k++)); do
+        if [[ "${!k}" == "-f" ]]; then
+          n=$((k+1))
+          [[ "${!n}" == in_reply_to=* ]] && bad_inreplyto=1
+        fi
+      done
+      if (( bad_inreplyto )); then
+        echo "MOCK_GH_API_422: in_reply_to passed as -f (string) — REST API requires integer (-F)" >&2
+        exit 22
+      fi
+      # log은 위에서 이미 기록됨.
       exit 0
     fi
     if [[ "$url" == *"/pulls/"*"/comments" ]]; then
