@@ -27,8 +27,8 @@ FEAT_BRANCH_MD="$REPO_ROOT/plugins/autopilot/skills/spec/references/feat-branch-
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
 
-command -v yq >/dev/null 2>&1 \
-  || fail "yq (mikefarah) 필요 — 설치: macOS \`brew install yq\` / Linux \`apt install yq\` 또는 https://github.com/mikefarah/yq/releases"
+yq --version 2>&1 | grep -qiE 'mikefarah|version v?[4-9]\.' \
+  || fail "yq (mikefarah Go 구현) 필요 — 설치: macOS \`brew install yq\` / Linux https://github.com/mikefarah/yq/releases (apt install yq 는 kislyuk Python 구현으로 \`yq eval\` 미지원이므로 사용 불가)"
 
 [[ -f "$SPEC_SKILL_MD" ]]  || fail "$SPEC_SKILL_MD 부재"
 [[ -f "$FEAT_BRANCH_MD" ]] || fail "$FEAT_BRANCH_MD 부재"
@@ -66,8 +66,15 @@ spec_items="$(printf '%s\n' "$SPEC_FM" | yq eval '.allowed-tools[]' -)"
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== AC1: 9개 신규 항목 포함 ==="
-REQUIRED_NEW=(
+echo "=== AC1: 9개 항목 포함 (신규 추가 + trailing 형식 정규화) ==="
+# 참고: `Bash(awk:*)` 는 기존 `Bash(awk *)` 의 trailing 형식 정규화 결과로
+# 실질 신규 권한이 아니다. 그러나 SPEC 108 의 AC1 은 "최종 frontmatter 가 9개
+# 항목을 포함" 으로 정의돼 있으므로 awk 도 본 배열에 포함시켜 통합 검증한다.
+# sed/tr 도 동일한 정규화 대상이지만 본 배열에 명시되지 않은 이유는 SPEC 108
+# AC1 의 9개 enumerate 가 awk·printf·pwd·mktemp + ToolSearch·EnterWorktree·
+# ExitWorktree·TaskCreate·TaskUpdate 로 고정돼 있기 때문 (trailing 형식 정규화
+# 자체는 AC2 가 sed/tr 포함 전수로 검증).
+REQUIRED_ITEMS=(
   'Bash(awk:*)'
   'Bash(printf:*)'
   'Bash(pwd:*)'
@@ -79,14 +86,14 @@ REQUIRED_NEW=(
   'TaskUpdate'
 )
 missing=0
-for req in "${REQUIRED_NEW[@]}"; do
+for req in "${REQUIRED_ITEMS[@]}"; do
   if ! grep -qxF -- "$req" <<< "$spec_items"; then
     echo "  MISSING: $req" >&2
     missing=1
   fi
 done
 (( missing == 0 )) || fail "AC1: 누락 항목 존재 (위 MISSING 참조)"
-ok "AC1: 9개 신규 항목 모두 포함"
+ok "AC1: 9개 항목 모두 포함"
 
 # ---------------------------------------------------------------------------
 echo ""
