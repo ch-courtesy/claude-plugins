@@ -103,11 +103,11 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 #### 1.1 검증 실패 라우팅 (요약)
 
-검증 실패·자연어 입력 시 즉시 종료 대신 `AskUserQuestion` 3옵션: **(a)** task-id 재입력 후 재시도, **(b)** 사전 명확화 라운드 진입(§1.2), **(c)** 종료(산출물 없음). 옵션 표기 `(a)`/`(b)`/`(c)`. "다음 단계: Skill(...)" 자유 텍스트 금지. 전체 절차는 `references/pre-clarification.md` §1.1 참조.
+검증 실패·자연어 입력 시 즉시 종료 대신 `AskUserQuestion` 3옵션: **(a)** task-id 재입력 후 재시도, **(b)** 사전 명확화 라운드 진입(§1.2), **(c)** 종료 — 어떤 산출물도 작성하지 않고 안전 종료(산출물 미작성). 옵션 표기 `(a)`/`(b)`/`(c)`. "다음 단계: Skill(...)" 자유 텍스트 금지. 전체 절차는 `references/pre-clarification.md` §1.1 참조.
 
 #### 1.2 사전 명확화 라운드 (요약)
 
-(b) 선택 시 진입. step 5 메커니즘을 task-id 확보 *전*으로 앞당겨 재사용(별도 phase·모듈 없음). 수집은 task 미정의 상태에 맞춰 `문제·목표·범위·제약`으로 확장. 매 라운드 "충분" 종결·명시적 취소 안전 종료 포함. 규모 분기: 단일 task → 프로젝트 태스크 트래커 컨벤션으로 task 생성 후 step 2 재진입, 마일스톤 규모 → `AskUserQuestion` 명시 승인 후 PRD 스킬 invoke. 수집 항목·라운드 규칙·1.2.1/1.2.2 분기 상세는 `references/pre-clarification.md` §1.2 참조.
+(b) 선택 시 진입. step 5 메커니즘을 task-id 확보 *전*으로 앞당겨 재사용(별도 phase·모듈 없음). 수집은 task 미정의 상태에 맞춰 `문제·목표·범위·제약`으로 확장. 매 라운드 "충분" 종결·명시적 취소 안전 종료(취소 시 어떤 산출물도 남기지 않고 종료) 포함. 규모 분기: 단일 task → 프로젝트의 태스크 관련 지침(태스크 트래커 컨벤션)으로 task 생성 후 step 2 재진입, 마일스톤 규모 → `AskUserQuestion` 명시 승인 후 PRD 스킬 invoke(milestone-id를 PRD 스킬에 인자로 전달). 수집 항목·라운드 규칙·1.2.1/1.2.2 분기 상세는 `references/pre-clarification.md` §1.2 참조.
 
 ⚠ task-id 는 항상 task 생성 호출의 응답값을 그대로 사용한다 — 추측·예측·작명 금지
 
@@ -136,7 +136,7 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 #### 3.1 subagent 위임 (선택)
 
-자동 수집이 부족하면 `references/agent-prompts.md`의 **`spec-context-explorer`** 양식으로 `Agent` 위임. 권장 휴리스틱(하나라도 해당): `rules/` 다수(≈5개 초과)이고 적용 룰 자명하지 않음, 기존 `milestones/*/loops/*/SPEC.md` 다수 선례, multi-file 영향, 사용자가 자연어 의도만 전달. 그 외엔 위임하지 않는다 — 단순 1~2 query는 메인이 직접 호출(헌법 §11.6). subagent는 사실 수집·인용만, **결정·합성은 메인 책임**.
+자동 수집이 부족하면 `references/agent-prompts.md`의 **`spec-context-explorer`** 양식으로 `Agent` 위임. 권장 도입 휴리스틱(하나라도 해당): `rules/` 다수(≈5개 초과)이고 적용 룰 자명하지 않음, 기존 `milestones/*/loops/*/SPEC.md` 다수 선례, multi-file 영향, 사용자가 자연어 의도만 전달. 그 외엔 위임하지 않는다 — 단순 1~2 query는 메인이 직접 호출(헌법 §11.6). subagent는 사실 수집·인용만, **결정·합성은 메인 책임**.
 
 ### 4. 범위 분해 게이트
 
