@@ -342,11 +342,11 @@ while (( iter < MAX_ITER )); do
       # silent-fail / stuck 패턴 평가 — evaluate_silent_fail에 위임 (SPEC 181).
       # 입력: fetch 실패 플래그 + rollup·활동 카운트 + PR 생성 후 경과 시간 + grace 기간.
       last_fetch_fail=$( cat "$FETCH_FAIL_FILE" 2>/dev/null || echo 0 )
-      pending_checks=$( cd "$WT" && gh pr view "$PR_NUMBER" --json statusCheckRollup \
-                          --jq '[.statusCheckRollup[]? | select((.status // "COMPLETED") != "COMPLETED")] | length' 2>/dev/null || echo "" )
+      # statusCheckRollup을 한 번만 fetch해 두 jq 필터를 적용 — API 호출·레이턴시 절감.
       # SPEC 181 AC2: total_checks=0(빈 rollup)을 "체크 모두 완료"로 오판하지 않기 위해 별도 산출.
-      total_checks=$( cd "$WT" && gh pr view "$PR_NUMBER" --json statusCheckRollup \
-                        --jq '.statusCheckRollup | length' 2>/dev/null || echo "" )
+      rollup_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json statusCheckRollup 2>/dev/null || echo "" )
+      pending_checks=$( printf '%s' "$rollup_json" | jq '[.statusCheckRollup[]? | select((.status // "COMPLETED") != "COMPLETED")] | length' 2>/dev/null || echo "" )
+      total_checks=$( printf '%s' "$rollup_json" | jq '.statusCheckRollup | length' 2>/dev/null || echo "" )
       total_reviews=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviews --jq '.reviews | length' 2>/dev/null || echo "" )
       total_comments=$( cd "$WT" && gh pr view "$PR_NUMBER" --json comments --jq '.comments | length' 2>/dev/null || echo "" )
       # inline review thread comments는 `/pulls/{n}/comments` REST endpoint에 별도로 산다 —

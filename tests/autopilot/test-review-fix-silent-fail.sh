@@ -53,6 +53,12 @@ assert_eq "(a-i) 빈 rollup + grace 안 → GRACE_SKIP" "GRACE_SKIP" "$got"
 got=$(run_eval 0 0 0 0 0 0 600 300)
 assert_eq "(a-ii) 빈 rollup + grace 밖 → EMPTY_ROLLUP_SKIP" "EMPTY_ROLLUP_SKIP" "$got"
 
+# ---------- (a-iii) [COMPLETED] + grace 기간 안 → GRACE_SKIP (grace 우선) ----------
+# total_checks>0이라도 grace 안이면 ESCALATE_STUCK이 아닌 GRACE_SKIP 반환 — grace 분기가
+# total_checks 분기보다 우선 (evaluate_silent_fail 우선순위 2 > 3·4).
+got=$(run_eval 0 0 1 0 0 0 60 300)
+assert_eq "(a-iii) [COMPLETED] + grace 안 → GRACE_SKIP" "GRACE_SKIP" "$got"
+
 # ---------- (b) [COMPLETED] + 활동 0 + grace 후 → ESCALATE_STUCK (AC3 회귀 보존) ----------
 got=$(run_eval 0 0 1 0 0 0 600 300)
 assert_eq "(b) [COMPLETED] + 활동 0 + grace 후 → ESCALATE_STUCK" "ESCALATE_STUCK" "$got"
@@ -98,6 +104,14 @@ if [[ -f "$SKILL_MD" ]] && grep -q 'LOOP_REVIEW_PR_GRACE_SECS' "$SKILL_MD"; then
   pass "(AC4) SKILL.md에 env var 명시"
 else
   fail "(AC4) SKILL.md에 env var 미명시"
+fi
+
+# ---------- LOOP_REVIEW_IDLE_THRESHOLD 문서·구현 일치 (drift 방지) ----------
+# 환경변수가 SKILL.md에 문서화돼 있다면 script에서도 실제 읽혀야 한다. drift 방어용 정적 검사.
+if grep -q 'LOOP_REVIEW_IDLE_THRESHOLD' "$SCRIPT"; then
+  pass "LOOP_REVIEW_IDLE_THRESHOLD script에서 읽힘 (문서·구현 일치)"
+else
+  fail "LOOP_REVIEW_IDLE_THRESHOLD script에서 미사용 (문서·구현 불일치)"
 fi
 
 # ---------- 요약 ----------
