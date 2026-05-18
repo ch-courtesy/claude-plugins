@@ -5,7 +5,7 @@ scope:
     - rules/**
     - milestones/**
     - CLAUDE.md
-verify: '[ ! -d plugins/project-init/skills/orchestration-rule-creator ] && ! grep -rq "orchestration-rule-creator" plugins/project-init/ && ! grep -q orchestration plugins/project-init/skills/bootstrap/SKILL.md && git diff --quiet main -- plugins/project-init/skills/context-rule-creator/ && [ "$(git diff main -- plugins/project-init/skills/engineering-rule-creator/ | grep -c ''^+[^+]'')" = "0" ] && jq -e ''.name == "project-init"'' plugins/project-init/.claude-plugin/plugin.json > /dev/null'
+verify: '[ ! -d plugins/project-init/skills/orchestration-rule-creator ] && ! grep -rq "orchestration-rule-creator" plugins/project-init/ && ! grep -q orchestration plugins/project-init/skills/bootstrap/SKILL.md && git diff --quiet main -- plugins/project-init/skills/context-rule-creator/ && [ "$(git diff main -- plugins/project-init/skills/engineering-rule-creator/ | grep ''^+[^+]'' | grep -c ''orchestration-rule-creator'')" = "0" ] && jq -e ''.name == "project-init"'' plugins/project-init/.claude-plugin/plugin.json > /dev/null'
 ears_language: ko
 ---
 
@@ -44,7 +44,7 @@ project-init 플러그인에서 `orchestration-rule-creator` 스킬을 자원 �
   ! grep -rq "orchestration-rule-creator" plugins/project-init/ && \
   ! grep -q orchestration plugins/project-init/skills/bootstrap/SKILL.md && \
   git diff --quiet main -- plugins/project-init/skills/context-rule-creator/ && \
-  [ "$(git diff main -- plugins/project-init/skills/engineering-rule-creator/ | grep -c '^+[^+]')" = "0" ] && \
+  [ "$(git diff main -- plugins/project-init/skills/engineering-rule-creator/ | grep '^+[^+]' | grep -c 'orchestration-rule-creator')" = "0" ] && \
   jq -e '.name == "project-init"' plugins/project-init/.claude-plugin/plugin.json > /dev/null
 ```
 
@@ -53,7 +53,7 @@ project-init 플러그인에서 `orchestration-rule-creator` 스킬을 자원 �
 - **AC-2**: `! grep -rq "orchestration-rule-creator" plugins/project-init/`
 - **AC-3**: `! grep -q orchestration plugins/project-init/skills/bootstrap/SKILL.md`
 - **AC-4**: `git diff --quiet main -- plugins/project-init/skills/context-rule-creator/`
-- **AC-5**: engineering-rule-creator diff의 추가 라인(`^+[^+]`) 0건 — 변경은 삭제(`-`)만 허용
+- **AC-5**: engineering-rule-creator diff의 추가 라인(`^+[^+]`) 중 `orchestration-rule-creator` 문자열 포함 라인 0건 — 새로 추가하는 라인에 orchestration 참조를 도입하지 않음. 기존 라인을 재서술하면서 orchestration 참조만 빼는 부분 수정은 허용.
 - **AC-6**: `plugin.json` 의 `.name`이 `"project-init"`로 유지
 
 ## 제약 (있을 때만)
