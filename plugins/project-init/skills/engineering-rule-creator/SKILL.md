@@ -7,7 +7,7 @@ description: 현재 프로젝트에 맞는 엔지니어링 sub-룰(versioning �
 
 같은 디렉토리의 `templates/` 아래에 있는 sub-룰 템플릿 중 하나를 사용자에게 선택받아 `rules/engineering/<sub>.md`로 생성합니다. 여기서 `<sub>`는 선택된 템플릿의 파일 이름(확장자 제외)입니다 — 예: `templates/versioning.md` → `rules/engineering/versioning.md`.
 
-본 스킬은 **엔지니어링 카테고리의 sub-룰 디스패처**입니다. 형제 스킬(`context-rule-creator`·`orchestration-rule-creator`)이 평면 파일(`rules/<name>.md`) 한 개를 만드는 것과 달리, 본 스킬은 같은 카테고리 아래 여러 sub-룰(versioning·testing·linting 등 — 후속 task에서 확장)을 디렉터리 구조로 누적합니다.
+본 스킬은 **엔지니어링 카테고리의 sub-룰 디스패처**입니다. 형제 스킬(`context-rule-creator`)이 평면 파일(`rules/<name>.md`) 한 개를 만드는 것과 달리, 본 스킬은 같은 카테고리 아래 여러 sub-룰(versioning·testing·linting 등 — 후속 task에서 확장)을 디렉터리 구조로 누적합니다.
 
 선택지·라벨·사후 작업은 모두 **템플릿 파일에서** 도출합니다. 새 sub-룰을 추가하려면 `templates/` 아래에 새 마크다운 파일을 두면 되고, 이 SKILL.md는 변경하지 않습니다.
 
