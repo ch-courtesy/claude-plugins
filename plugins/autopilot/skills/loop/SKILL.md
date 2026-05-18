@@ -46,7 +46,7 @@ Skill(skill: "spec", args: "<task-id>")
 
 ## Subcommand
 
-### start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>] [--no-monitor] [--no-pr]
+### start <task-id> [--max-iterations N] [--wall-clock-minutes N] [--watch] [--spec <path>] [--no-monitor] [--events-only] [--no-pr]
 
 검증 후 워크트리·락 생성 + 이터레이션 루프 시작.
 
@@ -60,16 +60,20 @@ Skill(skill: "spec", args: "<task-id>")
 
 #### 자동 Monitor 가설 (기본 동작)
 
-`--no-monitor`를 명시하지 않은 경우, 백그라운드로 띄운 `loop.sh start`의 stdout 스트림 위에 `Monitor` 도구를 즉시 가설하여 핵심 이벤트(이터 시작·종료, halt, escalation, done 등)를 사용자에게 자동 알림한다. 매 시작마다 별도 결정 질문을 묻지 않는다 — 기본 ON이며 비활성화는 호출 시 `--no-monitor` 플래그로만.
+`--no-monitor`를 명시하지 않은 경우, 백그라운드로 띄운 `loop.sh start`의 stdout 스트림 위에 `Monitor` 도구를 즉시 가설하여 셸 드라이버가 출력하는 비-noise 라인을 사용자에게 자동 알림한다. 매 시작마다 별도 결정 질문을 묻지 않는다 — 기본 ON이며 비활성화는 호출 시 `--no-monitor` 플래그로만.
 
 권장 기본값:
 - `persistent: true`
 - `timeout_ms: 3600000` (1시간)
-- 필터 정규식: `이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|DONE`
+- 필터 의미(default): **빈 줄과 단독 dot(`.`) 라인만 제외**(noise-only exclusion). 그 외 셸 드라이버 stdout 라인(이터 내부 상세 진행·보조 명령 결과·디버그·정보 라인 포함)은 모두 호출 세션의 알림 스트림으로 통과시킨다. 정확한 패턴 입력 표현법(정규식 문법·invert match 가능 여부 등)은 `Monitor` 도구 구현에 위임한다 — 본 SKILL.md는 의미만 명시한다.
+
+##### `--events-only` (opt-out: 기존 핵심 이벤트 필터로 회귀)
+
+`--events-only` 플래그는 `--no-monitor`와 동일한 **SKILL.md 차원 옵션** contract를 가진다 — 모델이 args 파싱 시 이 토큰을 분리·소비하여 `Monitor` 가설의 필터만 기존 핵심 이벤트 정규식(`이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|DONE`)으로 회귀시키고, `loop.sh`로는 **전달하지 않는다** (셸 드라이버는 본 플래그를 모름). 따라서 본 플래그는 **본 스킬을 통한 호출 시점에만** 작용하며, 사용자가 셸 드라이버 `loop.sh start`를 직접 호출하는 경우엔 효력이 없다. 사용 시점: default raw 라인 전달로 세션 컨텍스트·토큰 소비가 부담스러워 핵심 이벤트(이터 시작·종료·halt·escalation·done 등)만 알림 받고 싶을 때.
 
 `--no-monitor` 플래그는 **SKILL.md 차원 옵션**이다 — 모델이 args 파싱 시 이 토큰을 분리·소비하여 `Monitor` 가설 자체를 생략하고, `loop.sh`로는 **전달하지 않는다** (셸 드라이버는 본 플래그를 모름). 따라서 본 플래그는 **본 스킬을 통한 호출 시점에만** 작용하며, 사용자가 셸 드라이버 `loop.sh start`를 직접 호출하는 경우엔 효력이 없다.
 
-`spec` 스킬 단계 9의 "지금 loop start 호출" 결정으로 자동 연계되는 경우에도 추가 모니터 결정 질문 없이 본 기본 동작(Monitor 가설 포함)이 그대로 적용된다.
+`spec` 스킬 단계 10의 "지금 loop start 호출" 결정으로 자동 연계되는 경우에도 추가 모니터 결정 질문 없이 본 기본 동작(Monitor 가설 포함)이 그대로 적용된다. 단 spec 스킬은 사용자에게 `--events-only` opt-out 선택을 명시 확인하며 Yes 시 자동 연계 args 끝에 `--events-only` 토큰을 추가한다.
 
 #### DONE 이후 PR 생성·재사용 phase (default)
 

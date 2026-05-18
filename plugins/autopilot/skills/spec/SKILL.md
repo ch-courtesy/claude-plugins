@@ -300,7 +300,8 @@ SPEC.md commit 직후 본 단계는 **자동으로 default 브랜치(main)·feat
 - **dispatch 위임 모드** (§호출 방법 — dispatch 위임 모드): 본 단계의 세 옵션 사용자 질문을 생략하고 `Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계 — task 생성 → SPEC 작성 → 설계 브랜치 준비 → 자율 루프 자동 시작까지 단일 호출에서 완수.
 - **사용자 직접 호출 모드** (default): SPEC.md 경로(§8.1 slug-bearing)·요약 안내 후 `AskUserQuestion`으로 **명시적 결정 입력**(자유 텍스트 종결구 금지 — CLAUDE.md 규칙). 옵션 3개(상호배타):
 
-  - **지금 loop start 호출** (Recommended) — `Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계. 모니터 추가 질문 없이 loop 기본 동작(자동 Monitor 가설 포함, `plugins/autopilot/skills/loop/SKILL.md`) 적용. default `regular`이면 `start <c>` 단축형 동등.
+  - **지금 loop start 호출** (Recommended) — `Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계. loop 기본 동작(자동 Monitor 가설 포함, `plugins/autopilot/skills/loop/SKILL.md`) 적용. default `regular`이면 `start <c>` 단축형 동등.
+    - 이 옵션을 선택하면 **`--events-only` opt-out** 여부를 `AskUserQuestion`으로 명시 확인한다 — Yes 시 자동 연계 args 끝에 `--events-only` 토큰을 추가해 `Skill(skill: "loop", args: "start <m>/<c> --events-only")`로 호출하고, No(default)는 raw-stream Monitor 동작을 유지한다. opt-out 의미·동작은 `plugins/autopilot/skills/loop/SKILL.md`의 `--events-only` 정의 참조.
   - **SPEC만 확정** — 경로 안내·종료. 사용자가 별도 시점에 `Skill(skill: "loop", args: "start <m>/<c>")` 직접 호출.
   - **변경** — 변경 섹션을 묻고 단계 7/8 재진입.
 
