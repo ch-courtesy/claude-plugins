@@ -145,35 +145,38 @@ echo ""
 echo "=== AC7·AC8: issue #113 본문 enumerate 패턴 포함 ==="
 
 # issue #113 본문의 `autopilot:spec` 섹션 패턴 (gh 패턴 제외)
+# SPEC 108 AC2 — spec/SKILL.md 의 trailing ' *' 는 ':*' 로 정규화됨.
+# 'Bash(git branch *)' 는 short-prefix 'Bash(git branch:*)' 로 dedup 흡수 (SPEC 108).
 SPEC_REQ=(
-  'Bash(git -C * rev-parse *)'
+  'Bash(git -C * rev-parse:*)'
   'Bash(git -C * status --porcelain)'
-  'Bash(git -C * log *)'
-  'Bash(git -C * branch *)'
-  'Bash(git -C * show-ref *)'
-  'Bash(git -C * for-each-ref *)'
-  'Bash(git -C * ls-files *)'
-  'Bash(git -C * diff *)'
-  'Bash(git -C * checkout *)'
-  'Bash(git -C * checkout -b *)'
-  'Bash(git -C * add *)'
-  'Bash(git -C * commit *)'
-  'Bash(git update-ref *)'
-  'Bash(git branch *)'
-  'Bash(git -C * hash-object -w *)'
-  'Bash(GIT_INDEX_FILE=* git -C * read-tree *)'
-  'Bash(GIT_INDEX_FILE=* git -C * update-index --add --cacheinfo *)'
+  'Bash(git -C * log:*)'
+  'Bash(git -C * branch:*)'
+  'Bash(git -C * show-ref:*)'
+  'Bash(git -C * for-each-ref:*)'
+  'Bash(git -C * ls-files:*)'
+  'Bash(git -C * diff:*)'
+  'Bash(git -C * checkout:*)'
+  'Bash(git -C * checkout -b:*)'
+  'Bash(git -C * add:*)'
+  'Bash(git -C * commit:*)'
+  'Bash(git update-ref:*)'
+  'Bash(git branch:*)'
+  'Bash(git -C * hash-object -w:*)'
+  'Bash(GIT_INDEX_FILE=* git -C * read-tree:*)'
+  'Bash(GIT_INDEX_FILE=* git -C * update-index --add --cacheinfo:*)'
   'Bash(GIT_INDEX_FILE=* git -C * write-tree)'
-  'Bash(git -C * commit-tree * -p *)'
+  'Bash(git -C * commit-tree * -p:*)'
   'Bash(mkdir -p milestones/**)'
-  'Bash(awk *)'
-  'Bash(sed *)'
-  'Bash(tr *)'
+  'Bash(awk:*)'
+  'Bash(sed:*)'
+  'Bash(tr:*)'
   'Bash(grep -rE * plugins/autopilot/**)'
   'Bash(grep -rln * plugins/autopilot/**)'
 )
 
 # issue #113 본문의 `autopilot:loop` 섹션 패턴 (gh 패턴 제외)
+# loop/SKILL.md 는 SPEC 108 의 scope 밖이므로 ' *' 형식 유지.
 LOOP_REQ=(
   'Bash(bash * loop.sh start *)'
   'Bash(bash * loop.sh status *)'
@@ -186,7 +189,18 @@ LOOP_REQ=(
 )
 
 # issue #113 본문의 `공통·보조` 섹션 패턴 (gh 패턴 제외)
-COMMON_REQ=(
+# SPEC 108 AC2 — spec/SKILL.md 측은 ':*' 정규화, loop/SKILL.md 측은 ' *' 유지.
+# 한 배열로 묶을 수 없으므로 SPEC_COMMON_REQ / LOOP_COMMON_REQ 로 분리.
+SPEC_COMMON_REQ=(
+  'Bash(git -C * stash list)'
+  'Bash(git -C * stash pop:*)'
+  'Bash(git -C * stash show:*)'
+  'Bash(rm */ESCALATION.md)'
+  'Bash(rm */DONE)'
+  'Bash(ps -p:*)'
+  'Bash(cat */*.lock)'
+)
+LOOP_COMMON_REQ=(
   'Bash(git -C * stash list)'
   'Bash(git -C * stash pop *)'
   'Bash(git -C * stash show *)'
@@ -211,10 +225,10 @@ check_contains_all() {
   fi
 }
 
-check_contains_all "spec/SKILL.md" "$spec_items" "${SPEC_REQ[@]}" "${COMMON_REQ[@]}"
+check_contains_all "spec/SKILL.md" "$spec_items" "${SPEC_REQ[@]}" "${SPEC_COMMON_REQ[@]}"
 ok "AC7: spec SKILL.md 에 issue spec 섹션 + 공통·보조 섹션 패턴 모두 포함"
 
-check_contains_all "loop/SKILL.md" "$loop_items" "${LOOP_REQ[@]}" "${COMMON_REQ[@]}"
+check_contains_all "loop/SKILL.md" "$loop_items" "${LOOP_REQ[@]}" "${LOOP_COMMON_REQ[@]}"
 ok "AC8: loop SKILL.md 에 issue loop 섹션 + 공통·보조 섹션 패턴 모두 포함"
 
 echo ""
