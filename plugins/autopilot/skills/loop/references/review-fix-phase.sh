@@ -86,8 +86,12 @@ mark_seen() { echo "$1" >> "$SEEN_FILE"; }
 # 인라인 thread reply는 별도 REPLIED_THREADS_FILE로 thread 단위 dedup (SPEC 153 AC4·AC5).
 DISPUTE_FILE="$WT/.iterations/review-fix-dispute-posted"
 
-# 인라인 thread reply dedup — 본 phase 사이클 동안 같은 thread는 최대 1개 reply (AC4).
-# 서로 다른 thread들은 각각 reply 가능 (AC5: phase 단위 상한 없음).
+# 인라인 thread "응답 완료" 추적 — 본 phase 사이클 동안 같은 thread를 두 번 처리하지
+# 않게 가드 (AC4). FIX(코드 변경)·DISPUTE(thread reply) 두 액션 모두 처리 직후
+# `mark_thread_replied`로 기록된다 — 그렇지 않으면 다음 iter의 polling이 같은 thread를
+# 다시 발견해 claude가 중복 FIX/DISPUTE를 emit할 수 있다 (불필요한 commit·reply).
+# 파일명은 SPEC 153 초기 명칭 보존(과거 호환), 의미는 "responded" 확장.
+# 서로 다른 thread들은 각각 처리 가능 (AC5: phase 단위 상한 없음).
 REPLIED_THREADS_FILE="$WT/.iterations/review-fix-replied-threads"
 touch "$REPLIED_THREADS_FILE"
 
@@ -439,7 +443,7 @@ EOF
       # reply 대상은 root이므로 `_comment_id`는 in_reply_to 인자로 쓰이지 않는다.
       read -r _tag thread_id _comment_id action inline_body <<<"$inline_line"
       [[ "$_tag" != "INLINE" ]] && continue
-      [[ "$action" != "DISPUTE" ]] && continue   # FIX는 (iii)에서 이미 처리
+      [[ "$action" != "DISPUTE" && "$action" != "FIX" ]] && continue
       [[ -z "$thread_id" ]] && continue
       # 방어: thread_id가 정수가 아니면 skip — `gh api -F in_reply_to=<int>` REST 요구사항.
       # 비-수치값이 흘러들면 422를 받으므로 사전 차단(claude 출력 형식 위반 케이스 격리).
@@ -448,8 +452,16 @@ EOF
         continue
       fi
       if is_thread_replied "$thread_id"; then
-        continue   # AC4: 같은 thread 동일 phase 사이클 내 중복 reply 차단
+        continue   # AC4: 같은 thread 동일 phase 사이클 내 중복 처리 차단 (FIX·DISPUTE 공통)
       fi
+      # FIX 액션: 코드 변경은 (iii)에서 이미 commit·push 완료. 본 분기는 dedup 마킹만.
+      # 마킹하지 않으면 다음 polling iter에서 같은 thread가 fix_prompt_inline_threads에
+      # 그대로 다시 포함돼 claude가 중복 FIX를 emit할 수 있다 (불필요한 commit·oscillation).
+      if [[ "$action" == "FIX" ]]; then
+        mark_thread_replied "$thread_id"
+        continue
+      fi
+      # 이하 DISPUTE 분기 — inline thread에 reply 1개 POST.
       [[ -z "$inline_body" ]] && inline_body="(no body)"
       echo "[review-fix-phase] inline reply POST: thread $thread_id (comment $_comment_id)"
       # `--method POST`를 URL 앞에 두어 호출 로그가 `--method POST repos/.../pulls/N/comments`
