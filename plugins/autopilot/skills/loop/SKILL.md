@@ -20,6 +20,13 @@ allowed-tools:
   - Bash(rm */DONE)
   - Bash(ps -p *)
   - Bash(cat */*.lock)
+  # SPEC 183 — 세션에서 자주 프롬프되던 패턴 보강 (cache-path 드라이버·bg output tail·PR read-only·git inspect/restore)
+  - Bash(bash /Users/*/.claude/plugins/cache/*/autopilot/*/skills/loop/references/*.sh *)
+  - Bash(tail -F /private/tmp/claude-*/**/tasks/*.output*)
+  - Bash(gh pr view *)
+  - Bash(gh pr checks *)
+  - Bash(git status --porcelain*)
+  - Bash(git checkout HEAD -- *)
 ---
 
 # loop
