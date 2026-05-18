@@ -345,6 +345,15 @@ while (( iter < MAX_ITER )); do
   fix_prompt_header=$( cd "$WT" && gh pr view "$PR_NUMBER" --json comments,reviews 2>/dev/null || echo "{}" )
   fix_prompt_threads=$( cd "$WT" && gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/comments" 2>/dev/null || echo "[]" )
   fix_prompt_body=$(printf 'PR comments + reviews:\n%s\n\nReview thread inline comments:\n%s\n' "$fix_prompt_header" "$fix_prompt_threads")
+  # Inline thread roots (in_reply_to_id == null) — 각 root이 INLINE per-thread 응답 1건의 대상.
+  # SPEC 153에서 thread_id == comment_id (root.id). (iv-A) 파서가 INLINE 라인을 읽으므로
+  # 본 변수를 프롬프트에 명시 주입해 dead-code 갭을 차단.
+  fix_prompt_inline_threads=$(printf '%s' "$fix_prompt_threads" | jq -r '
+    [.[]? | select(.in_reply_to_id == null)]
+    | if length == 0 then "(no active inline review threads)"
+      else map("- thread_id=\(.id) path=\(.path // ""):\(.line // 0) body=\((.body // "") | gsub("\n"; " ") | gsub("\t"; " ") | .[0:240])") | join("\n")
+      end
+  ' 2>/dev/null || echo "(inline thread parse failed)")
   claude_prompt=$(cat <<EOF
 You are a fix worker for PR #$PR_NUMBER on branch '$BRANCH'.
 New review events:
@@ -353,13 +362,32 @@ $new_events
 Full PR comment/review context (for reference):
 $fix_prompt_body
 
-Goal:
-  - For each new event, decide if reviewer is correct → fix the code (Edit/Write).
-  - If reviewer is wrong → output a single line starting with 'DISPUTE: ' followed by
-    a short dispute body (the caller will post it as ONE PR comment via gh pr comment).
-  - DO NOT push, commit, or create PRs yourself. DO NOT post comments yourself.
+Active inline review threads requiring per-thread response (SPEC 153):
+$fix_prompt_inline_threads
 
-After working, output 'DONE' on the last line (or 'DISPUTE: ...' if disputing).
+Goal:
+  PR-level comments and review summaries (batched, collective verdict):
+    - If reviewer is correct → fix the code (Edit/Write).
+    - If reviewer is wrong → emit a single line: 'DISPUTE: <one-line dispute body>'
+      (the caller posts it as ONE PR-level comment — AC6 보존).
+
+  EACH active inline review thread listed above (per-thread 1:1 response, SPEC 153 AC1·AC2·AC3):
+    - If reviewer is correct → fix the referenced code, then emit ONE line:
+        INLINE <thread_id> <thread_id> FIX
+      AC2 fallback: 코드 변경 시도가 실패(빌드/테스트 실패·구문 오류 등)할 경우
+      해당 thread에 대해 INLINE <thread_id> <thread_id> DISPUTE <one-line 실패 사유>로
+      전환해 응답한다 (FIX → reply 자동 fallback, AC1 "정확히 하나" 보장 유지).
+    - If reviewer is wrong → emit ONE line:
+        INLINE <thread_id> <thread_id> DISPUTE <one-line dispute body>
+    - 보수적 판정 (SPEC §제약 요건): 타당성이 불확실하면 FIX 분기로 결정한다
+      (DISPUTE 남발 방지·reviewer-bot 갈등 완화).
+    - The INLINE line format is strict — 5 whitespace-separated tokens:
+      INLINE / <thread_id> / <comment_id> / <action> / <body...>
+      SPEC 153에서 thread_id와 comment_id는 같은 정수(root comment DB id).
+
+  DO NOT push, commit, or create PRs yourself. DO NOT post comments yourself.
+
+After working, output 'DONE' on the last line.
 EOF
 )
 
