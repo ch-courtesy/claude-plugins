@@ -64,16 +64,14 @@ slug=$(printf '%s' "$title" \
 - **main push 거부** (§9.5.4 step 4 `git push origin main` 이 non-fast-forward·protected branch·권한 부족 등으로 reject — step 3 ff-merge 는 이미 성공해 로컬 main HEAD 가 feat SPEC commit 까지 fast-forward 적용된 *후*, 원격 main push 가 거부된 시점):
   1. **`--force`·`--force-with-lease` 등 강제 push 절대 시도 안 함** — 본 단계의 모든 push는 일반 push 만 허용. push 명령은 단 한 번만 시도하고 실패하면 즉시 abort.
   2. **이 분기 시점의 상태 전제**: 로컬 main HEAD 는 SPEC commit 까지 적용됐지만 `origin/main` 은 step 1 의 fetch 시점 그대로다 — 즉 로컬 main 과 원격 main 이 분기된 상태로 일관성이 깨졌다. (이 전제는 ff-merge 거부·feat push 거부 분기와 다른 점이다.) 원격 feat push (step 5) 는 시도 자체를 하지 않는다.
-  3. 사용자에게 명시적으로 알리고, `git reset --hard origin/main` 으로 로컬 main 을 원격에 맞춰 되돌리거나 PR 흐름으로 전환할 수 있음을 안내. feat 브랜치 SPEC commit 은 보존.
+  3. 사용자에게 push 거부 사실과 함께 명시적으로 알리고, `git reset --hard origin/main` 으로 로컬 main 을 원격에 맞춰 되돌리거나 PR 흐름으로 전환할 수 있음을 안내한다 (단일 사용자 메시지 지점). feat 브랜치 SPEC commit 은 보존. SPEC.md disk 사본도 보존.
   4. `git checkout "$orig_branch"`로 호출 시점 원래 브랜치 복귀.
-  5. 사용자에게 push 거부 사실(어느 브랜치 push 가 어떤 사유로 거부됐는지)과 복구 방법 안내. SPEC.md disk 사본은 그대로 보존.
 
 - **feat push 거부** (§9.5.4 step 5 `git push origin <branch>` 가 protected branch·권한 부족·서버 일시 오류 등으로 reject — step 4 main push 는 이미 성공한 *후*, feat 브랜치만 push 가 거부된 시점):
   1. **`--force`·`--force-with-lease` 등 강제 push 절대 시도 안 함** — 일반 push 만 허용, 단 한 번 시도 후 실패 시 즉시 abort.
   2. **이 분기 시점의 상태 전제**: step 4 가 이미 성공했으므로 `origin/main = local main = feat SPEC commit` 이 동기 완료된 상태다 — 로컬 main 과 원격 main 사이에 분기가 없으며, 따라서 `git reset --hard origin/main` 같은 "로컬 되돌림" 안내는 부적절하다 (되돌릴 분기가 없다). feat 브랜치도 로컬·원격 모두 같은 SHA (단지 원격에 ref 가 등록 안 됐을 뿐) 인 경우가 일반적이다.
-  3. 사용자에게 명시적으로 알리고, **필요 복구는 `git push origin <branch>` 재시도** 임을 안내한다 (서버 일시 오류·네트워크 회복 후). 거부 사유가 권한·protected branch 라면 권한 설정·브랜치 보호 규칙 확인 후 재시도. main 동기화는 이미 완료됐으므로 다음 spec 호출에서는 본 단계가 no-op 으로 끝나며, feat ref 등록만 별도로 처리해도 무방하다.
+  3. 사용자에게 feat push 거부 사실과 함께 명시적으로 알리고, **필요 복구는 `git push origin <branch>` 재시도** 임을 안내한다 (서버 일시 오류·네트워크 회복 후, 단일 사용자 메시지 지점). 거부 사유가 권한·protected branch 라면 권한 설정·브랜치 보호 규칙 확인 후 재시도. main 동기화는 이미 완료됐으므로 다음 spec 호출에서는 본 단계가 no-op 으로 끝나며, feat ref 등록만 별도로 처리해도 무방하다. SPEC.md disk 사본 보존.
   4. `git checkout "$orig_branch"`로 호출 시점 원래 브랜치 복귀.
-  5. 사용자에게 push 거부 사실(feat 브랜치 push 가 어떤 사유로 거부됐는지)과 복구 방법 안내. SPEC.md disk 사본은 그대로 보존.
 
 - **fetch 실패** (`git fetch origin` 자체가 네트워크·인증 문제로 실패): §9.5.4 전체를 abort하고 `git checkout "$orig_branch"`로 복귀. SPEC.md commit 은 feat 브랜치에 그대로 남으며, 원격 동기화는 사용자가 네트워크 복구 후 수동 재시도 또는 다음 spec 호출에서 자동 재실행.
 
