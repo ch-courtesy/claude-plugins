@@ -82,8 +82,17 @@ touch "$SEEN_FILE"
 is_seen() { grep -qxF "$1" "$SEEN_FILE" 2>/dev/null; }
 mark_seen() { echo "$1" >> "$SEEN_FILE"; }
 
-# 반박 코멘트 1회 게시 가드 (AC10·AC11) — 본 phase 동안 1개만 허용.
+# 반박 코멘트 1회 게시 가드 — PR-level dispute에 한정 (SPEC 153 AC6 기존 동작 보존).
+# 인라인 thread reply는 별도 REPLIED_THREADS_FILE로 thread 단위 dedup (SPEC 153 AC4·AC5).
 DISPUTE_FILE="$WT/.iterations/review-fix-dispute-posted"
+
+# 인라인 thread reply dedup — 본 phase 사이클 동안 같은 thread는 최대 1개 reply (AC4).
+# 서로 다른 thread들은 각각 reply 가능 (AC5: phase 단위 상한 없음).
+REPLIED_THREADS_FILE="$WT/.iterations/review-fix-replied-threads"
+touch "$REPLIED_THREADS_FILE"
+
+is_thread_replied() { grep -qxF "$1" "$REPLIED_THREADS_FILE" 2>/dev/null; }
+mark_thread_replied() { echo "$1" >> "$REPLIED_THREADS_FILE"; }
 
 # owner cmd dedup — 매 폴링마다 동일 owner 코멘트 재처리 방지.
 OWNER_CMD_SEEN_FILE="$WT/.iterations/owner-cmd-seen-ids"
@@ -95,6 +104,10 @@ AUTO_MERGE_FAIL_MAX="${LOOP_REVIEW_AUTO_MERGE_FAIL_MAX:-5}"
 
 # ----- PR owner 식별 (owner cmd 검사용) -----
 PR_OWNER=$( cd "$WT" && gh pr view "$PR_NUMBER" --json author --jq '.author.login' 2>/dev/null || echo "" )
+
+# ----- owner/repo 식별 (인라인 thread reply용 gh api URL 구성) -----
+# `repos/<owner>/<repo>/pulls/<n>/comments`에 in_reply_to=<comment-id>로 POST 시 사용.
+OWNER_REPO=$( cd "$WT" && gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || echo "" )
 
 # ----- 종료 시 cleanup-phase 호출 헬퍼 -----
 finalize_merged() {
@@ -378,7 +391,48 @@ EOF
       || { echo "WARN: fix commit/push 실패 (iter $iter) — 다음 iter 재시도 (phase 계속)" >&2; sleep "$POLL_SECS"; continue; }
   fi
 
-  # (iv) DISPUTE 본문 감지 → PR 코멘트 1회 게시 (AC10·AC11)
+  # (iv-A) INLINE per-comment thread reply POST (SPEC 153 AC1·AC3·AC4·AC5)
+  # claude 출력에서 `INLINE <thread_id> <comment_id> <action> <body...>` 라인을 파싱.
+  # action == DISPUTE 인 경우 해당 inline thread에 reply 1개 POST. thread_id 기준 dedup으로
+  # 같은 phase 사이클 동안 같은 thread는 최대 1 reply (AC4). 서로 다른 thread들은 각각 reply 가능 (AC5).
+  # action == FIX는 claude가 이미 코드 변경을 적용했음을 의미 — 위 (iii) commit/push 경로가 처리.
+  # PR-level dispute(DISPUTE: ...) 본문은 본 블록과 무관, 아래 (iv-B)가 처리 — AC6 기존 동작 보존.
+  if [[ -z "$OWNER_REPO" ]]; then
+    if grep -qE '^INLINE[[:space:]]' "$WT/$fix_log" 2>/dev/null; then
+      echo "WARN: OWNER_REPO 미식별 — inline reply POST skip (모든 thread)" >&2
+    fi
+  else
+    while IFS= read -r inline_line; do
+      [[ -z "$inline_line" ]] && continue
+      # 토큰 분리: INLINE <thread_id> <comment_id> <action> <body...>
+      # 마지막 변수가 나머지 토큰을 모두 흡수 (body 내 공백 보존).
+      read -r _tag thread_id comment_id action inline_body <<<"$inline_line"
+      [[ "$_tag" != "INLINE" ]] && continue
+      [[ "$action" != "DISPUTE" ]] && continue   # FIX는 (iii)에서 이미 처리
+      [[ -z "$thread_id" ]] && continue
+      if is_thread_replied "$thread_id"; then
+        continue   # AC4: 같은 thread 동일 phase 사이클 내 중복 reply 차단
+      fi
+      [[ -z "$inline_body" ]] && inline_body="(no body)"
+      echo "[review-fix-phase] inline reply POST: thread $thread_id (comment $comment_id)"
+      # `--method POST`를 URL 앞에 두어 호출 로그가 `--method POST repos/.../pulls/N/comments`
+      # 순서를 보장 (mock·실CI 양쪽 grep 패턴 호환).
+      if ( cd "$WT" && gh api \
+              --method POST \
+              "repos/$OWNER_REPO/pulls/$PR_NUMBER/comments" \
+              -f "in_reply_to=$thread_id" \
+              -f "body=[autopilot:dispute] $inline_body" >/dev/null 2>&1 ); then
+        mark_thread_replied "$thread_id"
+      else
+        # recoverable: 다음 iter에서 재시도 가능 (mark_thread_replied 미호출이므로 동일 thread 재시도)
+        echo "WARN: inline reply POST 실패 (thread $thread_id) — 다음 iter 재시도 (phase 계속)" >&2
+      fi
+    done < <( grep -E '^INLINE[[:space:]]' "$WT/$fix_log" 2>/dev/null || true )
+  fi
+
+  # (iv-B) PR-level DISPUTE 본문 감지 → PR 코멘트 1회 게시 (AC10·AC11 — SPEC 123 기존 경로)
+  # `DISPUTE: <body>` 라인은 PR-level 의견 — gh pr comment 경로 (AC6 보존).
+  # INLINE 라인은 본 블록 패턴(^DISPUTE:)에 일치하지 않으므로 영향 없음.
   dispute_line=$( grep -m1 -E '^DISPUTE:' "$WT/$fix_log" 2>/dev/null || true )
   if [[ -n "$dispute_line" && ! -f "$DISPUTE_FILE" ]]; then
     dispute_body="${dispute_line#DISPUTE: }"
