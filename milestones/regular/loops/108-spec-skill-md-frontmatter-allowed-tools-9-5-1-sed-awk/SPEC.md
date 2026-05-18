@@ -6,6 +6,8 @@ scope:
     - milestones/**
     - CLAUDE.md
 verify: "bash tests/autopilot/test-spec-skill-frontmatter.sh"
+test_sweep_paths:
+  - "tests/autopilot/test-skill-allow-tools.sh"
 ears_language: ko
 request_review: true
 ---
