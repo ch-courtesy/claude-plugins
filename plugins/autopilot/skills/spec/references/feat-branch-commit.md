@@ -17,15 +17,22 @@ SPEC §1 제목(첫 H1, `# ` 다음 텍스트)에서 `<slug>`를 도출:
 
 결과가 빈 문자열이면 fallback 브랜치(`feat/<c>` 단독)·fallback 디렉토리(`milestones/<m>/loops/<c>/`)를 만들지 않는다 — SPEC 116 EARS AC4 단일 컨벤션 위반이며 sibling pr-phase 도 동일 이유로 abort. 빈 slug 발생 시 §9.5.3 실패 처리로 분기해 사용자에게 §1 H1 제목 수정(step 7 재진입)을 요청한다. 같은 SPEC 제목은 항상 같은 slug 를 만든다.
 
-구현 예 (bash) — **본 코드 조각이 슬러그 도출의 단일 출처(single source of truth)**이며 안전장치(`references/test-spec-loop-contract.sh`)가 이 위치를 검사한다:
+구현 예 (bash) — **본 코드 조각이 슬러그 도출의 단일 출처(single source of truth)**이며 안전장치(`references/test-spec-loop-contract.sh`)가 이 위치를 검사한다.
+
+H1 제목 추출은 BSD sed (macOS) 와 GNU sed 의 `{...}` 블록 + `q` 구문 차이로 인해 awk 기반으로 작성한다 — 기존 `sed -n '/^---$/,/^---$/!{/^# /{s/^# //p; q;}}'` 패턴은 BSD sed 에서 `extra characters at the end of } command` 로 실패한다 (SPEC 108):
 
 ```bash
-title=$(sed -n '/^---$/,/^---$/!{/^# /{s/^# //p; q;}}' "milestones/<m>/loops/<c>/SPEC.md")
+title=$(awk '
+  /^---$/ { fm = !fm; next }
+  !fm && /^# / { sub(/^# /, ""); print; exit }
+' "milestones/<m>/loops/<c>/SPEC.md")
 slug=$(printf '%s' "$title" \
   | LC_ALL=C tr '[:upper:]' '[:lower:]' \
   | LC_ALL=C tr -c 'a-z0-9-' '-' \
   | sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')
 ```
+
+awk 동작: `fm` 플래그가 frontmatter `---` 라인을 토글하므로 frontmatter 내부의 `# ...` 라인은 무시되고 frontmatter 종료 후 첫 H1 (`# ` prefix) 의 본문만 추출·종료한다. frontmatter 가 없는 SPEC.md 도 그대로 첫 H1 을 추출한다. 슬러그 정규화에 쓰이는 trailing `sed -e ...` 는 in-place 가 아닌 단순 치환 호출이라 BSD·GNU 양립한다.
 
 ## 9.5.2 브랜치 생성·commit 절차
 
