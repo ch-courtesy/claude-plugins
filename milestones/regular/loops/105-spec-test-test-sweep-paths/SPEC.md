@@ -25,7 +25,7 @@ spec 스킬 워크플로의 명확화 라운드에 "task scope가 test 코드 �
 ## 범위
 포함:
 - `plugins/autopilot/skills/spec/SKILL.md` — step 5 명확화 라운드 끝에 자동 판단·yes/no 단발 확인 절차 추가, step 8 SPEC.md 치환 룰에 frontmatter `test_sweep_paths` 키 처리 명세 추가.
-- `plugins/autopilot/skills/spec/references/spec-template.md` — `{{test_sweep_paths}}` placeholder 정의·고정 frontmatter active 영역 위치 결정. 기존 commented `# test_sweep_paths:`·`# test_paths:` 예시 블록은 보존.
+- `plugins/autopilot/skills/spec/references/spec-template.md` — `test_sweep_paths` placeholder 정의·고정 frontmatter active 영역 위치 결정. 기존 commented `# test_sweep_paths:`·`# test_paths:` 예시 블록은 보존.
 - `plugins/autopilot/skills/spec/references/self-review.md` — 5축 체크 항목에 "scope에 test 코드 변경 포함 시 `test_sweep_paths` 필드가 비어 있지 않다" 검사 추가.
 - `tests/autopilot/test-spec-skill.sh` — (a) test 변경 포함 SPEC 생성 케이스, (b) test 변경 없는 SPEC 생성 케이스 두 케이스 추가.
 
