@@ -113,36 +113,23 @@ collect_commit_log() {
   ( cd "$WT" && git log --pretty=format:'- %h %s' "$base..HEAD" 2>/dev/null || true )
 }
 
-# COMMIT_LOG·PR_BODY 조립은 rebase 이후로 미룬다 — 충돌 자동 해결(-X theirs)이 SHA를 재작성하면
-# PR body '## Commits' 섹션이 구 SHA를 표시하기 때문. SPEC_TITLE·WHAT_SECTION은 rebase 영향을
-# 받지 않으므로 위에서 미리 추출해 둔다.
+# COMMIT_LOG·PR_BODY 조립은 sync helper 이후로 미룬다 — rebase 경로에서 충돌 자동 해소가
+# SHA를 재작성하면 PR body '## Commits' 섹션이 구 SHA를 표시하기 때문. SPEC_TITLE·WHAT_SECTION은
+# sync 영향을 받지 않으므로 위에서 미리 추출해 둔다.
 
-# ----- base branch rebase (SPEC 103 M2/AC3·M3/AC4) -----
-# PR 생성 직전에 origin/<base>로부터 fetch + rebase를 수행해 base 최신 변경분을 흡수한다.
-# fast-forward(또는 동일 history)면 no-op으로 통과한다. 첫 평범한 rebase가 실패하면(충돌
-# 가능성 — 본 단계 외 환경 오류도 포함될 수 있음) `-X theirs` 전략으로 정확히 1회만 재시도한다
-# (M3/AC4 휴리스틱: feat 브랜치의 변경을 base 위에 우선 적용). 재시도도 실패하면 워크트리를
-# `git rebase --abort`로 복구하고 명시적 사용자 알림 + non-zero exit (보수적 좌절).
-# 1회 제한은 분기를 한 갈래만 두어 코드로 강제한다 — counter 변수 불필요.
-echo "[pr-phase] origin/$DEFAULT_BRANCH fetch"
-if ! ( cd "$WT" && git fetch origin "$DEFAULT_BRANCH" 2>&1 ); then
-  echo "ERROR: git fetch origin $DEFAULT_BRANCH 실패" >&2
+# ----- base 동기화 (SPEC 169) -----
+# 단일 sync helper(rebase-phase.sh)를 통해 fetch + 동기화를 수행한다. helper가 원격 트래킹
+# 브랜치 존재 여부를 검사해 rebase / merge 경로로 분기하므로 본 phase는 직접 `git rebase`·
+# `git merge`를 호출하지 않는다 (SPEC 169 AC7). force push도 helper·본 phase 모두에서 부재
+# (AC4). 충돌 자동 해소(1회) 및 실패 시 워크트리 abort 복구는 helper 책임.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+echo "[pr-phase] base 동기화 → $SCRIPT_DIR/rebase-phase.sh (SPEC 169 sync helper)"
+if ! bash "$SCRIPT_DIR/rebase-phase.sh" "$WT" "$BRANCH" "$PROJECT_ROOT"; then
+  echo "ERROR: base 동기화 실패 — PR 단계 abort (helper의 ESCALATION 로그 참조)" >&2
   exit 1
 fi
 
-echo "[pr-phase] origin/$DEFAULT_BRANCH rebase"
-if ! ( cd "$WT" && git rebase "origin/$DEFAULT_BRANCH" 2>&1 ); then
-  echo "[pr-phase] rebase 실패 감지 — 충돌 1회 자동 해결 시도 (-X theirs)"
-  ( cd "$WT" && git rebase --abort 2>/dev/null || true )
-  if ! ( cd "$WT" && git rebase -X theirs "origin/$DEFAULT_BRANCH" 2>&1 ); then
-    ( cd "$WT" && git rebase --abort 2>/dev/null || true )
-    echo "ERROR: rebase 충돌 자동 해결 실패 (1회 시도 후 좌절). 워크트리는 'git rebase --abort'로 복구됨 — 사용자 수동 해결 후 재시도하세요." >&2
-    exit 1
-  fi
-  echo "[pr-phase] rebase 충돌 자동 해결 성공 (-X theirs)"
-fi
-
-# ----- COMMIT_LOG·PR_BODY 조립 (rebase 이후 — SHA 재작성 흡수) -----
+# ----- COMMIT_LOG·PR_BODY 조립 (sync 이후 — rebase 경로의 SHA 재작성 흡수) -----
 COMMIT_LOG="$(collect_commit_log)"
 
 # Body 본문 (fence 안 내용)
