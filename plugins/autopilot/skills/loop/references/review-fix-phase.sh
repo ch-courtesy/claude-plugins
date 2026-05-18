@@ -352,8 +352,18 @@ while (( iter < MAX_ITER )); do
   # Inline thread roots (in_reply_to_id == null) — 각 root이 INLINE per-thread 응답 1건의 대상.
   # SPEC 153에서 thread_id == comment_id (root.id). (iv-A) 파서가 INLINE 라인을 읽으므로
   # 본 변수를 프롬프트에 명시 주입해 dead-code 갭을 차단.
-  fix_prompt_inline_threads=$(printf '%s' "$fix_prompt_threads" | jq -r '
-    [.[]? | select(.in_reply_to_id == null)]
+  # 이미 처리된 thread는 REPLIED_THREADS_FILE 기준으로 사전 제외 — (iv-A) dedup이
+  # 후처리만 막을 뿐 claude의 edit·comment 자체는 이미 수행되므로, 프롬프트 진입 전에
+  # 차단해야 불필요한 file edit·oscillation을 막을 수 있다.
+  replied_threads_json='[]'
+  if [[ -s "$REPLIED_THREADS_FILE" ]]; then
+    replied_threads_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' < "$REPLIED_THREADS_FILE" 2>/dev/null || echo '[]')
+  fi
+  fix_prompt_inline_threads=$(printf '%s' "$fix_prompt_threads" | jq -r --argjson replied "$replied_threads_json" '
+    [.[]?
+      | select(.in_reply_to_id == null)
+      | select((.id | tostring) as $sid | $replied | index($sid) | not)
+    ]
     | if length == 0 then "(no active inline review threads)"
       else map("- thread_id=\(.id) path=\(.path // ""):\(.line // 0) body=\((.body // "") | gsub("\n"; " ") | gsub("\t"; " ") | .[0:240])") | join("\n")
       end
@@ -469,7 +479,11 @@ EOF
     fi
     # 이하 DISPUTE 분기 — inline thread에 reply 1개 POST. OWNER_REPO 필수.
     if [[ -z "$OWNER_REPO" ]]; then
-      continue   # 상단 WARN으로 이미 안내, dedup 미적용 — 다음 iter에서 OWNER_REPO 회복 시 재시도 가능
+      # OWNER_REPO는 phase 진입 시 1회 식별되므로 비어 있으면 phase 전체에서 비어 있다.
+      # POST 불가 + 매 iter 재평가(oscillation) 차단을 위해 dedup만 마킹한다.
+      # dispute는 사실상 lost — 사용자 수동 처리 필요 (상단 WARN 메시지 참조).
+      mark_thread_replied "$thread_id"
+      continue
     fi
     [[ -z "$inline_body" ]] && inline_body="(no body)"
     echo "[review-fix-phase] inline reply POST: thread $thread_id (comment $_comment_id)"
