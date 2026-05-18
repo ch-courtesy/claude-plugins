@@ -46,6 +46,18 @@ test_spec_verify_command() {
   grep -qE 'review-fix|rebase|cleanup' "$S/SKILL.md"                       || fail "SKILL.md: phase 어휘 부재"
   grep -qE '상태 전이|Status'          "$S/SKILL.md"                       || fail "SKILL.md: 상태 어휘 부재"
   grep -qE '자동 머지|auto[- ]?merge'  "$S/SKILL.md"                       || fail "SKILL.md: 자동 머지 어휘 부재"
+  # SPEC 153 prompt → 파서 contract 정적 검증 — claude mock이 stdin을 무시하므로
+  # 런타임 테스트만으로는 prompt가 INLINE 포맷 출력을 지시하는지 확인 불가.
+  # production source에서 prompt-출력 contract의 양쪽이 모두 INLINE 어휘를 갖는지 grep.
+  grep -qE 'INLINE[[:space:]]+<thread_id>'  "$S/references/review-fix-phase.sh" \
+    || fail "review-fix: claude prompt에 INLINE <thread_id> 포맷 지시 부재 — (iv-A) 파서가 dead code 위험"
+  grep -qE '^[[:space:]]*read.*INLINE|grep.*\^INLINE' "$S/references/review-fix-phase.sh" \
+    || fail "review-fix: INLINE 라인 파서 부재 (read/grep ^INLINE 없음)"
+  # in_reply_to 타입 검증 — REST API는 정수 필드. `-F`(typed) 사용 강제.
+  grep -qE '\-F[[:space:]]+"in_reply_to=' "$S/references/review-fix-phase.sh" \
+    || fail "review-fix: in_reply_to에 -F (typed integer) 사용 부재 (REST 422 위험)"
+  ! grep -qE '\-f[[:space:]]+"in_reply_to=' "$S/references/review-fix-phase.sh" \
+    || fail "review-fix: in_reply_to에 -f (string) 사용 — REST API가 422 반환"
   pass "SPEC 검증 명령 통과"
 }
 
@@ -212,12 +224,400 @@ GH
   pass "rebase-phase: fast-forward 0 exit"
 }
 
+# =====================================================================
+# SPEC 153 — inline review thread comment 1:1 응답 테스트 케이스 (a)~(e)
+# =====================================================================
+#
+# 공통 셋업: 격리 main repo + bare remote + worktree(feat/153-test) + 1개 commit.
+# 공통 mock: gh stub은 AUTOPILOT_TEST_PR_FIXTURE(JSON 파일) + AUTOPILOT_TEST_INLINE_FIXTURE
+# (JSON 배열 파일)로 PR 본문·인라인 리뷰 코멘트를 주입. 모든 gh 호출은
+# AUTOPILOT_TEST_GH_LOG에 한 줄씩 기록 — POST/comments 호출 횟수 등 assertion에 사용.
+# claude stub은 AUTOPILOT_TEST_CLAUDE_OUT의 내용을 stdout으로 emit하고,
+# AUTOPILOT_TEST_CLAUDE_TOUCH가 지정되면 해당 경로에 파일 변경을 만든다(commit 트리거).
+
+_inline_setup_worktree() {
+  local case_name="$1"
+  local project="$WORK_DIR/$case_name"
+  local bare="$WORK_DIR/${case_name}.git"
+  git init -q --bare -b main "$bare"
+  mkdir -p "$project"
+  (
+    cd "$project"
+    git init -q -b main
+    git config user.email "t@e.com"; git config user.name "T"
+    git remote add origin "$bare"
+    git commit --allow-empty -q -m initial
+    git push -q origin main
+    # rebase-phase.sh의 default branch 감지 fallback(git symbolic-ref) 경로용
+    git remote set-head origin main
+    mkdir -p milestones/regular/loops/153
+    git worktree add -q -b feat/153-test milestones/regular/loops/153/.worktree HEAD
+    cd milestones/regular/loops/153/.worktree
+    # claude mock이 append할 추적 파일 (--untracked-files=no 모드의 commit 트리거)
+    echo "// initial" > fix-target.txt
+    git add fix-target.txt
+    git commit -q -m "feat: x"
+    git push -q -u origin feat/153-test
+  ) >/dev/null 2>&1 || fail "$case_name setup"
+  printf '%s|%s\n' "$project" "$bare"
+}
+
+# gh stub — 인라인 thread fixture 기반 응답 + 모든 호출을 log 파일에 기록.
+# 호출 형식: gh <cmd> <subcmd> [args...] [--jq <expr>]
+_inline_make_gh_mock() {
+  local mock_bin="$1"
+  mkdir -p "$mock_bin"
+  cat > "$mock_bin/gh" <<'GH'
+#!/usr/bin/env bash
+log_file="${AUTOPILOT_TEST_GH_LOG:-/dev/null}"
+echo "CALL|$*" >> "$log_file" 2>/dev/null || true
+
+jq_expr=""
+method=""
+for ((i=1; i<=$#; i++)); do
+  case "${!i}" in
+    --jq)     j=$((i+1)); jq_expr="${!j}" ;;
+    --method) j=$((i+1)); method="${!j}" ;;
+    -X)       j=$((i+1)); method="${!j}" ;;
+  esac
+done
+
+_pr_fixture() { [[ -f "${AUTOPILOT_TEST_PR_FIXTURE:-}" ]] && cat "$AUTOPILOT_TEST_PR_FIXTURE" || echo "{}"; }
+_inline_fixture() { [[ -f "${AUTOPILOT_TEST_INLINE_FIXTURE:-}" ]] && cat "$AUTOPILOT_TEST_INLINE_FIXTURE" || echo "[]"; }
+
+case "${1:-}/${2:-}" in
+  pr/view)
+    case "$jq_expr" in
+      .state)            _pr_fixture | jq -r '.state // ""' ;;
+      .reviewDecision)   _pr_fixture | jq -r '.reviewDecision // ""' ;;
+      .author.login)     _pr_fixture | jq -r '.author.login // ""' ;;
+      "")                _pr_fixture ;;
+      *)
+        # statusCheckRollup / reviews|length / comments|length / .comments[]?| select 등
+        if [[ "$jq_expr" == *statusCheckRollup* ]]; then echo "0"
+        elif [[ "$jq_expr" == *reviews* && "$jq_expr" == *length* ]]; then echo "0"
+        elif [[ "$jq_expr" == *comments* && "$jq_expr" == *length* ]]; then echo "0"
+        elif [[ "$jq_expr" == *comments*select*author.login* ]]; then echo ""
+        else echo ""
+        fi
+        ;;
+    esac
+    exit 0 ;;
+  pr/list)
+    echo '[{"number":1}]'; exit 0 ;;
+  pr/comment)
+    # PR-level fallback (case e). 호출 자체가 log에 기록됨.
+    exit 0 ;;
+  pr/merge)
+    exit 0 ;;
+  repo/view)
+    case "$jq_expr" in
+      .nameWithOwner)            echo "owner/repo" ;;
+      .defaultBranchRef.name)    echo "main" ;;
+      "")                        echo '{"nameWithOwner":"owner/repo","defaultBranchRef":{"name":"main"}}' ;;
+      *)                         echo "" ;;
+    esac
+    exit 0 ;;
+  api/*)
+    # URL은 첫 positional non-flag 인자에서 추출 ($2는 flag일 수 있음 — 예: `--method`).
+    # 가능 형태: `gh api <URL>` / `gh api --method POST <URL>` / `gh api -X POST <URL>` / 추가 -f·-F 인자
+    url=""
+    for ((u=2; u<=$#; u++)); do
+      a="${!u}"
+      case "$a" in
+        --method|-X) u=$((u+1)) ;;   # flag 값 1개 건너뜀
+        -f|-F)       u=$((u+1)) ;;   # -f/-F key=value의 value 건너뜀 (URL 전이라 가능성 낮지만 안전)
+        --jq)        u=$((u+1)) ;;
+        -*)          ;;              # 기타 flag — 값 없는 toggle 가정
+        *) url="$a"; break ;;
+      esac
+    done
+    if [[ "$method" == "POST" && "$url" == *"/pulls/"*"/comments" ]]; then
+      # inline thread reply POST. 실 GitHub REST API의 타입 검증을 모방:
+      #   - `in_reply_to`는 정수 필드 → `-F`(typed) 필수, `-f`(string)면 422.
+      #   - `body`는 문자열 → `-f`/`-F` 둘 다 허용 (검증 안 함).
+      # `-f in_reply_to=<val>`이 인자에 포함되면 mock도 422-equivalent로 fail.
+      bad_inreplyto=0
+      for ((k=1; k<=$#; k++)); do
+        if [[ "${!k}" == "-f" ]]; then
+          n=$((k+1))
+          [[ "${!n}" == in_reply_to=* ]] && bad_inreplyto=1
+        fi
+      done
+      if (( bad_inreplyto )); then
+        echo "MOCK_GH_API_422: in_reply_to passed as -f (string) — REST API requires integer (-F)" >&2
+        exit 22
+      fi
+      # log은 위에서 이미 기록됨.
+      exit 0
+    fi
+    if [[ "$url" == *"/pulls/"*"/comments" ]]; then
+      if [[ "$jq_expr" == "length" ]]; then _inline_fixture | jq -r 'length'
+      elif [[ -n "$jq_expr" ]]; then _inline_fixture | jq -r "$jq_expr"
+      else _inline_fixture
+      fi
+      exit 0
+    fi
+    if [[ "$url" == *"/issues/"*"/comments" ]]; then
+      if [[ -n "$jq_expr" ]]; then echo "[]" | jq -r "$jq_expr"; else echo "[]"; fi
+      exit 0
+    fi
+    if [[ "$url" == *"/pulls/"*"/reviews" ]]; then
+      if [[ -n "$jq_expr" ]]; then echo "[]" | jq -r "$jq_expr"; else echo "[]"; fi
+      exit 0
+    fi
+    echo "[]"; exit 0 ;;
+  project/*)
+    exit 0 ;;
+esac
+exit 0
+GH
+  chmod +x "$mock_bin/gh"
+}
+
+_inline_make_claude_mock() {
+  local mock_bin="$1"
+  cat > "$mock_bin/claude" <<'CL'
+#!/usr/bin/env bash
+cat >/dev/null   # stdin 무시
+if [[ -n "${AUTOPILOT_TEST_CLAUDE_TOUCH:-}" ]]; then
+  mkdir -p "$(dirname "$AUTOPILOT_TEST_CLAUDE_TOUCH")" 2>/dev/null || true
+  echo "// fix applied" >> "$AUTOPILOT_TEST_CLAUDE_TOUCH"
+fi
+printf '%s\n' "${AUTOPILOT_TEST_CLAUDE_OUT:-DONE}"
+exit 0
+CL
+  chmod +x "$mock_bin/claude"
+}
+
+# fixture builders
+_inline_fixture_pr_open() {
+  cat > "$1" <<'JSON'
+{"state":"OPEN","reviewDecision":null,"number":1,"author":{"login":"owner"},"comments":[],"reviews":[]}
+JSON
+}
+_inline_fixture_one_comment() {
+  cat > "$1" <<'JSON'
+[{"id":101,"body":"please rename foo to bar","in_reply_to_id":null}]
+JSON
+}
+_inline_fixture_two_same_thread() {
+  cat > "$1" <<'JSON'
+[
+  {"id":101,"body":"first wrong comment","in_reply_to_id":null},
+  {"id":102,"body":"second comment same thread","in_reply_to_id":101}
+]
+JSON
+}
+_inline_fixture_two_threads() {
+  cat > "$1" <<'JSON'
+[
+  {"id":101,"body":"thread A comment","in_reply_to_id":null},
+  {"id":201,"body":"thread B comment","in_reply_to_id":null}
+]
+JSON
+}
+
+# 공통 실행 helper — 단일 iter로 review-fix-phase 호출
+_inline_run_phase() {
+  local mock_bin="$1" wt="$2" project="$3" out_file="$4"
+  export LOOP_REVIEW_POLL_SECS=1
+  export LOOP_REVIEW_MAX_ITER=1
+  PATH="$mock_bin:$PATH" bash "$SKILL_REFS/review-fix-phase.sh" "$wt" "feat/153-test" "regular/153" "$project" "1" \
+       >"$out_file" 2>&1 || true
+}
+
+# ----- (a) inline 타당 → 코드 수정 push 1회 -----
+test_a_inline_valid_codefix_push() {
+  local pair; pair=$(_inline_setup_worktree "case_a")
+  local project="${pair%|*}" bare="${pair#*|}"
+  local wt="$project/milestones/regular/loops/153/.worktree"
+
+  local mock_bin="$WORK_DIR/case_a_mock"
+  _inline_make_gh_mock "$mock_bin"
+  _inline_make_claude_mock "$mock_bin"
+
+  local pr_fixture="$WORK_DIR/case_a_pr.json"; _inline_fixture_pr_open "$pr_fixture"
+  local inline_fixture="$WORK_DIR/case_a_inline.json"; _inline_fixture_one_comment "$inline_fixture"
+  local log="$WORK_DIR/case_a_gh.log"; : > "$log"
+
+  local before_sha; before_sha=$( cd "$bare" && git rev-parse refs/heads/feat/153-test )
+
+  export AUTOPILOT_TEST_PR_FIXTURE="$pr_fixture"
+  export AUTOPILOT_TEST_INLINE_FIXTURE="$inline_fixture"
+  export AUTOPILOT_TEST_GH_LOG="$log"
+  export AUTOPILOT_TEST_CLAUDE_OUT=$'INLINE 101 101 FIX\nDONE'
+  export AUTOPILOT_TEST_CLAUDE_TOUCH="$wt/fix-target.txt"
+
+  _inline_run_phase "$mock_bin" "$wt" "$project" "$WORK_DIR/case_a.out"
+
+  local after_sha; after_sha=$( cd "$bare" && git rev-parse refs/heads/feat/153-test 2>/dev/null || echo "" )
+  [[ "$before_sha" != "$after_sha" ]] \
+    || { cat "$WORK_DIR/case_a.out"; fail "(a) inline 타당: bare에 push 없음 (SHA 미변경)"; }
+
+  # POST inline reply 없어야 함
+  if grep -F "CALL|" "$log" | grep -qE -- '--method[[:space:]]+POST.*pulls/[0-9]+/comments|-X[[:space:]]+POST.*pulls/[0-9]+/comments'; then
+    cat "$log"; fail "(a) inline 타당: 코드 수정인데 inline reply POST 발생"
+  fi
+  unset AUTOPILOT_TEST_CLAUDE_TOUCH
+  pass "(a) inline 타당 → 코드 수정 push 1회 (reply 0)"
+}
+
+# ----- (b) inline 부당 → 해당 thread에 reply 1개 -----
+test_b_inline_invalid_thread_reply() {
+  local pair; pair=$(_inline_setup_worktree "case_b")
+  local project="${pair%|*}" bare="${pair#*|}"
+  local wt="$project/milestones/regular/loops/153/.worktree"
+
+  local mock_bin="$WORK_DIR/case_b_mock"
+  _inline_make_gh_mock "$mock_bin"
+  _inline_make_claude_mock "$mock_bin"
+
+  local pr_fixture="$WORK_DIR/case_b_pr.json"; _inline_fixture_pr_open "$pr_fixture"
+  local inline_fixture="$WORK_DIR/case_b_inline.json"; _inline_fixture_one_comment "$inline_fixture"
+  local log="$WORK_DIR/case_b_gh.log"; : > "$log"
+
+  local before_sha; before_sha=$( cd "$bare" && git rev-parse refs/heads/feat/153-test )
+
+  export AUTOPILOT_TEST_PR_FIXTURE="$pr_fixture"
+  export AUTOPILOT_TEST_INLINE_FIXTURE="$inline_fixture"
+  export AUTOPILOT_TEST_GH_LOG="$log"
+  export AUTOPILOT_TEST_CLAUDE_OUT=$'INLINE 101 101 DISPUTE reviewer is mistaken about naming\nDONE'
+  unset AUTOPILOT_TEST_CLAUDE_TOUCH
+
+  _inline_run_phase "$mock_bin" "$wt" "$project" "$WORK_DIR/case_b.out"
+
+  local after_sha; after_sha=$( cd "$bare" && git rev-parse refs/heads/feat/153-test 2>/dev/null || echo "" )
+  [[ "$before_sha" == "$after_sha" ]] \
+    || { cat "$WORK_DIR/case_b.out"; fail "(b) inline 부당: 코드 변경 없는데 push 발생"; }
+
+  local post_count
+  post_count=$(grep -F "CALL|" "$log" | grep -cE -- '--method[[:space:]]+POST.*pulls/[0-9]+/comments|-X[[:space:]]+POST.*pulls/[0-9]+/comments' || true)
+  [[ "$post_count" -eq 1 ]] \
+    || { cat "$log"; fail "(b) inline 부당: POST inline reply $post_count 회 (기대 1)"; }
+  grep -F "CALL|" "$log" | grep -qE 'in_reply_to[^|]*101' \
+    || { cat "$log"; fail "(b) inline 부당: in_reply_to=101 인자 부재"; }
+
+  # PR-level gh pr comment fallback 사용되지 않아야 함
+  if grep -E '^CALL\|pr comment' "$log" >/dev/null 2>&1; then
+    cat "$log"; fail "(b) inline 부당: PR-level gh pr comment fallback 사용됨"
+  fi
+  pass "(b) inline 부당 → inline thread reply 1개 (in_reply_to=101)"
+}
+
+# ----- (c) 같은 thread 재폴링 시 중복 reply 미게시 -----
+# 같은 thread 안 두 comment(101 root, 102 reply-of-101)가 동시 폴링되어도 thread-level dedup으로 reply 1개.
+test_c_same_thread_no_duplicate_reply() {
+  local pair; pair=$(_inline_setup_worktree "case_c")
+  local project="${pair%|*}" bare="${pair#*|}"
+  local wt="$project/milestones/regular/loops/153/.worktree"
+
+  local mock_bin="$WORK_DIR/case_c_mock"
+  _inline_make_gh_mock "$mock_bin"
+  _inline_make_claude_mock "$mock_bin"
+
+  local pr_fixture="$WORK_DIR/case_c_pr.json"; _inline_fixture_pr_open "$pr_fixture"
+  local inline_fixture="$WORK_DIR/case_c_inline.json"; _inline_fixture_two_same_thread "$inline_fixture"
+  local log="$WORK_DIR/case_c_gh.log"; : > "$log"
+
+  export AUTOPILOT_TEST_PR_FIXTURE="$pr_fixture"
+  export AUTOPILOT_TEST_INLINE_FIXTURE="$inline_fixture"
+  export AUTOPILOT_TEST_GH_LOG="$log"
+  export AUTOPILOT_TEST_CLAUDE_OUT=$'INLINE 101 101 DISPUTE first body\nINLINE 101 102 DISPUTE second body\nDONE'
+  unset AUTOPILOT_TEST_CLAUDE_TOUCH
+
+  _inline_run_phase "$mock_bin" "$wt" "$project" "$WORK_DIR/case_c.out"
+
+  local post_count
+  post_count=$(grep -F "CALL|" "$log" | grep -cE -- '--method[[:space:]]+POST.*pulls/[0-9]+/comments|-X[[:space:]]+POST.*pulls/[0-9]+/comments' || true)
+  [[ "$post_count" -eq 1 ]] \
+    || { cat "$log"; fail "(c) 같은 thread 두 comment: POST inline reply $post_count 회 (기대 1, thread dedup)"; }
+  pass "(c) 같은 thread 재폴링/내부 dedup → reply 1개"
+}
+
+# ----- (d) 서로 다른 inline thread 2개 부당 → 각 thread reply 1개씩 (총 2) -----
+test_d_two_threads_two_replies() {
+  local pair; pair=$(_inline_setup_worktree "case_d")
+  local project="${pair%|*}" bare="${pair#*|}"
+  local wt="$project/milestones/regular/loops/153/.worktree"
+
+  local mock_bin="$WORK_DIR/case_d_mock"
+  _inline_make_gh_mock "$mock_bin"
+  _inline_make_claude_mock "$mock_bin"
+
+  local pr_fixture="$WORK_DIR/case_d_pr.json"; _inline_fixture_pr_open "$pr_fixture"
+  local inline_fixture="$WORK_DIR/case_d_inline.json"; _inline_fixture_two_threads "$inline_fixture"
+  local log="$WORK_DIR/case_d_gh.log"; : > "$log"
+
+  export AUTOPILOT_TEST_PR_FIXTURE="$pr_fixture"
+  export AUTOPILOT_TEST_INLINE_FIXTURE="$inline_fixture"
+  export AUTOPILOT_TEST_GH_LOG="$log"
+  export AUTOPILOT_TEST_CLAUDE_OUT=$'INLINE 101 101 DISPUTE body for A\nINLINE 201 201 DISPUTE body for B\nDONE'
+  unset AUTOPILOT_TEST_CLAUDE_TOUCH
+
+  _inline_run_phase "$mock_bin" "$wt" "$project" "$WORK_DIR/case_d.out"
+
+  local post_count
+  post_count=$(grep -F "CALL|" "$log" | grep -cE -- '--method[[:space:]]+POST.*pulls/[0-9]+/comments|-X[[:space:]]+POST.*pulls/[0-9]+/comments' || true)
+  [[ "$post_count" -eq 2 ]] \
+    || { cat "$log"; fail "(d) 다른 thread 2개: POST inline reply $post_count 회 (기대 2)"; }
+  grep -F "CALL|" "$log" | grep -qE 'in_reply_to[^|]*101' \
+    || { cat "$log"; fail "(d) thread A reply (in_reply_to=101) 부재"; }
+  grep -F "CALL|" "$log" | grep -qE 'in_reply_to[^|]*201' \
+    || { cat "$log"; fail "(d) thread B reply (in_reply_to=201) 부재"; }
+  pass "(d) 서로 다른 thread 2개 → 각 thread reply 1개씩 (총 2)"
+}
+
+# ----- (e) PR-level dispute / review summary / owner cmd 경로 보존 -----
+# PR-level DISPUTE 본문(기존 흐름)이 gh pr comment를 통해 1회 게시되는지 확인.
+# inline reply POST는 없어야 함.
+test_e_pr_level_dispute_preserved() {
+  local pair; pair=$(_inline_setup_worktree "case_e")
+  local project="${pair%|*}" bare="${pair#*|}"
+  local wt="$project/milestones/regular/loops/153/.worktree"
+
+  local mock_bin="$WORK_DIR/case_e_mock"
+  _inline_make_gh_mock "$mock_bin"
+  _inline_make_claude_mock "$mock_bin"
+
+  local pr_fixture="$WORK_DIR/case_e_pr.json"; _inline_fixture_pr_open "$pr_fixture"
+  # PR-level이 trigger되도록 inline은 비우고, PR-level 이슈 코멘트 트리거 대신
+  # 단순히 inline fixture에 1개 두고 claude가 PR-level DISPUTE를 emit하는 케이스를 검증.
+  local inline_fixture="$WORK_DIR/case_e_inline.json"; _inline_fixture_one_comment "$inline_fixture"
+  local log="$WORK_DIR/case_e_gh.log"; : > "$log"
+
+  export AUTOPILOT_TEST_PR_FIXTURE="$pr_fixture"
+  export AUTOPILOT_TEST_INLINE_FIXTURE="$inline_fixture"
+  export AUTOPILOT_TEST_GH_LOG="$log"
+  export AUTOPILOT_TEST_CLAUDE_OUT=$'DISPUTE: PR-level concern about overall approach\nDONE'
+  unset AUTOPILOT_TEST_CLAUDE_TOUCH
+
+  _inline_run_phase "$mock_bin" "$wt" "$project" "$WORK_DIR/case_e.out"
+
+  # 기존 gh pr comment 경로 1회 호출
+  local pr_comment_count
+  pr_comment_count=$(grep -cE '^CALL\|pr comment' "$log" || true)
+  [[ "$pr_comment_count" -eq 1 ]] \
+    || { cat "$log"; fail "(e) PR-level DISPUTE: gh pr comment $pr_comment_count 회 (기대 1, 기존 경로 보존)"; }
+
+  # inline reply POST는 없어야 함 (PR-level은 PR-level 경로로만 처리)
+  if grep -F "CALL|" "$log" | grep -qE -- '--method[[:space:]]+POST.*pulls/[0-9]+/comments|-X[[:space:]]+POST.*pulls/[0-9]+/comments'; then
+    cat "$log"; fail "(e) PR-level DISPUTE: inline reply POST 발생 (PR-level은 inline 경로 쓰지 않아야 함)"
+  fi
+  pass "(e) PR-level dispute · review summary · owner cmd 경로 보존"
+}
+
 # ----- 실행 -----
 test_spec_verify_command
 test_phase_scripts_arg_validation
 test_cleanup_phase_removes_worktree_and_branches
 test_review_fix_phase_terminates_on_merged
 test_rebase_phase_fast_forward
+test_a_inline_valid_codefix_push
+test_b_inline_invalid_thread_reply
+test_c_same_thread_no_duplicate_reply
+test_d_two_threads_two_replies
+test_e_pr_level_dispute_preserved
 
 echo "----------"
 echo "ALL TESTS PASSED"
