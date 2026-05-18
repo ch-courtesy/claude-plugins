@@ -74,8 +74,13 @@ fi
 # 강제하므로 merge로 base 변경분만 흡수한다. 부재 시(첫 PR 진입 전)는 깨끗한 linear
 # history를 위해 rebase로 재배치한다.
 SYNC_MODE="rebase"
-if ( cd "$WT" && git ls-remote --heads --exit-code origin "$BRANCH" >/dev/null 2>&1 ); then
+ls_remote_rc=0
+( cd "$WT" && git ls-remote --heads --exit-code origin "$BRANCH" >/dev/null 2>&1 ) || ls_remote_rc=$?
+if (( ls_remote_rc == 0 )); then
   SYNC_MODE="merge"
+elif (( ls_remote_rc != 2 )); then
+  emit_escalation "git ls-remote 실패 (exit $ls_remote_rc) — SYNC_MODE 판정 불가 (네트워크/인증 오류 가능, 브랜치 부재(rc=2)와 구분)"
+  exit 1
 fi
 echo "[rebase-phase] sync mode: $SYNC_MODE (origin/$BRANCH $( [[ $SYNC_MODE == merge ]] && echo present || echo absent ))"
 
