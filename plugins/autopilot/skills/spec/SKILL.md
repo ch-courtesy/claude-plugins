@@ -269,13 +269,15 @@ SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점
 
 SPEC 초안이 길거나 잔존 마커가 다수면 `references/agent-prompts.md`의 **`spec-self-reviewer`** 양식으로 독립 검토 위임. 휴리스틱(하나라도 해당): 본문 ≈100줄 초과, 잔존 `[NEEDS CLARIFICATION]` 마커 2개 이상, 호출자의 명시적 요청. subagent는 5축 발견만 보고하고 **SPEC.md 수정·마커 박기는 메인이 수행**(헌법 §11.6 — patch 생성은 위임하지 않음). step 9 본문 원칙("사용자 Q&A 없음, 재루프 없음")은 위임 여부와 무관.
 
-### 9.5. feat 브랜치 + SPEC.md commit (자동, main 작업트리 무손상)
+### 9.5. feat 브랜치 + SPEC.md commit + default 브랜치 자동 ff-merge (main 작업트리 무손상)
 
 SPEC.md 작성·자체 검토 후 sibling `autopilot:loop`의 worktree base가 될 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·생성하고 SPEC.md만 그 브랜치에 commit. main 작업트리 상태(staged/unstaged/untracked) 변경 금지. 단계 10 *전*에 수행 — 이후 단계 10에서 "변경" 선택 시 단계 7/8 재진입 후 본 단계 commit amend·추가(자동).
 
 본 단계가 단일 출처로 삼는 **슬러그 도출 코드 조각은 `references/feat-branch-commit.md` §9.5.1**에 보존되며, 안전장치(`references/test-spec-loop-contract.sh`)는 그 새 위치를 검사한다.
 
-결정적 슬러그화 규칙(§9.5.1), 브랜치 생성·commit 9단계 절차(§9.5.2), 실패 처리·빈-slug abort(§9.5.3)의 전체 절차는 `references/feat-branch-commit.md` 참조.
+SPEC.md commit 직후 본 단계는 **자동으로 default 브랜치(main)·feat 브랜치를 원격 default 브랜치(`origin/main`) 최신 위로 정렬·동기화**한다 — `git fetch origin` 으로 `origin/main` 을 갱신한 뒤 feat 브랜치를 `origin/main` 위로 rebase하고, default 브랜치로 전환해 feat 브랜치로부터 **fast-forward** merge를 적용한 다음, 사용자 재확인 없이 default 브랜치와 feat 브랜치를 모두 원격에 `git push origin <branch>` 로 push한다 (예: `push origin main`, `push origin feat/<c>-<slug>`). 충돌·push 거부 시에는 강제 push(`--force`·`--force-with-lease`)를 절대 시도하지 않고 abort + 호출 이전 상태 복구 + 사용자 안내로 처리한다. 전체 흐름이 끝나면 호출 시점의 원래 브랜치로 복귀하며 default 브랜치 작업트리(staged/unstaged/untracked)는 호출 이전과 동일하게 유지된다.
+
+결정적 슬러그화 규칙(§9.5.1), 브랜치 생성·commit 9단계 절차(§9.5.2), 실패 처리·빈-slug abort·rebase 충돌·push 거부 abort 흐름(§9.5.3), 그리고 default 브랜치 자동 fast-forward merge·원격 `push origin` 절차(§9.5.4)의 전체 단계는 `references/feat-branch-commit.md` 참조.
 
 ### 10. 사용자 최종 검토
 
