@@ -319,7 +319,19 @@ case "${1:-}/${2:-}" in
     esac
     exit 0 ;;
   api/*)
-    url="${2:-}"
+    # URL은 첫 positional non-flag 인자에서 추출 ($2는 flag일 수 있음 — 예: `--method`).
+    # 가능 형태: `gh api <URL>` / `gh api --method POST <URL>` / `gh api -X POST <URL>` / 추가 -f·-F 인자
+    url=""
+    for ((u=2; u<=$#; u++)); do
+      a="${!u}"
+      case "$a" in
+        --method|-X) u=$((u+1)) ;;   # flag 값 1개 건너뜀
+        -f|-F)       u=$((u+1)) ;;   # -f/-F key=value의 value 건너뜀 (URL 전이라 가능성 낮지만 안전)
+        --jq)        u=$((u+1)) ;;
+        -*)          ;;              # 기타 flag — 값 없는 toggle 가정
+        *) url="$a"; break ;;
+      esac
+    done
     if [[ "$method" == "POST" && "$url" == *"/pulls/"*"/comments" ]]; then
       # inline thread reply POST. 실 GitHub REST API의 타입 검증을 모방:
       #   - `in_reply_to`는 정수 필드 → `-F`(typed) 필수, `-f`(string)면 422.
