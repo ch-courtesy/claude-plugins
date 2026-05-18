@@ -73,6 +73,8 @@ Skill(skill: "spec", args: "<task-id>")
 
 `--no-monitor` 플래그는 **SKILL.md 차원 옵션**이다 — 모델이 args 파싱 시 이 토큰을 분리·소비하여 `Monitor` 가설 자체를 생략하고, `loop.sh`로는 **전달하지 않는다** (셸 드라이버는 본 플래그를 모름). 따라서 본 플래그는 **본 스킬을 통한 호출 시점에만** 작용하며, 사용자가 셸 드라이버 `loop.sh start`를 직접 호출하는 경우엔 효력이 없다.
 
+**우선순위 규칙**: `--no-monitor`와 `--events-only`가 동시에 명시되면 `--no-monitor`가 우선 적용된다 — `Monitor` 가설 자체가 생략되므로 `--events-only`의 필터 회귀는 무효화된다.
+
 `spec` 스킬 단계 10의 "지금 loop start 호출" 결정으로 자동 연계되는 경우에도 추가 모니터 결정 질문 없이 본 기본 동작(Monitor 가설 포함)이 그대로 적용된다. 단 spec 스킬은 사용자에게 `--events-only` opt-out 선택을 명시 확인하며 Yes 시 자동 연계 args 끝에 `--events-only` 토큰을 추가한다.
 
 #### DONE 이후 PR 생성·재사용 phase (default)
