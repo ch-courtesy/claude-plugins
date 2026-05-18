@@ -448,10 +448,12 @@ EOF
       echo "[review-fix-phase] inline reply POST: thread $thread_id (comment $_comment_id)"
       # `--method POST`를 URL 앞에 두어 호출 로그가 `--method POST repos/.../pulls/N/comments`
       # 순서를 보장 (mock·실CI 양쪽 grep 패턴 호환).
+      # `-F`(typed)로 in_reply_to를 정수 전송 — REST API는 정수 필드를 요구하므로
+      # `-f`(JSON string)를 쓰면 422를 받는다. body는 그대로 문자열이라 `-f` 사용.
       if ( cd "$WT" && gh api \
               --method POST \
               "repos/$OWNER_REPO/pulls/$PR_NUMBER/comments" \
-              -f "in_reply_to=$thread_id" \
+              -F "in_reply_to=$thread_id" \
               -f "body=[autopilot:dispute] $inline_body" >/dev/null 2>&1 ); then
         mark_thread_replied "$thread_id"
       else
