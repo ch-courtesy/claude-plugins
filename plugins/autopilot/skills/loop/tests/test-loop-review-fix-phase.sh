@@ -805,6 +805,70 @@ CL
   pass "(AC6) 충돌 자동 해소 실패 → 워크트리 복구 + non-zero exit"
 }
 
+# (AC6) 충돌 자동 해소 실패 → 워크트리 복구 + non-zero exit (rebase 경로 — 대칭 케이스)
+# merge 경로(test_sync_conflict_failure_recovers_merge_path)와 동일 구조이나
+# feat 브랜치를 origin에 push하지 않아 ls-remote rc=2 → rebase 경로 분기.
+test_sync_conflict_failure_recovers_rebase_path() {
+  local case_name="conflict_rebase"
+  local project="$WORK_DIR/$case_name"
+  local bare="$WORK_DIR/${case_name}.git"
+  git init -q --bare -b main "$bare"
+  mkdir -p "$project"
+  (
+    cd "$project"
+    git init -q -b main
+    git config user.email "t@e.com"; git config user.name "T"
+    git remote add origin "$bare"
+    echo "initial" > shared.txt
+    git add shared.txt; git commit -q -m "initial"
+    git push -q origin main
+    git remote set-head origin main
+    mkdir -p milestones/regular/loops/169
+    git worktree add -q -b "feat/169-$case_name" "milestones/regular/loops/169/.worktree" HEAD
+    cd milestones/regular/loops/169/.worktree
+    echo "feat version" > shared.txt
+    git add shared.txt; git commit -q -m "feat: conflict"
+    # feat push 생략 — 원격 트래킹 부재 → rebase 경로 분기
+  ) >/dev/null 2>&1 || fail "$case_name setup"
+  (
+    cd "$project"
+    echo "main version" > shared.txt
+    git add shared.txt; git commit -q -m "base: conflict"
+    git push -q origin main
+  ) >/dev/null 2>&1 || fail "$case_name base advance"
+  local wt="$project/milestones/regular/loops/169/.worktree"
+  local feat_sha_before; feat_sha_before=$( cd "$wt" && git rev-parse HEAD )
+
+  local mock_bin="$WORK_DIR/${case_name}_mock"; mkdir -p "$mock_bin"
+  cat > "$mock_bin/gh" <<'GH'
+#!/usr/bin/env bash
+exit 1
+GH
+  chmod +x "$mock_bin/gh"
+  cat > "$mock_bin/claude" <<'CL'
+#!/usr/bin/env bash
+cat >/dev/null
+# 의도적으로 충돌 미해소: exit 0이지만 conflict marker가 worktree에 남아있음.
+exit 0
+CL
+  chmod +x "$mock_bin/claude"
+
+  local rc=0
+  PATH="$mock_bin:$PATH" bash "$SKILL_REFS/rebase-phase.sh" "$wt" "feat/169-$case_name" "$project" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]] || fail "(AC6 rebase) 충돌 미해소 시 non-zero exit 미발생"
+
+  # rebase-apply/rebase-merge 디렉토리 잔존 부재 (git rebase --abort 호출 흔적)
+  local rebase_apply; rebase_apply=$( cd "$wt" && git rev-parse --git-path rebase-apply 2>/dev/null )
+  local rebase_merge; rebase_merge=$( cd "$wt" && git rev-parse --git-path rebase-merge 2>/dev/null )
+  if { [[ -n "$rebase_apply" && -d "$rebase_apply" ]] || [[ -n "$rebase_merge" && -d "$rebase_merge" ]]; }; then
+    fail "(AC6 rebase) rebase 상태 잔존 — abort 복구 미수행"
+  fi
+  local feat_sha_after; feat_sha_after=$( cd "$wt" && git rev-parse HEAD )
+  [[ "$feat_sha_before" == "$feat_sha_after" ]] \
+    || fail "(AC6 rebase) 충돌 미해소 후 HEAD 이동 (복구 실패): before=$feat_sha_before after=$feat_sha_after"
+  pass "(AC6 rebase) rebase 경로 충돌 자동 해소 실패 → 워크트리 복구 + non-zero exit"
+}
+
 # ----- 실행 -----
 test_spec_verify_command
 test_phase_scripts_arg_validation
@@ -820,6 +884,7 @@ test_sync_rebase_path_no_remote_tracking
 test_sync_merge_path_remote_tracking_exists
 test_sync_no_force_push_and_no_direct_rebase_merge
 test_sync_conflict_failure_recovers_merge_path
+test_sync_conflict_failure_recovers_rebase_path
 
 echo "----------"
 echo "ALL TESTS PASSED"

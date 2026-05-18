@@ -26,10 +26,6 @@ set -euo pipefail
 WT="${1:-}"
 BRANCH="${2:-}"
 TASK_ID="${3:-}"
-# PROJECT_ROOT: 본 phase에서는 미사용 — 후속 phase(리뷰 모니터·자동 fix·완료 감지·정리)에서
-# 메인 repo를 대상으로 cherry-pick·merge·worktree remove 등 워크트리 밖 작업을 수행할 때 필요.
-# caller(loop.sh)는 이미 전달하고 있어 시그니처는 유지하되, 호출자 실수(누락) 방지를 위해 검증은
-# 유지. 본 스크립트 내 사용 위치가 추가될 때 본 주석 제거.
 PROJECT_ROOT="${4:-}"
 
 [[ -n "$WT" && -n "$BRANCH" && -n "$TASK_ID" && -n "$PROJECT_ROOT" ]] \
