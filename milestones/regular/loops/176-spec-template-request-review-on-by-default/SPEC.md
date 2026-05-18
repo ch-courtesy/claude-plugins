@@ -6,6 +6,7 @@ scope:
     - milestones/**
     - CLAUDE.md
 verify: "grep -E '^request_review:[[:space:]]*true' plugins/autopilot/skills/spec/references/spec-template.md && bash plugins/autopilot/skills/spec/references/test-spec-loop-contract.sh"
+request_review: true
 ---
 
 # Spec template: request_review on by default
