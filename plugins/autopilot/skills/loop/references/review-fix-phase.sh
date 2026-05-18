@@ -385,9 +385,12 @@ Goal:
         INLINE <thread_id> <thread_id> DISPUTE <one-line dispute body>
     - 보수적 판정 (SPEC §제약 요건): 타당성이 불확실하면 FIX 분기로 결정한다
       (DISPUTE 남발 방지·reviewer-bot 갈등 완화).
-    - The INLINE line format is strict — 5 whitespace-separated tokens:
-      INLINE / <thread_id> / <comment_id> / <action> / <body...>
-      SPEC 153에서 thread_id와 comment_id는 같은 정수(root comment DB id).
+    - The INLINE line format depends on action:
+        FIX:     INLINE <thread_id> <comment_id> FIX                       (4 tokens, no body)
+        DISPUTE: INLINE <thread_id> <comment_id> DISPUTE <body...>         (5 tokens, body required)
+      Whitespace-separated. SPEC 153에서 thread_id와 comment_id는 같은 정수
+      (root comment DB id). FIX 라인에 본문이 붙어도 파서는 skip하므로 기능 영향
+      없지만, 형식 일관성을 위해 FIX는 4토큰만 출력한다.
 
   DO NOT push, commit, or create PRs yourself. DO NOT post comments yourself.
 
@@ -429,57 +432,62 @@ EOF
   # 같은 phase 사이클 동안 같은 thread는 최대 1 reply (AC4). 서로 다른 thread들은 각각 reply 가능 (AC5).
   # action == FIX는 claude가 이미 코드 변경을 적용했음을 의미 — 위 (iii) commit/push 경로가 처리.
   # PR-level dispute(DISPUTE: ...) 본문은 본 블록과 무관, 아래 (iv-B)가 처리 — AC6 기존 동작 보존.
-  if [[ -z "$OWNER_REPO" ]]; then
-    if grep -qE '^INLINE[[:space:]]' "$WT/$fix_log" 2>/dev/null; then
-      echo "WARN: OWNER_REPO 미식별 — inline reply POST skip (모든 thread)" >&2
-    fi
-  else
-    while IFS= read -r inline_line; do
-      [[ -z "$inline_line" ]] && continue
-      # 토큰 분리: INLINE <thread_id> <comment_id> <action> <body...>
-      # 마지막 변수가 나머지 토큰을 모두 흡수 (body 내 공백 보존).
-      # `_comment_id` (underscore prefix): 디버그 로그 전용 — `in_reply_to`에는 항상
-      # `$thread_id`를 사용 (thread root에 reply, AC3). 케이스 (c)처럼 두 값이 다를 수 있어도
-      # reply 대상은 root이므로 `_comment_id`는 in_reply_to 인자로 쓰이지 않는다.
-      read -r _tag thread_id _comment_id action inline_body <<<"$inline_line"
-      [[ "$_tag" != "INLINE" ]] && continue
-      [[ "$action" != "DISPUTE" && "$action" != "FIX" ]] && continue
-      [[ -z "$thread_id" ]] && continue
-      # 방어: thread_id가 정수가 아니면 skip — `gh api -F in_reply_to=<int>` REST 요구사항.
-      # 비-수치값이 흘러들면 422를 받으므로 사전 차단(claude 출력 형식 위반 케이스 격리).
-      if ! [[ "$thread_id" =~ ^[0-9]+$ ]]; then
-        echo "WARN: INLINE thread_id 비-수치 ('$thread_id') — skip (in_reply_to 정수 요구)" >&2
-        continue
-      fi
-      if is_thread_replied "$thread_id"; then
-        continue   # AC4: 같은 thread 동일 phase 사이클 내 중복 처리 차단 (FIX·DISPUTE 공통)
-      fi
-      # FIX 액션: 코드 변경은 (iii)에서 이미 commit·push 완료. 본 분기는 dedup 마킹만.
-      # 마킹하지 않으면 다음 polling iter에서 같은 thread가 fix_prompt_inline_threads에
-      # 그대로 다시 포함돼 claude가 중복 FIX를 emit할 수 있다 (불필요한 commit·oscillation).
-      if [[ "$action" == "FIX" ]]; then
-        mark_thread_replied "$thread_id"
-        continue
-      fi
-      # 이하 DISPUTE 분기 — inline thread에 reply 1개 POST.
-      [[ -z "$inline_body" ]] && inline_body="(no body)"
-      echo "[review-fix-phase] inline reply POST: thread $thread_id (comment $_comment_id)"
-      # `--method POST`를 URL 앞에 두어 호출 로그가 `--method POST repos/.../pulls/N/comments`
-      # 순서를 보장 (mock·실CI 양쪽 grep 패턴 호환).
-      # `-F`(typed)로 in_reply_to를 정수 전송 — REST API는 정수 필드를 요구하므로
-      # `-f`(JSON string)를 쓰면 422를 받는다. body는 그대로 문자열이라 `-f` 사용.
-      if ( cd "$WT" && gh api \
-              --method POST \
-              "repos/$OWNER_REPO/pulls/$PR_NUMBER/comments" \
-              -F "in_reply_to=$thread_id" \
-              -f "body=[autopilot:dispute] $inline_body" >/dev/null 2>&1 ); then
-        mark_thread_replied "$thread_id"
-      else
-        # recoverable: 다음 iter에서 재시도 가능 (mark_thread_replied 미호출이므로 동일 thread 재시도)
-        echo "WARN: inline reply POST 실패 (thread $thread_id) — 다음 iter 재시도 (phase 계속)" >&2
-      fi
-    done < <( grep -E '^INLINE[[:space:]]' "$WT/$fix_log" 2>/dev/null || true )
+  #
+  # 구조: INLINE 파서·dedup 마킹은 OWNER_REPO 유무와 무관하게 항상 수행한다 —
+  # FIX 액션도 dedup이 필요하므로(다음 iter 중복 commit 방지) OWNER_REPO 미식별 시에도
+  # 마킹은 진행되어야 한다. DISPUTE 분기의 gh api POST만 OWNER_REPO 가드로 보호.
+  if [[ -z "$OWNER_REPO" ]] && grep -qE '^INLINE[[:space:]]' "$WT/$fix_log" 2>/dev/null; then
+    echo "WARN: OWNER_REPO 미식별 — DISPUTE inline reply POST skip (FIX dedup은 계속 적용)" >&2
   fi
+  while IFS= read -r inline_line; do
+    [[ -z "$inline_line" ]] && continue
+    # 토큰 분리: INLINE <thread_id> <comment_id> <action> <body...>
+    # 마지막 변수가 나머지 토큰을 모두 흡수 (body 내 공백 보존).
+    # `_comment_id` (underscore prefix): 디버그 로그 전용 — `in_reply_to`에는 항상
+    # `$thread_id`를 사용 (thread root에 reply, AC3). 케이스 (c)처럼 두 값이 다를 수 있어도
+    # reply 대상은 root이므로 `_comment_id`는 in_reply_to 인자로 쓰이지 않는다.
+    read -r _tag thread_id _comment_id action inline_body <<<"$inline_line"
+    [[ "$_tag" != "INLINE" ]] && continue
+    [[ "$action" != "DISPUTE" && "$action" != "FIX" ]] && continue
+    [[ -z "$thread_id" ]] && continue
+    # 방어: thread_id가 정수가 아니면 skip — `gh api -F in_reply_to=<int>` REST 요구사항.
+    # 비-수치값이 흘러들면 422를 받으므로 사전 차단(claude 출력 형식 위반 케이스 격리).
+    if ! [[ "$thread_id" =~ ^[0-9]+$ ]]; then
+      echo "WARN: INLINE thread_id 비-수치 ('$thread_id') — skip (in_reply_to 정수 요구)" >&2
+      continue
+    fi
+    if is_thread_replied "$thread_id"; then
+      continue   # AC4: 같은 thread 동일 phase 사이클 내 중복 처리 차단 (FIX·DISPUTE 공통)
+    fi
+    # FIX 액션: 코드 변경은 (iii)에서 이미 commit·push 완료. 본 분기는 dedup 마킹만.
+    # 마킹하지 않으면 다음 polling iter에서 같은 thread가 fix_prompt_inline_threads에
+    # 그대로 다시 포함돼 claude가 중복 FIX를 emit할 수 있다 (불필요한 commit·oscillation).
+    # OWNER_REPO 유무와 무관 — gh api 호출 없음.
+    if [[ "$action" == "FIX" ]]; then
+      mark_thread_replied "$thread_id"
+      continue
+    fi
+    # 이하 DISPUTE 분기 — inline thread에 reply 1개 POST. OWNER_REPO 필수.
+    if [[ -z "$OWNER_REPO" ]]; then
+      continue   # 상단 WARN으로 이미 안내, dedup 미적용 — 다음 iter에서 OWNER_REPO 회복 시 재시도 가능
+    fi
+    [[ -z "$inline_body" ]] && inline_body="(no body)"
+    echo "[review-fix-phase] inline reply POST: thread $thread_id (comment $_comment_id)"
+    # `--method POST`를 URL 앞에 두어 호출 로그가 `--method POST repos/.../pulls/N/comments`
+    # 순서를 보장 (mock·실CI 양쪽 grep 패턴 호환).
+    # `-F`(typed)로 in_reply_to를 정수 전송 — REST API는 정수 필드를 요구하므로
+    # `-f`(JSON string)를 쓰면 422를 받는다. body는 그대로 문자열이라 `-f` 사용.
+    if ( cd "$WT" && gh api \
+            --method POST \
+            "repos/$OWNER_REPO/pulls/$PR_NUMBER/comments" \
+            -F "in_reply_to=$thread_id" \
+            -f "body=[autopilot:dispute] $inline_body" >/dev/null 2>&1 ); then
+      mark_thread_replied "$thread_id"
+    else
+      # recoverable: 다음 iter에서 재시도 가능 (mark_thread_replied 미호출이므로 동일 thread 재시도)
+      echo "WARN: inline reply POST 실패 (thread $thread_id) — 다음 iter 재시도 (phase 계속)" >&2
+    fi
+  done < <( grep -E '^INLINE[[:space:]]' "$WT/$fix_log" 2>/dev/null || true )
 
   # (iv-B) PR-level DISPUTE 본문 감지 → PR 코멘트 1회 게시 (AC10·AC11 — SPEC 123 기존 경로)
   # `DISPUTE: <body>` 라인은 PR-level 의견 — gh pr comment 경로 (AC6 보존).
