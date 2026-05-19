@@ -31,7 +31,7 @@ ok()   { echo "OK: $*"; }
 [[ -f "$SPEC_SKILL_MD" ]] || fail "$SPEC_SKILL_MD 부재"
 
 # 핵심 이벤트 정규식 패턴 (default 필터의 옛 형태) — `--events-only` 분기에만 잔존해야 함.
-KEY_EVENT_REGEX='이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|DONE'
+KEY_EVENT_REGEX='이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|완료 신호'
 
 # ---------------------------------------------------------------------------
 # loop SKILL.md 의 "자동 Monitor 가설 (기본 동작)" 섹션 추출
