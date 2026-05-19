@@ -37,7 +37,7 @@ emit_escalation() { echo "ESCALATION cleanup-phase: $*"; }
 
 # ----- 1. 미커밋 변경 사전 검사 (위험: cleanup 손실 차단) -----
 # 워크트리에 staged·unstaged·untracked가 남아 있으면 worktree remove 시 손실 위험.
-# untracked는 본 task의 .iterations/·CLAUDE.md·DONE 등 info/exclude로 가려져 있어
+# untracked는 본 task의 .iterations/·CLAUDE.md 등 info/exclude로 가려져 있어
 # 보통 status에 안 나타난다. 그래도 safety-net으로 staged·unstaged만 검사.
 dirty=$( cd "$WT" && git status --porcelain --untracked-files=no 2>/dev/null || true )
 if [[ -n "$dirty" ]]; then
@@ -47,7 +47,7 @@ if [[ -n "$dirty" ]]; then
 fi
 
 # ----- 2. worktree remove -----
-# autopilot 워크트리는 info/exclude된 ephemeral 파일(.iterations/·DONE·CLAUDE.md)을
+# autopilot 워크트리는 info/exclude된 ephemeral 파일(.iterations/·CLAUDE.md)을
 # 항상 보유한다. 위 사전 검사로 staged/unstaged 변경 부재를 이미 확인했으므로
 # --force로 ephemeral 파일도 함께 정리. (사용자 수기 변경은 untracked로 들어와도
 # `--untracked-files=no`를 통과하므로 사전 검사가 catch하지 못함. 사용자가 워크트리
