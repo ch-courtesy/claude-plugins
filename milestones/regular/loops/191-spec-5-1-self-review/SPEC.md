@@ -22,17 +22,22 @@ spec 워크플로의 자체 검증 절차를 LLM 휴리스틱 의존에서 분�
 
 (3) **정적 검증**: tests/autopilot/test-spec-skill.sh에 self-referential 검사 케이스 추가 — 본 SPEC 자체 issue의 `gh issue view --json labels` 결과에 `self-review-passed` 라벨이 포함되었는지 검사. 본 SPEC issue ID는 SPEC.md frontmatter 또는 test 자체에서 참조 가능하게 한다.
 
+(4) **Issue body sync 시 자리표시 2줄 제거**: 기존 §8.2 first-sync가 placeholder 2줄을 보존했지만, sync 이후에는 SPEC 내용이 fence 안에 본문으로 자리 잡으므로 placeholder는 중복·잡음에 불과하다. first-sync 시 abort gate(placeholder 검증)를 그대로 거치되, 새 body 구성 단계에서 placeholder 2줄을 *제거*하고 fence 블록만 남긴다. re-sync는 이미 placeholder가 없는 상태이므로 fence 안만 교체한다. 적용은 forward-looking — 기존 issue body의 일괄 마이그레이션은 범위 외.
+
 ## 수용 기준 (EARS)
 - **AC1 (Ubiquitous)**: plugins/autopilot/skills/spec/SKILL.md의 §5.1 sweep 자동 판단 절차가 step 5 내부 sub-section에서 **독립된 단계(step 5.1)로 승격**되어, step 5 생략 여부와 무관하게 항상 실행됨이 워크플로 본문에 명시된다.
 - **AC2 (Ubiquitous)**: plugins/autopilot/skills/spec/references/self-review.md의 sweep 축 검사 항목이 "§5.1 실행 흔적 부재 시 fail" 조건을 명시한다 — `test_sweep_paths` 키와 `# test_sweep_paths: reviewed-no-sweep` 주석 둘 다 부재일 때 `[NEEDS CLARIFICATION]` 마커를 박는다.
 - **AC3 (Event-driven)**: spec 워크플로 step 9 자체 검토가 완료되고 5+1축 모두 통과했을 때, 시스템은 task issue에 `self-review-passed` 라벨을 추가한다.
 - **AC4 (Unwanted/조건)**: step 9 자체 검토에서 한 개라도 `[NEEDS CLARIFICATION]` 마커가 박힌 경우, 시스템은 task issue에 `self-review-passed` 라벨을 추가하지 않는다.
 - **AC5 (Ubiquitous)**: tests/autopilot/test-spec-skill.sh가 self-referential 라벨 검사 케이스를 포함 — 본 SPEC 자체 issue ID(SPEC.md frontmatter 또는 test 내부 참조)의 `gh issue view --json labels` 결과에 `self-review-passed` 라벨 포함을 검사한다.
-- **AC6 (Ubiquitous)**: `bash tests/autopilot/test-spec-skill.sh`가 0 exit으로 끝난다 (기존 TEST 1–16 + AC5 새 케이스 결합).
+- **AC6 (Event-driven)**: spec 워크플로 §8.2 first-sync 발동 시, 시스템은 placeholder abort gate 통과 후 새 body를 구성할 때 placeholder 2줄을 *제거*하고 sync fence 블록만 남긴다.
+- **AC7 (Unwanted/조건)**: re-sync 발동 시 placeholder 2줄이 이미 부재이면, 시스템은 placeholder 검증을 skip하고 fence 내부만 교체한다 (placeholder 부재가 abort 사유 아님).
+- **AC8 (Ubiquitous)**: 기존 issue body 일괄 마이그레이션 로직은 제공하지 않는다 — 새 동작은 forward-looking으로 본 SPEC 머지 이후의 첫 sync부터 적용된다.
+- **AC9 (Ubiquitous)**: `bash tests/autopilot/test-spec-skill.sh`가 0 exit으로 끝난다 (기존 TEST 1–16 + AC5 새 케이스 결합).
 
 ## 범위
 포함:
-- `plugins/autopilot/skills/spec/SKILL.md` — §5.1 독립 단계(step 5.1) 승격 + step 9 자체 검토 종료 직후 자동 라벨 추가 절차 명세.
+- `plugins/autopilot/skills/spec/SKILL.md` — §5.1 독립 단계(step 5.1) 승격 + step 9 자체 검토 종료 직후 자동 라벨 추가 절차 명세 + §8.2 first-sync placeholder 2줄 제거 절차 명세 + re-sync placeholder 부재 허용 명세.
 - `plugins/autopilot/skills/spec/references/self-review.md` — sweep 축 검사의 "§5.1 실행 흔적 부재 시 fail" 조건 명시.
 - `tests/autopilot/test-spec-skill.sh` — self-referential 라벨 검사 새 케이스 추가.
 
