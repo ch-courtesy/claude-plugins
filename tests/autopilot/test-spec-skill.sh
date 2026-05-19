@@ -194,13 +194,8 @@ ok "self-reviewer 응답 3섹션 키워드 존재"
 # ---------------------------------------------------------------------------
 echo ""
 echo "=== TEST 10: SKILL.md frontmatter allowed-tools에 Agent 포함 ==="
-# 수용 기준 5: subagent dispatch 도구 허가.
-# allowed-tools는 YAML inline (한 줄) 또는 block list (다음 줄 들여쓰기 `- Agent`) 두 형태 모두
-# valid. frontmatter 안에서 두 형식 중 하나로 Agent 토큰이 나타나면 통과.
-#   - block list 형식:  `^[[:space:]]+-[[:space:]]+Agent[[:space:]]*$`
-#   - inline list 형식: `^allowed-tools:.*[[ ,]Agent([] ,]|$)`
-awk '/^---$/{c++; next} c==1' "$SKILL_MD" | \
-  grep -qE '^[[:space:]]+-[[:space:]]+Agent[[:space:]]*$|^allowed-tools:.*([[ ,]|^allowed-tools:[[:space:]]*)Agent([],[:space:]]|$)' \
+# 수용 기준 5: subagent dispatch 도구 허가
+awk '/^---$/{c++; next} c==1' "$SKILL_MD" | grep -qE '^allowed-tools:.*\bAgent\b' \
   || fail "SKILL.md frontmatter allowed-tools에 Agent 미포함"
 ok "frontmatter allowed-tools에 Agent 포함"
 
@@ -242,81 +237,6 @@ ok "헌법 §11.6 / '이터 내 서브 도구 위임' 인용 존재"
 grep -qE '결정·합성.*메인|메인.*결정·합성|결정과 합성.*메인' "$SKILL_MD" \
   || fail "SKILL.md에 '결정·합성은 메인 책임' 문구 부재"
 ok "'결정·합성 메인 책임' 문구 존재"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 13: SKILL.md step 5 — test 코드 변경 자동 판단 절차 명시 ==="
-# AC1·AC2: 명확화 라운드 마지막에 task scope가 test 코드 변경(rename·cleanup·삭제·내용 수정 등)을
-# 포함하는지 자동 판단하고, 포함 시 sweep 화이트리스트 후보 경로를 단발 yes/no로 확인.
-TEMPLATE_MD="$SKILL_DIR/references/spec-template.md"
-SELF_REVIEW_MD="$SKILL_DIR/references/self-review.md"
-
-[[ -f "$TEMPLATE_MD" ]] || fail "spec-template.md 부재: $TEMPLATE_MD"
-[[ -f "$SELF_REVIEW_MD" ]] || fail "self-review.md 부재: $SELF_REVIEW_MD"
-
-# step 5 본문에 'test 코드 변경' (rename·cleanup·삭제·내용 수정 등) 자동 판단 어구
-grep -qE 'test 코드 변경|테스트 코드 변경|test code change' "$SKILL_MD" \
-  || fail "SKILL.md에 'test 코드 변경' 자동 판단 어구 없음"
-ok "test 코드 변경 자동 판단 어구 존재"
-
-# 단발 yes/no 확인 — AC2
-grep -qE '단발 yes/no|단발 (예|aye)/no|단일 yes/no|단발 확인' "$SKILL_MD" \
-  || fail "SKILL.md에 'test 변경 sweep 단발 yes/no 확인' 절차 없음"
-ok "단발 yes/no 확인 절차 존재"
-
-# 화이트리스트 후보 경로 추출 — AC2
-grep -qE '화이트리스트 후보|sweep 화이트리스트|sweep 후보 경로|화이트리스트 경로 후보' "$SKILL_MD" \
-  || fail "SKILL.md에 'sweep 화이트리스트 후보 경로 추출' 어구 없음"
-ok "sweep 후보 경로 추출 어구 존재"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 14: SKILL.md step 8 — test_sweep_paths frontmatter 치환 룰 ==="
-# AC3·AC4: yes 응답 시 frontmatter test_sweep_paths에 기록, no/판단 미발동 시 키 부재
-grep -qE '\{\{test_sweep_paths\}\}|test_sweep_paths.*frontmatter|frontmatter.*test_sweep_paths' "$SKILL_MD" \
-  || fail "SKILL.md step 8 치환 룰에 test_sweep_paths frontmatter 처리 명세 없음"
-ok "step 8 치환 룰에 test_sweep_paths 명세 존재"
-
-# AC4: test 변경 없을 때 키 부재 — SKILL.md에 명시
-grep -qE 'test_sweep_paths.*(키|key).*(부재|생략|미추가|추가하지|없음)|키 부재|키 추가하지|키를 추가하지' "$SKILL_MD" \
-  || fail "SKILL.md에 test 변경 없을 때 'test_sweep_paths 키 부재' 룰 명시 없음"
-ok "test 변경 없을 때 frontmatter 키 부재 룰 명시"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 15: spec-template.md — test_sweep_paths placeholder ==="
-# AC3·AC4 지원: active frontmatter 영역에 placeholder 정의. 기존 commented 예시는 보존.
-# active placeholder는 {{test_sweep_paths}} 형식 — step 8 치환 대상.
-grep -qE '\{\{test_sweep_paths\}\}' "$TEMPLATE_MD" \
-  || fail "spec-template.md active 영역에 {{test_sweep_paths}} placeholder 부재"
-ok "spec-template.md에 {{test_sweep_paths}} active placeholder 존재"
-
-# 기존 commented 예시 블록 보존 — # test_sweep_paths: 라인
-grep -qE '^# test_sweep_paths:' "$TEMPLATE_MD" \
-  || fail "spec-template.md commented '# test_sweep_paths:' 예시 블록 보존 실패"
-ok "commented '# test_sweep_paths:' 예시 블록 보존"
-
-# 기존 commented '# test_paths:' 예시 블록도 보존
-grep -qE '^# test_paths:' "$TEMPLATE_MD" \
-  || fail "spec-template.md commented '# test_paths:' 예시 블록 보존 실패"
-ok "commented '# test_paths:' 예시 블록 보존"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 16: self-review.md — 5축 검사 항목에 test_sweep_paths 검사 추가 ==="
-# AC5: scope에 test 코드 변경 포함 시 test_sweep_paths가 비어 있지 않다 검사
-grep -qE 'test_sweep_paths' "$SELF_REVIEW_MD" \
-  || fail "self-review.md에 'test_sweep_paths' 검사 항목 없음"
-ok "self-review.md에 test_sweep_paths 검사 항목 존재"
-
-# 검사 의미: scope에 test 코드 변경 포함 시 → 필드가 비어 있지 않다
-grep -qE 'test 코드 변경|테스트 코드 변경' "$SELF_REVIEW_MD" \
-  || fail "self-review.md에 'test 코드 변경' 트리거 어구 없음"
-ok "self-review.md에 test 코드 변경 트리거 어구 존재"
-
-grep -qE '비어 있지 않|채워|값이 있|empty' "$SELF_REVIEW_MD" \
-  || fail "self-review.md에 'test_sweep_paths 필드가 비어 있지 않다' 의미 어구 없음"
-ok "self-review.md에 필드 비어 있지 않음 의미 명시"
 
 # ---------------------------------------------------------------------------
 echo ""

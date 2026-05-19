@@ -30,11 +30,6 @@
 
 발견 시: 단계 3에서 사용자가 이미 "단일 강행"을 확인하여 SPEC "위험" 섹션에 기록되어 있으면 통과. 새로 발견된 신호면 `[NEEDS CLARIFICATION: 다중 영역 가능성 — 영역 A: <...>, 영역 B: <...>, 분해 vs 단일 강행?]` 마커.
 
-추가 항목 — **test 코드 변경 sweep 화이트리스트 검사**:
-- task scope가 test 코드 변경 (rename·cleanup·삭제·내용 수정 등)을 포함하면 SPEC frontmatter `test_sweep_paths` 필드가 비어 있지 않다 (= 사용 가능한 화이트리스트 후보 경로가 list 형태로 존재).
-- 신호 (하나라도 해당): `scope.include` 또는 본문 "범위.포함" 항목 중 어느 하나가 `tests/**`·`test/**`·`__tests__/**`·`spec/**`·`*_test.*`·`*.test.*`·`*_spec.*` 같은 test 경로 패턴 매칭, "무엇을 만들 것인가"·"위험"·"제약" 본문에 "테스트 rename"·"tests 정리"·"test cleanup"·"스펙 삭제" 같은 어구 등장.
-- 위 신호가 있고 frontmatter `test_sweep_paths` 키가 부재이거나 빈 list `[]` 이면 — step 5.1 자동 판단·yes/no 단발 확인 절차가 누락됐다는 신호. 발견 시: `[NEEDS CLARIFICATION: test 코드 변경 sweep 화이트리스트 누락 — step 5.1 절차에서 test_sweep_paths를 추출·확정했나? 비워 두면 loop 단계의 weakening 게이트가 합법적 sweep을 "테스트 약화"로 오인할 수 있음.]` 마커.
-
 ## 4. 모호성 검사
 
 다음 어휘는 모호 신호:
