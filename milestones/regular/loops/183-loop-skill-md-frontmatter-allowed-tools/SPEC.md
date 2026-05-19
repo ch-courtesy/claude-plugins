@@ -5,7 +5,7 @@ scope:
     - rules/**
     - milestones/**
     - CLAUDE.md
-verify: "grep -qF 'Bash(bash /Users/*/.claude/plugins/cache/*/autopilot/*/skills/loop/references/*.sh *)' plugins/autopilot/skills/loop/SKILL.md && grep -qF 'Bash(tail -F /private/tmp/claude-* 2>/dev/null | grep -E --line-buffered *)' plugins/autopilot/skills/loop/SKILL.md && grep -qF 'Bash(gh pr view *)' plugins/autopilot/skills/loop/SKILL.md && grep -qF 'Bash(gh pr checks *)' plugins/autopilot/skills/loop/SKILL.md && grep -qF 'Bash(git status --porcelain*)' plugins/autopilot/skills/loop/SKILL.md && grep -qF 'Bash(git checkout HEAD -- *)' plugins/autopilot/skills/loop/SKILL.md && ! grep -qF 'Bash(gh issue ' plugins/autopilot/skills/loop/SKILL.md"
+verify: "grep -qF 'Bash(bash /Users/*/.claude/plugins/cache/*/autopilot/*/skills/loop/references/*.sh *)' plugins/autopilot/skills/loop/SKILL.md && grep -qF 'Bash(tail -F /private/tmp/claude-* 2>/dev/null | grep -E --line-buffered *)' plugins/autopilot/skills/loop/SKILL.md && grep -qF 'Bash(gh pr view *)' plugins/autopilot/skills/loop/SKILL.md && grep -qF 'Bash(gh pr checks *)' plugins/autopilot/skills/loop/SKILL.md && grep -qF 'Bash(git status --porcelain*)' plugins/autopilot/skills/loop/SKILL.md && ! grep -qF 'Bash(git checkout HEAD -- *)' plugins/autopilot/skills/loop/SKILL.md && ! grep -qF 'Bash(gh issue ' plugins/autopilot/skills/loop/SKILL.md"
 ears_language: ko
 ---
 
@@ -22,7 +22,8 @@ loop 스킬 (`plugins/autopilot/skills/loop/SKILL.md`) 의 YAML frontmatter `all
 - **AC1** (Ubiquitous): `allowed-tools` 에 `Bash(bash /Users/*/.claude/plugins/cache/*/autopilot/*/skills/loop/references/*.sh *)` 패턴이 한 줄로 포함된다.
 - **AC2** (Ubiquitous): `allowed-tools` 에 `Bash(tail -F /private/tmp/claude-* 2>/dev/null | grep -E --line-buffered *)` 패턴이 한 줄로 포함된다 — Monitor 의 실제 tail+pipe+redirect 조합과 일치하도록 pipe(`| grep`)와 `2>/dev/null` 를 패턴에 명시 포함하고, 비지원 glob 문법(`**`)은 사용하지 않는다.
 - **AC3** (Ubiquitous): `allowed-tools` 에 `Bash(gh pr view *)` 와 `Bash(gh pr checks *)` 두 패턴이 각각 한 줄로 포함된다.
-- **AC4** (Ubiquitous): `allowed-tools` 에 `Bash(git status --porcelain*)` 와 `Bash(git checkout HEAD -- *)` 두 패턴이 각각 한 줄로 포함된다.
+- **AC4** (Ubiquitous): `allowed-tools` 에 `Bash(git status --porcelain*)` 패턴이 한 줄로 포함된다.
+- **AC4-neg** (Unwanted): `allowed-tools` 에 `Bash(git checkout HEAD -- *)` 패턴은 추가되지 **않는다** — `git checkout HEAD -- <path>` 는 미커밋 변경을 무음 파기하는 write 연산이라 destructive 위험으로 자동 승인 범위 제외 (PR #187 reviewer BLOCKING thread 3264181657 반영).
 - **AC5** (Unwanted): `allowed-tools` 에 `gh issue *`·`gh pr merge *`·`gh pr comment *` 같은 외부 상태 변경 가능 gh 패턴은 신규 추가되지 않는다 (기존 미포함 상태 유지, 메모리 노트 `feedback_allowlist_exclude_github` 정합).
 - **AC6** (Unwanted): 본 변경은 frontmatter `allowed-tools` 리스트 외 다른 어떤 필드·본문 텍스트·자매 스킬(`spec`·`dispatch`·`prd`) 의 SKILL.md 도 수정하지 않는다.
 
@@ -30,7 +31,7 @@ loop 스킬 (`plugins/autopilot/skills/loop/SKILL.md`) 의 YAML frontmatter `all
 
 포함:
 
-- `plugins/autopilot/skills/loop/SKILL.md` — frontmatter `allowed-tools` 에 6개 신규 패턴 추가 (AC1·AC2·AC3 두 항목·AC4 두 항목)
+- `plugins/autopilot/skills/loop/SKILL.md` — frontmatter `allowed-tools` 에 5개 신규 패턴 추가 (AC1·AC2·AC3 두 항목·AC4 한 항목). `git checkout HEAD -- *` 는 AC4-neg 에 따라 제외 (PR #187 reviewer BLOCKING 반영).
 
 비-목표 / 제외:
 
@@ -42,7 +43,7 @@ loop 스킬 (`plugins/autopilot/skills/loop/SKILL.md`) 의 YAML frontmatter `all
 
 ## 검증
 
-frontmatter `verify` 명령이 0 exit 으로 끝나야 합니다 (6개 grep -qF 체인 + 1개 negation):
+frontmatter `verify` 명령이 0 exit 으로 끝나야 합니다 (5개 grep -qF 체인 + 2개 negation — AC4-neg 와 AC5):
 
 ```bash
 grep -qF 'Bash(bash /Users/*/.claude/plugins/cache/*/autopilot/*/skills/loop/references/*.sh *)' plugins/autopilot/skills/loop/SKILL.md && \
@@ -50,17 +51,17 @@ grep -qF 'Bash(tail -F /private/tmp/claude-* 2>/dev/null | grep -E --line-buffer
 grep -qF 'Bash(gh pr view *)' plugins/autopilot/skills/loop/SKILL.md && \
 grep -qF 'Bash(gh pr checks *)' plugins/autopilot/skills/loop/SKILL.md && \
 grep -qF 'Bash(git status --porcelain*)' plugins/autopilot/skills/loop/SKILL.md && \
-grep -qF 'Bash(git checkout HEAD -- *)' plugins/autopilot/skills/loop/SKILL.md && \
+! grep -qF 'Bash(git checkout HEAD -- *)' plugins/autopilot/skills/loop/SKILL.md && \
 ! grep -qF 'Bash(gh issue ' plugins/autopilot/skills/loop/SKILL.md
 ```
 
 추가 보조 검사 (PR 리뷰 시점, AC6 형식 일관성):
 
 ```bash
-# AC6 — 6개 신규 패턴이 모두 "  - Bash(" 2칸 들여쓰기 형식
+# AC6 — 5개 신규 패턴이 모두 "  - Bash(" 2칸 들여쓰기 형식
 awk '/^---$/{c++;next} c==1 && /^  - Bash\(/' plugins/autopilot/skills/loop/SKILL.md \
-  | grep -cE 'cache/\*/autopilot|/private/tmp/claude-\*|gh pr view|gh pr checks|git status --porcelain|git checkout HEAD --'
-# 기대값: 6 이상
+  | grep -cE 'cache/\*/autopilot|/private/tmp/claude-\*|gh pr view|gh pr checks|git status --porcelain'
+# 기대값: 5 이상
 ```
 
 ## 제약

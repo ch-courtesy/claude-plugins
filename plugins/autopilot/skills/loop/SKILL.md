@@ -28,7 +28,7 @@ allowed-tools:
   - Bash(gh pr view *)
   - Bash(gh pr checks *)
   - Bash(git status --porcelain*)
-  - Bash(git checkout HEAD -- *)
+  # NOTE: `git checkout HEAD -- *` 는 자동 승인 제외 — 미커밋 변경을 무음 파기하는 write 연산이라 destructive 위험 (PR #187 [BLOCKING] thread 3264181657 반영)
 ---
 
 # loop
