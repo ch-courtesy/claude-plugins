@@ -19,7 +19,6 @@ allowed-tools:
   - Bash(git -C * stash pop:*)
   - Bash(git -C * stash show:*)
   - Bash(rm */ESCALATION.md)
-  - Bash(rm */DONE)
   - Bash(ps -p:*)
   - Bash(cat */*.lock)
   # SPEC 183 — 세션에서 자주 프롬프되던 패턴 보강 (cache-path 드라이버·bg output tail·PR read-only·git inspect/restore)
@@ -74,15 +73,15 @@ Skill(skill: "spec", args: "<task-id>")
 권장 기본값:
 - `persistent: true`
 - `timeout_ms: 3600000` (1시간)
-- 필터 정규식: `이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|DONE`
+- 필터 정규식: `이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|완료 신호`
 
 `--no-monitor` 플래그는 **SKILL.md 차원 옵션**이다 — 모델이 args 파싱 시 이 토큰을 분리·소비하여 `Monitor` 가설 자체를 생략하고, `loop.sh`로는 **전달하지 않는다** (셸 드라이버는 본 플래그를 모름). 따라서 본 플래그는 **본 스킬을 통한 호출 시점에만** 작용하며, 사용자가 셸 드라이버 `loop.sh start`를 직접 호출하는 경우엔 효력이 없다.
 
 `spec` 스킬 단계 9의 "지금 loop start 호출" 결정으로 자동 연계되는 경우에도 추가 모니터 결정 질문 없이 본 기본 동작(Monitor 가설 포함)이 그대로 적용된다.
 
-#### DONE 이후 PR 생성·재사용 phase (default)
+#### 완료 라벨 부착 이후 PR 생성·재사용 phase (default)
 
-task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 동일 브랜치의 open PR 재사용) 단계가 **default로 자동 실행**됩니다 (SPEC 103 AC1). 건너뛰려면 `--no-pr` 플래그를 명시(SPEC 103 AC2).
+task 가 완료 신호(`LOOP_DONE_LABEL` 라벨 부착)에 도달한 직후 같은 워크트리에서 PR 생성(또는 동일 브랜치의 open PR 재사용) 단계가 **default로 자동 실행**됩니다 (SPEC 103 AC1). 건너뛰려면 `--no-pr` 플래그를 명시(SPEC 103 AC2).
 
 활성화 시 동작:
 - default 브랜치 자동 감지 (`gh repo view` → `git symbolic-ref refs/remotes/origin/HEAD`)
@@ -105,7 +104,7 @@ task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 �
 
 기존 PR body의 사용자 수기 편집 보호를 위해 자동 영역은 `<!-- autopilot:pr-body:begin --> ... <!-- autopilot:pr-body:end -->` marker fence 안에만 작성됩니다.
 
-#### DONE 이후 PR 리뷰 자동 fix 루프 (SPEC 123, `request_review: true` opt-in)
+#### 완료 라벨 부착 이후 PR 리뷰 자동 fix 루프 (SPEC 123, `request_review: true` opt-in)
 
 SPEC frontmatter에 `request_review: true`가 지정된 task만 본 흐름을 진입합니다. PR 생성·재사용이 성공한 직후 다음 sub-phase가 차례·일부 background로 실행됩니다:
 
@@ -187,7 +186,8 @@ start 첫 호출에 자동:
 |---|---|
 | `constitution.md` | 워커 헌법. start 시점에 워크트리 CLAUDE.md로 복사 |
 | `loop.sh` | 외부 셸 드라이버. 모든 subcommand의 핵심 로직 |
-| `pr-phase.sh` | DONE 이후 PR 생성·재사용 단계 |
+| `task-storage.sh` | task 저장소 라벨 검출 공통 헬퍼 (loop.sh·dispatch.sh 공유, SPEC 175) |
+| `pr-phase.sh` | 완료 라벨 부착 이후 PR 생성·재사용 단계 |
 | `operational-guide.md` | 사용자용 운영 가이드 (워크플로·환경 변수·객관 게이트 표·의존성) |
 | `status-format.md` | status 출력 형식 가이드 |
 | `troubleshooting.md` | 차단 신호 카테고리별 처리 가이드 |

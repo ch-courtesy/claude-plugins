@@ -56,7 +56,6 @@ allowed-tools:
   - Bash(git -C * stash pop:*)
   - Bash(git -C * stash show:*)
   - Bash(rm */ESCALATION.md)
-  - Bash(rm */DONE)
   - Bash(ps -p:*)
   - Bash(cat */*.lock)
   # SPEC 108 — 본 스킬 본문 실행에 필요한 추가 도구·Bash prefix (AC1)

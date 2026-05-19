@@ -11,20 +11,25 @@
 #   T3. worktree 경로 — `milestones/<m>/loops/<input-id>-<slug>/.worktree`.
 #   T4. SPEC.md 경로 정합 — spec 작성 경로 = loop 읽기 경로 = pr-phase 읽기 경로.
 #   T5. 모호성 die — 동일 input-id 매칭 브랜치 2+ 일 때 비-zero exit + 안내.
+#   T6. dispatch.sh child_state — issue 에 LOOP_DONE_LABEL 라벨이 부착되면
+#       워크트리 안 sentinel 파일 부재에도 "done" 상태를 보고해야 한다
+#       (SPEC 175 AC2: 라벨 단일 의존).
 #
-# 셋업: 임시 git fixture · mock claude (DONE 즉시 생성) · yq 필요.
+# 셋업: 임시 git fixture · mock claude (stdin 소비 + JSON 응답) · yq 필요.
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 LOOP_SH="$REPO_ROOT/plugins/autopilot/skills/loop/references/loop.sh"
 PR_PHASE_SH="$REPO_ROOT/plugins/autopilot/skills/loop/references/pr-phase.sh"
+DISPATCH_SH="$REPO_ROOT/plugins/autopilot/skills/dispatch/references/dispatch.sh"
 SPEC_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/spec/SKILL.md"
 # 슬러그 도출 코드 조각의 단일 출처 (SKILL.md §9.5 → references/feat-branch-commit.md).
 SPEC_FEAT_REF="$REPO_ROOT/plugins/autopilot/skills/spec/references/feat-branch-commit.md"
 
 [[ -f "$LOOP_SH" ]]      || { echo "FAIL setup: loop.sh missing: $LOOP_SH" >&2; exit 1; }
 [[ -f "$PR_PHASE_SH" ]]  || { echo "FAIL setup: pr-phase.sh missing: $PR_PHASE_SH" >&2; exit 1; }
+[[ -f "$DISPATCH_SH" ]]  || { echo "FAIL setup: dispatch.sh missing: $DISPATCH_SH" >&2; exit 1; }
 [[ -f "$SPEC_SKILL_MD" ]]|| { echo "FAIL setup: SKILL.md missing: $SPEC_SKILL_MD" >&2; exit 1; }
 [[ -f "$SPEC_FEAT_REF" ]]|| { echo "FAIL setup: feat-branch-commit.md missing: $SPEC_FEAT_REF" >&2; exit 1; }
 
@@ -57,22 +62,24 @@ MAIN_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 # baseline empty commit (suppressor 오탐 방지)
 git commit --allow-empty -q -m "chore: baseline"
 
-# mock claude — stdin 소비 + DONE 생성 + JSON 응답
+# mock claude — stdin 소비 + JSON 응답.
+# 완료 신호는 task 저장소(GitHub Issue)의 `loop:done` label 부착이 단일 검출 키이며
+# (SPEC 134/150/175), 파일 sentinel 은 없다 — mock 도 파일을 만들지 않는다.
 MOCK_BIN="$WORK_DIR/mock-bin"
 mkdir -p "$MOCK_BIN"
 cat > "$MOCK_BIN/claude" <<'MOCKEOF'
 #!/usr/bin/env bash
 cat > /dev/null
-touch DONE
 echo '{"result":"mock","usage":{"input_tokens":1,"output_tokens":1}}'
 MOCKEOF
 chmod +x "$MOCK_BIN/claude"
 
 # mock gh — task_status_is_done 를 만족시키는 최소 stub.
-# 배경: loop.sh 는 done 신호를 task 저장소의 `loop:done` label 단일 의존으로 감지한다
-#       (SPEC 134/150). mock claude 가 `DONE` 파일을 만들어도 loop.sh 는 보지 않는다.
-#       본 테스트는 real GitHub 이 없으므로 gh stub 으로 label 존재를 흉내내 iter #1
-#       직후 task_status_is_done 이 0(done) 을 반환하도록 한다.
+# 배경: loop.sh·dispatch.sh 는 done 신호를 task 저장소의 `loop:done` label 단일
+#       의존으로 감지한다 (SPEC 134/150/175). 파일 sentinel 은 제거되었으므로
+#       라벨 부착이 done 검출의 유일한 경로다. 본 테스트는 real GitHub 이 없으므로
+#       gh stub 으로 label 존재를 흉내내 iter #1 직후 task_status_is_done 이
+#       0(done) 을 반환하도록 한다.
 # 처리:
 #   - gh issue list  : "1" (task_issue_number 가 lookup 성공하게)
 #   - gh issue view  : "loop:done" (task_label_present 가 hit)
@@ -273,5 +280,37 @@ echo "$T5_OUT" | grep -qE '여러 feat 브랜치|모호|ambig' \
 
 echo "OK T5: 모호성 die"
 
+# ──────────────────────────────────────────────────────────────────────────────
+# T6. dispatch.sh child_state — label 단일 의존 (SPEC 175 AC2)
+# ──────────────────────────────────────────────────────────────────────────────
+# 배경: 이전 contract 에서 dispatch.sh 는 `[[ -f $wt/DONE ]]` 파일 sentinel 로
+#       child 완료를 판정했으나, 어떤 코드 경로도 그 파일을 만들지 않아 dead code
+#       였다. SPEC 175 는 loop.sh 와 동일하게 task 저장소의 `loop:done` 라벨 단일
+#       의존으로 통합한다. mock gh 가 `loop:done` 을 echo 하므로, child issue 가
+#       라벨 부착된 상태를 흉내내고 dispatch status 가 "done" 을 보고하는지 확인.
+#
+# fixture: milestones/wave-m/loops/123/.worktree (sentinel 파일 일절 없음).
+#          child id "123" 은 숫자라 task_issue_number 가 gh issue list 우회.
+T6_M="wave-m"
+T6_C="123"
+T6_WT="$PROJECT/milestones/${T6_M}/loops/${T6_C}/.worktree"
+mkdir -p "$T6_WT"
+
+set +e
+T6_OUT=$(bash "$DISPATCH_SH" status "$T6_M" 2>&1)
+T6_RC=$?
+set -e
+
+if [[ $T6_RC -ne 0 ]]; then
+  echo "FAIL T6a: dispatch.sh status rc=$T6_RC" >&2
+  echo "$T6_OUT" >&2
+  exit 1
+fi
+echo "$T6_OUT" | grep -qE "^[[:space:]]*${T6_C}[[:space:]]+done$" \
+  || { echo "FAIL T6: dispatch child_state did not report 'done' for label-only completion (SPEC 175 AC2)" >&2
+       echo "$T6_OUT" >&2; exit 1; }
+
+echo "OK T6: dispatch child_state — label 단일 의존"
+
 echo ""
-echo "ALL TESTS PASSED (T1–T5)"
+echo "ALL TESTS PASSED (T1–T6)"
