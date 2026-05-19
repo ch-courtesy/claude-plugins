@@ -607,6 +607,268 @@ test_e_pr_level_dispute_preserved() {
   pass "(e) PR-level dispute · review summary · owner cmd 경로 보존"
 }
 
+# =====================================================================
+# SPEC 169 — Push sync policy: rebase locally, merge on remote
+# =====================================================================
+#
+# 동기화 helper(rebase-phase.sh)가 원격 트래킹 브랜치 존재 여부에 따라 두 경로로
+# 분기하는지, force push가 부재한지, pr/review-fix phase가 직접 git rebase·merge를
+# 호출하지 않고 helper만 통해 sync하는지, 충돌 자동 해소 실패 시 워크트리가
+# 복구되는지 검증한다.
+
+# Helper: 격리 fixture — main 1 commit + feat 1 commit + push 옵션 + origin/main advance.
+# push_feat == "push" 이면 feat 브랜치를 origin으로 push (remote tracking 존재 케이스).
+# push_feat == "nopush" 이면 push 생략 (remote tracking 부재 케이스).
+_sync_setup_diverged_base() {
+  local case_name="$1"
+  local push_feat="$2"
+  local project="$WORK_DIR/$case_name"
+  local bare="$WORK_DIR/${case_name}.git"
+  git init -q --bare -b main "$bare"
+  mkdir -p "$project"
+  (
+    cd "$project"
+    git init -q -b main
+    git config user.email "t@e.com"; git config user.name "T"
+    git remote add origin "$bare"
+    echo "initial" > shared.txt
+    git add shared.txt; git commit -q -m "initial"
+    git push -q origin main
+    # rebase-phase.sh default branch 감지 fallback(git symbolic-ref) 경로용
+    git remote set-head origin main
+    mkdir -p milestones/regular/loops/169
+    git worktree add -q -b "feat/169-${case_name}" "milestones/regular/loops/169/.worktree" HEAD
+    cd milestones/regular/loops/169/.worktree
+    echo "feat change" > feat-only.txt
+    git add feat-only.txt; git commit -q -m "feat: work"
+    if [[ "$push_feat" == "push" ]]; then
+      git push -q -u origin "feat/169-${case_name}"
+    fi
+  ) >/dev/null 2>&1 || fail "$case_name sync setup"
+  # origin/main advance (다른 worker가 base에 새 commit을 push한 시나리오).
+  # 메인 repo는 main에 머물러 있어 worktree(feat) 점유와 충돌하지 않는다.
+  (
+    cd "$project"
+    echo "main advanced" >> shared.txt
+    git add shared.txt; git commit -q -m "base: advance"
+    git push -q origin main
+  ) >/dev/null 2>&1 || fail "$case_name base advance"
+  printf '%s|%s\n' "$project" "$bare"
+}
+
+# (AC2) 원격 트래킹 부재 → rebase 경로 수행 (history 재작성, merge commit 부재)
+test_sync_rebase_path_no_remote_tracking() {
+  local pair; pair=$(_sync_setup_diverged_base "rebase_path" "nopush")
+  local project="${pair%|*}"
+  local wt="$project/milestones/regular/loops/169/.worktree"
+  local feat_sha_before; feat_sha_before=$( cd "$wt" && git rev-parse HEAD )
+
+  local mock_bin="$WORK_DIR/rebase_path_mock"; mkdir -p "$mock_bin"
+  cat > "$mock_bin/gh" <<'GH'
+#!/usr/bin/env bash
+exit 1
+GH
+  chmod +x "$mock_bin/gh"
+
+  PATH="$mock_bin:$PATH" bash "$SKILL_REFS/rebase-phase.sh" "$wt" "feat/169-rebase_path" "$project" \
+    || fail "(AC2) rebase-phase 실패 (rebase 경로 — remote tracking 부재)"
+
+  local feat_sha_after; feat_sha_after=$( cd "$wt" && git rev-parse HEAD )
+  [[ "$feat_sha_before" != "$feat_sha_after" ]] \
+    || fail "(AC2) rebase 경로: HEAD 미변경 (rebase 미수행)"
+  local merge_count; merge_count=$( cd "$wt" && git log --merges --pretty=oneline "$feat_sha_after" | wc -l | tr -d ' ' )
+  [[ "$merge_count" -eq 0 ]] \
+    || fail "(AC2) rebase 경로: merge commit 존재 ($merge_count) — rebase여야 함"
+  # 주의: `git log --pretty=%s | grep -q ...`는 grep -q 조기 종료로 SIGPIPE → pipefail 트립.
+  # 캡처 후 here-string으로 검사.
+  local _subjects; _subjects=$( cd "$wt" && git log --pretty=%s )
+  grep -qE '^feat: work$' <<<"$_subjects" \
+    || fail "(AC2) rebase 경로: feat commit 메시지 손실"
+  pass "(AC2) 원격 트래킹 부재 → rebase 경로"
+}
+
+# (AC3) 원격 트래킹 존재 → merge 경로 수행 (자기 commit SHA 보존, merge commit 생성)
+test_sync_merge_path_remote_tracking_exists() {
+  local pair; pair=$(_sync_setup_diverged_base "merge_path" "push")
+  local project="${pair%|*}"
+  local wt="$project/milestones/regular/loops/169/.worktree"
+  local feat_sha_before; feat_sha_before=$( cd "$wt" && git rev-parse HEAD )
+
+  local mock_bin="$WORK_DIR/merge_path_mock"; mkdir -p "$mock_bin"
+  cat > "$mock_bin/gh" <<'GH'
+#!/usr/bin/env bash
+exit 1
+GH
+  chmod +x "$mock_bin/gh"
+
+  PATH="$mock_bin:$PATH" bash "$SKILL_REFS/rebase-phase.sh" "$wt" "feat/169-merge_path" "$project" \
+    || fail "(AC3) rebase-phase 실패 (merge 경로 — remote tracking 존재)"
+
+  # 자기 commit SHA 보존
+  ( cd "$wt" && git cat-file -e "$feat_sha_before" ) \
+    || fail "(AC3) merge 경로: 자기 commit SHA ($feat_sha_before) 손실"
+  # HEAD는 base 변화 흡수한 merge commit (2 parents)이어야 함 — diverged history
+  local parents; parents=$( cd "$wt" && git rev-list --parents -n 1 HEAD | awk '{print NF-1}' )
+  [[ "$parents" -eq 2 ]] \
+    || fail "(AC3) merge 경로: HEAD가 merge commit 아님 (parents=$parents)"
+  pass "(AC3) 원격 트래킹 존재 → merge 경로 (자기 SHA 보존)"
+}
+
+# (AC4·AC7) Static grep — force push 부재 + 직접 git rebase/merge 부재 (helper 외)
+test_sync_no_force_push_and_no_direct_rebase_merge() {
+  local S="$REPO_ROOT/plugins/autopilot/skills/loop"
+  # AC4: push 경로에서 --force/--force-with-lease 부재 (모든 push-bearing phase)
+  local f
+  for f in rebase-phase.sh pr-phase.sh review-fix-phase.sh; do
+    if grep -E 'git[[:space:]]+push[^|;&)]*--force' "$S/references/$f" >/dev/null 2>&1; then
+      grep -nE 'git[[:space:]]+push[^|;&)]*--force' "$S/references/$f"
+      fail "(AC4) git push --force* 존재: $f"
+    fi
+  done
+  # AC7: pr-phase.sh / review-fix-phase.sh에 직접 git rebase·merge 라인 부재
+  # (주석 라인은 sed로 제외 후 grep — helper 외 phase는 sync를 helper로만 위임).
+  for f in pr-phase.sh review-fix-phase.sh; do
+    local stripped; stripped=$(sed 's/^[[:space:]]*#.*$//' "$S/references/$f")
+    if printf '%s\n' "$stripped" | grep -qE 'git[[:space:]]+(rebase|merge)([[:space:]]|$)'; then
+      printf '%s\n' "$stripped" | grep -nE 'git[[:space:]]+(rebase|merge)([[:space:]]|$)'
+      fail "(AC7) 직접 git rebase/merge 라인 잔존: $f"
+    fi
+  done
+  # rebase-phase.sh는 두 명령 모두 포함해야 함 (helper가 단일 출처)
+  grep -qE 'git[[:space:]]+rebase' "$S/references/rebase-phase.sh" \
+    || fail "(AC7) rebase-phase.sh에 git rebase 부재 (rebase 경로 누락)"
+  grep -qE 'git[[:space:]]+merge' "$S/references/rebase-phase.sh" \
+    || fail "(AC7) rebase-phase.sh에 git merge 부재 (merge 경로 누락)"
+  pass "(AC4·AC7) force push 부재 + helper 외 직접 git rebase/merge 부재"
+}
+
+# (AC6) 충돌 자동 해소 실패 → 워크트리 복구 + non-zero exit (merge 경로)
+test_sync_conflict_failure_recovers_merge_path() {
+  local case_name="conflict_merge"
+  local project="$WORK_DIR/$case_name"
+  local bare="$WORK_DIR/${case_name}.git"
+  git init -q --bare -b main "$bare"
+  mkdir -p "$project"
+  (
+    cd "$project"
+    git init -q -b main
+    git config user.email "t@e.com"; git config user.name "T"
+    git remote add origin "$bare"
+    echo "initial" > shared.txt
+    git add shared.txt; git commit -q -m "initial"
+    git push -q origin main
+    git remote set-head origin main
+    mkdir -p milestones/regular/loops/169
+    git worktree add -q -b "feat/169-$case_name" "milestones/regular/loops/169/.worktree" HEAD
+    cd milestones/regular/loops/169/.worktree
+    echo "feat version" > shared.txt
+    git add shared.txt; git commit -q -m "feat: conflict"
+    git push -q -u origin "feat/169-$case_name"
+  ) >/dev/null 2>&1 || fail "$case_name setup"
+  (
+    cd "$project"
+    echo "main version" > shared.txt
+    git add shared.txt; git commit -q -m "base: conflict"
+    git push -q origin main
+  ) >/dev/null 2>&1 || fail "$case_name base advance"
+  local wt="$project/milestones/regular/loops/169/.worktree"
+  local feat_sha_before; feat_sha_before=$( cd "$wt" && git rev-parse HEAD )
+
+  # gh stub: default branch 감지 fallback 경로 트리거.
+  # claude stub: 충돌을 해소하지 않은 채 exit 0 → script가 unresolved 감지 → abort 경로.
+  local mock_bin="$WORK_DIR/${case_name}_mock"; mkdir -p "$mock_bin"
+  cat > "$mock_bin/gh" <<'GH'
+#!/usr/bin/env bash
+exit 1
+GH
+  chmod +x "$mock_bin/gh"
+  cat > "$mock_bin/claude" <<'CL'
+#!/usr/bin/env bash
+cat >/dev/null
+# 의도적으로 충돌 미해소: exit 0이지만 conflict marker가 worktree에 남아있음.
+exit 0
+CL
+  chmod +x "$mock_bin/claude"
+
+  local rc=0
+  PATH="$mock_bin:$PATH" bash "$SKILL_REFS/rebase-phase.sh" "$wt" "feat/169-$case_name" "$project" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]] || fail "(AC6) 충돌 미해소 시 non-zero exit 미발생"
+
+  # MERGE_HEAD 잔존 부재 (git merge --abort 호출 흔적)
+  local merge_head_path; merge_head_path=$( cd "$wt" && git rev-parse --git-path MERGE_HEAD 2>/dev/null )
+  if [[ -n "$merge_head_path" && -f "$merge_head_path" ]]; then
+    fail "(AC6) MERGE_HEAD 잔존 — abort 복구 미수행 ($merge_head_path)"
+  fi
+  local feat_sha_after; feat_sha_after=$( cd "$wt" && git rev-parse HEAD )
+  [[ "$feat_sha_before" == "$feat_sha_after" ]] \
+    || fail "(AC6) 충돌 미해소 후 HEAD 이동 (복구 실패): before=$feat_sha_before after=$feat_sha_after"
+  pass "(AC6) 충돌 자동 해소 실패 → 워크트리 복구 + non-zero exit"
+}
+
+# (AC6) 충돌 자동 해소 실패 → 워크트리 복구 + non-zero exit (rebase 경로 — 대칭 케이스)
+# merge 경로(test_sync_conflict_failure_recovers_merge_path)와 동일 구조이나
+# feat 브랜치를 origin에 push하지 않아 ls-remote rc=2 → rebase 경로 분기.
+test_sync_conflict_failure_recovers_rebase_path() {
+  local case_name="conflict_rebase"
+  local project="$WORK_DIR/$case_name"
+  local bare="$WORK_DIR/${case_name}.git"
+  git init -q --bare -b main "$bare"
+  mkdir -p "$project"
+  (
+    cd "$project"
+    git init -q -b main
+    git config user.email "t@e.com"; git config user.name "T"
+    git remote add origin "$bare"
+    echo "initial" > shared.txt
+    git add shared.txt; git commit -q -m "initial"
+    git push -q origin main
+    git remote set-head origin main
+    mkdir -p milestones/regular/loops/169
+    git worktree add -q -b "feat/169-$case_name" "milestones/regular/loops/169/.worktree" HEAD
+    cd milestones/regular/loops/169/.worktree
+    echo "feat version" > shared.txt
+    git add shared.txt; git commit -q -m "feat: conflict"
+    # feat push 생략 — 원격 트래킹 부재 → rebase 경로 분기
+  ) >/dev/null 2>&1 || fail "$case_name setup"
+  (
+    cd "$project"
+    echo "main version" > shared.txt
+    git add shared.txt; git commit -q -m "base: conflict"
+    git push -q origin main
+  ) >/dev/null 2>&1 || fail "$case_name base advance"
+  local wt="$project/milestones/regular/loops/169/.worktree"
+  local feat_sha_before; feat_sha_before=$( cd "$wt" && git rev-parse HEAD )
+
+  local mock_bin="$WORK_DIR/${case_name}_mock"; mkdir -p "$mock_bin"
+  cat > "$mock_bin/gh" <<'GH'
+#!/usr/bin/env bash
+exit 1
+GH
+  chmod +x "$mock_bin/gh"
+  cat > "$mock_bin/claude" <<'CL'
+#!/usr/bin/env bash
+cat >/dev/null
+# 의도적으로 충돌 미해소: exit 0이지만 conflict marker가 worktree에 남아있음.
+exit 0
+CL
+  chmod +x "$mock_bin/claude"
+
+  local rc=0
+  PATH="$mock_bin:$PATH" bash "$SKILL_REFS/rebase-phase.sh" "$wt" "feat/169-$case_name" "$project" >/dev/null 2>&1 || rc=$?
+  [[ "$rc" -ne 0 ]] || fail "(AC6 rebase) 충돌 미해소 시 non-zero exit 미발생"
+
+  # rebase-apply/rebase-merge 디렉토리 잔존 부재 (git rebase --abort 호출 흔적)
+  local rebase_apply; rebase_apply=$( cd "$wt" && git rev-parse --git-path rebase-apply 2>/dev/null )
+  local rebase_merge; rebase_merge=$( cd "$wt" && git rev-parse --git-path rebase-merge 2>/dev/null )
+  if { [[ -n "$rebase_apply" && -d "$rebase_apply" ]] || [[ -n "$rebase_merge" && -d "$rebase_merge" ]]; }; then
+    fail "(AC6 rebase) rebase 상태 잔존 — abort 복구 미수행"
+  fi
+  local feat_sha_after; feat_sha_after=$( cd "$wt" && git rev-parse HEAD )
+  [[ "$feat_sha_before" == "$feat_sha_after" ]] \
+    || fail "(AC6 rebase) 충돌 미해소 후 HEAD 이동 (복구 실패): before=$feat_sha_before after=$feat_sha_after"
+  pass "(AC6 rebase) rebase 경로 충돌 자동 해소 실패 → 워크트리 복구 + non-zero exit"
+}
+
 # ----- 실행 -----
 test_spec_verify_command
 test_phase_scripts_arg_validation
@@ -618,6 +880,11 @@ test_b_inline_invalid_thread_reply
 test_c_same_thread_no_duplicate_reply
 test_d_two_threads_two_replies
 test_e_pr_level_dispute_preserved
+test_sync_rebase_path_no_remote_tracking
+test_sync_merge_path_remote_tracking_exists
+test_sync_no_force_push_and_no_direct_rebase_merge
+test_sync_conflict_failure_recovers_merge_path
+test_sync_conflict_failure_recovers_rebase_path
 
 echo "----------"
 echo "ALL TESTS PASSED"
