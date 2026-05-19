@@ -261,7 +261,7 @@ grep -qE 'test 코드 변경|테스트 코드 변경|test code change' "$SKILL_M
 ok "test 코드 변경 자동 판단 어구 존재"
 
 # 단발 yes/no 확인 — AC2
-grep -qE '단발 yes/no|단발 (예|aye)/no|단일 yes/no|단발 확인' "$SKILL_MD" \
+grep -qE '단발 yes/no|단발 예/no|단일 yes/no|단발 확인' "$SKILL_MD" \
   || fail "SKILL.md에 'test 변경 sweep 단발 yes/no 확인' 절차 없음"
 ok "단발 yes/no 확인 절차 존재"
 
