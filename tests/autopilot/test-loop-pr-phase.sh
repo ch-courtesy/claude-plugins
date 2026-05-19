@@ -276,6 +276,34 @@ GIT_EOF
   chmod +x "$mock_bin/git"
 }
 
+# SPEC 110 단일 contract — feat 브랜치에 SPEC.md를 commit해 loop.sh가 단일 contract를
+# 만족하도록 셋업한다 (없으면 loop.sh가 "feat 브랜치 부재" die로 종료).
+# 사용: setup_feat_with_spec <PROJECT> <RAW_TASK_ID>
+# 사전 조건: $PROJECT/milestones/<m>/loops/<c>/SPEC.md 파일이 이미 존재.
+# 동작: feat/<child> 브랜치 생성·체크아웃 → SPEC.md add+commit → 원래 브랜치 복귀.
+# 주의: loop.sh find_feat_branch는 child(슬래시 이후)만으로 검색하므로 브랜치 이름에
+# milestone prefix는 넣지 않는다 (SPEC 110 §AC1).
+setup_feat_with_spec() {
+  local proj="$1"
+  local task_id="$2"
+  local norm_id="$task_id"
+  [[ "$norm_id" != */* ]] && norm_id="regular/$task_id"
+  local mst="${norm_id%%/*}"
+  local child="${norm_id#*/}"
+  local loops_rel="milestones/$mst/loops/$child"
+  local default_br
+  default_br=$(git -C "$proj" rev-parse --abbrev-ref HEAD)
+  local feat_br="feat/$child"
+  if git -C "$proj" rev-parse --verify "$feat_br" >/dev/null 2>&1; then
+    git -C "$proj" checkout -q "$feat_br"
+  else
+    git -C "$proj" checkout -q -b "$feat_br"
+  fi
+  git -C "$proj" add -f "$loops_rel/SPEC.md"
+  git -C "$proj" commit -q -m "feat(spec): $task_id (test setup)" 2>/dev/null || true
+  git -C "$proj" checkout -q "$default_br"
+}
+
 # argv 덤프 디렉토리에서 특정 subcommand 호출의 --body 인자 추출
 # 사용: extract_body_from_call "<CALL_DIR>" "pr-create"  → 첫 매치 호출의 --body 값을 stdout
 # gh mock은 각 argv를 한 줄씩 기록(multiline body는 여러 줄 차지)하므로 --body 라인 다음부터
@@ -343,6 +371,7 @@ verify: 'true'
 ## 무엇을 만들 것인가
 DONE 직후 PR 생성이 default로 실행되는지 검증.
 EOF
+setup_feat_with_spec "$T1_PROJECT" "default-task"
 
 (
   cd "$T1_PROJECT"
@@ -561,6 +590,11 @@ t4_body="$(extract_body_from_call "$T4_CALL_DIR" "pr-create")"
   || { echo "FAIL: pr create의 --body 추출 불가. call dir:"; ls "$T4_CALL_DIR"; exit 1; }
 echo "$t4_body" | grep -qF "Closes #42" \
   || { echo "FAIL: 숫자 task-id인데 body에 'Closes #42' 없음. body:"; echo "$t4_body"; exit 1; }
+
+# SPEC 194 AC1: 숫자 task-id 시 PR 제목이 '#<task-id>: <SPEC H1>' 포맷
+t4_title="$(extract_title_from_call "$T4_CALL_DIR" "pr-create")"
+[[ "$t4_title" == "#42: Numeric Task ID" ]] \
+  || { echo "FAIL: SPEC 194 AC1 — 숫자 task-id 제목 포맷 불일치. expected='#42: Numeric Task ID' got='$t4_title'"; exit 1; }
 echo "OK"
 
 echo "=== TEST 5: AC6 — 비숫자 task-id 시 'Closes #' 자동 링크 생략 ==="
@@ -603,6 +637,15 @@ t5_body="$(extract_body_from_call "$T5_CALL_DIR" "pr-create")"
 if echo "$t5_body" | grep -qE 'Closes #[0-9]+'; then
   echo "FAIL: 비숫자 task-id인데 body에 'Closes #<num>' 있음 (AC6 위반). body:"
   echo "$t5_body"; exit 1
+fi
+
+# SPEC 194 AC3: 비숫자 task-id 시 PR 제목이 '<task-id>: <SPEC H1>' 포맷 ('#' 없이)
+t5_title="$(extract_title_from_call "$T5_CALL_DIR" "pr-create")"
+[[ "$t5_title" == "foo-task: Non-numeric Task ID" ]] \
+  || { echo "FAIL: SPEC 194 AC3 — 비숫자 task-id 제목 포맷 불일치. expected='foo-task: Non-numeric Task ID' got='$t5_title'"; exit 1; }
+# '#' prefix 없음 보장
+if [[ "$t5_title" == "#"* ]]; then
+  echo "FAIL: SPEC 194 AC3 — 비숫자 task-id 제목에 '#' prefix 있음. got='$t5_title'"; exit 1
 fi
 echo "OK"
 
@@ -651,10 +694,10 @@ fi
 grep -qE '^pr edit 99( |$)' "$T6_GH_LOG" \
   || { echo "FAIL: pr edit 99 호출 기록 없음. log:"; cat "$T6_GH_LOG"; exit 1; }
 
-# AC4: 제목 == SPEC의 H1
+# AC4 + SPEC 194 AC2: 갱신 경로에서도 제목 = '<task-id>: <SPEC H1>' (task-id 'reuse-task'는 비숫자 → fallback)
 t6_title="$(extract_title_from_call "$T6_CALL_DIR" "pr-edit")"
-[[ "$t6_title" == "Reuse Existing PR Title" ]] \
-  || { echo "FAIL: pr edit 제목이 SPEC H1과 불일치. got='$t6_title'"; exit 1; }
+[[ "$t6_title" == "reuse-task: Reuse Existing PR Title" ]] \
+  || { echo "FAIL: SPEC 194 AC2 — 갱신 경로 제목 포맷 불일치. expected='reuse-task: Reuse Existing PR Title' got='$t6_title'"; exit 1; }
 
 # AC5: body가 SPEC '무엇을 만들 것인가' 본문 포함
 t6_body="$(extract_body_from_call "$T6_CALL_DIR" "pr-edit")"

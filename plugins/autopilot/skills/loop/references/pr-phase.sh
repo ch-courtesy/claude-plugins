@@ -142,6 +142,15 @@ if [[ "$CHILD_ID" =~ ^[0-9]+$ ]]; then
 Closes #${CHILD_ID}"
 fi
 
+# SPEC 194: PR 제목 = '#<task-id>: <SPEC H1>' (숫자 task-id, GitHub auto-link 활성화)
+#                  | '<task-id>: <SPEC H1>'  (비숫자 task-id, fallback — '#' 생략)
+# CHILD_ID는 정규화된 TASK_ID의 child 부분이며, Closes #<id> 와 동일한 ^[0-9]+$ 판정을 공유한다.
+if [[ "$CHILD_ID" =~ ^[0-9]+$ ]]; then
+  DISPLAY_TITLE="#${CHILD_ID}: ${SPEC_TITLE}"
+else
+  DISPLAY_TITLE="${CHILD_ID}: ${SPEC_TITLE}"
+fi
+
 PR_BODY_FENCE_BEGIN='<!-- autopilot:pr-body:begin -->'
 PR_BODY_FENCE_END='<!-- autopilot:pr-body:end -->'
 
@@ -169,7 +178,7 @@ if [[ $existing_pr_count -eq 0 ]]; then
   if ! pr_url=$( cd "$WT" && gh pr create \
     --base "$DEFAULT_BRANCH" \
     --head "$BRANCH" \
-    --title "$SPEC_TITLE" \
+    --title "$DISPLAY_TITLE" \
     --body "$PR_BODY" ); then
     echo "ERROR: gh pr create 실패" >&2
     exit 1
@@ -209,7 +218,7 @@ else
     new_body="$PR_BODY"
   fi
 
-  if ! ( cd "$WT" && gh pr edit "$pr_number" --title "$SPEC_TITLE" --body "$new_body" ); then
+  if ! ( cd "$WT" && gh pr edit "$pr_number" --title "$DISPLAY_TITLE" --body "$new_body" ); then
     echo "ERROR: gh pr edit 실패 (PR #$pr_number)" >&2
     exit 1
   fi
