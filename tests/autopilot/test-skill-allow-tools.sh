@@ -177,6 +177,9 @@ SPEC_REQ=(
 
 # issue #113 본문의 `autopilot:loop` 섹션 패턴 (gh 패턴 제외)
 # SPEC 170 — trailing wildcard 형식을 ` *`(공백+별표) → `:*` 로 정규화
+# SPEC 190 — sub-phase 직호출 (review-fix/rebase/cleanup) + 일반 git 명령 + python3 inline 보강.
+#   commit 110a6bf 가 loop/SKILL.md 에서 tail -F·rm */ESCALATION.md 항목을 제거했으므로
+#   본 frozen reference 도 동일하게 정렬한다 (SPEC 190 verify 0 exit 강제).
 LOOP_REQ=(
   'Bash(bash * loop.sh start:*)'
   'Bash(bash * loop.sh status:*)'
@@ -184,18 +187,43 @@ LOOP_REQ=(
   'Bash(bash * loop.sh list)'
   'Bash(bash * loop.sh cleanup:*)'
   'Bash(bash * loop.sh logs:*)'
-  'Bash(tail -F /private/tmp/* | grep -E --line-buffered:*)'
-  'Bash(tail -F /tmp/* | grep -E --line-buffered:*)'
+  'Bash(bash * review-fix-phase.sh:*)'
+  'Bash(bash * rebase-phase.sh:*)'
+  'Bash(bash * cleanup-phase.sh:*)'
+  'Bash(git fetch:*)'
+  'Bash(git push:*)'
+  'Bash(git rebase:*)'
+  'Bash(git switch:*)'
+  'Bash(git cherry-pick:*)'
+  'Bash(git worktree:*)'
+  'Bash(git branch:*)'
+  'Bash(git reset:*)'
+  'Bash(git revert:*)'
+  'Bash(git stash:*)'
+  'Bash(git checkout:*)'
+  'Bash(git diff:*)'
+  'Bash(git log:*)'
+  'Bash(git show:*)'
+  'Bash(git status:*)'
+  'Bash(git rev-parse:*)'
+  'Bash(git rev-list:*)'
+  'Bash(git merge-base:*)'
+  'Bash(git show-ref:*)'
+  'Bash(git ls-files:*)'
+  'Bash(git ls-remote:*)'
+  'Bash(git commit:*)'
+  'Bash(git pull:*)'
+  'Bash(python3 -c:*)'
 )
 
 # issue #113 본문의 `공통·보조` 섹션 패턴 (gh 패턴 제외).
 # SPEC 108·170 머지 이후 두 SKILL.md 모두 `:*` trailing wildcard로 통일됨.
+# SPEC 190 — commit 110a6bf 가 두 SKILL.md 에서 rm */ESCALATION.md·rm */DONE 항목을 제거했으므로
+#   frozen reference 도 동일하게 정렬 (verify 0 exit 강제).
 COMMON_REQ=(
   'Bash(git -C * stash list)'
   'Bash(git -C * stash pop:*)'
   'Bash(git -C * stash show:*)'
-  'Bash(rm */ESCALATION.md)'
-  'Bash(rm */DONE)'
   'Bash(ps -p:*)'
   'Bash(cat */*.lock)'
 )

@@ -6,3 +6,4 @@ milestones/*/dispatch/DISPATCH_LOG.md
 .loop/
 milestones/**/loops/**/.worktree/
 milestones/**/loops/**/.lock
+.claude/worktrees/
