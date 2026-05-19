@@ -13,7 +13,7 @@ ears_language: ko
 
 ## 무엇을 만들 것인가
 
-loop 스킬 (`plugins/autopilot/skills/loop/SKILL.md`) 의 YAML frontmatter `allowed-tools` 리스트에 다음 카테고리의 Bash 명령 패턴을 glob 와일드카드 형식으로 추가한다 — (1) version-pinned cache path 의 loop 드라이버·phase 스크립트 호출, (2) bg job output 파일의 Monitor tail+grep, (3) GitHub PR read-only 조회 (`gh pr view`·`gh pr checks` — `gh issue *` 와 `gh pr merge/comment` 는 제외, 메모리 노트와 정합), (4) main repo working tree 의 git inspect/restore (`git status --porcelain`·`git checkout HEAD -- <path>`). 추가는 frontmatter `allowed-tools` 리스트 내에 한정되며, 본문·다른 frontmatter 키·자매 스킬(`spec`·`dispatch`·`prd`) 의 SKILL.md 는 변경하지 않는다.
+loop 스킬 (`plugins/autopilot/skills/loop/SKILL.md`) 의 YAML frontmatter `allowed-tools` 리스트에 다음 카테고리의 Bash 명령 패턴을 glob 와일드카드 형식으로 추가한다 — (1) version-pinned cache path 의 loop 드라이버·phase 스크립트 호출, (2) bg job output 파일의 Monitor tail+grep, (3) GitHub PR read-only 조회 (`gh pr view`·`gh pr checks` — `gh issue *` 와 `gh pr merge/comment` 는 제외, 메모리 노트와 정합), (4) main repo working tree 의 git inspect (`git status --porcelain` — `git checkout HEAD -- *` 는 미커밋 변경 무음 파기 위험으로 AC4-neg 제외). 추가는 frontmatter `allowed-tools` 리스트 내에 한정되며, 본문·다른 frontmatter 키·자매 스킬(`spec`·`dispatch`·`prd`) 의 SKILL.md 는 변경하지 않는다.
 
 배경: loop 스킬을 통한 호출 세션에서 동일 명령에 prompt 가 반복 발생함이 관측됐다. settings.json·settings.local.json 영구 등록 0건으로, 매 호출마다 "allow once" 가 반복되는 마찰이 누적된다. 기존 frontmatter 가 이미 다수 패턴(`Bash(bash * loop.sh start *)`·`Bash(tail -F /private/tmp/* | grep -E --line-buffered *)` 등)을 선언하고 있어, 동일 메커니즘으로 새 패턴을 누적·일관성 있게 확장한다. gh CLI 의 외부 상태 변경 가능성 우려는 PR read-only 만 예외로 허용해 메모리 노트 `feedback_allowlist_exclude_github` 의 정신(외부 상태 변경 가능 명령 제외)과 정합한다.
 
