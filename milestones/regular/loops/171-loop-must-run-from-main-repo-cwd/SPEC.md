@@ -6,6 +6,8 @@ scope:
     - milestones/**
     - CLAUDE.md
 verify: "bash plugins/autopilot/skills/loop/tests/test-loop-review-fix-phase.sh"
+test_sweep_paths:
+  - "plugins/autopilot/skills/loop/tests/**"
 ---
 
 # Loop must run from main repo cwd
