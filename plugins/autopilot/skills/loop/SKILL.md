@@ -141,6 +141,17 @@ review-fix 루프는 다음 중 하나가 감지되면 종료합니다:
 
 상수는 `loop.sh`의 `AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS` / `AUTOPILOT_REBASE_ALLOWED_TOOLS` 에 정의되며, 환경 변수로 자식 phase 스크립트에 export됩니다. 사용자 대화형 세션의 `settings.json`은 본 등록의 영향을 받지 않습니다 — autopilot 워커 컨텍스트에만 한정됩니다.
 
+##### silent-fail 검출기 환경변수
+
+review-fix-phase의 silent-fail 검출기(연속 idle 폴링 후 stuck 패턴 escalate)는 다음 환경변수로 조절됩니다.
+
+| 환경변수 | 기본값 | floor | 의미 |
+|---|---|---|---|
+| `LOOP_REVIEW_IDLE_THRESHOLD` | 3 | 3 | 새 이벤트 0건이 N회 연속 폴링되면 silent-fail 패턴 평가 |
+| `LOOP_REVIEW_PR_GRACE_SECS` | 300 (5분) | 0 | PR 생성 직후 N초 동안은 silent-fail 검출기 평가 자체를 skip — GitHub Actions check 등록 지연·큐 지연 흡수 (SPEC 181). 0으로 설정 시 grace 비활성화 |
+
+검출기는 `statusCheckRollup`의 전체 check 수가 0이면(check 미등록·정보 부족) 해당 폴링 회차의 ESCALATION을 발동하지 않고 카운터만 리셋합니다 (SPEC 181 AC2). 전체 check 수가 0보다 크고 pending 0 + 다른 활동(리뷰·코멘트·inline·owner cmd) 모두 0일 때만 진짜 stuck으로 escalate합니다 (AC3).
+
 요구: `gh` CLI 설치 + OAuth 인증.
 
 ### status [<task-id>] / stop <task-id> / list / cleanup <task-id> [--force] / logs <task-id> [--tail | --iter N]
