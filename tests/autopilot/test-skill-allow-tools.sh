@@ -176,37 +176,27 @@ SPEC_REQ=(
 )
 
 # issue #113 본문의 `autopilot:loop` 섹션 패턴 (gh 패턴 제외)
-# loop/SKILL.md 는 SPEC 108 의 scope 밖이므로 ' *' 형식 유지.
+# SPEC 170 — trailing wildcard 형식을 ` *`(공백+별표) → `:*` 로 정규화
 LOOP_REQ=(
-  'Bash(bash * loop.sh start *)'
-  'Bash(bash * loop.sh status *)'
-  'Bash(bash * loop.sh stop *)'
+  'Bash(bash * loop.sh start:*)'
+  'Bash(bash * loop.sh status:*)'
+  'Bash(bash * loop.sh stop:*)'
   'Bash(bash * loop.sh list)'
-  'Bash(bash * loop.sh cleanup *)'
-  'Bash(bash * loop.sh logs *)'
-  'Bash(tail -F /private/tmp/* | grep -E --line-buffered *)'
-  'Bash(tail -F /tmp/* | grep -E --line-buffered *)'
+  'Bash(bash * loop.sh cleanup:*)'
+  'Bash(bash * loop.sh logs:*)'
+  'Bash(tail -F /private/tmp/* | grep -E --line-buffered:*)'
+  'Bash(tail -F /tmp/* | grep -E --line-buffered:*)'
 )
 
-# issue #113 본문의 `공통·보조` 섹션 패턴 (gh 패턴 제외)
-# SPEC 108 AC2 — spec/SKILL.md 측은 ':*' 정규화, loop/SKILL.md 측은 ' *' 유지.
-# 한 배열로 묶을 수 없으므로 SPEC_COMMON_REQ / LOOP_COMMON_REQ 로 분리.
-SPEC_COMMON_REQ=(
+# issue #113 본문의 `공통·보조` 섹션 패턴 (gh 패턴 제외).
+# SPEC 108·170 머지 이후 두 SKILL.md 모두 `:*` trailing wildcard로 통일됨.
+COMMON_REQ=(
   'Bash(git -C * stash list)'
   'Bash(git -C * stash pop:*)'
   'Bash(git -C * stash show:*)'
   'Bash(rm */ESCALATION.md)'
   'Bash(rm */DONE)'
   'Bash(ps -p:*)'
-  'Bash(cat */*.lock)'
-)
-LOOP_COMMON_REQ=(
-  'Bash(git -C * stash list)'
-  'Bash(git -C * stash pop *)'
-  'Bash(git -C * stash show *)'
-  'Bash(rm */ESCALATION.md)'
-  'Bash(rm */DONE)'
-  'Bash(ps -p *)'
   'Bash(cat */*.lock)'
 )
 
@@ -225,10 +215,12 @@ check_contains_all() {
   fi
 }
 
-check_contains_all "spec/SKILL.md" "$spec_items" "${SPEC_REQ[@]}" "${SPEC_COMMON_REQ[@]}"
+check_contains_all "spec/SKILL.md" "$spec_items" \
+  "${SPEC_REQ[@]}" "${COMMON_REQ[@]}"
 ok "AC7: spec SKILL.md 에 issue spec 섹션 + 공통·보조 섹션 패턴 모두 포함"
 
-check_contains_all "loop/SKILL.md" "$loop_items" "${LOOP_REQ[@]}" "${LOOP_COMMON_REQ[@]}"
+check_contains_all "loop/SKILL.md" "$loop_items" \
+  "${LOOP_REQ[@]}" "${COMMON_REQ[@]}"
 ok "AC8: loop SKILL.md 에 issue loop 섹션 + 공통·보조 섹션 패턴 모두 포함"
 
 echo ""
