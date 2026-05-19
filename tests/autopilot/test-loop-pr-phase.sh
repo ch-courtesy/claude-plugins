@@ -54,16 +54,60 @@ make_mock_bin() {
   echo "$d"
 }
 
-# 단순 claude mock — stdin 소비 + DONE 작성 + JSON 응답
+# 단순 claude mock — stdin 소비 + DONE 작성 + (SPEC 175) loop:done label 시그널 발행
+# + JSON 응답.
+# 두 가지 호출 경로를 stdin 매칭으로 분기:
+#  - 통상 task 이터: DONE 파일 + LOOP_DONE_LABEL 라벨 시그널 (SPEC 175 단일 검출 키).
+#  - rebase/merge 충돌 자동 해소 (SPEC 169 rebase-phase.sh resolve_conflicts_via_claude):
+#    stdin 에 "git rebase conflict" / "git merge conflict" prompt 가 포함됨. MOCK_CLAUDE_REBASE_FAIL=1
+#    인 경우 비-zero exit (TEST 13 자동 해소 실패 경로), 아니면 unresolved 파일 ours 선택 + add
+#    + GIT_CONFLICT_RESOLVED_FILE flag touch (mock git pass-through 트리거 — TEST 12).
+# SPEC 175 이후 완료 검출은 task issue 의 LOOP_DONE_LABEL 단일 의존이므로, 단순히
+# DONE 파일만 생성해서는 loop.sh 가 완료를 인지하지 못한다. mock gh (install_gh_record_mock)
+# 가 GH_LABEL_FILE 에 라벨을 누적 기록하도록 `gh issue edit 99 --add-label loop:done` 호출.
 install_claude_done_mock() {
   local mock_bin="$1"
   cat > "$mock_bin/claude" <<'CLAUDE_EOF'
 #!/usr/bin/env bash
-cat > /dev/null
-touch DONE
+stdin_buf=$(cat)
+if printf '%s' "$stdin_buf" | grep -qE "git rebase conflict|git merge conflict"; then
+  # SPEC 169 rebase-phase 가 호출 — 자동 해소 1회 시뮬레이션.
+  if [[ "${MOCK_CLAUDE_REBASE_FAIL:-0}" == "1" ]]; then
+    echo "mock claude: 충돌 해소 실패 (시뮬레이션 — MOCK_CLAUDE_REBASE_FAIL=1)" >&2
+    exit 1
+  fi
+  # unresolved 파일을 모두 ours 채택 + git add (real git 으로 passthrough — mock git 의
+  # rebase 분기는 'rebase' subcommand 만 가로채므로 checkout/add 는 real git 이 처리).
+  unresolved=$(git diff --name-only --diff-filter=U 2>/dev/null || true)
+  if [[ -n "$unresolved" ]]; then
+    while IFS= read -r f; do
+      [[ -n "$f" ]] || continue
+      git checkout --ours -- "$f" 2>/dev/null || true
+      git add -- "$f" 2>/dev/null || true
+    done <<< "$unresolved"
+  fi
+  # mock git 의 rebase --continue pass-through 트리거 (TEST 12 만 export).
+  [[ -n "${GIT_CONFLICT_RESOLVED_FILE:-}" ]] && touch "$GIT_CONFLICT_RESOLVED_FILE"
+else
+  # 통상 task 이터.
+  touch DONE
+  # SPEC 175 단일 검출 키 — mock gh 가 같은 PATH 에 설치되어 있어야 함 (테스트 setup 책임).
+  gh issue edit 99 --add-label "${LOOP_DONE_LABEL:-loop:done}" >/dev/null 2>&1 || true
+fi
 echo '{"result": "mock", "usage": {"input_tokens": 1, "output_tokens": 1}}'
 CLAUDE_EOF
   chmod +x "$mock_bin/claude"
+}
+
+# 각 테스트 setup 마다 호출 — GH_LABEL_FILE 환경 변수에 빈 파일 경로를 export 한다.
+# mock claude 의 `gh issue edit` 가 라벨을 append 하고, mock gh 의 `issue view --json labels`
+# 가 그 내용을 출력해 loop.sh task_status_is_done 이 완료를 인지한다.
+# 사용: init_done_label_signal <TEST_NAME>  → 표준출력으로 라벨 파일 경로 (export 는 caller 책임).
+init_done_label_signal() {
+  local test_name="$1"
+  local label_file="$WORK_DIR/${test_name}-labels"
+  : > "$label_file"
+  echo "$label_file"
 }
 
 # gh mock — 모든 호출의 argv를 LOG_FILE에 한 줄씩 기록. PR URL stub을 stdout으로 반환.
@@ -96,6 +140,83 @@ if [[ -n "${GH_CALL_DIR:-}" ]]; then
 fi
 
 case "${1:-}" in
+  issue)
+    # SPEC 175: loop.sh task_status_is_done · task_issue_number · halt 의 gh issue 호출 처리.
+    # `GH_LABEL_FILE` 환경 변수가 가리키는 파일에 라벨이 한 줄씩 누적되며 mock claude 의
+    # `gh issue edit --add-label` 이 추가하고 `gh issue view --json labels` 가 출력한다.
+    case "${2:-}" in
+      list)
+        # gh issue list --search <q> --json number [--jq '.[0].number']
+        # task_issue_number 가 --jq '.[0].number' 로 단일 숫자만 추출하는 경로를 직접 모방.
+        __want_first_num=0
+        for __arg in "$@"; do
+          case "$__arg" in
+            ".[0].number"|"--jq=.[0].number") __want_first_num=1 ;;
+          esac
+        done
+        if [[ $__want_first_num -eq 1 ]]; then
+          echo "${GH_TASK_ISSUE_NUMBER:-99}"
+        else
+          printf '[{"number":%s}]\n' "${GH_TASK_ISSUE_NUMBER:-99}"
+        fi
+        exit 0
+        ;;
+      view)
+        # gh issue view <num> [--json labels --jq '.labels[].name' | --comments | --json comments ...]
+        __want_labels=0
+        __want_comments=0
+        for __arg in "$@"; do
+          case "$__arg" in
+            ".labels[].name"|"--jq=.labels[].name") __want_labels=1 ;;
+            --comments) __want_comments=1 ;;
+            ".comments"|"--jq=.comments"|".comments | last | .body"|"--jq=.comments | last | .body") __want_comments=1 ;;
+          esac
+        done
+        if [[ $__want_labels -eq 1 ]]; then
+          if [[ -n "${GH_LABEL_FILE:-}" && -f "${GH_LABEL_FILE}" ]]; then
+            cat "$GH_LABEL_FILE"
+          fi
+          exit 0
+        fi
+        if [[ $__want_comments -eq 1 ]]; then
+          # 빈 출력 — task_status_is_blocked / cmd_logs 무해 응답
+          exit 0
+        fi
+        # 기본 view — 빈 본문
+        echo ""
+        exit 0
+        ;;
+      edit)
+        # gh issue edit <num> --add-label <label>
+        __next_label=0
+        for __arg in "$@"; do
+          if [[ $__next_label -eq 1 ]]; then
+            [[ -n "${GH_LABEL_FILE:-}" ]] && printf '%s\n' "$__arg" >> "$GH_LABEL_FILE"
+            __next_label=0
+          elif [[ "$__arg" == "--add-label" ]]; then
+            __next_label=1
+          fi
+        done
+        exit 0
+        ;;
+      comment)
+        # halt() 의 gh issue comment — argv 는 이미 위에서 LOG_FILE / CALL_DIR 에 덤프됨.
+        exit 0
+        ;;
+    esac
+    ;;
+  label)
+    # gh label list --search <l> --json name --jq '.[].name' | label create
+    case "${2:-}" in
+      list)
+        # 빈 응답 — ensure_label_exists 가 create 시도하도록 (그리고 create 도 0 exit 으로 처리).
+        exit 0
+        ;;
+      create)
+        exit 0
+        ;;
+    esac
+    ;;
   repo)
     # gh repo view --json defaultBranchRef --jq .defaultBranchRef.name
     # 기본 branch 응답 (또는 GH_REPO_VIEW_FAIL=1 시 exit 1)
@@ -242,9 +363,11 @@ if [[ "\${1:-}" == "rebase" && -n "\${GIT_CONFLICT_MODE:-}" ]]; then
   # --abort는 항상 pass-through (real git이 rebase 상태 아니라 fail해도 무시)
   is_abort=0
   is_x=0
+  is_continue=0
   for a in "\$@"; do
     [[ "\$a" == "--abort" ]] && is_abort=1
     [[ "\$a" == "-X" ]] && is_x=1
+    [[ "\$a" == "--continue" ]] && is_continue=1
   done
 
   if [[ \$is_abort -eq 1 ]]; then
@@ -252,10 +375,21 @@ if [[ "\${1:-}" == "rebase" && -n "\${GIT_CONFLICT_MODE:-}" ]]; then
     exit 0
   fi
 
+  # SPEC 169 mock 경로: mock claude 가 자동 해소 후 GIT_CONFLICT_RESOLVED_FILE 를 touch
+  # 했으면 후속 rebase --continue 를 fake-success 로 처리. real git 의 rebase 상태가 없어
+  # passthrough 가 실패하므로 mock 이 직접 0 exit (assertion 은 git log 호출 행적만 검사).
+  if [[ -n "\${GIT_CONFLICT_RESOLVED_FILE:-}" && -f "\${GIT_CONFLICT_RESOLVED_FILE}" ]]; then
+    if [[ \$is_continue -eq 1 ]]; then
+      echo "Successfully rebased (mock — claude 해소 후 --continue)"
+      exit 0
+    fi
+  fi
+
   case "\$GIT_CONFLICT_MODE" in
     auto-resolve)
       if [[ \$is_x -eq 1 ]]; then
-        # 재시도(-X theirs)는 real git으로 위임 — 실제 worktree에는 충돌이 없으므로 fast-forward로 통과
+        # SPEC 103 legacy 경로(-X theirs 재시도)는 real git으로 위임 — SPEC 169 이후엔
+        # 사용되지 않지만 호환성 유지.
         exec "$real_git" "\$@"
       else
         # 첫 평범한 rebase는 충돌로 실패
@@ -276,24 +410,32 @@ GIT_EOF
   chmod +x "$mock_bin/git"
 }
 
-# SPEC 110 단일 contract — feat 브랜치에 SPEC.md를 commit해 loop.sh가 단일 contract를
-# 만족하도록 셋업한다 (없으면 loop.sh가 "feat 브랜치 부재" die로 종료).
-# 사용: setup_feat_with_spec <PROJECT> <RAW_TASK_ID>
-# 사전 조건: $PROJECT/milestones/<m>/loops/<c>/SPEC.md 파일이 이미 존재.
-# 동작: feat/<child> 브랜치 생성·체크아웃 → SPEC.md add+commit → 원래 브랜치 복귀.
-# 주의: loop.sh find_feat_branch는 child(슬래시 이후)만으로 검색하므로 브랜치 이름에
-# milestone prefix는 넣지 않는다 (SPEC 110 §AC1).
+# SPEC 110 + SPEC 116 단일 contract — feat/<child>-<slug> 브랜치에 SPEC.md를 commit해
+# loop·pr-phase 모두 단일 contract 를 만족하도록 셋업한다.
+# 사용: setup_feat_with_spec <PROJECT> <RAW_TASK_ID> [<SLUG=test>]
+# 사전 조건: $PROJECT/milestones/<m>/loops/<child>-<slug>/SPEC.md 파일이 이미 존재
+#            (호출자가 mkdir + cat<<EOF로 슬러그 경로에 생성).
+# 동작:
+#  - feat/<child>-<slug> 브랜치 생성·체크아웃
+#  - 슬러그 경로 SPEC.md add+commit
+#  - 원래 브랜치 복귀
+# 주의:
+#  - loop.sh find_feat_branch 는 child(슬래시 이후) 만으로 `feat/<child>-<slug>` 또는
+#    `feat/<child>` 를 검색하므로 브랜치 이름에 milestone prefix 는 넣지 않는다 (SPEC 110 §AC1).
+#  - pr-phase.sh 는 SPEC 116 단일 컨벤션으로 slug 가 비면 abort 하므로 slug 가 필수.
+#    각 테스트는 호환을 위해 slug="test" 를 기본 사용 (호출자 override 허용).
 setup_feat_with_spec() {
   local proj="$1"
   local task_id="$2"
+  local slug="${3:-test}"
   local norm_id="$task_id"
   [[ "$norm_id" != */* ]] && norm_id="regular/$task_id"
   local mst="${norm_id%%/*}"
   local child="${norm_id#*/}"
-  local loops_rel="milestones/$mst/loops/$child"
+  local loops_rel="milestones/$mst/loops/$child-$slug"
   local default_br
   default_br=$(git -C "$proj" rev-parse --abbrev-ref HEAD)
-  local feat_br="feat/$child"
+  local feat_br="feat/$child-$slug"
   if git -C "$proj" rev-parse --verify "$feat_br" >/dev/null 2>&1; then
     git -C "$proj" checkout -q "$feat_br"
   else
@@ -355,9 +497,10 @@ install_claude_done_mock "$T1_MOCK"
 install_gh_record_mock "$T1_MOCK"
 T1_GH_LOG="$WORK_DIR/${T1_NAME}-gh.log"
 : > "$T1_GH_LOG"
+T1_LABEL_FILE="$(init_done_label_signal "$T1_NAME")"
 
-mkdir -p "$T1_PROJECT/milestones/regular/loops/default-task"
-cat > "$T1_PROJECT/milestones/regular/loops/default-task/SPEC.md" <<'EOF'
+mkdir -p "$T1_PROJECT/milestones/regular/loops/default-task-test"
+cat > "$T1_PROJECT/milestones/regular/loops/default-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -375,7 +518,7 @@ setup_feat_with_spec "$T1_PROJECT" "default-task"
 
 (
   cd "$T1_PROJECT"
-  GH_LOG_FILE="$T1_GH_LOG" PATH="$T1_MOCK:$PATH" \
+  GH_LOG_FILE="$T1_GH_LOG" GH_LABEL_FILE="$T1_LABEL_FILE" PATH="$T1_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "default-task" > "$WORK_DIR/${T1_NAME}.out" 2>&1
 )
@@ -391,7 +534,7 @@ grep -qE '^pr create ' "$T1_GH_LOG" \
   || { echo "FAIL: default인데 pr create 호출 없음. log:"; cat "$T1_GH_LOG"; exit 1; }
 
 # DONE은 정상 생성됐어야
-[[ -f "$T1_PROJECT/milestones/regular/loops/default-task/.worktree/DONE" ]] \
+[[ -f "$T1_PROJECT/milestones/regular/loops/default-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
@@ -405,9 +548,10 @@ install_claude_done_mock "$T1B_MOCK"
 install_gh_record_mock "$T1B_MOCK"
 T1B_GH_LOG="$WORK_DIR/${T1B_NAME}-gh.log"
 : > "$T1B_GH_LOG"
+T1B_LABEL_FILE="$(init_done_label_signal "$T1B_NAME")"
 
-mkdir -p "$T1B_PROJECT/milestones/regular/loops/nopr-task"
-cat > "$T1B_PROJECT/milestones/regular/loops/nopr-task/SPEC.md" <<'EOF'
+mkdir -p "$T1B_PROJECT/milestones/regular/loops/nopr-task-test"
+cat > "$T1B_PROJECT/milestones/regular/loops/nopr-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -421,22 +565,25 @@ verify: 'true'
 ## 무엇을 만들 것인가
 --no-pr 플래그가 PR phase를 차단하는지 검증.
 EOF
+setup_feat_with_spec "$T1B_PROJECT" "nopr-task"
 
 (
   cd "$T1B_PROJECT"
-  GH_LOG_FILE="$T1B_GH_LOG" PATH="$T1B_MOCK:$PATH" \
+  GH_LOG_FILE="$T1B_GH_LOG" GH_LABEL_FILE="$T1B_LABEL_FILE" PATH="$T1B_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "nopr-task" --no-pr > "$WORK_DIR/${T1B_NAME}.out" 2>&1
 )
 
-# AC2: --no-pr이면 gh 호출 0회
+# AC2: --no-pr이면 PR 관련 gh 호출(pr create / pr edit) 0회.
+# (SPEC 175 이후 done 검출·label 보장 경로에서 issue/label gh 호출이 발생하므로
+#  '전체 gh 호출 0회' assertion 은 부정확 — PR phase 진입 여부를 직접 검증한다.)
 [[ -f "$T1B_GH_LOG" ]] || { echo "FAIL: gh log 파일 없음"; exit 1; }
-gh_calls_t1b=$(wc -l < "$T1B_GH_LOG" | tr -d ' ')
-[[ "$gh_calls_t1b" -eq 0 ]] \
-  || { echo "FAIL: --no-pr인데 gh가 ${gh_calls_t1b}회 호출됨. log:"; cat "$T1B_GH_LOG"; exit 1; }
+if grep -qE '^(pr create|pr edit) ' "$T1B_GH_LOG"; then
+  echo "FAIL: --no-pr인데 PR 호출(create/edit)이 기록됨. log:"; cat "$T1B_GH_LOG"; exit 1
+fi
 
 # DONE은 정상 생성됐어야
-[[ -f "$T1B_PROJECT/milestones/regular/loops/nopr-task/.worktree/DONE" ]] \
+[[ -f "$T1B_PROJECT/milestones/regular/loops/nopr-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
@@ -448,9 +595,10 @@ install_claude_done_mock "$T2_MOCK"
 install_gh_record_mock "$T2_MOCK"
 T2_GH_LOG="$WORK_DIR/${T2_NAME}-gh.log"
 : > "$T2_GH_LOG"
+T2_LABEL_FILE="$(init_done_label_signal "$T2_NAME")"
 
-mkdir -p "$T2_PROJECT/milestones/regular/loops/optin-task"
-cat > "$T2_PROJECT/milestones/regular/loops/optin-task/SPEC.md" <<'EOF'
+mkdir -p "$T2_PROJECT/milestones/regular/loops/optin-task-test"
+cat > "$T2_PROJECT/milestones/regular/loops/optin-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -465,10 +613,11 @@ request_review: true
 ## 무엇을 만들 것인가
 opt-in 검증용 task.
 EOF
+setup_feat_with_spec "$T2_PROJECT" "optin-task"
 
 (
   cd "$T2_PROJECT"
-  GH_LOG_FILE="$T2_GH_LOG" PATH="$T2_MOCK:$PATH" \
+  GH_LOG_FILE="$T2_GH_LOG" GH_LABEL_FILE="$T2_LABEL_FILE" PATH="$T2_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "optin-task" > "$WORK_DIR/${T2_NAME}.out" 2>&1
 )
@@ -489,7 +638,7 @@ if grep -qE '(--reviewer|--label|--assignee)' "$T2_GH_LOG"; then
 fi
 
 # DONE 유지
-[[ -f "$T2_PROJECT/milestones/regular/loops/optin-task/.worktree/DONE" ]] \
+[[ -f "$T2_PROJECT/milestones/regular/loops/optin-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
@@ -503,9 +652,10 @@ install_claude_done_mock "$T3_MOCK"
 install_gh_record_mock "$T3_MOCK"
 T3_GH_LOG="$WORK_DIR/${T3_NAME}-gh.log"
 : > "$T3_GH_LOG"
+T3_LABEL_FILE="$(init_done_label_signal "$T3_NAME")"
 
-mkdir -p "$T3_PROJECT/milestones/regular/loops/dbfail-task"
-cat > "$T3_PROJECT/milestones/regular/loops/dbfail-task/SPEC.md" <<'EOF'
+mkdir -p "$T3_PROJECT/milestones/regular/loops/dbfail-task-test"
+cat > "$T3_PROJECT/milestones/regular/loops/dbfail-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -520,11 +670,12 @@ request_review: true
 ## 무엇을 만들 것인가
 default branch 감지 실패 abort 검증.
 EOF
+setup_feat_with_spec "$T3_PROJECT" "dbfail-task"
 
 set +e
 (
   cd "$T3_PROJECT"
-  GH_LOG_FILE="$T3_GH_LOG" GH_REPO_VIEW_FAIL=1 PATH="$T3_MOCK:$PATH" \
+  GH_LOG_FILE="$T3_GH_LOG" GH_LABEL_FILE="$T3_LABEL_FILE" GH_REPO_VIEW_FAIL=1 PATH="$T3_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "dbfail-task" > "$WORK_DIR/${T3_NAME}.out" 2>&1
 )
@@ -546,7 +697,7 @@ if grep -qE '^pr (create|edit) ' "$T3_GH_LOG"; then
 fi
 
 # DONE은 정상 생성됐어야 (PR 단계만 실패, 워커 본체는 성공)
-[[ -f "$T3_PROJECT/milestones/regular/loops/dbfail-task/.worktree/DONE" ]] \
+[[ -f "$T3_PROJECT/milestones/regular/loops/dbfail-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
@@ -559,9 +710,10 @@ install_gh_record_mock "$T4_MOCK"
 T4_GH_LOG="$WORK_DIR/${T4_NAME}-gh.log"
 T4_CALL_DIR="$WORK_DIR/${T4_NAME}-calls"
 : > "$T4_GH_LOG"
+T4_LABEL_FILE="$(init_done_label_signal "$T4_NAME")"
 
-mkdir -p "$T4_PROJECT/milestones/regular/loops/42"
-cat > "$T4_PROJECT/milestones/regular/loops/42/SPEC.md" <<'EOF'
+mkdir -p "$T4_PROJECT/milestones/regular/loops/42-test"
+cat > "$T4_PROJECT/milestones/regular/loops/42-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -576,10 +728,11 @@ request_review: true
 ## 무엇을 만들 것인가
 숫자 task-id의 Closes 자동 링크.
 EOF
+setup_feat_with_spec "$T4_PROJECT" "42"
 
 (
   cd "$T4_PROJECT"
-  GH_LOG_FILE="$T4_GH_LOG" GH_CALL_DIR="$T4_CALL_DIR" PATH="$T4_MOCK:$PATH" \
+  GH_LOG_FILE="$T4_GH_LOG" GH_LABEL_FILE="$T4_LABEL_FILE" GH_CALL_DIR="$T4_CALL_DIR" PATH="$T4_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "42" > "$WORK_DIR/${T4_NAME}.out" 2>&1
 )
@@ -606,9 +759,10 @@ install_gh_record_mock "$T5_MOCK"
 T5_GH_LOG="$WORK_DIR/${T5_NAME}-gh.log"
 T5_CALL_DIR="$WORK_DIR/${T5_NAME}-calls"
 : > "$T5_GH_LOG"
+T5_LABEL_FILE="$(init_done_label_signal "$T5_NAME")"
 
-mkdir -p "$T5_PROJECT/milestones/regular/loops/foo-task"
-cat > "$T5_PROJECT/milestones/regular/loops/foo-task/SPEC.md" <<'EOF'
+mkdir -p "$T5_PROJECT/milestones/regular/loops/foo-task-test"
+cat > "$T5_PROJECT/milestones/regular/loops/foo-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -623,10 +777,11 @@ request_review: true
 ## 무엇을 만들 것인가
 비숫자 task-id 검증.
 EOF
+setup_feat_with_spec "$T5_PROJECT" "foo-task"
 
 (
   cd "$T5_PROJECT"
-  GH_LOG_FILE="$T5_GH_LOG" GH_CALL_DIR="$T5_CALL_DIR" PATH="$T5_MOCK:$PATH" \
+  GH_LOG_FILE="$T5_GH_LOG" GH_LABEL_FILE="$T5_LABEL_FILE" GH_CALL_DIR="$T5_CALL_DIR" PATH="$T5_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "foo-task" > "$WORK_DIR/${T5_NAME}.out" 2>&1
 )
@@ -658,9 +813,10 @@ install_gh_record_mock "$T6_MOCK"
 T6_GH_LOG="$WORK_DIR/${T6_NAME}-gh.log"
 T6_CALL_DIR="$WORK_DIR/${T6_NAME}-calls"
 : > "$T6_GH_LOG"
+T6_LABEL_FILE="$(init_done_label_signal "$T6_NAME")"
 
-mkdir -p "$T6_PROJECT/milestones/regular/loops/reuse-task"
-cat > "$T6_PROJECT/milestones/regular/loops/reuse-task/SPEC.md" <<'EOF'
+mkdir -p "$T6_PROJECT/milestones/regular/loops/reuse-task-test"
+cat > "$T6_PROJECT/milestones/regular/loops/reuse-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -675,10 +831,11 @@ request_review: true
 ## 무엇을 만들 것인가
 기존 open PR을 in-place로 갱신하는 경로.
 EOF
+setup_feat_with_spec "$T6_PROJECT" "reuse-task"
 
 (
   cd "$T6_PROJECT"
-  GH_LOG_FILE="$T6_GH_LOG" GH_CALL_DIR="$T6_CALL_DIR" \
+  GH_LOG_FILE="$T6_GH_LOG" GH_LABEL_FILE="$T6_LABEL_FILE" GH_CALL_DIR="$T6_CALL_DIR" \
     GH_OPEN_PR_NUMBER=99 \
     PATH="$T6_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
@@ -720,9 +877,10 @@ install_claude_done_mock "$T7_MOCK"
 install_gh_record_mock "$T7_MOCK"
 T7_GH_LOG="$WORK_DIR/${T7_NAME}-gh.log"
 : > "$T7_GH_LOG"
+T7_LABEL_FILE="$(init_done_label_signal "$T7_NAME")"
 
-mkdir -p "$T7_PROJECT/milestones/regular/loops/createfail-task"
-cat > "$T7_PROJECT/milestones/regular/loops/createfail-task/SPEC.md" <<'EOF'
+mkdir -p "$T7_PROJECT/milestones/regular/loops/createfail-task-test"
+cat > "$T7_PROJECT/milestones/regular/loops/createfail-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -737,11 +895,12 @@ request_review: true
 ## 무엇을 만들 것인가
 pr create 실패 시 abort 검증.
 EOF
+setup_feat_with_spec "$T7_PROJECT" "createfail-task"
 
 set +e
 (
   cd "$T7_PROJECT"
-  GH_LOG_FILE="$T7_GH_LOG" GH_FAIL_PR_CREATE=1 PATH="$T7_MOCK:$PATH" \
+  GH_LOG_FILE="$T7_GH_LOG" GH_LABEL_FILE="$T7_LABEL_FILE" GH_FAIL_PR_CREATE=1 PATH="$T7_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "createfail-task" > "$WORK_DIR/${T7_NAME}.out" 2>&1
 )
@@ -757,9 +916,9 @@ grep -q "boom-create" "$WORK_DIR/${T7_NAME}.out" \
   || { echo "FAIL: gh stderr passthrough 미동작 ('boom-create' 없음). out:"; cat "$WORK_DIR/${T7_NAME}.out"; exit 1; }
 
 # 워크트리·DONE 보존 (AC9 정신 — 워크트리는 유지)
-[[ -d "$T7_PROJECT/milestones/regular/loops/createfail-task/.worktree" ]] \
+[[ -d "$T7_PROJECT/milestones/regular/loops/createfail-task-test/.worktree" ]] \
   || { echo "FAIL: 워크트리 미보존"; exit 1; }
-[[ -f "$T7_PROJECT/milestones/regular/loops/createfail-task/.worktree/DONE" ]] \
+[[ -f "$T7_PROJECT/milestones/regular/loops/createfail-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미보존"; exit 1; }
 echo "OK"
 
@@ -771,9 +930,10 @@ install_claude_done_mock "$T8_MOCK"
 install_gh_record_mock "$T8_MOCK"
 T8_GH_LOG="$WORK_DIR/${T8_NAME}-gh.log"
 : > "$T8_GH_LOG"
+T8_LABEL_FILE="$(init_done_label_signal "$T8_NAME")"
 
-mkdir -p "$T8_PROJECT/milestones/regular/loops/success-task"
-cat > "$T8_PROJECT/milestones/regular/loops/success-task/SPEC.md" <<'EOF'
+mkdir -p "$T8_PROJECT/milestones/regular/loops/success-task-test"
+cat > "$T8_PROJECT/milestones/regular/loops/success-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -788,11 +948,12 @@ request_review: true
 ## 무엇을 만들 것인가
 AC9 성공 출력·보존 검증.
 EOF
+setup_feat_with_spec "$T8_PROJECT" "success-task"
 
 T8_PR_URL="https://github.example/x/y/pull/777"
 (
   cd "$T8_PROJECT"
-  GH_LOG_FILE="$T8_GH_LOG" GH_PR_URL="$T8_PR_URL" PATH="$T8_MOCK:$PATH" \
+  GH_LOG_FILE="$T8_GH_LOG" GH_LABEL_FILE="$T8_LABEL_FILE" GH_PR_URL="$T8_PR_URL" PATH="$T8_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "success-task" > "$WORK_DIR/${T8_NAME}.out" 2>&1
 )
@@ -806,12 +967,12 @@ grep -qE "PR state:[[:space:]]*open" "$WORK_DIR/${T8_NAME}.out" \
   || { echo "FAIL: PR state stdout 미출력. out:"; cat "$WORK_DIR/${T8_NAME}.out"; exit 1; }
 
 # AC9: 워크트리 보존
-[[ -d "$T8_PROJECT/milestones/regular/loops/success-task/.worktree" ]] \
+[[ -d "$T8_PROJECT/milestones/regular/loops/success-task-test/.worktree" ]] \
   || { echo "FAIL: 워크트리 미보존"; exit 1; }
 
 # AC9: local 브랜치 보존 (워크트리에 체크아웃된 브랜치 = HEAD 참조 정상)
 (
-  cd "$T8_PROJECT/milestones/regular/loops/success-task/.worktree"
+  cd "$T8_PROJECT/milestones/regular/loops/success-task-test/.worktree"
   git rev-parse --abbrev-ref HEAD > /dev/null 2>&1
 ) || { echo "FAIL: 워크트리의 HEAD 브랜치 미보존"; exit 1; }
 echo "OK"
@@ -847,9 +1008,10 @@ T10_GH_LOG="$WORK_DIR/${T10_NAME}-gh.log"
 T10_CALL_DIR="$WORK_DIR/${T10_NAME}-gh-calls"
 : > "$T10_GH_LOG"
 rm -rf "$T10_CALL_DIR"
+T10_LABEL_FILE="$(init_done_label_signal "$T10_NAME")"
 
-mkdir -p "$T10_PROJECT/milestones/regular/loops/fence-task"
-cat > "$T10_PROJECT/milestones/regular/loops/fence-task/SPEC.md" <<'EOF'
+mkdir -p "$T10_PROJECT/milestones/regular/loops/fence-task-test"
+cat > "$T10_PROJECT/milestones/regular/loops/fence-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -867,10 +1029,11 @@ EOF
 
 # 기존 PR body: 사용자 수기 prelude + fence + 옛 자동 body + fence + 사용자 epilogue.
 T10_OLD_BODY=$'사용자 수기 prelude — 보존돼야 함.\n<!-- autopilot:pr-body:begin -->\n## 무엇을 만들 것인가\n옛 자동 body (교체 대상)\n\n## Commits\n- old commit\n<!-- autopilot:pr-body:end -->\n사용자 수기 epilogue — 보존돼야 함.'
+setup_feat_with_spec "$T10_PROJECT" "fence-task"
 
 (
   cd "$T10_PROJECT"
-  GH_LOG_FILE="$T10_GH_LOG" GH_CALL_DIR="$T10_CALL_DIR" \
+  GH_LOG_FILE="$T10_GH_LOG" GH_LABEL_FILE="$T10_LABEL_FILE" GH_CALL_DIR="$T10_CALL_DIR" \
     GH_OPEN_PR_NUMBER=77 GH_OPEN_PR_BODY="$T10_OLD_BODY" \
     PATH="$T10_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
@@ -920,9 +1083,10 @@ T11_GH_LOG="$WORK_DIR/${T11_NAME}-gh.log"
 T11_GIT_LOG="$WORK_DIR/${T11_NAME}-git.log"
 : > "$T11_GH_LOG"
 : > "$T11_GIT_LOG"
+T11_LABEL_FILE="$(init_done_label_signal "$T11_NAME")"
 
-mkdir -p "$T11_PROJECT/milestones/regular/loops/rebase-task"
-cat > "$T11_PROJECT/milestones/regular/loops/rebase-task/SPEC.md" <<'EOF'
+mkdir -p "$T11_PROJECT/milestones/regular/loops/rebase-task-test"
+cat > "$T11_PROJECT/milestones/regular/loops/rebase-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -936,10 +1100,11 @@ verify: 'true'
 ## 무엇을 만들 것인가
 PR push 직전 origin base 브랜치 fetch + rebase가 실행되는 회귀.
 EOF
+setup_feat_with_spec "$T11_PROJECT" "rebase-task"
 
 (
   cd "$T11_PROJECT"
-  GH_LOG_FILE="$T11_GH_LOG" GIT_LOG_FILE="$T11_GIT_LOG" PATH="$T11_MOCK:$PATH" \
+  GH_LOG_FILE="$T11_GH_LOG" GH_LABEL_FILE="$T11_LABEL_FILE" GIT_LOG_FILE="$T11_GIT_LOG" PATH="$T11_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "rebase-task" > "$WORK_DIR/${T11_NAME}.out" 2>&1
 )
@@ -959,7 +1124,7 @@ push_line=$(grep -nE '^push .*origin' "$T11_GIT_LOG" | head -1 | cut -d: -f1)
 # rebase 후 PR 생성 정상 흐름 유지
 grep -qE '^pr create ' "$T11_GH_LOG" \
   || { echo "FAIL: rebase 후 pr create 호출 안 됨. gh log:"; cat "$T11_GH_LOG"; exit 1; }
-[[ -f "$T11_PROJECT/milestones/regular/loops/rebase-task/.worktree/DONE" ]] \
+[[ -f "$T11_PROJECT/milestones/regular/loops/rebase-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
@@ -976,9 +1141,10 @@ T12_GH_LOG="$WORK_DIR/${T12_NAME}-gh.log"
 T12_GIT_LOG="$WORK_DIR/${T12_NAME}-git.log"
 : > "$T12_GH_LOG"
 : > "$T12_GIT_LOG"
+T12_LABEL_FILE="$(init_done_label_signal "$T12_NAME")"
 
-mkdir -p "$T12_PROJECT/milestones/regular/loops/conflict-auto-task"
-cat > "$T12_PROJECT/milestones/regular/loops/conflict-auto-task/SPEC.md" <<'EOF'
+mkdir -p "$T12_PROJECT/milestones/regular/loops/conflict-auto-task-test"
+cat > "$T12_PROJECT/milestones/regular/loops/conflict-auto-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -990,39 +1156,48 @@ verify: 'true'
 # Rebase Conflict Auto-Resolve
 
 ## 무엇을 만들 것인가
-첫 rebase 충돌 후 1회 -X theirs 재시도로 자동 해결되는 회귀.
+첫 rebase 충돌 후 1회 자동 해결되는 회귀 (SPEC 169 claude-based resolution).
 EOF
+setup_feat_with_spec "$T12_PROJECT" "conflict-auto-task"
 
+# SPEC 169 mock 경로 — mock claude 가 rebase prompt 감지 시 unresolved 파일 ours 채택 +
+# 이 flag 파일을 touch. mock git 은 후속 rebase --continue 를 fake-success.
+T12_RESOLVED_FILE="$WORK_DIR/${T12_NAME}-resolved-flag"
 (
   cd "$T12_PROJECT"
-  GH_LOG_FILE="$T12_GH_LOG" GIT_LOG_FILE="$T12_GIT_LOG" \
+  GH_LOG_FILE="$T12_GH_LOG" GH_LABEL_FILE="$T12_LABEL_FILE" GIT_LOG_FILE="$T12_GIT_LOG" \
     GIT_CONFLICT_MODE=auto-resolve \
+    GIT_CONFLICT_RESOLVED_FILE="$T12_RESOLVED_FILE" \
     PATH="$T12_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "conflict-auto-task" > "$WORK_DIR/${T12_NAME}.out" 2>&1
 )
 
-# AC4: rebase 호출이 정확히 2회 발생 (1차 plain + 1회 -X theirs 재시도).
-rebase_total_t12=$(grep -cE '^rebase ' "$T12_GIT_LOG" || true)
-rebase_with_x_t12=$(grep -cE '^rebase .*\-X[[:space:]]+theirs ' "$T12_GIT_LOG" || true)
+# AC4 (SPEC 169 — claude-based resolution):
+#   1) 첫 plain `rebase origin/<base>` 호출 1회 (mock 이 CONFLICT 로 실패)
+#   2) rebase-phase 가 claude 자동 해소 호출 → mock claude 가 GIT_CONFLICT_RESOLVED_FILE touch
+#   3) `rebase --continue` 호출 1회 (mock 이 flag 보고 fake-success)
 rebase_plain_t12=$(grep -cE '^rebase origin/' "$T12_GIT_LOG" || true)
-[[ "$rebase_total_t12" -ge 2 ]] \
-  || { echo "FAIL: rebase 호출이 ${rebase_total_t12}회 (≥2 기대 — plain + -X theirs). git log tail:"; tail -50 "$T12_GIT_LOG"; echo "out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
-[[ "$rebase_with_x_t12" -ge 1 ]] \
-  || { echo "FAIL: '-X theirs' 재시도 미실행 (AC4 위반). git log tail:"; tail -50 "$T12_GIT_LOG"; exit 1; }
+rebase_continue_t12=$(grep -cE '^rebase --continue' "$T12_GIT_LOG" || true)
 [[ "$rebase_plain_t12" -ge 1 ]] \
   || { echo "FAIL: 첫 plain 'rebase origin/<base>' 호출 기록 없음. git log tail:"; tail -50 "$T12_GIT_LOG"; exit 1; }
+[[ "$rebase_continue_t12" -ge 1 ]] \
+  || { echo "FAIL: claude 해소 후 'rebase --continue' 호출 기록 없음 (AC4 위반). git log tail:"; tail -50 "$T12_GIT_LOG"; echo "out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
 
-# 자동 해결 시도 메시지가 출력에 있어야
-grep -qE "(자동 해결|충돌 1회|-X[[:space:]]+theirs)" "$WORK_DIR/${T12_NAME}.out" \
-  || { echo "FAIL: 자동 해결 시도 안내 메시지 없음. out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
+# claude 가 실제로 자동 해소를 시도했는지 — RESOLVED flag 파일 생성 확인.
+[[ -f "$T12_RESOLVED_FILE" ]] \
+  || { echo "FAIL: mock claude 가 자동 해소 호출되지 않음 (RESOLVED flag 부재 — AC4 위반)."; exit 1; }
+
+# 자동 해결 시도 메시지가 출력에 있어야 (rebase-phase 가 claude CLI 호출 로깅)
+grep -qE "(자동 해소|충돌 감지)" "$WORK_DIR/${T12_NAME}.out" \
+  || { echo "FAIL: 자동 해소 시도 안내 메시지 없음. out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
 
 # 자동 해결 성공 후 정상 PR 생성 흐름이 이어져야
 grep -qE '^pr create ' "$T12_GH_LOG" \
   || { echo "FAIL: 자동 해결 후 pr create 호출 안 됨. gh log:"; cat "$T12_GH_LOG"; echo "out:"; cat "$WORK_DIR/${T12_NAME}.out"; exit 1; }
 
 # DONE 보존
-[[ -f "$T12_PROJECT/milestones/regular/loops/conflict-auto-task/.worktree/DONE" ]] \
+[[ -f "$T12_PROJECT/milestones/regular/loops/conflict-auto-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
@@ -1039,9 +1214,10 @@ T13_GH_LOG="$WORK_DIR/${T13_NAME}-gh.log"
 T13_GIT_LOG="$WORK_DIR/${T13_NAME}-git.log"
 : > "$T13_GH_LOG"
 : > "$T13_GIT_LOG"
+T13_LABEL_FILE="$(init_done_label_signal "$T13_NAME")"
 
-mkdir -p "$T13_PROJECT/milestones/regular/loops/conflict-abort-task"
-cat > "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/SPEC.md" <<'EOF'
+mkdir -p "$T13_PROJECT/milestones/regular/loops/conflict-abort-task-test"
+cat > "$T13_PROJECT/milestones/regular/loops/conflict-abort-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1053,14 +1229,18 @@ verify: 'true'
 # Rebase Conflict Abort
 
 ## 무엇을 만들 것인가
-rebase 충돌 자동 해결 1회 시도가 실패해 사용자에게 위임되는 회귀.
+rebase 충돌 자동 해결 1회 시도가 실패해 사용자에게 위임되는 회귀 (SPEC 169 claude-based).
 EOF
+setup_feat_with_spec "$T13_PROJECT" "conflict-abort-task"
 
+# SPEC 169 mock 경로 — MOCK_CLAUDE_REBASE_FAIL=1 로 mock claude 가 충돌 해소를 시도하지만
+# 비-zero exit 으로 실패. rebase-phase 가 escalation + abort + push·pr 단계 미진입.
 set +e
 (
   cd "$T13_PROJECT"
-  GH_LOG_FILE="$T13_GH_LOG" GIT_LOG_FILE="$T13_GIT_LOG" \
+  GH_LOG_FILE="$T13_GH_LOG" GH_LABEL_FILE="$T13_LABEL_FILE" GIT_LOG_FILE="$T13_GIT_LOG" \
     GIT_CONFLICT_MODE=abort \
+    MOCK_CLAUDE_REBASE_FAIL=1 \
     PATH="$T13_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
     bash "$LOOP_SH_SRC" start "conflict-abort-task" > "$WORK_DIR/${T13_NAME}.out" 2>&1
@@ -1072,18 +1252,22 @@ set -e
 [[ $t13_exit -ne 0 ]] \
   || { echo "FAIL: 자동 해결 실패에도 loop exit 0. out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
 
-# rebase 호출 2회 (plain + -X theirs) 후 좌절 — 3회 이상이면 1회 제한 위반
-rebase_total_t13=$(grep -cE '^rebase origin/|^rebase .*\-X[[:space:]]+theirs ' "$T13_GIT_LOG" || true)
-[[ "$rebase_total_t13" -eq 2 ]] \
-  || { echo "FAIL: rebase가 ${rebase_total_t13}회 호출 (정확히 2회 기대 — plain + -X theirs 한 번씩). git log tail:"; tail -50 "$T13_GIT_LOG"; exit 1; }
+# AC4 (SPEC 169): 첫 plain rebase 실패 → claude 호출 실패 → abort.
+#   rebase 호출은 plain 1회만 (claude 실패로 --continue 미시도).
+#   rebase --abort 1회 (escalation 복구).
+rebase_plain_t13=$(grep -cE '^rebase origin/' "$T13_GIT_LOG" || true)
+rebase_abort_t13=$(grep -cE '^rebase --abort' "$T13_GIT_LOG" || true)
+rebase_continue_t13=$(grep -cE '^rebase --continue' "$T13_GIT_LOG" || true)
+[[ "$rebase_plain_t13" -eq 1 ]] \
+  || { echo "FAIL: plain rebase 가 ${rebase_plain_t13}회 호출 (정확히 1회 기대 — claude 실패로 재시도 없음). git log tail:"; tail -50 "$T13_GIT_LOG"; exit 1; }
+[[ "$rebase_abort_t13" -ge 1 ]] \
+  || { echo "FAIL: 'rebase --abort' 호출 기록 없음 (워크트리 복구 위반). git log tail:"; tail -50 "$T13_GIT_LOG"; exit 1; }
+[[ "$rebase_continue_t13" -eq 0 ]] \
+  || { echo "FAIL: claude 실패에도 'rebase --continue' 호출됨 (${rebase_continue_t13}회). git log tail:"; tail -50 "$T13_GIT_LOG"; exit 1; }
 
-# 자동 해결 실패 안내 메시지 — "자동 해결 실패" 또는 "1회 시도" 토큰 포함
-grep -qE "(자동 해결 실패|1회 시도|좌절)" "$WORK_DIR/${T13_NAME}.out" \
-  || { echo "FAIL: 자동 해결 실패 안내 메시지 없음 (사용자 위임 위반). out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
-
-# 사용자 수동 해결 안내 — "수동" 또는 "사용자" 명시
-grep -qE "(수동|사용자)" "$WORK_DIR/${T13_NAME}.out" \
-  || { echo "FAIL: 사용자 수동 해결 안내 없음. out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
+# 자동 해결 실패·escalation 안내 메시지
+grep -qE "(ESCALATION|자동 해소 실패|충돌 해소 실패)" "$WORK_DIR/${T13_NAME}.out" \
+  || { echo "FAIL: 자동 해소 실패 escalation 메시지 없음 (사용자 위임 위반). out:"; cat "$WORK_DIR/${T13_NAME}.out"; exit 1; }
 
 # pr create 호출 0회 (rebase 좌절 후 push·pr 단계 미진입)
 if grep -qE '^pr (create|edit) ' "$T13_GH_LOG"; then
@@ -1091,9 +1275,9 @@ if grep -qE '^pr (create|edit) ' "$T13_GH_LOG"; then
 fi
 
 # 워크트리·DONE 보존 (사용자 수동 해결 가능하도록)
-[[ -d "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/.worktree" ]] \
+[[ -d "$T13_PROJECT/milestones/regular/loops/conflict-abort-task-test/.worktree" ]] \
   || { echo "FAIL: 워크트리 미보존"; exit 1; }
-[[ -f "$T13_PROJECT/milestones/regular/loops/conflict-abort-task/.worktree/DONE" ]] \
+[[ -f "$T13_PROJECT/milestones/regular/loops/conflict-abort-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미보존"; exit 1; }
 echo "OK"
 
@@ -1110,9 +1294,10 @@ install_claude_done_mock "$T14_MOCK"
 install_gh_record_mock "$T14_MOCK"
 T14_GH_LOG="$WORK_DIR/${T14_NAME}-gh.log"
 : > "$T14_GH_LOG"
+T14_LABEL_FILE="$(init_done_label_signal "$T14_NAME")"
 
-mkdir -p "$T14_PROJECT/milestones/regular/loops/stuck-task"
-cat > "$T14_PROJECT/milestones/regular/loops/stuck-task/SPEC.md" <<'EOF'
+mkdir -p "$T14_PROJECT/milestones/regular/loops/stuck-task-test"
+cat > "$T14_PROJECT/milestones/regular/loops/stuck-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1126,10 +1311,11 @@ verify: 'true'
 ## 무엇을 만들 것인가
 PR check가 stuck 상태일 때 Monitor가 최대 3회 재트리거 후 상한 알림.
 EOF
+setup_feat_with_spec "$T14_PROJECT" "stuck-task"
 
 (
   cd "$T14_PROJECT"
-  GH_LOG_FILE="$T14_GH_LOG" \
+  GH_LOG_FILE="$T14_GH_LOG" GH_LABEL_FILE="$T14_LABEL_FILE" \
     GH_PR_STATE=OPEN \
     GH_PR_REVIEW_DECISION="" \
     GH_CHECKS_MODE=stuck \
@@ -1153,7 +1339,7 @@ grep -qE '^pr create ' "$T14_GH_LOG" \
   || { echo "FAIL: stuck 진입 전 pr create 호출 없음. gh log:"; cat "$T14_GH_LOG"; exit 1; }
 
 # DONE 보존 + 정상 종료 (상한 도달은 에러가 아니라 경고 — loop 자체는 정상 종료)
-[[ -f "$T14_PROJECT/milestones/regular/loops/stuck-task/.worktree/DONE" ]] \
+[[ -f "$T14_PROJECT/milestones/regular/loops/stuck-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
@@ -1170,9 +1356,10 @@ install_claude_done_mock "$T15_MOCK"
 install_gh_record_mock "$T15_MOCK"
 T15_GH_LOG="$WORK_DIR/${T15_NAME}-gh.log"
 : > "$T15_GH_LOG"
+T15_LABEL_FILE="$(init_done_label_signal "$T15_NAME")"
 
-mkdir -p "$T15_PROJECT/milestones/regular/loops/merged-task"
-cat > "$T15_PROJECT/milestones/regular/loops/merged-task/SPEC.md" <<'EOF'
+mkdir -p "$T15_PROJECT/milestones/regular/loops/merged-task-test"
+cat > "$T15_PROJECT/milestones/regular/loops/merged-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1186,10 +1373,11 @@ verify: 'true'
 ## 무엇을 만들 것인가
 PR이 MERGED 상태로 전이될 때 cleanup 후보 안내만 출력하고 자동 삭제는 하지 않는 회귀.
 EOF
+setup_feat_with_spec "$T15_PROJECT" "merged-task"
 
 (
   cd "$T15_PROJECT"
-  GH_LOG_FILE="$T15_GH_LOG" \
+  GH_LOG_FILE="$T15_GH_LOG" GH_LABEL_FILE="$T15_LABEL_FILE" \
     GH_PR_STATE=MERGED \
     PATH="$T15_MOCK:$PATH" \
     MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=5 \
@@ -1205,9 +1393,9 @@ grep -qE "(자동 삭제하지 않|수동|명시 승인)" "$WORK_DIR/${T15_NAME}
   || { echo "FAIL: 자동 삭제 차단 안내 없음 (AC6 위반). out:"; cat "$WORK_DIR/${T15_NAME}.out"; exit 1; }
 
 # AC6: 자동 삭제 안 함 — worktree·DONE 보존
-[[ -d "$T15_PROJECT/milestones/regular/loops/merged-task/.worktree" ]] \
+[[ -d "$T15_PROJECT/milestones/regular/loops/merged-task-test/.worktree" ]] \
   || { echo "FAIL: MERGED 감지 후 워크트리가 삭제됨 (AC6 위반 — 자동 삭제 금지)"; exit 1; }
-[[ -f "$T15_PROJECT/milestones/regular/loops/merged-task/.worktree/DONE" ]] \
+[[ -f "$T15_PROJECT/milestones/regular/loops/merged-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미보존"; exit 1; }
 
 # Monitor 진입 후 MERGED 감지로 즉시 break — pr checks --rerun 호출 0회
@@ -1228,9 +1416,10 @@ install_claude_done_mock "$T16_MOCK"
 install_gh_record_mock "$T16_MOCK"
 T16_GH_LOG="$WORK_DIR/${T16_NAME}-gh.log"
 : > "$T16_GH_LOG"
+T16_LABEL_FILE="$(init_done_label_signal "$T16_NAME")"
 
-mkdir -p "$T16_PROJECT/milestones/regular/loops/waiting-task"
-cat > "$T16_PROJECT/milestones/regular/loops/waiting-task/SPEC.md" <<'EOF'
+mkdir -p "$T16_PROJECT/milestones/regular/loops/waiting-task-test"
+cat > "$T16_PROJECT/milestones/regular/loops/waiting-task-test/SPEC.md" <<'EOF'
 ---
 scope:
   include:
@@ -1244,10 +1433,11 @@ verify: 'true'
 ## 무엇을 만들 것인가
 WAITING(환경 승인 대기) 상태는 stuck 아님 — --rerun 호출 0회.
 EOF
+setup_feat_with_spec "$T16_PROJECT" "waiting-task"
 
 (
   cd "$T16_PROJECT"
-  GH_LOG_FILE="$T16_GH_LOG" \
+  GH_LOG_FILE="$T16_GH_LOG" GH_LABEL_FILE="$T16_LABEL_FILE" \
     GH_PR_STATE=OPEN \
     GH_PR_REVIEW_DECISION="" \
     GH_CHECKS_MODE=waiting \
@@ -1267,7 +1457,7 @@ grep -qE "(check 진행 중|stuck 아님)" "$WORK_DIR/${T16_NAME}.out" \
   || { echo "FAIL: WAITING 시 'stuck 아님' 안내 메시지 없음. out:"; cat "$WORK_DIR/${T16_NAME}.out"; exit 1; }
 
 # DONE 보존 + 정상 종료
-[[ -f "$T16_PROJECT/milestones/regular/loops/waiting-task/.worktree/DONE" ]] \
+[[ -f "$T16_PROJECT/milestones/regular/loops/waiting-task-test/.worktree/DONE" ]] \
   || { echo "FAIL: DONE 미생성"; exit 1; }
 echo "OK"
 
