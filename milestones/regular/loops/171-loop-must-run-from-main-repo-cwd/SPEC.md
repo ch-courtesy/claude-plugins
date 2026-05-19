@@ -23,7 +23,7 @@ loop 스킬의 `start` 서브커맨드가 호출될 때, 시스템은 호출 워
 - **AC3** (Optional/조건): 호출 워킹 디렉토리가 보조 worktree로 판정되는 경우, 시스템은 nested worktree 생성을 생략하고 현재 cwd의 worktree를 작업 공간으로 사용한다. SPEC.md·헌법·lock 등 통상 nested worktree 안에 두는 파일은 현재 worktree 안의 동등 경로(또는 `milestones/<m>/loops/<c>/` 안)에 배치한다.
 - **AC4** (Ubiquitous): worktree 검사와 분기 로직은 셸 드라이버 본체에 위치해 스킬을 통한 호출과 셸 드라이버 직접 호출 모두에 동일하게 작동한다.
 - **AC5** (Ubiquitous): 스킬 문서의 호출 방법 절에 "주 작업트리: nested worktree 생성 / 보조 worktree: 현재 worktree 사용 (생략)" 분기 동작이 명시된다.
-- **AC6** (Unwanted/조건): 보조 worktree에서 호출된 경우라도 lock·SPEC 검증 등 기존 안전 검사(SPEC.md 존재·placeholder 없음·`[NEEDS CLARIFICATION]` 없음·락 미보유)는 동일하게 수행한다 — skip 대상은 nested worktree 생성·헌법 복사 등의 *worktree 셋업 단계*만이다.
+- **AC6** (Unwanted/조건): 보조 worktree에서 호출된 경우라도 lock·SPEC 검증 등 기존 안전 검사(SPEC.md 존재·placeholder 없음·미해결 마커 부재·락 미보유)는 동일하게 수행한다 — skip 대상은 nested worktree 생성·헌법 복사 등의 *worktree 셋업 단계*만이다.
 
 ## 범위
 
