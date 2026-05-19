@@ -3,22 +3,24 @@ name: loop
 description: 자율 수행 루프(랄프 루프) 운영 인터페이스. start/status/stop/list/cleanup/logs 서브커맨드로 자율 task의 lifecycle을 관리합니다. SPEC 작성은 별도 'autopilot:spec' 스킬을 사용. 본 스킬은 자기완결적이며 헌법·드라이버를 모두 references/에 포함합니다.
 allowed-tools:
   - Monitor
+  - Read
   # SPEC 113 — issue #113 본문 `autopilot:loop` 섹션 (직전 세션 실측)
-  - Bash(bash * loop.sh start *)
-  - Bash(bash * loop.sh status *)
-  - Bash(bash * loop.sh stop *)
+  # SPEC 170 — trailing wildcard 형식을 ` *`(공백+별표) → `:*` 로 정규화
+  - Bash(bash * loop.sh start:*)
+  - Bash(bash * loop.sh status:*)
+  - Bash(bash * loop.sh stop:*)
   - Bash(bash * loop.sh list)
-  - Bash(bash * loop.sh cleanup *)
-  - Bash(bash * loop.sh logs *)
-  - Bash(tail -F /private/tmp/* | grep -E --line-buffered *)
-  - Bash(tail -F /tmp/* | grep -E --line-buffered *)
+  - Bash(bash * loop.sh cleanup:*)
+  - Bash(bash * loop.sh logs:*)
+  - Bash(tail -F /private/tmp/* | grep -E --line-buffered:*)
+  - Bash(tail -F /tmp/* | grep -E --line-buffered:*)
   # SPEC 113 — issue #113 본문 `공통·보조` 섹션
   - Bash(git -C * stash list)
-  - Bash(git -C * stash pop *)
-  - Bash(git -C * stash show *)
+  - Bash(git -C * stash pop:*)
+  - Bash(git -C * stash show:*)
   - Bash(rm */ESCALATION.md)
   - Bash(rm */DONE)
-  - Bash(ps -p *)
+  - Bash(ps -p:*)
   - Bash(cat */*.lock)
   # SPEC 183 — 세션에서 자주 프롬프되던 패턴 보강 (cache-path 드라이버·bg output tail·PR read-only·git inspect/restore)
   - Bash(bash /Users/*/.claude/plugins/cache/*/autopilot/*/skills/loop/references/*.sh *)
@@ -145,6 +147,17 @@ review-fix 루프는 다음 중 하나가 감지되면 종료합니다:
 - Read·Edit·Write·Glob·Grep
 
 상수는 `loop.sh`의 `AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS` / `AUTOPILOT_REBASE_ALLOWED_TOOLS` 에 정의되며, 환경 변수로 자식 phase 스크립트에 export됩니다. 사용자 대화형 세션의 `settings.json`은 본 등록의 영향을 받지 않습니다 — autopilot 워커 컨텍스트에만 한정됩니다.
+
+##### silent-fail 검출기 환경변수
+
+review-fix-phase의 silent-fail 검출기(연속 idle 폴링 후 stuck 패턴 escalate)는 다음 환경변수로 조절됩니다.
+
+| 환경변수 | 기본값 | floor | 의미 |
+|---|---|---|---|
+| `LOOP_REVIEW_IDLE_THRESHOLD` | 3 | 3 | 새 이벤트 0건이 N회 연속 폴링되면 silent-fail 패턴 평가 |
+| `LOOP_REVIEW_PR_GRACE_SECS` | 300 (5분) | 0 | PR 생성 직후 N초 동안은 silent-fail 검출기 평가 자체를 skip — GitHub Actions check 등록 지연·큐 지연 흡수 (SPEC 181). 0으로 설정 시 grace 비활성화 |
+
+검출기는 `statusCheckRollup`의 전체 check 수가 0이면(check 미등록·정보 부족) 해당 폴링 회차의 ESCALATION을 발동하지 않고 카운터만 리셋합니다 (SPEC 181 AC2). 전체 check 수가 0보다 크고 pending 0 + 다른 활동(리뷰·코멘트·inline·owner cmd) 모두 0일 때만 진짜 stuck으로 escalate합니다 (AC3).
 
 요구: `gh` CLI 설치 + OAuth 인증.
 
