@@ -26,7 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ----- allowed-tools (SPEC 123 AC18) -----
 #
-# DONE 이후 PR 생애주기 자동화 phase 그룹(rebase·review-fix·cleanup)의 *자식 claude CLI
+# 완료 신호 이후 PR 생애주기 자동화 phase 그룹(rebase·review-fix·cleanup)의 *자식 claude CLI
 # 세션*(rebase 충돌 자동 해소, review-fix iter) 전용 도구 권한. review-fix-phase가
 # `--allowed-tools "$AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS"` 형태로 전달한다.
 #
@@ -61,9 +61,12 @@ export AUTOPILOT_REBASE_ALLOWED_TOOLS
 # 완료 신호의 검출 키는 task 식별자에 부속된 label 이름이다 (헌법 §12, SKILL.md).
 # 워커가 완료 시 `[done]` prefix comment(가독·로그)와 본 label 추가(검출 키)를 모두
 # 수행해야 드라이버가 done으로 판정한다. comment 본문은 더 이상 단일 검출 키가 아니다.
-# 환경 변수 override 허용 — 단, label 이름은 프로젝트 수준에서 단일 위치에 고정되어
-# task storage adapter 다중 분기를 만들지 않는다 (SPEC 134 §비-목표).
-LOOP_DONE_LABEL="${LOOP_DONE_LABEL:-loop:done}"
+#
+# LOOP_DONE_LABEL·task_issue_number·task_label_present·ensure_label_exists·
+# task_status_is_done 는 dispatch.sh 와 공유 (SPEC 175 AC6) — task-storage.sh
+# 단일 출처를 양쪽이 source 한다.
+# shellcheck source=./task-storage.sh
+source "$SCRIPT_DIR/task-storage.sh"
 
 # ----- 헬퍼 -----
 
@@ -102,93 +105,9 @@ normalize_task_id() {
   fi
 }
 
-# ----- task ↔ GitHub issue 매핑 (헌법 §11, rules/context.md) -----
-# task-id의 마지막 컴포넌트(예: 'regular/124' → '124')가 숫자면 issue number로 직접 사용.
-# 그 외 문자열이면 `gh issue list --search`로 첫 매칭 lookup. 실패 시 빈 출력 + return 1.
-# 호출자(halt·iterate·cmd_status)는 매핑 실패 시 graceful degrade한다.
-# M4-b 인라인 — M4-c에서 재시도/backoff 추가.
-task_issue_number() {
-  local task_id="${1:-$TASK_ID}"
-  local child="${task_id##*/}"
-  if [[ "$child" =~ ^[0-9]+$ ]]; then
-    printf '%s\n' "$child"
-    return 0
-  fi
-  if ! command -v gh >/dev/null 2>&1; then
-    return 1
-  fi
-  local n
-  n=$(gh issue list --search "$task_id" --json number --jq '.[0].number' 2>/dev/null || true)
-  if [[ -n "$n" && "$n" != "null" ]]; then
-    printf '%s\n' "$n"
-    return 0
-  fi
-  return 1
-}
-
-# task issue에 특정 label이 붙어 있는지 boolean 검사 (SPEC 134 AC3).
-# 인자: $1=task-id (생략 시 $TASK_ID), $2=label 이름 (필수).
-# 반환: 0=label 존재, 1=label 부재 또는 판정 불가 (issue 매핑 실패·gh 부재 포함).
-# 구현은 단일 GitHub 호출(`gh issue view --json labels`)로 한정 — adapter 인터페이스
-# 신설 없음 (SPEC 134 §비-목표).
-task_label_present() {
-  local task_id="${1:-$TASK_ID}"
-  local label="${2:-}"
-  [[ -z "$label" ]] && return 1
-  local issue
-  issue=$(task_issue_number "$task_id" 2>/dev/null) || return 1
-  if ! command -v gh >/dev/null 2>&1; then
-    return 1
-  fi
-  # gh CLI의 `--jq`는 단일 expression 인자만 받아 jq의 `--arg`를 통과시키지 않으므로
-  # name 목록만 추출해 셸에서 정확 일치 비교 (grep -F -x).
-  local names
-  names=$(gh issue view "$issue" --json labels \
-    --jq '.labels[].name' 2>/dev/null || true)
-  [[ -z "$names" ]] && return 1
-  printf '%s\n' "$names" | grep -qxF "$label" && return 0
-  return 1
-}
-
-# task storage에 label이 존재하는지 확인하고, 없으면 자동 생성 (SPEC 134 AC5).
-# 인자: $1=label 이름 (필수).
-# 권한 부족·gh 부재 시 best-effort로 stderr WARN + 비-0 반환 (비차단 진행).
-# SPEC 134 §위험 "label 자동 생성 권한 부족" — runtime 실패는 verify 범위 밖.
-ensure_label_exists() {
-  local label="${1:-}"
-  [[ -z "$label" ]] && return 1
-  if ! command -v gh >/dev/null 2>&1; then
-    return 1
-  fi
-  # 존재 여부 확인 — `gh label list --search`는 prefix·substring을 함께 반환할 수
-  # 있으므로 name 목록만 추출 후 셸에서 정확 일치 비교 (gh `--jq`는 jq `--arg`를
-  # 통과시키지 않아 셸 비교가 안전).
-  local names
-  names=$(gh label list --search "$label" --json name \
-    --jq '.[].name' 2>/dev/null || true)
-  if [[ -n "$names" ]] && printf '%s\n' "$names" | grep -qxF "$label"; then
-    return 0
-  fi
-  # 미존재 — 생성 시도. race 또는 권한 부족 시 WARN.
-  if ! gh label create "$label" \
-        --description "autopilot loop 완료 신호 (드라이버 검출 키)" \
-        >/dev/null 2>&1; then
-    echo "[$(now_iso)] WARN: label '$label' 자동 생성 실패 — 권한 부족·race·gh 응답 비정상. 수동 생성 필요." >&2
-    return 1
-  fi
-  echo "[$(now_iso)] label '$label' 자동 생성 완료." >&2
-  return 0
-}
-
-# task issue의 완료 신호 검사 (헌법 §12, SPEC 134 AC2).
-# 정식 검출 키: task issue에 LOOP_DONE_LABEL 값과 일치하는 label이 붙어 있는지.
-# comment 본문은 가독·로그 채널이며 판정에 사용되지 않는다 — 워커가 [done] prefix
-# comment 발행과 함께 label 추가 두 동작을 모두 수행해야 0(done)을 반환한다.
-# 반환: 0=done, 1=done 아님(판정 불가 포함).
-task_status_is_done() {
-  local task_id="${1:-$TASK_ID}"
-  task_label_present "$task_id" "$LOOP_DONE_LABEL"
-}
+# ----- task ↔ GitHub issue 매핑 -----
+# task_issue_number·task_label_present·ensure_label_exists·task_status_is_done
+# 정의는 task-storage.sh 단일 출처 (SPEC 175 AC6 — dispatch.sh 와 공유).
 
 # task issue의 차단 신호 검사 (헌법 §5·§12, SPEC 134 §제약).
 # 정식 검출 키: Project Status field 값(`Blocked`) 단일 의존. comment 본문은 가독·
@@ -642,11 +561,12 @@ diff_vs_scope() {
     # 프레임워크 파일은 항상 scope 검사에서 제외 (워커 프레임워크 메타파일)
     # CLAUDE.md는 SPEC scope.exclude로 통제 — skip-worktree로 보통은 diff에 안 잡히지만,
     # 워커가 unskip + commit하면 여기서 정상 catch되어야 함 (워크트리 셋업 직후 자동 skip 처리).
-    # SPEC.md(워커 명세)와 DONE(종료 신호)은 milestones/<m>/loops/<c>/ 단일 트리 안에 있으므로
-    # 그 경로 패턴으로 제외. 이터간 메타(handoff/notes/done/blocked)는 task issue
-    # body·prefix comments로 위임됐으므로 워크트리 파일이 존재하지 않는다 (헌법 §11).
+    # SPEC.md(워커 명세)는 milestones/<m>/loops/<c>/ 단일 트리 안에 있으므로 그 경로 패턴으로
+    # 제외. 종료 신호는 task 저장소 LOOP_DONE_LABEL 라벨 단일 의존이라 워크트리 파일이 없다
+    # (SPEC 175). 이터간 메타(handoff/notes/done/blocked)는 task issue body·prefix
+    # comments로 위임됐으므로 워크트리 파일이 존재하지 않는다 (헌법 §11).
     case "$file" in
-      milestones/*/loops/*/SPEC.md|DONE) continue ;;
+      milestones/*/loops/*/SPEC.md) continue ;;
     esac
 
     # exclude 패턴 매칭 → 위반
@@ -953,7 +873,7 @@ cmd_start() {
         shift 2
         ;;
       --no-pr)
-        # AC2 (SPEC 103): PR 자동 생성 opt-out. 지정 시 DONE 직후 PR phase 건너뜀.
+        # AC2 (SPEC 103): PR 자동 생성 opt-out. 지정 시 완료 라벨 부착 직후 PR phase 건너뜀.
         # default(없음): PR phase가 실행됨 (AC1).
         no_pr=1
         shift
@@ -1074,13 +994,14 @@ cmd_start() {
     # 워크트리에는 메타 파일을 시드·commit하지 않는다 — feat 브랜치 HEAD가 그대로 BASE SHA가 된다.
 
     # 워크트리 로컬 비추적 등록 — .iterations/는 iter raw 로그, 어떤 git 브랜치에도
-    # commit되지 않음. DONE은 종료 신호로 worktree-local.
+    # commit되지 않음. 완료 신호는 task 저장소 라벨 단일 의존이라 워크트리 파일이 없다
+    # (SPEC 175) — exclude 패턴에서 제외.
     # 등록 위치 선택: --git-common-dir (공유 commondir의 info/exclude).
     # 배경: git은 워크트리별 $GIT_DIR/info/exclude(--git-dir)도 참조하지만 그 효과는
-    #       해당 워크트리에만 한정된다. 본 패턴(CLAUDE.md·.iterations/·DONE)은 본 task의
+    #       해당 워크트리에만 한정된다. 본 패턴(CLAUDE.md·.iterations/)은 본 task의
     #       워크트리 동안만 필요하지만, autopilot worktree는 task별로 새로 생성되므로
     #       commondir에 idempotent하게 누적해도 충돌·중복은 없다. 단순성을 위해 commondir
-    #       선택. 다른 워크트리·메인 트리에도 위 3 패턴이 untracked로 노출되지 않게
+    #       선택. 다른 워크트리·메인 트리에도 위 2 패턴이 untracked로 노출되지 않게
     #       정합되는 부수 효과는 의도된 것 (모두 ephemeral·메타 파일).
     local wt_common_dir
     wt_common_dir="$(git -C "$WT" rev-parse --git-common-dir)"
@@ -1088,7 +1009,7 @@ cmd_start() {
     mkdir -p "$wt_common_dir/info"
     local exclude_file="$wt_common_dir/info/exclude"
     touch "$exclude_file"
-    for pat in "CLAUDE.md" ".iterations/" "DONE"; do
+    for pat in "CLAUDE.md" ".iterations/"; do
       grep -qxF "$pat" "$exclude_file" 2>/dev/null || echo "$pat" >> "$exclude_file"
     done
 
@@ -1112,7 +1033,7 @@ cmd_start() {
     set -e
 
     if [[ $iter_status -eq 100 ]]; then
-      echo "[$(now_iso)] DONE 신호 감지. 정상 종료."
+      echo "[$(now_iso)] 완료 신호(LOOP_DONE_LABEL) 감지. 정상 종료."
 
       # PR 생성·재사용 phase. SPEC 103 AC1: default로 실행 (opt-in 플래그 불필요).
       # SPEC 103 AC2: --no-pr 플래그가 지정되면 건너뜀.
@@ -1599,7 +1520,7 @@ Subcommands:
   status [<task-id>]      상태 조회
   stop <task-id>          실행 중 정지
   list                    전체 task 상태
-  cleanup <task-id>       DONE 후 정리
+  cleanup <task-id>       완료 라벨 부착 후 정리
   logs <task-id>          로그 조회
 
 자세한 내용: references/operational-guide.md (autopilot/skills/loop/)
