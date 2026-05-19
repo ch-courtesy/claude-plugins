@@ -7,7 +7,6 @@ allowed-tools:
   - Write
   - Skill
   - Agent
-  # 기존 단축 prefix 패턴 (보존)
   - Bash(git log:*)
   - Bash(git status:*)
   - Bash(git rev-parse:*)
@@ -24,8 +23,6 @@ allowed-tools:
   - Bash(grep:*)
   - Bash(echo:*)
   - Bash(head:*)
-  # SPEC 113 — issue #113 본문 `autopilot:spec` 섹션 (직전 세션 실측)
-  # SPEC 108 — trailing ' *' → ':*' 정규화 (AC2)
   - Bash(git -C * rev-parse:*)
   - Bash(git -C * status --porcelain)
   - Bash(git -C * log:*)
@@ -39,7 +36,6 @@ allowed-tools:
   - Bash(git -C * add:*)
   - Bash(git -C * commit:*)
   - Bash(git update-ref:*)
-  # `Bash(git branch:*)` 는 위 "기존 단축 prefix 패턴" 섹션에 존재 — SPEC 108 dedup
   - Bash(git -C * hash-object -w:*)
   - Bash(GIT_INDEX_FILE=* git -C * read-tree:*)
   - Bash(GIT_INDEX_FILE=* git -C * update-index --add --cacheinfo:*)
@@ -51,14 +47,11 @@ allowed-tools:
   - Bash(tr:*)
   - Bash(grep -rE * plugins/autopilot/**)
   - Bash(grep -rln * plugins/autopilot/**)
-  # SPEC 113 — issue #113 본문 `공통·보조` 섹션
   - Bash(git -C * stash list)
   - Bash(git -C * stash pop:*)
   - Bash(git -C * stash show:*)
-  - Bash(rm */ESCALATION.md)
   - Bash(ps -p:*)
   - Bash(cat */*.lock)
-  # SPEC 108 — 본 스킬 본문 실행에 필요한 추가 도구·Bash prefix (AC1)
   - Bash(printf:*)
   - Bash(pwd:*)
   - Bash(mktemp:*)

@@ -4,30 +4,20 @@ description: 자율 수행 루프(랄프 루프) 운영 인터페이스. start/s
 allowed-tools:
   - Monitor
   - Read
-  # SPEC 113 — issue #113 본문 `autopilot:loop` 섹션 (직전 세션 실측)
-  # SPEC 170 — trailing wildcard 형식을 ` *`(공백+별표) → `:*` 로 정규화
   - Bash(bash * loop.sh start:*)
   - Bash(bash * loop.sh status:*)
   - Bash(bash * loop.sh stop:*)
   - Bash(bash * loop.sh list)
   - Bash(bash * loop.sh cleanup:*)
   - Bash(bash * loop.sh logs:*)
-  - Bash(tail -F /private/tmp/* | grep -E --line-buffered:*)
-  - Bash(tail -F /tmp/* | grep -E --line-buffered:*)
-  # SPEC 113 — issue #113 본문 `공통·보조` 섹션
   - Bash(git -C * stash list)
   - Bash(git -C * stash pop:*)
   - Bash(git -C * stash show:*)
-  - Bash(rm */ESCALATION.md)
   - Bash(ps -p:*)
   - Bash(cat */*.lock)
-  # SPEC 183 — 세션에서 자주 프롬프되던 패턴 보강 (cache-path 드라이버·bg output tail·PR read-only·git inspect)
-  - Bash(bash /Users/*/.claude/plugins/cache/*/autopilot/*/skills/loop/references/*.sh *)
-  - Bash(tail -F /private/tmp/claude-* 2>/dev/null | grep -E --line-buffered *)
   - Bash(gh pr view *)
   - Bash(gh pr checks *)
   - Bash(git status --porcelain*)
-  # NOTE: `git checkout HEAD -- *` 는 자동 승인 제외 — 미커밋 변경을 무음 파기하는 write 연산이라 destructive 위험
 ---
 
 # loop
