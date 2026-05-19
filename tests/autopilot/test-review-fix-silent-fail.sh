@@ -75,8 +75,8 @@ assert_eq "(d) [COMPLETED, IN_PROGRESS] pending=1 → RESET_COUNTER" "RESET_COUN
 got=$(run_eval 1 0 0 0 0 0 60 300)
 assert_eq "(e) fetch_fail=1 → ESCALATE_FETCH_FAIL (grace보다 우선)" "ESCALATE_FETCH_FAIL" "$got"
 
-# ---------- (f) 활동 있음 (reviews>0) + 빈 rollup + grace 후 → RESET_COUNTER ----------
-# total_checks=0이면 EMPTY_ROLLUP_SKIP 분기가 먼저 잡지만, 안전 회귀: pending=0+활동>0 케이스도 escalate 안 함.
+# ---------- (f) 활동 있음 (reviews>0) + total=1 + pending=0 + grace 후 → RESET_COUNTER ----------
+# total_checks=1·reviews=1: EMPTY_ROLLUP_SKIP 분기를 통과시켜 pending=0+활동>0 케이스의 escalate 회피를 검증.
 got=$(run_eval 0 0 1 1 0 0 600 300)
 assert_eq "(f) [COMPLETED] + reviews>0 + grace 후 → RESET_COUNTER" "RESET_COUNTER" "$got"
 

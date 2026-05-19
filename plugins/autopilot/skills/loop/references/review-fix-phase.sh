@@ -342,9 +342,9 @@ while (( iter < MAX_ITER )); do
       # silent-fail / stuck 패턴 평가 — evaluate_silent_fail에 위임 (SPEC 181).
       # 입력: fetch 실패 플래그 + rollup·활동 카운트 + PR 생성 후 경과 시간 + grace 기간.
       last_fetch_fail=$( cat "$FETCH_FAIL_FILE" 2>/dev/null || echo 0 )
-      # statusCheckRollup을 한 번만 fetch해 두 jq 필터를 적용 — API 호출·레이턴시 절감.
+      # statusCheckRollup·createdAt을 한 번에 fetch해 jq 필터 3종 적용 — API 호출·레이턴시 절감.
       # SPEC 181 AC2: total_checks=0(빈 rollup)을 "체크 모두 완료"로 오판하지 않기 위해 별도 산출.
-      rollup_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json statusCheckRollup 2>/dev/null || echo "" )
+      rollup_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json statusCheckRollup,createdAt 2>/dev/null || echo "" )
       pending_checks=$( printf '%s' "$rollup_json" | jq '[.statusCheckRollup[]? | select((.status // "COMPLETED") != "COMPLETED")] | length' 2>/dev/null || echo "" )
       total_checks=$( printf '%s' "$rollup_json" | jq '.statusCheckRollup | length' 2>/dev/null || echo "" )
       total_reviews=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviews --jq '.reviews | length' 2>/dev/null || echo "" )
@@ -353,9 +353,10 @@ while (( iter < MAX_ITER )); do
       # `gh pr view --json comments`는 `/issues/{n}/comments`(PR-level conversation)만 반영하므로
       # claude-review가 inline만 게시한 케이스에서 false-positive ESCALATION을 막으려면 추가 체크.
       total_inline=$( cd "$WT" && gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/comments" --jq 'length' 2>/dev/null || echo "" )
-      # PR 생성 후 경과 시간 — jq의 fromdateiso8601로 ISO 8601 → epoch 변환.
-      # fetch 실패·파싱 실패 시 0 → elapsed가 매우 커져 grace 비활성화와 동등 (기존 동작으로 degrade, 안전).
-      pr_created_ts=$( cd "$WT" && gh pr view "$PR_NUMBER" --json createdAt --jq '.createdAt | fromdateiso8601' 2>/dev/null || echo 0 )
+      # PR 생성 후 경과 시간 — 위 rollup_json fetch에 createdAt도 함께 받았으므로 별도 호출 불요.
+      # jq의 fromdateiso8601로 ISO 8601 → epoch 변환.
+      # 파싱 실패 시 0 → elapsed가 매우 커져 grace 비활성화와 동등 (기존 동작으로 degrade, 안전).
+      pr_created_ts=$( printf '%s' "$rollup_json" | jq '.createdAt | fromdateiso8601' 2>/dev/null || echo 0 )
       now_ts=$( date -u +%s )
       elapsed=$(( now_ts - pr_created_ts ))
 
