@@ -23,7 +23,7 @@
 #   6. 어떤 단계든 비-zero exit 시 stdout 첫 줄에 "ESCALATION" prefix를 출력해
 #      caller(loop.sh·pr-phase.sh·review-fix-phase.sh)가 종료 신호로 감지하게 한다.
 #
-# 파일명은 `rebase-phase.sh` 로 유지 — 의미는 "sync helper" 이며 본 스크립트가 두 모드를 모두 책임진다.
+# 파일명은 `rebase-phase.sh` 로 유지(rename은 환경변수·문서 파급 회피) — 의미는 "sync helper" 이며 본 스크립트가 두 모드를 모두 책임진다.
 
 set -euo pipefail
 

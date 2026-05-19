@@ -1154,8 +1154,7 @@ cmd_status() {
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
 
-  # filter 지정 시 task-id 검증 + 정규화 (단일 컴포넌트 → regular/) +
-  # slug-bearing 디렉토리 매핑 (feat 브랜치 발견 시).
+  # filter 지정 시 task-id 검증 + 정규화 (단일 컴포넌트 → regular/) + slug-bearing 디렉토리 매핑 (feat 브랜치 발견 시).
   if [[ -n "$filter_task_id" ]]; then
     validate_task_id "$filter_task_id"
     filter_task_id="$(normalize_task_id "$filter_task_id")"
