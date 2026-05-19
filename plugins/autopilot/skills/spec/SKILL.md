@@ -103,11 +103,11 @@ milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `a
 
 #### 1.1 검증 실패 라우팅 (요약)
 
-검증 실패·자연어 입력 시 즉시 종료 대신 `AskUserQuestion` 3옵션: **(a)** task-id 재입력 후 재시도, **(b)** 사전 명확화 라운드 진입(§1.2), **(c)** 종료(산출물 없음). 옵션 표기 `(a)`/`(b)`/`(c)`. "다음 단계: Skill(...)" 자유 텍스트 금지. 전체 절차는 `references/pre-clarification.md` §1.1 참조.
+검증 실패·자연어 입력 시 즉시 종료 대신 `AskUserQuestion` 3옵션: **(a)** task-id 재입력 후 재시도, **(b)** 사전 명확화 라운드 진입(§1.2), **(c)** 종료 — 어떤 산출물도 작성하지 않고 안전 종료(산출물 미작성). 옵션 표기 `(a)`/`(b)`/`(c)`. "다음 단계: Skill(...)" 자유 텍스트 금지. 전체 절차는 `references/pre-clarification.md` §1.1 참조.
 
 #### 1.2 사전 명확화 라운드 (요약)
 
-(b) 선택 시 진입. step 5 메커니즘을 task-id 확보 *전*으로 앞당겨 재사용(별도 phase·모듈 없음). 수집은 task 미정의 상태에 맞춰 `문제·목표·범위·제약`으로 확장. 매 라운드 "충분" 종결·명시적 취소 안전 종료 포함. 규모 분기: 단일 task → 프로젝트 태스크 트래커 컨벤션으로 task 생성 후 step 2 재진입, 마일스톤 규모 → `AskUserQuestion` 명시 승인 후 PRD 스킬 invoke. 수집 항목·라운드 규칙·1.2.1/1.2.2 분기 상세는 `references/pre-clarification.md` §1.2 참조.
+(b) 선택 시 진입. step 5 메커니즘을 task-id 확보 *전*으로 앞당겨 재사용(별도 phase·모듈 없음). 수집은 task 미정의 상태에 맞춰 `문제·목표·범위·제약`으로 확장. 매 라운드 "충분" 종결·명시적 취소 안전 종료(취소 시 어떤 산출물도 남기지 않고 종료) 포함. 규모 분기: 단일 task → 프로젝트의 태스크 관련 지침(태스크 트래커 컨벤션)으로 task 생성 후 step 2 재진입, 마일스톤 규모 → `AskUserQuestion` 명시 승인 후 PRD 스킬 invoke(milestone-id를 PRD 스킬에 인자로 전달). 수집 항목·라운드 규칙·1.2.1/1.2.2 분기 상세는 `references/pre-clarification.md` §1.2 참조.
 
 ⚠ task-id 는 항상 task 생성 호출의 응답값을 그대로 사용한다 — 추측·예측·작명 금지
 
@@ -136,7 +136,7 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 #### 3.1 subagent 위임 (선택)
 
-자동 수집이 부족하면 `references/agent-prompts.md`의 **`spec-context-explorer`** 양식으로 `Agent` 위임. 권장 휴리스틱(하나라도 해당): `rules/` 다수(≈5개 초과)이고 적용 룰 자명하지 않음, 기존 `milestones/*/loops/*/SPEC.md` 다수 선례, multi-file 영향, 사용자가 자연어 의도만 전달. 그 외엔 위임하지 않는다 — 단순 1~2 query는 메인이 직접 호출(헌법 §11.6). subagent는 사실 수집·인용만, **결정·합성은 메인 책임**.
+자동 수집이 부족하면 `references/agent-prompts.md`의 **`spec-context-explorer`** 양식으로 `Agent` 위임. 권장 도입 휴리스틱(하나라도 해당): `rules/` 다수(≈5개 초과)이고 적용 룰 자명하지 않음, 기존 `milestones/*/loops/*/SPEC.md` 다수 선례, multi-file 영향, 사용자가 자연어 의도만 전달. 그 외엔 위임하지 않는다 — 단순 1~2 query는 메인이 직접 호출(헌법 §11.6). subagent는 사실 수집·인용만, **결정·합성은 메인 책임**.
 
 ### 4. 범위 분해 게이트
 
@@ -155,6 +155,15 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 - 알려진 위험 (이미 시도한 dead-end·금지 영역)
 
 `--resume` 모드: 마커가 박힌 섹션 관련 질문만.
+
+#### 5.1 test 코드 변경 sweep 화이트리스트 자동 판단 (라운드 마지막)
+
+명확화 라운드 마지막에 다음 절차를 한 번 수행한다. 본 task가 합법적 test 코드 sweep (rename·cleanup·삭제·내용 수정 등)을 포함하면 loop 단계의 weakening 게이트가 그 변경을 "테스트 약화"로 오인하지 않도록 SPEC frontmatter에 `test_sweep_paths` 화이트리스트를 미리 박는다 (rules/loop의 `test_sweep_paths` 컨벤션과 정합).
+
+1. **자동 판단** — 수집된 scope·의도로 본 task가 test 코드 변경을 포함하는지 모델이 판단한다. 신호: 사용자 의도 본문에 "테스트 rename", "tests 정리", "test cleanup", "스펙 삭제" 등 어구 / scope 후보 경로가 `tests/**`·`test/**`·`__tests__/**`·`spec/**`·`*_test.*`·`*.test.*`·`*_spec.*` 패턴에 매칭 / WHAT/HOW 의도가 기존 테스트 파일의 rename·이동·삭제·내용 변경을 시사. (모델 휴리스틱이므로 위양성·위음성 가능 — 다음 단계의 사용자 단발 yes/no가 안전망.)
+2. **변경 없음 분기**: 자동 판단이 "test 변경 없음"이면 어떤 추가 prompt도 노출하지 않고 라운드를 종료한다. 본 task SPEC frontmatter에 `test_sweep_paths` 키를 추가하지 않는다 (빈 list `[]`로도 추가하지 않음 — 키 자체 부재).
+3. **변경 포함 분기 — 후보 경로 추출**: 모델이 sweep 화이트리스트 후보 경로 (git pathspec)를 scope·의도에서 추출한다 (예: rename 대상이 `tests/legacy_to_remove/` 디렉토리면 `tests/legacy_to_remove/**` 후보).
+4. **단발 yes/no 확인**: `AskUserQuestion`으로 사용자에게 단일 질문 — 추출 후보 경로 목록을 보여주고 "이 경로들을 SPEC frontmatter `test_sweep_paths`에 화이트리스트로 등록할까요? (yes/no)" — 단발(라운드 반복 없음). yes 응답 시 후보 경로를 step 8 SPEC.md 치환의 `test_sweep_paths` 입력으로 보존. no 응답 시 변경 없음 분기와 동일하게 키 부재로 진행.
 
 ### 6. 접근법 비교 (조건부)
 
@@ -186,6 +195,16 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 - `{{scope_in}}` / `{{scope_out}}` → 본문 섹션 4
 - `{{scope_include}}` → frontmatter `scope.include` (YAML inline flow list, 예: `["src/**", "tests/**"]`)
 - `{{verify_command}}` → 본문 섹션 5 + frontmatter `verify` (둘 다 같은 placeholder)
+- `{{test_sweep_paths}}` → frontmatter `test_sweep_paths` 영역. 자체 한 줄을 차지하는 placeholder로 다음 두 분기를 따른다:
+  - **step 5.1 yes 응답** (test 코드 변경 포함 + 사용자 확정): `test_sweep_paths` YAML 키와 후보 경로 list로 치환. 예시 multi-line 출력:
+
+    ```
+    test_sweep_paths:
+      - "tests/legacy_to_remove/**"
+      - "tests/test_specific_to_rename.py"
+    ```
+
+  - **step 5.1 변경 없음/no 응답**: placeholder를 빈 문자열로 치환하고 그 자리의 줄 자체를 삭제 — frontmatter에 `test_sweep_paths` 키 자체를 추가하지 않는다 (빈 list `[]`도 출력하지 않음 — 키 부재가 명확한 의미).
 - `{{constraints}}` / `{{risks}}` → 섹션 6/7. 빈 값이면 빈 줄 1개 치환(헤더 유지)
 - frontmatter `scope.exclude`는 고정 default(`rules/**`, `milestones/**`, `CLAUDE.md`) — 치환 대상 아님
 

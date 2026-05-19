@@ -28,6 +28,47 @@
 
 set -euo pipefail
 
+# ===== silent-fail 평가 (SPEC 181) — 단위 테스트 가능 =====
+# 인자(8): fetch_fail pending total_checks reviews comments inline elapsed grace
+# stdout(택일): ESCALATE_FETCH_FAIL | GRACE_SKIP | EMPTY_ROLLUP_SKIP | ESCALATE_STUCK | RESET_COUNTER
+#
+# 우선순위:
+#   1) fetch_fail == 1                       → ESCALATE_FETCH_FAIL  (grace 무관 — fetch 실패는 즉시 escalate)
+#   2) elapsed < grace                       → GRACE_SKIP           (PR 생성 직후 — Actions check 등록 전)
+#   3) total_checks가 양의 정수가 아님       → EMPTY_ROLLUP_SKIP    (rollup 비어 있음·gh fetch 실패 등 — 정보 부족)
+#   4) pending=0 + reviews/comments/inline=0 → ESCALATE_STUCK       (진짜 stuck — AC3 회귀 보존)
+#   5) 그 외                                  → RESET_COUNTER       (자연 idle)
+evaluate_silent_fail() {
+  local last_fetch_fail="$1" pending="$2" total_checks="$3" reviews="$4" comments="$5" inline="$6" elapsed="$7" grace="$8"
+  if [[ "$last_fetch_fail" == "1" ]]; then
+    echo "ESCALATE_FETCH_FAIL"; return 0
+  fi
+  if (( elapsed < grace )); then
+    echo "GRACE_SKIP"; return 0
+  fi
+  if ! [[ "$total_checks" =~ ^[1-9][0-9]*$ ]]; then
+    echo "EMPTY_ROLLUP_SKIP"; return 0
+  fi
+  if [[ "$pending" == "0" && "$reviews" == "0" && "$comments" == "0" && "$inline" == "0" ]]; then
+    echo "ESCALATE_STUCK"; return 0
+  fi
+  echo "RESET_COUNTER"
+}
+
+# ===== grace 기간 (silent-fail 조기 호출 방지) — SPEC 181 =====
+# 환경변수: LOOP_REVIEW_PR_GRACE_SECS
+# 기본값:  300 (5분) — GitHub Actions check 등록·큐 지연 흡수
+# floor:   0  (음수 입력 시 0으로 clamp — grace=0은 grace 비활성화 동등)
+GRACE_SECS="${LOOP_REVIEW_PR_GRACE_SECS:-300}"
+if (( GRACE_SECS < 0 )); then
+  GRACE_SECS=0
+fi
+
+# 테스트 모드 진입점: 함수만 expose 후 main 로직 skip (단위 테스트 진입점).
+if [[ -n "${REVIEW_FIX_PHASE_TEST_MODE:-}" ]]; then
+  return 0 2>/dev/null || exit 0
+fi
+
 WT="${1:-}"
 BRANCH="${2:-}"
 TASK_ID="${3:-}"
@@ -298,28 +339,52 @@ while (( iter < MAX_ITER )); do
   if [[ -z "$new_events" ]]; then
     CONSECUTIVE_IDLE=$((CONSECUTIVE_IDLE + 1))
     if (( CONSECUTIVE_IDLE >= CONSECUTIVE_IDLE_THRESHOLD )); then
-      # silent-fail / stuck 패턴 검사 — false positive 방지를 위해 두 패턴으로 분리.
+      # silent-fail / stuck 패턴 평가 — evaluate_silent_fail에 위임 (SPEC 181).
+      # 입력: fetch 실패 플래그 + rollup·활동 카운트 + PR 생성 후 경과 시간 + grace 기간.
       last_fetch_fail=$( cat "$FETCH_FAIL_FILE" 2>/dev/null || echo 0 )
-      if [[ "$last_fetch_fail" == "1" ]]; then
-        emit_escalation "silent-fail 감지 (stuck): ${CONSECUTIVE_IDLE}회 연속 idle 중 이벤트 fetch 호출 실패 — 사용자 개입 필요 (PR #$PR_NUMBER)"
-        exit 1
-      fi
-      # PR check 완료 + 활동 부재 — 셋 다 명시적으로 "0"일 때만 trigger (값이 비어
-      # 있으면 자체 fetch 실패이므로 위 분기에서 처리; 안전을 위해 false 처리).
-      pending_checks=$( cd "$WT" && gh pr view "$PR_NUMBER" --json statusCheckRollup \
-                          --jq '[.statusCheckRollup[]? | select((.status // "COMPLETED") != "COMPLETED")] | length' 2>/dev/null || echo "" )
+      # statusCheckRollup·createdAt을 한 번에 fetch해 jq 필터 3종 적용 — API 호출·레이턴시 절감.
+      # SPEC 181 AC2: total_checks=0(빈 rollup)을 "체크 모두 완료"로 오판하지 않기 위해 별도 산출.
+      rollup_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json statusCheckRollup,createdAt 2>/dev/null || echo "" )
+      pending_checks=$( printf '%s' "$rollup_json" | jq '[.statusCheckRollup[]? | select((.status // "COMPLETED") != "COMPLETED")] | length' 2>/dev/null || echo "" )
+      total_checks=$( printf '%s' "$rollup_json" | jq '.statusCheckRollup | length' 2>/dev/null || echo "" )
       total_reviews=$( cd "$WT" && gh pr view "$PR_NUMBER" --json reviews --jq '.reviews | length' 2>/dev/null || echo "" )
       total_comments=$( cd "$WT" && gh pr view "$PR_NUMBER" --json comments --jq '.comments | length' 2>/dev/null || echo "" )
       # inline review thread comments는 `/pulls/{n}/comments` REST endpoint에 별도로 산다 —
       # `gh pr view --json comments`는 `/issues/{n}/comments`(PR-level conversation)만 반영하므로
       # claude-review가 inline만 게시한 케이스에서 false-positive ESCALATION을 막으려면 추가 체크.
       total_inline=$( cd "$WT" && gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/comments" --jq 'length' 2>/dev/null || echo "" )
-      if [[ "$pending_checks" == "0" && "$total_reviews" == "0" && "$total_comments" == "0" && "$total_inline" == "0" ]]; then
-        emit_escalation "silent-fail 감지 (stuck): ${CONSECUTIVE_IDLE}회 연속 idle + PR check 완료 + 리뷰·코멘트·inline·owner cmd 모두 부재 — 사용자 개입 필요 (PR #$PR_NUMBER)"
-        exit 1
-      fi
-      # 자연 idle (리뷰어 응답 대기 등) — 카운터만 리셋, 폴링 계속
-      CONSECUTIVE_IDLE=0
+      # PR 생성 후 경과 시간 — 위 rollup_json fetch에 createdAt도 함께 받았으므로 별도 호출 불요.
+      # jq의 fromdateiso8601로 ISO 8601 → epoch 변환.
+      # 파싱 실패 시 0 → elapsed가 매우 커져 grace 비활성화와 동등 (기존 동작으로 degrade, 안전).
+      pr_created_ts=$( printf '%s' "$rollup_json" | jq '.createdAt | fromdateiso8601' 2>/dev/null || echo 0 )
+      now_ts=$( date -u +%s )
+      elapsed=$(( now_ts - pr_created_ts ))
+
+      action=$(evaluate_silent_fail "$last_fetch_fail" "$pending_checks" "$total_checks" \
+                                     "$total_reviews" "$total_comments" "$total_inline" \
+                                     "$elapsed" "$GRACE_SECS")
+      case "$action" in
+        ESCALATE_FETCH_FAIL)
+          emit_escalation "silent-fail 감지 (stuck): ${CONSECUTIVE_IDLE}회 연속 idle 중 이벤트 fetch 호출 실패 — 사용자 개입 필요 (PR #$PR_NUMBER)"
+          exit 1
+          ;;
+        ESCALATE_STUCK)
+          emit_escalation "silent-fail 감지 (stuck): ${CONSECUTIVE_IDLE}회 연속 idle + PR check 완료 + 리뷰·코멘트·inline·owner cmd 모두 부재 — 사용자 개입 필요 (PR #$PR_NUMBER)"
+          exit 1
+          ;;
+        GRACE_SKIP)
+          echo "[review-fix-phase] silent-fail check skip — PR 생성 후 ${elapsed}s (grace ${GRACE_SECS}s) — Actions check 등록 대기" >&2
+          CONSECUTIVE_IDLE=0
+          ;;
+        EMPTY_ROLLUP_SKIP)
+          echo "[review-fix-phase] silent-fail check skip — statusCheckRollup 비어 있음 (check 미등록 / fetch 실패) — 정보 부족, 다음 임계까지 폴링 계속" >&2
+          CONSECUTIVE_IDLE=0
+          ;;
+        *)
+          # RESET_COUNTER — 자연 idle (리뷰어 응답 대기 등) — 카운터만 리셋, 폴링 계속
+          CONSECUTIVE_IDLE=0
+          ;;
+      esac
     fi
     sleep "$POLL_SECS"
     continue

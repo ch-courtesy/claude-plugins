@@ -6,6 +6,7 @@ scope:
     - milestones/**
     - CLAUDE.md
 verify: "{{verify_command}}"
+{{test_sweep_paths}}
 # test_paths (선택): 테스트 약화 게이트가 추적할 경로/파일명 패턴 (git pathspec).
 #   미지정 시 기본 컨벤션(tests/·test/·__tests__/·spec/·src/test/ 디렉토리 +
 #   *.test.{js,ts,jsx,tsx,py}·*.spec.{js,ts,rb}·*_test.{go,py,rb}·test_*.py·*_spec.rb)
