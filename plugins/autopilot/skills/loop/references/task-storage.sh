@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+# source-only — do not execute directly
 # task-storage.sh — task 저장소(GitHub Issue) 라벨 검출 공통 헬퍼.
 #
 # loop.sh·dispatch.sh 가 함께 source 하는 헬퍼. 완료 검출의 단일 출처는
