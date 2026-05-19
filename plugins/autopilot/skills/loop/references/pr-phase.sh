@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pr-phase.sh — loop DONE 이후 PR 생성·재사용 단계
+# pr-phase.sh — loop 완료 라벨 부착 이후 PR 생성·재사용 단계
 #
 # 사용:
 #   bash pr-phase.sh <worktree> <branch> <task-id> <project-root>

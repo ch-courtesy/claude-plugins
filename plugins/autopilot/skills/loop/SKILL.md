@@ -3,22 +3,23 @@ name: loop
 description: 자율 수행 루프(랄프 루프) 운영 인터페이스. start/status/stop/list/cleanup/logs 서브커맨드로 자율 task의 lifecycle을 관리합니다. SPEC 작성은 별도 'autopilot:spec' 스킬을 사용. 본 스킬은 자기완결적이며 헌법·드라이버를 모두 references/에 포함합니다.
 allowed-tools:
   - Monitor
+  - Read
   # SPEC 113 — issue #113 본문 `autopilot:loop` 섹션 (직전 세션 실측)
-  - Bash(bash * loop.sh start *)
-  - Bash(bash * loop.sh status *)
-  - Bash(bash * loop.sh stop *)
+  # SPEC 170 — trailing wildcard 형식을 ` *`(공백+별표) → `:*` 로 정규화
+  - Bash(bash * loop.sh start:*)
+  - Bash(bash * loop.sh status:*)
+  - Bash(bash * loop.sh stop:*)
   - Bash(bash * loop.sh list)
-  - Bash(bash * loop.sh cleanup *)
-  - Bash(bash * loop.sh logs *)
-  - Bash(tail -F /private/tmp/* | grep -E --line-buffered *)
-  - Bash(tail -F /tmp/* | grep -E --line-buffered *)
+  - Bash(bash * loop.sh cleanup:*)
+  - Bash(bash * loop.sh logs:*)
+  - Bash(tail -F /private/tmp/* | grep -E --line-buffered:*)
+  - Bash(tail -F /tmp/* | grep -E --line-buffered:*)
   # SPEC 113 — issue #113 본문 `공통·보조` 섹션
   - Bash(git -C * stash list)
-  - Bash(git -C * stash pop *)
-  - Bash(git -C * stash show *)
+  - Bash(git -C * stash pop:*)
+  - Bash(git -C * stash show:*)
   - Bash(rm */ESCALATION.md)
-  - Bash(rm */DONE)
-  - Bash(ps -p *)
+  - Bash(ps -p:*)
   - Bash(cat */*.lock)
 ---
 
@@ -69,7 +70,7 @@ Skill(skill: "spec", args: "<task-id>")
 
 ##### `--events-only` (opt-out: 기존 핵심 이벤트 필터로 회귀)
 
-`--events-only` 플래그는 `--no-monitor`와 동일한 **SKILL.md 차원 옵션** contract를 가진다 — 모델이 args 파싱 시 이 토큰을 분리·소비하여 `Monitor` 가설의 필터만 기존 핵심 이벤트 정규식(`이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|DONE`)으로 회귀시키고, `loop.sh`로는 **전달하지 않는다** (셸 드라이버는 본 플래그를 모름). 따라서 본 플래그는 **본 스킬을 통한 호출 시점에만** 작용하며, 사용자가 셸 드라이버 `loop.sh start`를 직접 호출하는 경우엔 효력이 없다. 사용 시점: default raw 라인 전달로 세션 컨텍스트·토큰 소비가 부담스러워 핵심 이벤트(이터 시작·종료·halt·escalation·done 등)만 알림 받고 싶을 때.
+`--events-only` 플래그는 `--no-monitor`와 동일한 **SKILL.md 차원 옵션** contract를 가진다 — 모델이 args 파싱 시 이 토큰을 분리·소비하여 `Monitor` 가설의 필터만 기존 핵심 이벤트 정규식(`이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|완료 신호`)으로 회귀시키고, `loop.sh`로는 **전달하지 않는다** (셸 드라이버는 본 플래그를 모름). 따라서 본 플래그는 **본 스킬을 통한 호출 시점에만** 작용하며, 사용자가 셸 드라이버 `loop.sh start`를 직접 호출하는 경우엔 효력이 없다. 사용 시점: default raw 라인 전달로 세션 컨텍스트·토큰 소비가 부담스러워 핵심 이벤트(이터 시작·종료·halt·escalation·done 등)만 알림 받고 싶을 때.
 
 `--no-monitor` 플래그는 **SKILL.md 차원 옵션**이다 — 모델이 args 파싱 시 이 토큰을 분리·소비하여 `Monitor` 가설 자체를 생략하고, `loop.sh`로는 **전달하지 않는다** (셸 드라이버는 본 플래그를 모름). 따라서 본 플래그는 **본 스킬을 통한 호출 시점에만** 작용하며, 사용자가 셸 드라이버 `loop.sh start`를 직접 호출하는 경우엔 효력이 없다.
 
@@ -77,9 +78,9 @@ Skill(skill: "spec", args: "<task-id>")
 
 `spec` 스킬 단계 10의 "지금 loop start 호출" 결정으로 자동 연계되는 경우에도 추가 모니터 결정 질문 없이 본 기본 동작(Monitor 가설 포함)이 그대로 적용된다. 단 spec 스킬은 사용자에게 `--events-only` opt-out 선택을 명시 확인하며 Yes 시 자동 연계 args 끝에 `--events-only` 토큰을 추가한다.
 
-#### DONE 이후 PR 생성·재사용 phase (default)
+#### 완료 라벨 부착 이후 PR 생성·재사용 phase (default)
 
-task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 동일 브랜치의 open PR 재사용) 단계가 **default로 자동 실행**됩니다 (SPEC 103 AC1). 건너뛰려면 `--no-pr` 플래그를 명시(SPEC 103 AC2).
+task 가 완료 신호(`LOOP_DONE_LABEL` 라벨 부착)에 도달한 직후 같은 워크트리에서 PR 생성(또는 동일 브랜치의 open PR 재사용) 단계가 **default로 자동 실행**됩니다 (SPEC 103 AC1). 건너뛰려면 `--no-pr` 플래그를 명시(SPEC 103 AC2).
 
 활성화 시 동작:
 - default 브랜치 자동 감지 (`gh repo view` → `git symbolic-ref refs/remotes/origin/HEAD`)
@@ -102,7 +103,7 @@ task가 `DONE`에 도달한 직후 같은 워크트리에서 PR 생성(또는 �
 
 기존 PR body의 사용자 수기 편집 보호를 위해 자동 영역은 `<!-- autopilot:pr-body:begin --> ... <!-- autopilot:pr-body:end -->` marker fence 안에만 작성됩니다.
 
-#### DONE 이후 PR 리뷰 자동 fix 루프 (SPEC 123, `request_review: true` opt-in)
+#### 완료 라벨 부착 이후 PR 리뷰 자동 fix 루프 (SPEC 123, `request_review: true` opt-in)
 
 SPEC frontmatter에 `request_review: true`가 지정된 task만 본 흐름을 진입합니다. PR 생성·재사용이 성공한 직후 다음 sub-phase가 차례·일부 background로 실행됩니다:
 
@@ -145,6 +146,17 @@ review-fix 루프는 다음 중 하나가 감지되면 종료합니다:
 
 상수는 `loop.sh`의 `AUTOPILOT_REVIEW_FIX_ALLOWED_TOOLS` / `AUTOPILOT_REBASE_ALLOWED_TOOLS` 에 정의되며, 환경 변수로 자식 phase 스크립트에 export됩니다. 사용자 대화형 세션의 `settings.json`은 본 등록의 영향을 받지 않습니다 — autopilot 워커 컨텍스트에만 한정됩니다.
 
+##### silent-fail 검출기 환경변수
+
+review-fix-phase의 silent-fail 검출기(연속 idle 폴링 후 stuck 패턴 escalate)는 다음 환경변수로 조절됩니다.
+
+| 환경변수 | 기본값 | floor | 의미 |
+|---|---|---|---|
+| `LOOP_REVIEW_IDLE_THRESHOLD` | 3 | 3 | 새 이벤트 0건이 N회 연속 폴링되면 silent-fail 패턴 평가 |
+| `LOOP_REVIEW_PR_GRACE_SECS` | 300 (5분) | 0 | PR 생성 직후 N초 동안은 silent-fail 검출기 평가 자체를 skip — GitHub Actions check 등록 지연·큐 지연 흡수 (SPEC 181). 0으로 설정 시 grace 비활성화 |
+
+검출기는 `statusCheckRollup`의 전체 check 수가 0이면(check 미등록·정보 부족) 해당 폴링 회차의 ESCALATION을 발동하지 않고 카운터만 리셋합니다 (SPEC 181 AC2). 전체 check 수가 0보다 크고 pending 0 + 다른 활동(리뷰·코멘트·inline·owner cmd) 모두 0일 때만 진짜 stuck으로 escalate합니다 (AC3).
+
 요구: `gh` CLI 설치 + OAuth 인증.
 
 ### status [<task-id>] / stop <task-id> / list / cleanup <task-id> [--force] / logs <task-id> [--tail | --iter N]
@@ -173,7 +185,8 @@ start 첫 호출에 자동:
 |---|---|
 | `constitution.md` | 워커 헌법. start 시점에 워크트리 CLAUDE.md로 복사 |
 | `loop.sh` | 외부 셸 드라이버. 모든 subcommand의 핵심 로직 |
-| `pr-phase.sh` | DONE 이후 PR 생성·재사용 단계 |
+| `task-storage.sh` | task 저장소 라벨 검출 공통 헬퍼 (loop.sh·dispatch.sh 공유, SPEC 175) |
+| `pr-phase.sh` | 완료 라벨 부착 이후 PR 생성·재사용 단계 |
 | `operational-guide.md` | 사용자용 운영 가이드 (워크플로·환경 변수·객관 게이트 표·의존성) |
 | `status-format.md` | status 출력 형식 가이드 |
 | `troubleshooting.md` | 차단 신호 카테고리별 처리 가이드 |

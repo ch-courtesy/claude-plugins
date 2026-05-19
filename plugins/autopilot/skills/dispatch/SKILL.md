@@ -28,7 +28,7 @@ description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave
    → 게이트 ② 최종 확인 (DAG 레벨 wave·child·예상 verify·의존성 표 + 사용자 승인. SPEC 자체는 각 wave 진입 시 비로소 작성)
    → wave 단위 순차 실행 (wave 안 child 간은 병렬):
      · 게이트 ③ spec 위임 (per-wave): 그 wave 의 각 child 분해 plan 항목에 Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>") — task-id 는 spec 이 task 생성 단계에서 결정. spec 의 dispatch-위임 모드 auto-loop-start 로 그 wave 의 child loop 가 자동 시작
-     · sentinel watch (Bash(dispatch.sh watch_wave ...)) — 이 wave 의 DONE/ESCALATION 감시
+     · sentinel watch (Bash(dispatch.sh watch_wave ...)) — 이 wave 의 완료 라벨(`LOOP_DONE_LABEL`)/ESCALATION.md 감시
      · 성공 시 다음 wave 의 게이트 ③ per-wave 로 진행. wave 끝까지 반복
        (sentinel watch · fail-fast 는 per-wave 단계에 포함 — 마일스톤 레벨 별도 sentinel 없음)
    → wave 모두 통과 후 최종 보고
@@ -93,14 +93,14 @@ spec 스킬은 dispatch 위임 모드를 인식해 step 10 사용자 최종 검�
 for wave in waves:
   # 1) per-wave 게이트 ③ spec 위임: 그 wave 의 각 child 에 Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>") 호출.
   #    spec 의 dispatch-위임 모드 auto-loop-start 로 그 wave 의 child loop 가 자동 시작된다.
-  #    이전 wave 들의 loop 는 그 wave 의 watch_wave 가 이미 DONE 으로 종료한 상태 — 의존 산출물 준비 완료.
+  #    이전 wave 들의 loop 는 그 wave 의 watch_wave 가 이미 완료(exit 100)로 종료한 상태 — 의존 산출물 준비 완료.
   #    dispatch 는 별도 `loop start` 호출 없이 sentinel watch 만 수행 (중복 시작 방지).
 
   while wave 진행 중:
     # references/dispatch.sh watch_wave <m> child1 child2 ...
-    각 child의 sentinel 파일 watch (sleep 2s + test -e 단순 폴링):
-      milestones/<m>/loops/<c>/.worktree/DONE                  → 성공
-      milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md   → 실패
+    각 child의 sentinel watch (sleep 2s 폴링):
+      task 저장소 child issue 에 LOOP_DONE_LABEL 라벨 부착                → 성공 (SPEC 175)
+      milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md             → 실패
 
     누군가 ESCALATION (watch_wave exit 101):
       watch_wave가 나머지 진행 중 child들에 kill -TERM (fail-fast, 자동)
@@ -108,7 +108,7 @@ for wave in waves:
       ESCALATION 카테고리·보고서 사용자 제시
       다음 wave 차단 + 종료 (재계획은 사용자)
 
-    모두 DONE (watch_wave exit 100):
+    모두 완료 라벨 부착 (watch_wave exit 100):
       DISPATCH_LOG.md 기록 → 다음 wave 의 per-wave 게이트 ③ spec 위임으로 진입
 
     타임아웃 (watch_wave exit 102):
@@ -124,13 +124,13 @@ for wave in waves:
 
 | exit | 의미 | child stop 처리 | 모델 후속 행동 |
 |---|---|---|---|
-| `100` | wave 내 모든 child DONE | 불필요 | DISPATCH_LOG에 wave 성공 기록 → 다음 wave 진입 |
+| `100` | wave 내 모든 child 가 완료 라벨(`LOOP_DONE_LABEL`) 부착 | 불필요 | DISPATCH_LOG에 wave 성공 기록 → 다음 wave 진입 |
 | `101` | wave 내 누군가 ESCALATION (fail-fast) | watch_wave가 자동 stop | DISPATCH_LOG에 escalation 기록, ESCALATION.md 본문·카테고리 사용자 제시, **다음 wave 차단**, 재계획은 사용자 책임 |
 | `102` | `WATCH_TIMEOUT_SECONDS` 초과 (기본 7200s) | watch_wave가 자동 stop | DISPATCH_LOG에 timeout 기록, 진행 단계·partial 결과 사용자 제시, **다음 wave 차단**, `dispatch resume <m>`으로 이어갈지 사용자 결정 |
 
 이 외 exit code는 dispatch 자체 결함을 의미하므로 즉시 abort + 사용자에게 stderr·exit code 그대로 보고.
 
-**기존 loop과의 분업** — 워크트리·lock·iteration 상한·헌법 준수는 모두 `loop.sh`가 처리. dispatch는 sentinel 파일(`DONE`·`.loop/ESCALATION.md`) **존재만** 감시. 외부 셸 루프 표준 유지(in-process Stop 훅 미사용).
+**기존 loop과의 분업** — 워크트리·lock·iteration 상한·헌법 준수는 모두 `loop.sh`가 처리. dispatch는 두 sentinel 신호 — task 저장소 child issue 의 `LOOP_DONE_LABEL` 라벨(성공, SPEC 175) 과 워크트리 안 `.loop/ESCALATION.md` 파일(실패) — **존재만** 감시. 외부 셸 루프 표준 유지(in-process Stop 훅 미사용).
 
 ## Subcommand
 

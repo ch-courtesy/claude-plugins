@@ -28,10 +28,10 @@ milestones/<m>/loops/<c>/
 ├── .lock                      # 동시 실행 락 (gitignored)
 └── .worktree/                 # git 워크트리 (gitignored)
     ├── CLAUDE.md              # 헌법 복사본
-    ├── DONE                   # 정상 완료 신호 (있을 때만)
     ├── .iterations/<n>.log    # 매 이터 stdout 캡처 (gitignored, worktree-local)
     └── milestones/<m>/loops/<c>/
         └── SPEC.md            # feat 브랜치 commit으로 자연 노출
+# 완료 신호는 task 저장소의 LOOP_DONE_LABEL 라벨 단일 의존 — 워크트리 sentinel 파일 없음 (SPEC 175)
 # 이터간 상태(계획·교훈·인계·차단·완료)는 워크트리에 두지 않고 task 메모리·task 신호로 위임 (헌법 §11)
 ```
 
@@ -49,7 +49,7 @@ loop.sh start   <task-id> [옵션]      # 검증 후 워크트리·락 생성 + 
 loop.sh status  [<task-id>]           # 상태 조회 (전체 또는 단일)
 loop.sh stop    <task-id>             # 실행 중 정지 (SIGTERM)
 loop.sh list                          # 전체 task 상태 (status 별칭)
-loop.sh cleanup <task-id> [--force]   # DONE 후 정리
+loop.sh cleanup <task-id> [--force]   # 완료 라벨 부착 후 정리
 loop.sh logs    <task-id> [옵션]      # 로그 조회
 ```
 
@@ -61,7 +61,7 @@ LOOP_SH="$HOME/.claude/plugins/autopilot/skills/loop/references/loop.sh"
 Skill(skill: "spec", args: "auth-refactor")   # 대화형 SPEC.md 생성
 bash "$LOOP_SH" start auth-refactor           # 루프 시작
 bash "$LOOP_SH" logs auth-refactor --tail  # 별도 터미널에서 모니터링
-# 정지: Ctrl+C, DONE 파일 생성, 또는 완료·차단 신호 발행 시 자동 종료
+# 정지: Ctrl+C, 또는 완료(LOOP_DONE_LABEL 부착)·차단 신호 발행 시 자동 종료
 ```
 
 ## 외부 SPEC 파일 전달 (--spec 플래그)
@@ -89,7 +89,7 @@ bash "$LOOP_SH" status auth-refactor # 단일 task 상태
 bash "$LOOP_SH" stop auth-refactor   # SIGTERM + 5초 대기 + 락 해제
 ```
 
-## DONE 후 머지 및 정리
+## 완료 라벨 부착 후 머지 및 정리
 
 ```bash
 # feat/<task-id>[-<slug>] 브랜치를 PR base로 — request_review opt-in 시 자동 push·PR 생성
