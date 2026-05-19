@@ -44,7 +44,6 @@ allowed-tools:
   - Bash(cat */*.lock)
   - Bash(gh pr view:*)
   - Bash(gh pr checks:*)
-  - Bash(git status --porcelain*)
 ---
 
 # loop
