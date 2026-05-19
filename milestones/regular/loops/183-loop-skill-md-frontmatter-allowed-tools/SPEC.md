@@ -23,7 +23,7 @@ loop 스킬 (`plugins/autopilot/skills/loop/SKILL.md`) 의 YAML frontmatter `all
 - **AC2** (Ubiquitous): `allowed-tools` 에 `Bash(tail -F /private/tmp/claude-* 2>/dev/null | grep -E --line-buffered *)` 패턴이 한 줄로 포함된다 — Monitor 의 실제 tail+pipe+redirect 조합과 일치하도록 pipe(`| grep`)와 `2>/dev/null` 를 패턴에 명시 포함하고, 비지원 glob 문법(`**`)은 사용하지 않는다.
 - **AC3** (Ubiquitous): `allowed-tools` 에 `Bash(gh pr view *)` 와 `Bash(gh pr checks *)` 두 패턴이 각각 한 줄로 포함된다.
 - **AC4** (Ubiquitous): `allowed-tools` 에 `Bash(git status --porcelain*)` 패턴이 한 줄로 포함된다.
-- **AC4-neg** (Unwanted): `allowed-tools` 에 `Bash(git checkout HEAD -- *)` 패턴은 추가되지 **않는다** — `git checkout HEAD -- <path>` 는 미커밋 변경을 무음 파기하는 write 연산이라 destructive 위험으로 자동 승인 범위 제외 (PR #187 reviewer BLOCKING thread 3264181657 반영).
+- **AC4-neg** (Unwanted): `allowed-tools` 에 `Bash(git checkout HEAD -- *)` 패턴은 추가되지 **않는다** — `git checkout HEAD -- <path>` 는 미커밋 변경을 무음 파기하는 write 연산이라 destructive 위험으로 자동 승인 범위 제외.
 - **AC5** (Unwanted): `allowed-tools` 에 `gh issue *`·`gh pr merge *`·`gh pr comment *` 같은 외부 상태 변경 가능 gh 패턴은 신규 추가되지 않는다 (기존 미포함 상태 유지, 메모리 노트 `feedback_allowlist_exclude_github` 정합).
 - **AC6** (Unwanted): 본 변경은 frontmatter `allowed-tools` 리스트 외 다른 어떤 필드·본문 텍스트·자매 스킬(`spec`·`dispatch`·`prd`) 의 SKILL.md 도 수정하지 않는다.
 
@@ -31,7 +31,7 @@ loop 스킬 (`plugins/autopilot/skills/loop/SKILL.md`) 의 YAML frontmatter `all
 
 포함:
 
-- `plugins/autopilot/skills/loop/SKILL.md` — frontmatter `allowed-tools` 에 5개 신규 패턴 추가 (AC1·AC2·AC3 두 항목·AC4 한 항목). `git checkout HEAD -- *` 는 AC4-neg 에 따라 제외 (PR #187 reviewer BLOCKING 반영).
+- `plugins/autopilot/skills/loop/SKILL.md` — frontmatter `allowed-tools` 에 5개 신규 패턴 추가 (AC1·AC2·AC3 두 항목·AC4 한 항목). `git checkout HEAD -- *` 는 AC4-neg 에 따라 제외 (destructive write 위험).
 
 비-목표 / 제외:
 
