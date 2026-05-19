@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# rebase-phase.sh — SPEC 123 M1 + SPEC 169 push sync policy
+# rebase-phase.sh — push sync policy
 #
 # PR 생성·재사용 직전, 그리고 review-fix 루프의 각 fix iter 직전에 호출되는 단일 sync helper.
 # 워크트리의 feat 브랜치를 default 브랜치로 동기화한다.
 #
-# 동기화 모드 (SPEC 169):
+# 동기화 모드:
 #   - 원격 트래킹 브랜치 부재 → rebase 경로 (history 재배치, 깨끗한 linear history)
 #   - 원격 트래킹 브랜치 존재 → merge 경로 (자기 commit SHA 보존, force push 회피)
 # 두 경로 어디서도 force push(`--force`·`--force-with-lease` 포함)를 도입하지 않는다.
@@ -18,13 +18,12 @@
 #   3. `git ls-remote --heads origin <branch>`로 원격 브랜치 존재 여부 판정 → SYNC_MODE
 #   4. rebase 경로: `git rebase origin/<default>`
 #      merge  경로: `git merge --ff-only origin/<default>` → 실패 시 non-ff `git merge --no-edit`
-#   5. 충돌 시 claude CLI 세션 1회로 자동 해소 시도 (SPEC 123 AC2 / SPEC 169 AC5).
+#   5. 충돌 시 claude CLI 세션 1회로 자동 해소 시도.
 #      - claude 미설치·세션 실패·해소 후 잔존 → 해당 모드의 abort 명령으로 워크트리 복구 + 비-zero exit.
 #   6. 어떤 단계든 비-zero exit 시 stdout 첫 줄에 "ESCALATION" prefix를 출력해
 #      caller(loop.sh·pr-phase.sh·review-fix-phase.sh)가 종료 신호로 감지하게 한다.
 #
-# 파일명은 SPEC 169 이후에도 `rebase-phase.sh` 그대로 유지(rename은 환경변수·문서 파급 회피로 SPEC 범위 외).
-# 의미는 "sync helper" — 본 스크립트 자체는 두 모드를 모두 책임진다.
+# 파일명은 `rebase-phase.sh` 로 유지 — 의미는 "sync helper" 이며 본 스크립트가 두 모드를 모두 책임진다.
 
 set -euo pipefail
 
@@ -68,7 +67,7 @@ if ! ( cd "$WT" && git fetch origin "$DEFAULT_BRANCH" 2>&1 ); then
   exit 1
 fi
 
-# ----- 동기화 모드 판정 (SPEC 169 AC1) -----
+# ----- 동기화 모드 판정 -----
 # `git ls-remote --heads --exit-code origin <branch>`는 원격에 해당 ref가 있으면 0,
 # 없으면 2를 반환. 원격에 자기 브랜치가 이미 존재하면 history 재작성이 force push를
 # 강제하므로 merge로 base 변경분만 흡수한다. 부재 시(첫 PR 진입 전)는 깨끗한 linear
@@ -85,8 +84,7 @@ fi
 echo "[rebase-phase] sync mode: $SYNC_MODE (origin/$BRANCH $( [[ $SYNC_MODE == merge ]] && echo present || echo absent ))"
 
 # allowed-tools는 caller(loop.sh)에서 export한 환경 변수 또는 본 스크립트 기본값.
-# 환경 변수 이름은 SPEC 169 이후에도 `AUTOPILOT_REBASE_ALLOWED_TOOLS` 유지 — rename은
-# SPEC 169 범위 외(파급 회피).
+# 환경 변수 이름은 `AUTOPILOT_REBASE_ALLOWED_TOOLS` 로 고정.
 ALLOWED_TOOLS_REBASE="${AUTOPILOT_REBASE_ALLOWED_TOOLS:-Bash(git add:*),Bash(git status:*),Bash(git diff:*),Bash(cat:*),Bash(ls:*),Read,Edit,Write}"
 
 # ----- 공통 충돌 해소 helper (claude CLI 1회) -----
@@ -140,7 +138,7 @@ EOF
   return 0
 }
 
-# ----- rebase 경로 (SPEC 169 AC2): 원격 트래킹 부재 → history 재배치 -----
+# ----- rebase 경로: 원격 트래킹 부재 → history 재배치 -----
 if [[ "$SYNC_MODE" == "rebase" ]]; then
   echo "[rebase-phase] rebase onto origin/$DEFAULT_BRANCH"
   if ( cd "$WT" && git rebase "origin/$DEFAULT_BRANCH" 2>&1 ); then
@@ -168,7 +166,7 @@ if [[ "$SYNC_MODE" == "rebase" ]]; then
   exit 1
 fi
 
-# ----- merge 경로 (SPEC 169 AC3): 원격 트래킹 존재 → 자기 SHA 보존 -----
+# ----- merge 경로: 원격 트래킹 존재 → 자기 SHA 보존 -----
 # 1차 ff-only: base 변화 없음 또는 feat가 base의 후손인 경우 no-op으로 통과 (불필요 merge commit 회피).
 # 2차 non-ff:  diverged base를 흡수해 새 merge commit 생성. 자기 commit SHA는 그대로 reachable.
 echo "[rebase-phase] merge from origin/$DEFAULT_BRANCH (ff-only 우선 시도)"

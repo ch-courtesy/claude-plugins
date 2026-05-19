@@ -32,7 +32,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# task 저장소 라벨 헬퍼 공유 (SPEC 175 AC6) — loop.sh 와 동일한
+# task 저장소 라벨 헬퍼 공유 — loop.sh 와 동일한
 # task_status_is_done·task_label_present·LOOP_DONE_LABEL 단일 출처를 source.
 # 위치: plugins/autopilot/skills/loop/references/task-storage.sh.
 # shellcheck source=../../loop/references/task-storage.sh
@@ -100,9 +100,9 @@ child_archive_path() {
 }
 
 # child 의 sentinel 상태: done / escalated / running / idle / missing.
-# 완료(`done`) 검출은 task 저장소(GitHub Issue)의 LOOP_DONE_LABEL 라벨 단일 의존
-# (SPEC 175 AC1). loop.sh 와 동일 helper(task_status_is_done) 를 source 해 공유.
-# ESCALATION 은 워크트리 안의 .loop/ESCALATION.md 파일 sentinel 유지 (SPEC 175 비-목표).
+# 완료(`done`) 검출은 task 저장소(GitHub Issue)의 LOOP_DONE_LABEL 라벨 단일 의존.
+# loop.sh 와 동일 helper(task_status_is_done) 를 source 해 공유.
+# ESCALATION 은 워크트리 안의 .loop/ESCALATION.md 파일 sentinel 유지.
 child_state() {
   local milestone="$1"
   local child="$2"
@@ -336,7 +336,7 @@ cmd_cleanup() {
             continue
             ;;
         esac
-        # cleanup 대상은 done 상태 child — 검출은 child_state(라벨 단일 의존, SPEC 175).
+        # cleanup 대상은 done 상태 child — 검출은 child_state(라벨 단일 의존).
         if [[ "$(child_state "$m" "$child")" == "done" ]]; then
           echo "[$(now_iso)] cleanup $m/$child (완료 라벨 부착, archival 포함)"
           # 메타 파일 archival — loop.sh cmd_cleanup의 step 4와 동일 로직.
