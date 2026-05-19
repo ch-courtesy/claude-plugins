@@ -198,9 +198,10 @@ echo "=== TEST 10: SKILL.md frontmatter allowed-tools에 Agent 포함 ==="
 # allowed-tools는 YAML inline (한 줄) 또는 block list (다음 줄 들여쓰기 `- Agent`) 두 형태 모두
 # valid. frontmatter 안에서 두 형식 중 하나로 Agent 토큰이 나타나면 통과.
 #   - block list 형식:  `^[[:space:]]+-[[:space:]]+Agent[[:space:]]*$`
-#   - inline list 형식: `^allowed-tools:.*[[ ,]Agent([] ,]|$)`
+#   - inline list 형식: `^allowed-tools:.*[[ ,]Agent([],[:space:]]|$)`
+#     ('Agent' 앞은 공백·`[`·`,` 중 하나, 뒤는 `]`·`,`·공백·줄끝 중 하나.)
 awk '/^---$/{c++; next} c==1' "$SKILL_MD" | \
-  grep -qE '^[[:space:]]+-[[:space:]]+Agent[[:space:]]*$|^allowed-tools:.*([[ ,]|^allowed-tools:[[:space:]]*)Agent([],[:space:]]|$)' \
+  grep -qE '^[[:space:]]+-[[:space:]]+Agent[[:space:]]*$|^allowed-tools:.*[[ ,]Agent([],[:space:]]|$)' \
   || fail "SKILL.md frontmatter allowed-tools에 Agent 미포함"
 ok "frontmatter allowed-tools에 Agent 포함"
 

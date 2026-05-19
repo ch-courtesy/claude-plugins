@@ -31,9 +31,13 @@
 발견 시: 단계 3에서 사용자가 이미 "단일 강행"을 확인하여 SPEC "위험" 섹션에 기록되어 있으면 통과. 새로 발견된 신호면 `[NEEDS CLARIFICATION: 다중 영역 가능성 — 영역 A: <...>, 영역 B: <...>, 분해 vs 단일 강행?]` 마커.
 
 추가 항목 — **test 코드 변경 sweep 화이트리스트 검사**:
-- task scope가 test 코드 변경 (rename·cleanup·삭제·내용 수정 등)을 포함하면 SPEC frontmatter `test_sweep_paths` 필드가 비어 있지 않다 (= 사용 가능한 화이트리스트 후보 경로가 list 형태로 존재).
+- task scope가 test 코드 변경 (rename·cleanup·삭제·내용 수정 등)을 포함하면 SPEC frontmatter `test_sweep_paths` 필드가 비어 있지 않거나, §5.1 절차를 거쳐 no-sweep으로 결정됐다는 명시 흔적이 frontmatter에 남아 있어야 한다.
 - 신호 (하나라도 해당): `scope.include` 또는 본문 "범위.포함" 항목 중 어느 하나가 `tests/**`·`test/**`·`__tests__/**`·`spec/**`·`*_test.*`·`*.test.*`·`*_spec.*` 같은 test 경로 패턴 매칭, "무엇을 만들 것인가"·"위험"·"제약" 본문에 "테스트 rename"·"tests 정리"·"test cleanup"·"스펙 삭제" 같은 어구 등장.
-- 위 신호가 있고 frontmatter `test_sweep_paths` 키가 부재이거나 빈 list `[]` 이면 — step 5.1 자동 판단·yes/no 단발 확인 절차가 누락됐다는 신호. 발견 시: `[NEEDS CLARIFICATION: test 코드 변경 sweep 화이트리스트 누락 — step 5.1 절차에서 test_sweep_paths를 추출·확정했나? 비워 두면 loop 단계의 weakening 게이트가 합법적 sweep을 "테스트 약화"로 오인할 수 있음.]` 마커.
+- 위 신호가 있고 다음 두 흔적이 **모두** 부재하면 — step 5.1 자동 판단·yes/no 단발 확인 절차가 누락됐다는 신호로 판정한다:
+  - frontmatter `test_sweep_paths` 키 (비어 있지 않은 list)
+  - frontmatter YAML 주석 `# test_sweep_paths: reviewed-no-sweep` (§5.1 변경 없음/no 응답 흔적)
+- 발견 시 (둘 다 부재): `[NEEDS CLARIFICATION: test 코드 변경 sweep 화이트리스트 누락 — step 5.1 절차에서 test_sweep_paths를 추출·확정했나? 비워 두면 loop 단계의 weakening 게이트가 합법적 sweep을 "테스트 약화"로 오인할 수 있음.]` 마커.
+- 둘 중 하나라도 존재하면 통과 — `reviewed-no-sweep` 주석은 "사용자가 no 응답·모델이 변경 없음 판단"을 self-review와 구분하기 위한 명시 표식이므로, 부재만으로 절차 누락을 단정하면 거짓 양성(no 응답을 반복 마커로 오인)이 발생한다.
 
 ## 4. 모호성 검사
 
