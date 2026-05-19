@@ -7,6 +7,8 @@ scope:
     - CLAUDE.md
 verify: "bash tests/autopilot/test-skill-allow-tools.sh"
 request_review: true
+test_sweep_paths:
+  - "tests/autopilot/test-skill-allow-tools.sh"
 ---
 
 # loop SKILL.md allow-tools 확장 + 테스트 LOOP_REQ 싱크
