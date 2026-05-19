@@ -315,7 +315,7 @@ grep -qE 'test 코드 변경|테스트 코드 변경' "$SELF_REVIEW_MD" \
   || fail "self-review.md에 'test 코드 변경' 트리거 어구 없음"
 ok "self-review.md에 test 코드 변경 트리거 어구 존재"
 
-grep -qE '비어 있지 않|채워|값이 있|empty' "$SELF_REVIEW_MD" \
+grep -qE '비어 있지 않|채워|값이 있' "$SELF_REVIEW_MD" \
   || fail "self-review.md에 'test_sweep_paths 필드가 비어 있지 않다' 의미 어구 없음"
 ok "self-review.md에 필드 비어 있지 않음 의미 명시"
 
