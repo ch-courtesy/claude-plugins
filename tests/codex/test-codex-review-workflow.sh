@@ -44,21 +44,33 @@ fi
 ok "check 3: full prompt를 argv 대신 stdin으로 전달"
 
 echo ""
-echo "=== check 4: legacy access-token auth is not used ==="
+echo "=== check 4: @codex mention triggers require trusted author association ==="
+trusted_expr="contains(fromJSON('[\"OWNER\",\"MEMBER\",\"COLLABORATOR\"]')"
+trusted_count="$(awk -v needle="$trusted_expr" 'index($0, needle) { count++ } END { print count + 0 }' "$WORKFLOW")"
+[[ "$trusted_count" == "3" ]] \
+  || fail "issue/review comment/review @codex 트리거의 trusted author 제한이 3곳 모두에 없음"
+grep -q 'github.event.comment.author_association' "$WORKFLOW" \
+  || fail "comment 기반 @codex 트리거 author_association 제한 부재"
+grep -q 'github.event.review.author_association' "$WORKFLOW" \
+  || fail "review 기반 @codex 트리거 author_association 제한 부재"
+ok "check 4: @codex mention 트리거가 OWNER/MEMBER/COLLABORATOR 로 제한됨"
+
+echo ""
+echo "=== check 5: legacy access-token auth is not used ==="
 if grep -q 'CODEX_ACCESS_TOKEN' "$WORKFLOW"; then
   fail "CODEX_ACCESS_TOKEN 기반 인증이 남아 있음"
 fi
-ok "check 4: CODEX_ACCESS_TOKEN 기반 인증 제거됨"
+ok "check 5: CODEX_ACCESS_TOKEN 기반 인증 제거됨"
 
 echo ""
-echo "=== check 5: review output is posted idempotently ==="
+echo "=== check 6: review output is posted idempotently ==="
 grep -q '<!-- codex-cli-pr-review -->' "$WORKFLOW" \
   || fail "중복 방지 marker 부재"
 grep -q 'issues.updateComment' "$WORKFLOW" \
   || fail "기존 리뷰 코멘트 update 경로 부재"
 grep -q 'issues.createComment' "$WORKFLOW" \
   || fail "신규 리뷰 코멘트 create 경로 부재"
-ok "check 5: marker 기반 update/create 코멘트 경로 존재"
+ok "check 6: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
 echo "ALL CHECKS PASSED"
