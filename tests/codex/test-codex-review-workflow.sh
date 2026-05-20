@@ -85,8 +85,11 @@ grep -qE 'uses: actions/checkout@[0-9a-f]{40}' "$WORKFLOW" \
   || fail "actions/checkout SHA 고정 부재"
 grep -qE 'uses: actions/setup-node@[0-9a-f]{40}' "$WORKFLOW" \
   || fail "actions/setup-node SHA 고정 부재"
-grep -q 'npm install -g @openai/codex@0\.132\.0' "$WORKFLOW" \
+grep -qE 'npm install -g @openai/codex@[0-9]+\.[0-9]+\.[0-9]+' "$WORKFLOW" \
   || fail "@openai/codex 버전 고정 부재"
+if grep -q 'PR_BASE_SHA:' "$WORKFLOW" || grep -q 'PR_HEAD_SHA:' "$WORKFLOW"; then
+  fail "미사용 PR_BASE_SHA/PR_HEAD_SHA env 가 남아 있음"
+fi
 ok "check 7: Actions SHA 및 Codex CLI 버전이 고정됨"
 
 echo ""
