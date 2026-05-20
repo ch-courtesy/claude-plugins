@@ -62,7 +62,6 @@ jobs:
 
             core.setOutput('number', String(pr.number));
             core.setOutput('base_ref', pr.base.ref);
-            core.setOutput('base_sha', pr.base.sha);
             core.setOutput('head_sha', pr.head.sha);
             core.setOutput('title', pr.title || '');
 
