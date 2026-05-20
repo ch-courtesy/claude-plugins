@@ -1014,14 +1014,15 @@ exit 0
 GH
   chmod +x "$mock_bin/gh"
 
+  local out_main=""
   set +e
-  ( cd "$project" && PATH="$mock_bin:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=1 \
-    bash "$SKILL_REFS/loop.sh" start "171main" >/dev/null 2>&1 )
+  out_main=$( cd "$project" && PATH="$mock_bin:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=1 \
+    bash "$SKILL_REFS/loop.sh" start "171main" 2>&1 )
   set -e
 
   # AC2: 주 작업트리에서는 nested .worktree 가 그대로 생성되어야 (기존 동작 보존)
   [[ -d "$project/milestones/regular/loops/171main/.worktree" ]] \
-    || fail "주 작업트리에서 nested .worktree 미생성 — AC2 위반"
+    || fail "주 작업트리에서 nested .worktree 미생성 — AC2 위반. out=$out_main"
   pass "SPEC 171: 주 작업트리 cmd_start → nested .worktree 생성 보존 (AC2)"
 }
 
