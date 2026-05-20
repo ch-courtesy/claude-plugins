@@ -46,7 +46,7 @@ loop 워커가 자기 SPEC의 명시 scope를 벗어나는 변경을 자유롭�
 
 ## 검증
 
-frontmatter `verify` 명령이 0 exit으로 끝나야 합니다 (4개 grep -qE 체인 — AC1·AC2·AC3 게이트 표현과 헌법 보강 표현 각각 독립 검출):
+frontmatter `verify` 명령이 0 exit으로 끝나야 합니다 (4개 grep -qE 체인 — AC1·AC2·AC3 게이트 표현과 헌법 보강 표현 각각 독립 검출). 아래 블록은 frontmatter `verify`의 문서적 미러(reference)이며 권위는 line 10 frontmatter에 있습니다 — 두 표현이 다르면 frontmatter가 정답:
 
 ```bash
 # AC1 (이터 종료 후 drift 검출)
