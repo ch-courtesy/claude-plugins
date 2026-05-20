@@ -327,6 +327,8 @@ compute_paths() {
   fi
 
   # v0.2 cutover: 워크트리·lock·메타 파일이 모두 milestones/<m>/loops/<c>[-<slug>]/ 단일 트리.
+  # (SPEC 171: PROJECT_ROOT·LOOPS_DIR 의 보조 worktree 기준 재계산은 본 SPEC scope 외 —
+  #  별도 SPEC 으로 보강 검토. 본 SPEC 는 nested worktree 생성 단계만 skip 한다.)
   LOOPS_DIR="$PROJECT_ROOT/milestones/$milestone/loops/$loop_dir_name"
   # LOOPS_DIR_REL: worktree 안의 SPEC.md canonical 경로 prefix.
   # SPEC.md 는 feat 브랜치에 동일 slug-bearing 경로로 commit 되어 worktree 에서
@@ -337,6 +339,21 @@ compute_paths() {
   # 정규화된 task-id 와 발견된 feat 브랜치를 caller 에게 노출.
   TASK_ID_NORMALIZED="$task_id"
   FEAT_BRANCH="$feat_branch"
+}
+
+# SPEC 171: 호출 cwd 가 git 저장소의 *주 작업트리* 인지 *보조 worktree* 인지 판정한다.
+#
+# 판정 기준 (SPEC 171 제약):
+#   - 주 작업트리: top-level 의 .git 이 디렉토리.
+#   - 보조 worktree: top-level 의 .git 이 `gitdir: <main_repo>/.git/worktrees/<name>` 형태의
+#     파일. git 이 보조 worktree 에 항상 적용하는 표준 구조.
+#
+# 반환: 보조 worktree 면 0 (true), 주 작업트리 또는 git 저장소 외부면 non-zero (false).
+# bare repo·submodule·detached HEAD 등 비표준 환경은 보장 범위 외 (SPEC 171 제약).
+is_secondary_worktree() {
+  local top
+  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [[ -f "$top/.git" ]]
 }
 
 # feat 브랜치 검색: input-id (정규화된 task-id 의 child 컴포넌트) 만으로 `feat/<id>` 또는
@@ -884,6 +901,14 @@ cmd_start() {
     esac
   done
 
+  # SPEC 171: 호출 cwd 가 주 작업트리인지 보조 worktree 인지 entry 직후 검사. 보조 worktree
+  # 분기에서는 nested .worktree 생성·헌법 복사 등 *worktree 셋업 단계* 만 skip 한다 — lock·
+  # SPEC 검증 등 안전 검사는 두 분기 모두 동일 수행 (AC6).
+  local is_secondary=0
+  if is_secondary_worktree; then
+    is_secondary=1
+  fi
+
   compute_paths "$task_id"
   # 정규화된 task-id를 이후 출력·logging에 사용 (regular/ prefix 포함)
   task_id="$TASK_ID_NORMALIZED"
@@ -948,8 +973,15 @@ cmd_start() {
   # 헌법 §11.2가 워커에게 label 부착 동작을 강제한다 (SPEC 150).
   ensure_label_exists "$LOOP_DONE_LABEL" || true
 
-  # 6. 워크트리 생성 (없는 경우)
-  if [[ ! -d "$WT" ]]; then
+  # 6. 워크트리 생성 (없는 경우) — SPEC 171: 보조 worktree 분기에서는 nested 생성 생략.
+  if (( is_secondary == 1 )); then
+    # SPEC 171 AC3: 보조 worktree 안에서 호출 — nested .worktree 생성·헌법 복사 단계 skip.
+    # 현재 cwd 의 worktree top-level 을 작업 공간으로 그대로 사용한다.
+    # 후속 흐름(BASE_SHA 캡처·iter 실행 경로 정합) 의 세부 조정은 SPEC 171 비-목표로
+    # 명시 — 별도 SPEC 으로 보강 검토.
+    WT="$(git rev-parse --show-toplevel)"
+    echo "[$(now_iso)] 보조 worktree 감지 — nested worktree 생성 생략. 현재 cwd 사용: $WT"
+  elif [[ ! -d "$WT" ]]; then
     echo "[$(now_iso)] 워크트리 생성 시작: $WT"
 
     # 새 nested 정책: WT 부모(loops_dir)는 이미 SPEC.md 존재 시 만들어짐.
@@ -1529,38 +1561,44 @@ EOF
 }
 
 # ----- subcommand 디스패처 -----
-
-if [[ $# -lt 1 ]]; then
-  usage
-fi
-
-SUBCOMMAND="$1"
-shift
-
-case "$SUBCOMMAND" in
-  prepare)
-    cmd_prepare "$@"
-    ;;
-  start)
-    cmd_start "$@"
-    ;;
-  status)
-    cmd_status "${1:-}"
-    ;;
-  stop)
-    cmd_stop "${1:-}"
-    ;;
-  list)
-    cmd_list
-    ;;
-  cleanup)
-    cmd_cleanup "$@"
-    ;;
-  logs)
-    cmd_logs "$@"
-    ;;
-  *)
-    echo "알 수 없는 subcommand: $SUBCOMMAND" >&2
+#
+# SPEC 171: 본 스크립트를 test 가 `source` 로 불러서 함수(예: is_secondary_worktree) 만
+# 단위 검증할 수 있도록, 디스패처는 실행 모드일 때만 동작하게 가드한다.
+# `${BASH_SOURCE[0]} == ${0}` 는 표준 bash 패턴 — script 로 실행 시 둘이 일치, source 시
+# `${0}` 는 호출 셸의 $0 이라 불일치.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  if [[ $# -lt 1 ]]; then
     usage
-    ;;
-esac
+  fi
+
+  SUBCOMMAND="$1"
+  shift
+
+  case "$SUBCOMMAND" in
+    prepare)
+      cmd_prepare "$@"
+      ;;
+    start)
+      cmd_start "$@"
+      ;;
+    status)
+      cmd_status "${1:-}"
+      ;;
+    stop)
+      cmd_stop "${1:-}"
+      ;;
+    list)
+      cmd_list
+      ;;
+    cleanup)
+      cmd_cleanup "$@"
+      ;;
+    logs)
+      cmd_logs "$@"
+      ;;
+    *)
+      echo "알 수 없는 subcommand: $SUBCOMMAND" >&2
+      usage
+      ;;
+  esac
+fi

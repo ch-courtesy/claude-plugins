@@ -869,6 +869,156 @@ CL
   pass "(AC6 rebase) rebase 경로 충돌 자동 해소 실패 → 워크트리 복구 + non-zero exit"
 }
 
+# ----- SPEC 171: cmd_start 진입 시 주/보조 worktree 분기 (static grep) -----
+test_spec_171_worktree_detection_static() {
+  local S="$REPO_ROOT/plugins/autopilot/skills/loop"
+  # AC1·AC4: loop.sh 본체에 분기 검사 함수 정의 + cmd_start 가 호출
+  grep -qE 'is_secondary_worktree\(\)' "$S/references/loop.sh" \
+    || fail "loop.sh: is_secondary_worktree() 함수 정의 부재 (AC1·AC4)"
+  # cmd_start 함수 본체에서 is_secondary_worktree 호출이 있는지 (entry 직후 분기)
+  awk '/^cmd_start\(\)/,/^}/' "$S/references/loop.sh" | grep -qE 'is_secondary_worktree' \
+    || fail "loop.sh cmd_start: is_secondary_worktree 호출 부재 — entry 분기 미배선 (AC1·AC4)"
+  # AC5: SKILL.md 호출 방법 절에 두 분기 어휘 명시
+  grep -q '주 작업트리' "$S/SKILL.md" \
+    || fail "SKILL.md: '주 작업트리' 어휘 부재 (AC5)"
+  grep -q '보조 worktree' "$S/SKILL.md" \
+    || fail "SKILL.md: '보조 worktree' 어휘 부재 (AC5)"
+  grep -qE '생략|skip' "$S/SKILL.md" \
+    || fail "SKILL.md: 보조 worktree 분기에서 nested wt 생성 '생략|skip' 어휘 부재 (AC5)"
+  pass "SPEC 171 정적: loop.sh 분기 함수·cmd_start 호출·SKILL.md 어휘"
+}
+
+# ----- SPEC 171: is_secondary_worktree 검출 (소스 후 함수 호출) -----
+test_spec_171_is_secondary_worktree_detection() {
+  local project="$WORK_DIR/sw_detect_proj"
+  local secondary="$WORK_DIR/sw_detect_secondary"
+  git init -q -b main "$project"
+  (
+    cd "$project"
+    git config user.email "t@e.com"; git config user.name "T"
+    git commit --allow-empty -q -m initial
+    git worktree add -q -b feat/sw-detect "$secondary" HEAD
+  ) || fail "is_secondary_worktree setup"
+
+  # 주 작업트리에서: 함수 호출 → non-zero (false) 기대
+  local rc_main=0
+  ( cd "$project"; source "$SKILL_REFS/loop.sh"; is_secondary_worktree ) >/dev/null 2>&1 \
+    || rc_main=$?
+  [[ $rc_main -eq 0 ]] && fail "is_secondary_worktree: 주 작업트리에서 0 exit (=true) 반환 — false 기대"
+
+  # 보조 worktree에서: 함수 호출 → 0 exit (true) 기대
+  local rc_sec=0
+  ( cd "$secondary"; source "$SKILL_REFS/loop.sh"; is_secondary_worktree ) >/dev/null 2>&1 \
+    || rc_sec=$?
+  [[ $rc_sec -eq 0 ]] || fail "is_secondary_worktree: 보조 worktree에서 non-zero ($rc_sec) — true 기대"
+
+  pass "SPEC 171: is_secondary_worktree 검출 (주=false, 보조=true)"
+}
+
+# ----- SPEC 171: 보조 worktree cwd 에서 cmd_start 호출 → nested .worktree 생성 생략 (AC3) -----
+test_spec_171_cmd_start_secondary_skips_nested_wt() {
+  local project="$WORK_DIR/sw_skip_proj"
+  local secondary="$WORK_DIR/sw_skip_secondary"
+  git init -q -b main "$project"
+  (
+    cd "$project"
+    git config user.email "t@e.com"; git config user.name "T"
+    git commit --allow-empty -q -m initial
+    git worktree add -q -b feat/171skip "$secondary" HEAD
+    cd "$secondary"
+    mkdir -p milestones/regular/loops/171skip
+    cat > milestones/regular/loops/171skip/SPEC.md <<'SPEC'
+---
+scope:
+  include: ["**"]
+verify: "true"
+---
+# Test SPEC 171 skip
+SPEC
+    git add milestones/regular/loops/171skip/SPEC.md
+    git commit -q -m "spec: 171skip"
+  ) || fail "cmd_start secondary skip: setup"
+
+  local mock_bin="$WORK_DIR/sw_skip_mock"
+  mkdir -p "$mock_bin"
+  cat > "$mock_bin/claude" <<'CL'
+#!/usr/bin/env bash
+exit 0
+CL
+  chmod +x "$mock_bin/claude"
+  cat > "$mock_bin/gh" <<'GH'
+#!/usr/bin/env bash
+exit 0
+GH
+  chmod +x "$mock_bin/gh"
+
+  local out=""
+  set +e
+  out=$( cd "$secondary" && PATH="$mock_bin:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=1 \
+         bash "$SKILL_REFS/loop.sh" start "171skip" 2>&1 )
+  set -e
+
+  # AC3: 보조 worktree 안에 nested .worktree 가 생성되지 않아야 함
+  [[ -d "$secondary/milestones/regular/loops/171skip/.worktree" ]] \
+    && fail "보조 worktree에서 nested .worktree 생성됨 — AC3 위반. out=$out"
+
+  # AC3: skip 메시지가 출력되어야 함
+  echo "$out" | grep -qE '보조 worktree|nested.*생략|생성 생략' \
+    || fail "보조 worktree skip 메시지 부재 (AC3). out=$out"
+
+  # AC6: SPEC 검증 동작 — SPEC 부재면 die 하는지 별도 케이스에서 확인 가능. 본 케이스는
+  # 정상 SPEC 이라 검증 통과까지 진행했고 nested 생성만 skip 됐다는 사실로 충족.
+  pass "SPEC 171: 보조 worktree cmd_start → nested .worktree 생성 skip (AC3·AC6)"
+}
+
+# ----- SPEC 171: 주 작업트리 cwd 에서 cmd_start 호출 → 기존 nested .worktree 생성 보존 (AC2) -----
+test_spec_171_cmd_start_main_creates_nested_wt() {
+  local project="$WORK_DIR/sw_main_proj"
+  git init -q -b main "$project"
+  (
+    cd "$project"
+    git config user.email "t@e.com"; git config user.name "T"
+    git commit --allow-empty -q -m initial
+    # feat 브랜치에 SPEC.md 커밋한 후 main 으로 복귀
+    git checkout -q -b feat/171main
+    mkdir -p milestones/regular/loops/171main
+    cat > milestones/regular/loops/171main/SPEC.md <<'SPEC'
+---
+scope:
+  include: ["**"]
+verify: "true"
+---
+# Test SPEC 171 main
+SPEC
+    git add milestones/regular/loops/171main/SPEC.md
+    git commit -q -m "spec: 171main"
+    git checkout -q main
+  ) || fail "cmd_start main create: setup"
+
+  local mock_bin="$WORK_DIR/sw_main_mock"
+  mkdir -p "$mock_bin"
+  cat > "$mock_bin/claude" <<'CL'
+#!/usr/bin/env bash
+exit 0
+CL
+  chmod +x "$mock_bin/claude"
+  cat > "$mock_bin/gh" <<'GH'
+#!/usr/bin/env bash
+exit 0
+GH
+  chmod +x "$mock_bin/gh"
+
+  set +e
+  ( cd "$project" && PATH="$mock_bin:$PATH" MAX_ITERATIONS=1 WALL_CLOCK_MINUTES=1 \
+    bash "$SKILL_REFS/loop.sh" start "171main" >/dev/null 2>&1 )
+  set -e
+
+  # AC2: 주 작업트리에서는 nested .worktree 가 그대로 생성되어야 (기존 동작 보존)
+  [[ -d "$project/milestones/regular/loops/171main/.worktree" ]] \
+    || fail "주 작업트리에서 nested .worktree 미생성 — AC2 위반"
+  pass "SPEC 171: 주 작업트리 cmd_start → nested .worktree 생성 보존 (AC2)"
+}
+
 # ----- 실행 -----
 test_spec_verify_command
 test_phase_scripts_arg_validation
@@ -885,6 +1035,10 @@ test_sync_merge_path_remote_tracking_exists
 test_sync_no_force_push_and_no_direct_rebase_merge
 test_sync_conflict_failure_recovers_merge_path
 test_sync_conflict_failure_recovers_rebase_path
+test_spec_171_worktree_detection_static
+test_spec_171_is_secondary_worktree_detection
+test_spec_171_cmd_start_secondary_skips_nested_wt
+test_spec_171_cmd_start_main_creates_nested_wt
 
 echo "----------"
 echo "ALL TESTS PASSED"

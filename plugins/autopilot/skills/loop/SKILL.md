@@ -78,8 +78,8 @@ Skill(skill: "spec", args: "<task-id>")
 - `--spec <path>` 지정 시 외부 파일을 `milestones/<m>/loops/<c>/SPEC.md`로 복사 (prepare 대체)
 - `milestones/<m>/loops/<c>/SPEC.md` 존재 + `[NEEDS CLARIFICATION]` 마커 없음 + placeholder 모두 치환됨 (legacy `.loops/<task-id>/SPEC.md` fallback 없음 — v0.2 cutover)
 - 락 미보유 — lock 파일은 `milestones/<m>/loops/<c>/.lock`
-- 워크트리 없으면 생성 (메인 레포 내부 nested 위치 `milestones/<m>/loops/<c>/.worktree/` — `.gitignore`로 추적 차단)
-- 헌법(`references/constitution.md`)을 워크트리의 CLAUDE.md로 복사
+- 호출 cwd 가 git 저장소의 **주 작업트리**(main working tree)인 경우 — 기존 동작 보존: 워크트리 없으면 메인 레포 내부 nested 위치 `milestones/<m>/loops/<c>/.worktree/` 에 생성하고(`.gitignore`로 추적 차단), 헌법(`references/constitution.md`)을 워크트리의 CLAUDE.md로 복사
+- 호출 cwd 가 **보조 worktree** 안인 경우 (SPEC 171) — nested worktree 생성 **생략**, 현재 cwd 의 worktree 를 작업 공간으로 그대로 사용 (헌법 복사 등 worktree 셋업 단계도 skip). 단 락·SPEC 검증 등 안전 검사는 동일하게 수행
 - 락 획득 + 이터레이션 루프
 
 #### 자동 Monitor 가설 (기본 동작)
