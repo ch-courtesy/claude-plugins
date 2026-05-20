@@ -73,21 +73,36 @@ fi
 ok "check 6: checkout 이 persist-credentials:false 를 사용하지 않음"
 
 echo ""
-echo "=== check 7: legacy access-token auth is not used ==="
+echo "=== check 7: third-party actions and Codex CLI are pinned ==="
+if grep -qE 'uses: actions/[a-z-]+@v[0-9]+' "$WORKFLOW"; then
+  fail "GitHub Actions가 mutable version tag 로 참조됨"
+fi
+grep -qE 'uses: actions/github-script@[0-9a-f]{40}' "$WORKFLOW" \
+  || fail "actions/github-script SHA 고정 부재"
+grep -qE 'uses: actions/checkout@[0-9a-f]{40}' "$WORKFLOW" \
+  || fail "actions/checkout SHA 고정 부재"
+grep -qE 'uses: actions/setup-node@[0-9a-f]{40}' "$WORKFLOW" \
+  || fail "actions/setup-node SHA 고정 부재"
+grep -q 'npm install -g @openai/codex@0\.132\.0' "$WORKFLOW" \
+  || fail "@openai/codex 버전 고정 부재"
+ok "check 7: Actions SHA 및 Codex CLI 버전이 고정됨"
+
+echo ""
+echo "=== check 8: legacy access-token auth is not used ==="
 if grep -q 'CODEX_ACCESS_TOKEN' "$WORKFLOW"; then
   fail "CODEX_ACCESS_TOKEN 기반 인증이 남아 있음"
 fi
-ok "check 7: CODEX_ACCESS_TOKEN 기반 인증 제거됨"
+ok "check 8: CODEX_ACCESS_TOKEN 기반 인증 제거됨"
 
 echo ""
-echo "=== check 8: review output is posted idempotently ==="
+echo "=== check 9: review output is posted idempotently ==="
 grep -q '<!-- codex-cli-pr-review -->' "$WORKFLOW" \
   || fail "중복 방지 marker 부재"
 grep -q 'issues.updateComment' "$WORKFLOW" \
   || fail "기존 리뷰 코멘트 update 경로 부재"
 grep -q 'issues.createComment' "$WORKFLOW" \
   || fail "신규 리뷰 코멘트 create 경로 부재"
-ok "check 8: marker 기반 update/create 코멘트 경로 존재"
+ok "check 9: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
 echo "ALL CHECKS PASSED"
