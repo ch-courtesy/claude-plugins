@@ -181,7 +181,7 @@ jobs:
               if ($findings | length) == 0 then
                 "고신뢰 finding 없음."
               else
-                "Finding 목록:\n" + (
+                "발견 사항:\n" + (
                   [$findings[] |
                     "- [" + .severity + "/" + (.confidence_score|tostring) + "] " +
                     .title + " (" + .file + ":" + ((.line // 1)|tostring) + ")\n  " +
@@ -249,9 +249,15 @@ jobs:
               per_page: 100,
             });
 
-            const viewer = await github.rest.users.getAuthenticated();
+            let currentLogin = 'github-actions[bot]';
+            try {
+              const viewer = await github.rest.users.getAuthenticated();
+              currentLogin = viewer.data.login;
+            } catch (error) {
+              core.info('Authenticated user lookup is unavailable for this token; falling back to github-actions[bot].');
+            }
             const previous = comments.find((comment) =>
-              comment.user?.login === viewer.data.login &&
+              comment.user?.login === currentLogin &&
               comment.body?.includes(marker)
             );
 

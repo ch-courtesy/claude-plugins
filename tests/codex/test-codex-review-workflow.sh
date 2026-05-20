@@ -116,6 +116,8 @@ grep -q 'CODEX_REVIEW_GITHUB_TOKEN || github.token' "$WORKFLOW" \
   || fail "review publish token 이 CODEX_REVIEW_GITHUB_TOKEN fallback 을 사용하지 않음"
 grep -q 'users.getAuthenticated' "$WORKFLOW" \
   || fail "managed comment 가 현재 token 사용자 기준으로 previous comment 를 찾지 않음"
+grep -q "falling back to github-actions\\[bot\\]" "$WORKFLOW" \
+  || fail "GITHUB_TOKEN /user 조회 실패 시 github-actions fallback 부재"
 grep -q 'issues.updateComment' "$WORKFLOW" \
   || fail "기존 리뷰 코멘트 update 경로 부재"
 grep -q 'issues.createComment' "$WORKFLOW" \
