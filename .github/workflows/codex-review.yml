@@ -103,8 +103,8 @@ jobs:
             exit 1
           fi
 
-          mkdir -p "$HOME/.codex"
           umask 077
+          mkdir -p "$HOME/.codex"
           printf '%s' "$CODEX_AUTH_JSON" > "$HOME/.codex/auth.json"
 
           mkdir -p .codex-review
@@ -142,7 +142,7 @@ jobs:
 
           codex review \
             --base "origin/$PR_BASE_REF" \
-            "$(cat .codex-review/full-prompt.md)" \
+            - < .codex-review/full-prompt.md \
             > .codex-review/output.md
 
       - name: Post Codex review comment
