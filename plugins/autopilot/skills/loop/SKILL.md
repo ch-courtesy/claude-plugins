@@ -103,14 +103,14 @@ Skill(skill: "spec", args: "<task-id>")
 
 #### 완료 라벨 부착 이후 PR 생성·재사용 phase (default)
 
-task 가 완료 신호(`LOOP_DONE_LABEL` 라벨 부착)에 도달한 직후 같은 워크트리에서 PR 생성(또는 동일 브랜치의 open PR 재사용) 단계가 **default로 자동 실행**됩니다 (SPEC 103 AC1). 건너뛰려면 `--no-pr` 플래그를 명시(SPEC 103 AC2).
+task 가 완료 신호(`LOOP_DONE_LABEL` 라벨 부착)에 도달한 직후 같은 워크트리에서 PR 생성(또는 동일 브랜치의 open PR 재사용) 단계가 **default로 자동 실행**됩니다. 건너뛰려면 `--no-pr` 플래그를 명시합니다.
 
 활성화 시 동작:
 - default 브랜치 자동 감지 (`gh repo view` → `git symbolic-ref refs/remotes/origin/HEAD`)
-- push 직전에 `origin/<base>`로부터 `git fetch` + 단일 sync helper(`references/rebase-phase.sh`)로 base 동기화 (SPEC 169) — helper가 `git ls-remote --heads origin <branch>`로 원격 트래킹 브랜치 존재 여부를 판정해 두 경로로 분기한다:
+- push 직전에 `origin/<base>`로부터 `git fetch` + 단일 sync helper(`references/rebase-phase.sh`)로 base 동기화 — helper가 `git ls-remote --heads origin <branch>`로 원격 트래킹 브랜치 존재 여부를 판정해 두 경로로 분기한다:
   - **부재 → rebase 경로**: `git rebase origin/<base>`로 history 재배치 (첫 PR 진입 전 깨끗한 linear history)
   - **존재 → merge 경로**: `git merge --ff-only` → 실패 시 non-ff `git merge --no-edit`로 base 변경분만 흡수 (자기 commit SHA 보존, force push 회피)
-- 어떤 경로에서도 force push(`--force`·`--force-with-lease` 포함)는 도입되지 않는다 (SPEC 169 AC4). 충돌 시 claude CLI 세션 1회로 자동 해소 시도(SPEC 169 AC5), 실패 시 해당 모드의 `--abort`로 워크트리 복구 + non-zero exit (보수적 좌절, SPEC 169 AC6)
+- 어떤 경로에서도 force push(`--force`·`--force-with-lease` 포함)는 도입되지 않는다. 충돌 시 claude CLI 세션 1회로 자동 해소 시도, 실패 시 해당 모드의 `--abort`로 워크트리 복구 + non-zero exit (보수적 좌절)
 - 현재 브랜치를 `origin`으로 push
 - 동일 head 브랜치에 open PR이 없으면 **새 PR 생성**, 있으면 **기존 PR을 in-place로 갱신** (제목·body 동기화)
 - PR 제목 = SPEC 문서의 H1, body = SPEC "무엇을 만들 것인가" 본문 + base..HEAD commit log
@@ -119,20 +119,20 @@ task 가 완료 신호(`LOOP_DONE_LABEL` 라벨 부착)에 도달한 직후 같�
 - 성공 시 PR URL·state(open)를 stdout으로 출력, worktree·local 브랜치 보존
 - push·pr create·pr edit 중 하나라도 실패하면 non-zero exit으로 단계 중단 (워크트리는 유지)
 - default 브랜치 감지 실패 시 push·pr 호출 전 abort
-- PR 생성·갱신 직후 **Monitor 단계** 진입 (SPEC 103 AC5): PR check가 모두 완료(success/failure)됐는데 PR state가 OPEN이고 reviewDecision이 없는 "stuck" 패턴을 감지하면 `gh pr checks <num> --rerun`을 호출. 최대 **3회** 재트리거하고 상한 도달 시 stderr에 사용자 개입 안내. MERGED·CLOSED 상태 전이 또는 리뷰 활동(reviewDecision set) 감지 시 즉시 종료. check 진행 중·정보 없음도 stuck 아닌 것으로 간주해 종료. 상한 도달은 경고이며 loop 자체는 정상 종료
-- **Cleanup 안내 단계** (SPEC 103 AC6): Monitor가 PR state를 MERGED 또는 CLOSED로 감지해 종료할 때 셸 드라이버는 "cleanup 후보" 안내(=PR 번호·상태·자동 삭제 차단·수동 cleanup 명령 위치)를 stdout에 명시 출력하고 worktree·feat 브랜치는 그대로 보존한다. 본 스킬을 통한 호출에서 cleanup 안내가 감지되면 `AskUserQuestion`으로 "worktree·feat 브랜치 cleanup 승인?"을 명시 확인하고 사용자의 명시 승인이 있을 때만 `cleanup` 서브커맨드를 호출한다 — 승인 없이 자동 삭제 금지
+- PR 생성·갱신 직후 **Monitor 단계** 진입: PR check가 모두 완료(success/failure)됐는데 PR state가 OPEN이고 reviewDecision이 없는 "stuck" 패턴을 감지하면 `gh pr checks <num> --rerun`을 호출. 최대 **3회** 재트리거하고 상한 도달 시 stderr에 사용자 개입 안내. MERGED·CLOSED 상태 전이 또는 리뷰 활동(reviewDecision set) 감지 시 즉시 종료. check 진행 중·정보 없음도 stuck 아닌 것으로 간주해 종료. 상한 도달은 경고이며 loop 자체는 정상 종료
+- **Cleanup 안내 단계**: Monitor가 PR state를 MERGED 또는 CLOSED로 감지해 종료할 때 셸 드라이버는 "cleanup 후보" 안내(=PR 번호·상태·자동 삭제 차단·수동 cleanup 명령 위치)를 stdout에 명시 출력하고 worktree·feat 브랜치는 그대로 보존한다. 본 스킬을 통한 호출에서 cleanup 안내가 감지되면 `AskUserQuestion`으로 "worktree·feat 브랜치 cleanup 승인?"을 명시 확인하고 사용자의 명시 승인이 있을 때만 `cleanup` 서브커맨드를 호출한다 — 승인 없이 자동 삭제 금지
 
 `--no-pr` 플래그는 셸 드라이버(`loop.sh`)에 직접 전달되며, PR phase 진입 자체를 차단합니다. 이전 버전에서 `request_review: true`로 opt-in을 사용하던 호출자는 별도 마이그레이션이 필요 없습니다(default가 ON으로 변경됐으므로 동일 동작). 이전 버전에서 `request_review: false`(또는 키 미지정)로 PR을 차단하던 호출자는 `--no-pr`로 동일 동작을 재현해야 합니다.
 
 기존 PR body의 사용자 수기 편집 보호를 위해 자동 영역은 `<!-- autopilot:pr-body:begin --> ... <!-- autopilot:pr-body:end -->` marker fence 안에만 작성됩니다.
 
-#### 완료 라벨 부착 이후 PR 리뷰 자동 fix 루프 (SPEC 123, `request_review: true` opt-in)
+#### 완료 라벨 부착 이후 PR 리뷰 자동 fix 루프 (`request_review: true` opt-in)
 
 SPEC frontmatter에 `request_review: true`가 지정된 task만 본 흐름을 진입합니다. PR 생성·재사용이 성공한 직후 다음 sub-phase가 차례·일부 background로 실행됩니다:
 
 | 단계 | 스크립트 | 역할 |
 |---|---|---|
-| pre-PR sync | `references/rebase-phase.sh` | default 브랜치로부터 워크트리 feat 브랜치 동기화 (SPEC 169). 원격 트래킹 부재면 rebase, 존재면 merge 경로. 충돌 시 claude CLI 1회 자동 해소, 실패 시 해당 모드의 `--abort`로 복구 + ESCALATION abort. |
+| pre-PR sync | `references/rebase-phase.sh` | default 브랜치로부터 워크트리 feat 브랜치 동기화. 원격 트래킹 부재면 rebase, 존재면 merge 경로. 충돌 시 claude CLI 1회 자동 해소, 실패 시 해당 모드의 `--abort`로 복구 + ESCALATION abort. |
 | review-fix 루프 (background) | `references/review-fix-phase.sh` | 30초 주기 폴링 (PR comments · review threads · summary). 새 이벤트마다 base 재동기화(sync helper — merge 경로) → claude CLI fix → commit+push → (필요 시) 1개 반박 코멘트. |
 | 자동 머지 (auto-merge) | `references/review-fix-phase.sh` 내부 | reviewDecision `APPROVED` 또는 owner의 종료 코멘트(`/done`·`합격`·`통과`)로 `gh pr merge --squash` 수행. PR이 이미 `merged`이면 자동 머지 건너뜀. |
 | cleanup | `references/cleanup-phase.sh` | PR `merged` 후 worktree 제거 + 로컬 feat `branch -D` + origin feat `push --delete`. |
@@ -176,9 +176,9 @@ review-fix-phase의 silent-fail 검출기(연속 idle 폴링 후 stuck 패턴 es
 | 환경변수 | 기본값 | floor | 의미 |
 |---|---|---|---|
 | `LOOP_REVIEW_IDLE_THRESHOLD` | 3 | 3 | 새 이벤트 0건이 N회 연속 폴링되면 silent-fail 패턴 평가 |
-| `LOOP_REVIEW_PR_GRACE_SECS` | 300 (5분) | 0 | PR 생성 직후 N초 동안은 silent-fail 검출기 평가 자체를 skip — GitHub Actions check 등록 지연·큐 지연 흡수 (SPEC 181). 0으로 설정 시 grace 비활성화 |
+| `LOOP_REVIEW_PR_GRACE_SECS` | 300 (5분) | 0 | PR 생성 직후 N초 동안은 silent-fail 검출기 평가 자체를 skip — GitHub Actions check 등록 지연·큐 지연 흡수. 0으로 설정 시 grace 비활성화 |
 
-검출기는 `statusCheckRollup`의 전체 check 수가 0이면(check 미등록·정보 부족) 해당 폴링 회차의 ESCALATION을 발동하지 않고 카운터만 리셋합니다 (SPEC 181 AC2). 전체 check 수가 0보다 크고 pending 0 + 다른 활동(리뷰·코멘트·inline·owner cmd) 모두 0일 때만 진짜 stuck으로 escalate합니다 (AC3).
+검출기는 `statusCheckRollup`의 전체 check 수가 0이면(check 미등록·정보 부족) 해당 폴링 회차의 ESCALATION을 발동하지 않고 카운터만 리셋합니다. 전체 check 수가 0보다 크고 pending 0 + 다른 활동(리뷰·코멘트·inline·owner cmd) 모두 0일 때만 진짜 stuck으로 escalate합니다.
 
 요구: `gh` CLI 설치 + OAuth 인증.
 
@@ -208,7 +208,7 @@ start 첫 호출에 자동:
 |---|---|
 | `constitution.md` | 워커 헌법. start 시점에 워크트리 CLAUDE.md로 복사 |
 | `loop.sh` | 외부 셸 드라이버. 모든 subcommand의 핵심 로직 |
-| `task-storage.sh` | task 저장소 라벨 검출 공통 헬퍼 (loop.sh·dispatch.sh 공유, SPEC 175) |
+| `task-storage.sh` | task 저장소 라벨 검출 공통 헬퍼 (loop.sh·dispatch.sh 공유) |
 | `pr-phase.sh` | 완료 라벨 부착 이후 PR 생성·재사용 단계 |
 | `operational-guide.md` | 사용자용 운영 가이드 (워크플로·환경 변수·객관 게이트 표·의존성) |
 | `status-format.md` | status 출력 형식 가이드 |

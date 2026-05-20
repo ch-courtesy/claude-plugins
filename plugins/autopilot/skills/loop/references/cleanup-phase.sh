@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# cleanup-phase.sh — SPEC 123 M3
+# cleanup-phase.sh
 #
 # PR이 MERGED 상태로 전이된 직후 호출되어 워크트리·로컬 feat·원격 feat 브랜치를
 # 차례로 정리하고, 추상 상태를 "Done"으로 전이한다.
@@ -7,7 +7,7 @@
 # 사용:
 #   bash cleanup-phase.sh <worktree> <branch> <task-id> <project-root>
 #
-# 동작 (SPEC 123 AC16·AC17):
+# 동작:
 #   1. 사전 검사: 워크트리에 미커밋 변경 없음 (git status --porcelain 비어 있음)
 #   2. git worktree remove <wt>
 #   3. git branch -D <branch>            (로컬 feat 삭제)
@@ -16,7 +16,7 @@
 #      (환경변수 LOOP_PROJECT_ID·LOOP_STATUS_FIELD_ID·LOOP_STATUS_DONE_OPTION_ID 부재 시
 #       무음 skip하여 phase 자체는 계속 진행)
 #   6. 어떤 단계가 비-zero exit이면 stdout에 "ESCALATION cleanup-phase: ..." emit
-#      후 비-zero exit (SPEC 123 AC19).
+#      후 비-zero exit.
 
 set -euo pipefail
 
