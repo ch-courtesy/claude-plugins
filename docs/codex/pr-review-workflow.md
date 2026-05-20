@@ -20,9 +20,10 @@
    - `approve`: `gh pr review --approve`
    - `request_changes`: `gh pr review --request-changes`
    - `comment`, `needs_context`, `unavailable`: `gh pr review --comment`
-7. managed issue comment를 marker 기반으로 create/update한다.
+7. `approve` 판정이 안전하게 나온 경우 `approved` 라벨을 부착한다. approve가 아닌 판정에서는 stale 신호를 막기 위해 해당 라벨을 제거한다.
+8. managed issue comment를 marker 기반으로 create/update한다.
 
-`GITHUB_TOKEN`은 `pull-requests: write` 권한이 있어도 GitHub 정책상 PR approve가 거부될 수 있다. approve까지 자동화하려면 `CODEX_REVIEW_GITHUB_TOKEN`에 리뷰 작성 권한이 있는 별도 bot/user 토큰을 저장한다. 이 토큰은 PR 작성자와 다른 계정이어야 self-approval 제한을 피할 수 있다.
+`GITHUB_TOKEN`은 `pull-requests: write` 권한이 있어도 GitHub 정책상 PR approve가 거부될 수 있다. 이 경우 workflow는 comment review로 대체하고 `approved` 라벨을 부착해 자동화가 소비할 수 있는 승인 신호를 남긴다. GitHub의 실제 approve까지 자동화하려면 `CODEX_REVIEW_GITHUB_TOKEN`에 리뷰 작성 권한이 있는 별도 bot/user 토큰을 저장한다. 이 토큰은 PR 작성자와 다른 계정이어야 self-approval 제한을 피할 수 있다.
 
 ## 단계적 고도화 계획
 
@@ -37,6 +38,7 @@
 완료 기준:
 - JSON schema 검증이 실패하면 approve하지 않는다.
 - `approve` verdict는 findings가 비어 있고 `automation_safety.may_approve=true`일 때만 제출된다.
+- GitHub API가 approve를 거부해도 `approve` verdict가 안전하면 `approved` 라벨이 부착된다.
 - `request_changes`는 confidence 80 이상의 blocking finding이 있을 때만 제출된다.
 
 ### Phase 2: Inline Comment Adapter

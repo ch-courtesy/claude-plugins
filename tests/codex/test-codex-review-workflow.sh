@@ -24,6 +24,8 @@ grep -q 'mkdir -p "\$HOME/\.codex"' "$WORKFLOW" \
   || fail "~/.codex 디렉토리 생성 부재"
 grep -q 'printf .*> "\$HOME/\.codex/auth\.json"' "$WORKFLOW" \
   || fail "~/.codex/auth.json 복원 부재"
+grep -q 'unset CODEX_AUTH_JSON' "$WORKFLOW" \
+  || fail "Codex 실행 전 CODEX_AUTH_JSON env 제거 부재"
 ok "check 1: CODEX_AUTH_JSON secret을 ~/.codex/auth.json 으로 복원"
 
 echo ""
@@ -52,6 +54,8 @@ grep -q -- '--output-last-message \.codex-review/result\.json' "$WORKFLOW" \
   || fail "codex 최종 JSON 출력 파일 지정 부재"
 grep -q '< \.codex-review/prompt\.md' "$WORKFLOW" \
   || fail "prompt 를 stdin 으로 전달하지 않음"
+grep -q 'unset GH_TOKEN' "$WORKFLOW" \
+  || fail "Codex 실행 전 GH_TOKEN env 제거 부재"
 if grep -q '"$(cat \.codex-review/full-prompt\.md)"' "$WORKFLOW"; then
   fail "prompt 전체를 커맨드라인 인자로 전달하고 있음"
 fi
@@ -140,6 +144,14 @@ grep -q 'filter((finding)' "$WORKFLOW" && grep -q 'Number(finding\.confidence_sc
   || fail "managed comment finding confidence 필터 부재"
 grep -q '현재 GitHub 토큰으로 PR approve 제출에 실패해 comment review로 대체' "$WORKFLOW" \
   || fail "approve 실패 시 comment fallback 부재"
+grep -q 'approved_label="approved"' "$WORKFLOW" \
+  || fail "approve fallback 라벨명 부재"
+grep -q 'gh label create "\$approved_label"' "$WORKFLOW" \
+  || fail "approved 라벨 생성 경로 부재"
+grep -q 'gh issue edit "\$PR_NUMBER".*--add-label "\$approved_label"' "$WORKFLOW" \
+  || fail "approve verdict 라벨 부착 경로 부재"
+grep -q 'gh issue edit "\$PR_NUMBER".*--remove-label "\$approved_label"' "$WORKFLOW" \
+  || fail "non-approve verdict 라벨 제거 경로 부재"
 grep -q '현재 GitHub 토큰으로 request changes 제출에 실패해 comment review로 대체' "$WORKFLOW" \
   || fail "request changes 실패 시 comment fallback 부재"
 ok "check 10: verdict 기반 GitHub review 제출 경로 존재"
