@@ -2,7 +2,7 @@
 # task-storage.sh — task 저장소(GitHub Issue) 라벨 검출 공통 헬퍼.
 #
 # loop.sh·dispatch.sh 가 함께 source 하는 헬퍼. 완료 검출의 단일 출처는
-# task 식별자에 부속된 LOOP_DONE_LABEL 라벨이다(헌법 §12, SPEC 134/150/175).
+# task 식별자에 부속된 LOOP_DONE_LABEL 라벨이다(헌법 §12).
 # 본 파일은 source 전용이며 단독 실행하지 않는다.
 #
 # 매체: GitHub Issue + label. 환경: gh CLI 인증을 전제.
@@ -18,7 +18,7 @@
 # dispatch.sh 등 다른 호출자는 task-id 를 명시적으로 넘긴다.
 
 # 완료 신호의 검출 키. 환경 변수 override 허용 — 단, 프로젝트 수준에서 단일 위치에
-# 고정되어 task storage adapter 다중 분기를 만들지 않는다 (SPEC 134 §비-목표).
+# 고정되어 task storage adapter 다중 분기를 만들지 않는다.
 LOOP_DONE_LABEL="${LOOP_DONE_LABEL:-loop:done}"
 
 # 내부 전용 — ensure_label_exists 의 stderr WARN 라인 타임스탬프.
@@ -50,11 +50,11 @@ task_issue_number() {
   return 1
 }
 
-# task issue 에 특정 label 이 붙어 있는지 boolean 검사 (SPEC 134 AC3).
+# task issue 에 특정 label 이 붙어 있는지 boolean 검사.
 # 인자: $1=task-id (생략 시 $TASK_ID), $2=label 이름 (필수).
 # 반환: 0=label 존재, 1=label 부재 또는 판정 불가 (issue 매핑 실패·gh 부재 포함).
 # 구현은 단일 GitHub 호출(`gh issue view --json labels`)로 한정 — adapter 인터페이스
-# 신설 없음 (SPEC 134 §비-목표).
+# 신설 없음.
 task_label_present() {
   local task_id="${1:-${TASK_ID:-}}"
   local label="${2:-}"
@@ -74,10 +74,10 @@ task_label_present() {
   return 1
 }
 
-# task storage 에 label 이 존재하는지 확인하고, 없으면 자동 생성 (SPEC 134 AC5).
+# task storage 에 label 이 존재하는지 확인하고, 없으면 자동 생성.
 # 인자: $1=label 이름 (필수).
 # 권한 부족·gh 부재 시 best-effort 로 stderr WARN + 비-0 반환 (비차단 진행).
-# SPEC 134 §위험 "label 자동 생성 권한 부족" — runtime 실패는 verify 범위 밖.
+# "label 자동 생성 권한 부족" — runtime 실패는 verify 범위 밖.
 ensure_label_exists() {
   local label="${1:-}"
   [[ -z "$label" ]] && return 1
@@ -104,7 +104,7 @@ ensure_label_exists() {
   return 0
 }
 
-# task issue 의 완료 신호 검사 (헌법 §12, SPEC 134 AC2, SPEC 175 AC1).
+# task issue 의 완료 신호 검사 (헌법 §12).
 # 정식 검출 키: task issue 에 LOOP_DONE_LABEL 값과 일치하는 label 이 붙어 있는지.
 # comment 본문은 가독·로그 채널이며 판정에 사용되지 않는다 — 워커가 [done] prefix
 # comment 발행과 함께 label 추가 두 동작을 모두 수행해야 0(done) 을 반환한다.

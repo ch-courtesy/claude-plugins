@@ -58,10 +58,10 @@ if [[ -z "$DEFAULT_BRANCH" ]]; then
 fi
 
 # ----- SPEC 제목·본문 추출 (M3) -----
-# TASK_ID 는 정규화된 '<milestone>/<child>' 형태. SPEC 116 단일 컨벤션:
+# TASK_ID 는 정규화된 '<milestone>/<child>' 형태. 단일 컨벤션:
 # SPEC.md 는 워크트리 안의 `milestones/<m>/loops/<child>-<slug>/SPEC.md` 단일 경로에서 읽는다.
 # slug 는 $BRANCH (`feat/<child>-<slug>`) 이름에서 추출 — spec 스킬·loop 드라이버와 동일 키.
-# SPEC 116 EARS AC4: "다른 경로 fallback은 없다" — slug-less 경로는 의도적으로 미지원.
+# 다른 경로 fallback은 없다 — slug-less 경로는 의도적으로 미지원.
 SPEC_MILESTONE="${TASK_ID%%/*}"
 SPEC_CHILD="${TASK_ID#*/}"
 SPEC_SLUG_FROM_BRANCH=""
@@ -70,7 +70,7 @@ if [[ "$BRANCH" == "${SPEC_BRANCH_PREFIX}-"* ]]; then
   SPEC_SLUG_FROM_BRANCH="${BRANCH#${SPEC_BRANCH_PREFIX}-}"
 fi
 if [[ -z "$SPEC_SLUG_FROM_BRANCH" ]]; then
-  echo "ERROR: slug 추출 실패 — BRANCH='$BRANCH'가 'feat/${SPEC_CHILD}-<slug>' 형식 아님. SPEC 116 단일 컨벤션 위반." >&2
+  echo "ERROR: slug 추출 실패 — BRANCH='$BRANCH'가 'feat/${SPEC_CHILD}-<slug>' 형식 아님. 단일 컨벤션 위반." >&2
   exit 1
 fi
 SPEC_FILE="$WT/milestones/${SPEC_MILESTONE}/loops/${SPEC_CHILD}-${SPEC_SLUG_FROM_BRANCH}/SPEC.md"
@@ -113,13 +113,13 @@ collect_commit_log() {
 # SHA를 재작성하면 PR body '## Commits' 섹션이 구 SHA를 표시하기 때문. SPEC_TITLE·WHAT_SECTION은
 # sync 영향을 받지 않으므로 위에서 미리 추출해 둔다.
 
-# ----- base 동기화 (SPEC 169) -----
+# ----- base 동기화 -----
 # 단일 sync helper(rebase-phase.sh)를 통해 fetch + 동기화를 수행한다. helper가 원격 트래킹
 # 브랜치 존재 여부를 검사해 rebase / merge 경로로 분기하므로 본 phase는 직접 `git rebase`·
-# `git merge`를 호출하지 않는다 (SPEC 169 AC7). force push도 helper·본 phase 모두에서 부재
-# (AC4). 충돌 자동 해소(1회) 및 실패 시 워크트리 abort 복구는 helper 책임.
+# `git merge`를 호출하지 않는다. force push도 helper·본 phase 모두에서 부재.
+# 충돌 자동 해소(1회) 및 실패 시 워크트리 abort 복구는 helper 책임.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-echo "[pr-phase] base 동기화 → $SCRIPT_DIR/rebase-phase.sh (SPEC 169 sync helper)"
+echo "[pr-phase] base 동기화 → $SCRIPT_DIR/rebase-phase.sh (sync helper)"
 if ! bash "$SCRIPT_DIR/rebase-phase.sh" "$WT" "$BRANCH" "$PROJECT_ROOT"; then
   echo "ERROR: base 동기화 실패 — PR 단계 abort (helper의 ESCALATION 로그 참조)" >&2
   exit 1
@@ -226,7 +226,7 @@ else
   echo "PR state: open"
 fi
 
-# ----- Monitor: stuck PR check 재트리거 (SPEC 103 M4/AC5) -----
+# ----- Monitor: stuck PR check 재트리거 -----
 # PR 생성·갱신 직후 같은 셸에서 동기적으로 PR check 상태를 polling한다.
 # "stuck" 패턴 = (1) PR state OPEN + (2) reviewDecision 없음 (리뷰 미발생) +
 #                (3) check가 모두 완료(COMPLETED state)된 상태.
@@ -251,11 +251,11 @@ else
     monitor_pr_state=$( cd "$WT" && gh pr view "$monitor_pr_number" --json state --jq '.state' 2>/dev/null || printf '' )
     if [[ "$monitor_pr_state" == "MERGED" || "$monitor_pr_state" == "CLOSED" ]]; then
       echo "[pr-phase] PR 상태=$monitor_pr_state — Monitor 종료 (lifecycle 완료 단계)"
-      # SPEC 103 M5/AC6: cleanup 후보 안내. 자동 삭제는 하지 않으며 사용자 명시 승인 필요.
+      # cleanup 후보 안내. 자동 삭제는 하지 않으며 사용자 명시 승인 필요.
       # 셸 드라이버는 안내만 출력하고, 실제 cleanup은 사용자가 'loop.sh cleanup <task-id>'를
       # 명시 호출하거나 SKILL 계층에서 AskUserQuestion 승인을 거친 뒤에만 수행한다.
       echo "[pr-phase] cleanup 후보: PR #$monitor_pr_number 가 $monitor_pr_state 상태 — worktree·feat 브랜치 정리 가능."
-      echo "[pr-phase] 자동 삭제하지 않습니다 (AC6). 명시 승인 후 'loop.sh cleanup <task-id>'로 수동 정리하세요."
+      echo "[pr-phase] 자동 삭제하지 않습니다. 명시 승인 후 'loop.sh cleanup <task-id>'로 수동 정리하세요."
       break
     fi
 

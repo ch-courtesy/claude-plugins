@@ -15,11 +15,11 @@ SPEC §1 제목(첫 H1, `# ` 다음 텍스트)에서 `<slug>`를 도출:
 3. 연속된 `-`를 단일 `-`로 압축
 4. 시작·끝의 `-` 제거
 
-결과가 빈 문자열이면 fallback 브랜치(`feat/<c>` 단독)·fallback 디렉토리(`milestones/<m>/loops/<c>/`)를 만들지 않는다 — SPEC 116 EARS AC4 단일 컨벤션 위반이며 sibling pr-phase 도 동일 이유로 abort. 빈 slug 발생 시 §9.5.3 실패 처리로 분기해 사용자에게 §1 H1 제목 수정(step 7 재진입)을 요청한다. 같은 SPEC 제목은 항상 같은 slug 를 만든다.
+결과가 빈 문자열이면 fallback 브랜치(`feat/<c>` 단독)·fallback 디렉토리(`milestones/<m>/loops/<c>/`)를 만들지 않는다 — 단일 컨벤션이며 sibling pr-phase 도 동일 이유로 abort. 빈 slug 발생 시 §9.5.3 실패 처리로 분기해 사용자에게 §1 H1 제목 수정(step 7 재진입)을 요청한다. 같은 SPEC 제목은 항상 같은 slug 를 만든다.
 
 구현 예 (bash) — **본 코드 조각이 슬러그 도출의 단일 출처(single source of truth)**이며 안전장치(`references/test-spec-loop-contract.sh`)가 이 위치를 검사한다.
 
-H1 제목 추출은 BSD sed (macOS) 와 GNU sed 의 `{...}` 블록 + `q` 구문 차이로 인해 awk 기반으로 작성한다 — 기존 `sed -n '/^---$/,/^---$/!{/^# /{s/^# //p; q;}}'` 패턴은 BSD sed 에서 `extra characters at the end of } command` 로 실패한다 (SPEC 108):
+H1 제목 추출은 BSD sed (macOS) 와 GNU sed 의 `{...}` 블록 + `q` 구문 차이로 인해 awk 기반으로 작성한다 — 기존 `sed -n '/^---$/,/^---$/!{/^# /{s/^# //p; q;}}'` 패턴은 BSD sed 에서 `extra characters at the end of } command` 로 실패한다:
 
 ```bash
 title=$(awk '
@@ -36,7 +36,7 @@ awk 동작: `fm` 플래그가 frontmatter `---` 라인을 토글하므로 frontm
 
 ## 9.5.2 브랜치 생성·commit 절차
 
-본 단계의 모든 경로 참조는 진입점 §8.1 에서 결정된 slug-bearing 디렉토리 — `milestones/<m>/loops/<c>-<slug>/SPEC.md` — 와 정합하게 동일 `<slug>` 를 사용한다. 브랜치 이름의 `<slug>` 와 디렉토리 이름의 `<slug>` 는 반드시 같다. `<slug>` 가 빈 문자열이면 §9.5.1 의 빈-slug 실패 처리로 사전 분기되므로 본 단계는 항상 non-empty `<slug>` 를 가정한다 (SPEC 116 단일 컨벤션, EARS AC4 — fallback 없음).
+본 단계의 모든 경로 참조는 진입점 §8.1 에서 결정된 slug-bearing 디렉토리 — `milestones/<m>/loops/<c>-<slug>/SPEC.md` — 와 정합하게 동일 `<slug>` 를 사용한다. 브랜치 이름의 `<slug>` 와 디렉토리 이름의 `<slug>` 는 반드시 같다. `<slug>` 가 빈 문자열이면 §9.5.1 의 빈-slug 실패 처리로 사전 분기되므로 본 단계는 항상 non-empty `<slug>` 를 가정한다 (단일 컨벤션 — fallback 없음).
 
 1. `git status --porcelain`으로 main 작업트리 상태 스냅샷 캡처. unstaged·untracked가 있으면 그 사실을 인지 (다음 단계의 git 동작이 영향 안 주도록 명시적 경로 사용).
 2. 현재 브랜치 이름 보존: `orig_branch=$(git rev-parse --abbrev-ref HEAD)`.
@@ -54,7 +54,7 @@ awk 동작: `fm` 플래그가 frontmatter `---` 라인을 토글하므로 frontm
 - 부분 결과 정리: 생성된 feat 브랜치가 있으면 `git branch -D "$branch"`로 삭제 (단, 그 브랜치에 다른 commit이 없을 때만; 의심스러우면 사용자에게 알리고 수동 정리 안내).
 - 원래 브랜치 복귀: `git checkout "$orig_branch"`.
 - 사용자에게 명시적으로 실패 사유와 복구 방법 안내. SPEC.md는 `milestones/<m>/loops/<c>-<slug>/SPEC.md` 에 그대로 남기되, loop 진행은 다음 단계에서 사용자가 결정.
-- **빈 slug 케이스 (§9.5.1)**: 슬러그화 결과가 빈 문자열이면 본 §9.5.2 진입 전에 abort 한다. SPEC.md 는 step 8 의 §8.1 단일 경로 가정에 의해 빈 slug 에서는 작성되지 않으며, 사용자에게 §1 H1 제목 수정을 요청해 step 7 재진입한다 (SPEC 116 단일 컨벤션 — fallback 없음).
+- **빈 slug 케이스 (§9.5.1)**: 슬러그화 결과가 빈 문자열이면 본 §9.5.2 진입 전에 abort 한다. SPEC.md 는 step 8 의 §8.1 단일 경로 가정에 의해 빈 slug 에서는 작성되지 않으며, 사용자에게 §1 H1 제목 수정을 요청해 step 7 재진입한다 (단일 컨벤션 — fallback 없음).
 
 §9.5.4 절차(원격 default 브랜치 동기화·fast-forward merge·원격 push) 중 실패 분기:
 
@@ -114,4 +114,4 @@ awk 동작: `fm` 플래그가 frontmatter `---` 라인을 토글하므로 frontm
 
 ## 9.5.5 self-referential 호출 면제
 
-본 §9.5.4 절차를 정의·도입하는 SPEC (예: SPEC 149) 을 작성·수락하는 *현재* spec 호출 자체에는 본 §9.5.4 새 동작을 적용하지 않는다. 이는 다음 일반 규약을 따른 것이다: **spec 호출이 정의·도입하는 새 contract 는 그 호출의 산출물(경로·브랜치·동작)에 선행 적용하지 않으며, 새 contract 는 해당 SPEC 이 default 브랜치에 merge 된 후의 다음 spec 호출부터 적용된다**. 따라서 현재 호출은 §9.5.2 까지만 (feat 브랜치 분기·SPEC commit·원래 브랜치 복귀) 수행하고, default 브랜치 ff-merge·원격 push 는 본 SPEC 이 merge 된 후의 다음 spec 호출부터 적용된다.
+본 §9.5.4 절차를 정의·도입하는 SPEC 을 작성·수락하는 *현재* spec 호출 자체에는 본 §9.5.4 새 동작을 적용하지 않는다. 이는 다음 일반 규약을 따른 것이다: **spec 호출이 정의·도입하는 새 contract 는 그 호출의 산출물(경로·브랜치·동작)에 선행 적용하지 않으며, 새 contract 는 해당 SPEC 이 default 브랜치에 merge 된 후의 다음 spec 호출부터 적용된다**. 따라서 현재 호출은 §9.5.2 까지만 (feat 브랜치 분기·SPEC commit·원래 브랜치 복귀) 수행하고, default 브랜치 ff-merge·원격 push 는 본 SPEC 이 merge 된 후의 다음 spec 호출부터 적용된다.

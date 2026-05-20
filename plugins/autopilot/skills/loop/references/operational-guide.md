@@ -31,7 +31,7 @@ milestones/<m>/loops/<c>/
     ├── .iterations/<n>.log    # 매 이터 stdout 캡처 (gitignored, worktree-local)
     └── milestones/<m>/loops/<c>/
         └── SPEC.md            # feat 브랜치 commit으로 자연 노출
-# 완료 신호는 task 저장소의 LOOP_DONE_LABEL 라벨 단일 의존 — 워크트리 sentinel 파일 없음 (SPEC 175)
+# 완료 신호는 task 저장소의 LOOP_DONE_LABEL 라벨 단일 의존 — 워크트리 sentinel 파일 없음
 # 이터간 상태(계획·교훈·인계·차단·완료)는 워크트리에 두지 않고 task 메모리·task 신호로 위임 (헌법 §11)
 ```
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-loop-review-fix-phase.sh — SPEC 123 rebase·review-fix·cleanup phase 테스트
+# test-loop-review-fix-phase.sh — rebase·review-fix·cleanup phase 테스트
 #
 # 검증 대상:
 #  - rebase-phase.sh / review-fix-phase.sh / cleanup-phase.sh 존재·실행권
@@ -46,7 +46,7 @@ test_spec_verify_command() {
   grep -qE 'review-fix|rebase|cleanup' "$S/SKILL.md"                       || fail "SKILL.md: phase 어휘 부재"
   grep -qE '상태 전이|Status'          "$S/SKILL.md"                       || fail "SKILL.md: 상태 어휘 부재"
   grep -qE '자동 머지|auto[- ]?merge'  "$S/SKILL.md"                       || fail "SKILL.md: 자동 머지 어휘 부재"
-  # SPEC 153 prompt → 파서 contract 정적 검증 — claude mock이 stdin을 무시하므로
+  # prompt → 파서 contract 정적 검증 — claude mock이 stdin을 무시하므로
   # 런타임 테스트만으로는 prompt가 INLINE 포맷 출력을 지시하는지 확인 불가.
   # production source에서 prompt-출력 contract의 양쪽이 모두 INLINE 어휘를 갖는지 grep.
   grep -qE 'INLINE[[:space:]]+<thread_id>'  "$S/references/review-fix-phase.sh" \
@@ -225,7 +225,7 @@ GH
 }
 
 # =====================================================================
-# SPEC 153 — inline review thread comment 1:1 응답 테스트 케이스 (a)~(e)
+# inline review thread comment 1:1 응답 테스트 케이스 (a)~(e)
 # =====================================================================
 #
 # 공통 셋업: 격리 main repo + bare remote + worktree(feat/153-test) + 1개 commit.
@@ -608,7 +608,7 @@ test_e_pr_level_dispute_preserved() {
 }
 
 # =====================================================================
-# SPEC 169 — Push sync policy: rebase locally, merge on remote
+# Push sync policy: rebase locally, merge on remote
 # =====================================================================
 #
 # 동기화 helper(rebase-phase.sh)가 원격 트래킹 브랜치 존재 여부에 따라 두 경로로

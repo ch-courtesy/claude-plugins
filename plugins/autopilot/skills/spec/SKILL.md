@@ -209,7 +209,7 @@ find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__'
 
 - `milestones/<m>/loops/<c>-<slug>/SPEC.md`
 
-`<slug>` 가 빈 문자열로 환원되면 fallback 경로를 만들지 않는다 — SPEC 116 EARS AC4(단일 컨벤션, 다른 경로 fallback 없음) 위반이고 sibling pr-phase 도 슬러그 없는 브랜치는 abort. 빈 slug 시 `references/feat-branch-commit.md` §9.5.3 실패 처리로 분기·§1 H1 제목 수정(step 7 재진입) 요청.
+`<slug>` 가 빈 문자열로 환원되면 fallback 경로를 만들지 않는다 — 단일 컨벤션이고 sibling pr-phase 도 슬러그 없는 브랜치는 abort. 빈 slug 시 `references/feat-branch-commit.md` §9.5.3 실패 처리로 분기·§1 H1 제목 수정(step 7 재진입) 요청.
 
 `<c>` 는 input task-id (단계 1 통과값). 본 디렉토리 이름의 `<slug>` 가 sibling `autopilot:loop` 이 발견하는 feat 브랜치 `feat/<c>-<slug>` 의 `<slug>` 와 동일해 spec→loop 라운드트립이 단일 컨벤션으로 정합. `mkdir -p` 후 `SPEC.md` 기록.
 

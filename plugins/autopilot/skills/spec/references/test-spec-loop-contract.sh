@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# test-spec-loop-contract.sh — SPEC 116 verify
+# test-spec-loop-contract.sh
 #
 # spec↔loop feat 브랜치·worktree 경로 단일 규약 contract verifier.
 #
-# 검사 항목 (SPEC 116 수용 기준 매핑):
+# 검사 항목:
 #   T1. slug 도출 결정성 — canonical 알고리즘이 "Foo Bar" → "foo-bar".
 #       + spec SKILL.md 가 canonical 알고리즘을 문서화하고 있는지 (drift guard).
 #       + spec SKILL.md 가 slug-bearing SPEC.md 경로를 참조하는지.
@@ -13,7 +13,7 @@
 #   T5. 모호성 die — 동일 input-id 매칭 브랜치 2+ 일 때 비-zero exit + 안내.
 #   T6. dispatch.sh child_state — issue 에 LOOP_DONE_LABEL 라벨이 부착되면
 #       워크트리 안 sentinel 파일 부재에도 "done" 상태를 보고해야 한다
-#       (SPEC 175 AC2: 라벨 단일 의존).
+#       (라벨 단일 의존).
 #
 # 셋업: 임시 git fixture · mock claude (stdin 소비 + JSON 응답) · yq 필요.
 
@@ -63,8 +63,8 @@ MAIN_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 git commit --allow-empty -q -m "chore: baseline"
 
 # mock claude — stdin 소비 + JSON 응답.
-# 완료 신호는 task 저장소(GitHub Issue)의 `loop:done` label 부착이 단일 검출 키이며
-# (SPEC 134/150/175), 파일 sentinel 은 없다 — mock 도 파일을 만들지 않는다.
+# 완료 신호는 task 저장소(GitHub Issue)의 `loop:done` label 부착이 단일 검출 키이며,
+# 파일 sentinel 은 없다 — mock 도 파일을 만들지 않는다.
 MOCK_BIN="$WORK_DIR/mock-bin"
 mkdir -p "$MOCK_BIN"
 cat > "$MOCK_BIN/claude" <<'MOCKEOF'
@@ -76,7 +76,7 @@ chmod +x "$MOCK_BIN/claude"
 
 # mock gh — task_status_is_done 를 만족시키는 최소 stub.
 # 배경: loop.sh·dispatch.sh 는 done 신호를 task 저장소의 `loop:done` label 단일
-#       의존으로 감지한다 (SPEC 134/150/175). 파일 sentinel 은 제거되었으므로
+#       의존으로 감지한다. 파일 sentinel 은 제거되었으므로
 #       라벨 부착이 done 검출의 유일한 경로다. 본 테스트는 real GitHub 이 없으므로
 #       gh stub 으로 label 존재를 흉내내 iter #1 직후 task_status_is_done 이
 #       0(done) 을 반환하도록 한다.
@@ -132,7 +132,7 @@ grep -qF "sed -e 's/--*/-/g'" "$SPEC_FEAT_REF" \
 grep -qF "milestones/<m>/loops/<c>-<slug>" "$SPEC_SKILL_MD" \
   || { echo "FAIL T1e: SKILL.md missing slug-bearing directory reference (milestones/<m>/loops/<c>-<slug>)" >&2; exit 1; }
 
-# T1f: slug-less fallback 경로·브랜치가 SKILL.md 에 살아 있으면 SPEC 116 EARS AC4 위반.
+# T1f: slug-less fallback 경로·브랜치가 SKILL.md 에 살아 있으면 단일 컨벤션 위반.
 # 구 문구(회귀하면 fail):
 #   - "milestones/<m>/loops/<c>/SPEC.md` (fallback)" / "(slug fallback)"
 #   - "branch=\"feat/<c>\"" / "feat/<task-id>` 단독으로 fallback"
@@ -218,7 +218,7 @@ WT_SPEC="$EXPECTED_WT/${DIR_REL}/SPEC.md"
   || { echo "FAIL T4a: worktree 안 SPEC.md 부재: $WT_SPEC" >&2; exit 1; }
 
 # pr-phase.sh 의 SPEC_FILE 도출 — feat 브랜치 이름의 slug를 사용해야 한다.
-# SPEC 116 EARS AC4: "다른 경로 fallback은 없다" — slug-less 경로는 미지원, 단일 컨벤션.
+# 다른 경로 fallback은 없다 — slug-less 경로는 미지원, 단일 컨벤션.
 # 동일 도출 로직을 본 테스트에서 재현해 결과가 slug-bearing 경로와 일치하는지 확인.
 PR_TASK_ID="regular/${INPUT_ID}"
 PR_BRANCH="feat/${INPUT_ID}-${SLUG}"
@@ -248,7 +248,7 @@ if ! grep -qE '\$\{?BRANCH#' "$PR_PHASE_SH"; then
   exit 1
 fi
 
-# T4d: pr-phase.sh 에 slug-less fallback 경로가 없는지 검사 — SPEC 116 EARS AC4 "다른 경로 fallback은 없다".
+# T4d: pr-phase.sh 에 slug-less fallback 경로가 없는지 검사 — "다른 경로 fallback은 없다".
 # 구 fallback 패턴: `${SPEC_CHILD}/SPEC.md` (slug-bearing 분기의 else 측에서 SPEC_CHILD 만 사용).
 # 신 컨벤션: slug 추출 실패 시 즉시 abort, 다른 경로 시도 금지.
 if grep -nE 'SPEC_FILE=.*loops/\$\{?SPEC_CHILD\}?/SPEC\.md' "$PR_PHASE_SH" >/dev/null; then
@@ -281,11 +281,11 @@ echo "$T5_OUT" | grep -qE '여러 feat 브랜치|모호|ambig' \
 echo "OK T5: 모호성 die"
 
 # ──────────────────────────────────────────────────────────────────────────────
-# T6. dispatch.sh child_state — label 단일 의존 (SPEC 175 AC2)
+# T6. dispatch.sh child_state — label 단일 의존
 # ──────────────────────────────────────────────────────────────────────────────
 # 배경: 이전 contract 에서 dispatch.sh 는 `[[ -f $wt/DONE ]]` 파일 sentinel 로
 #       child 완료를 판정했으나, 어떤 코드 경로도 그 파일을 만들지 않아 dead code
-#       였다. SPEC 175 는 loop.sh 와 동일하게 task 저장소의 `loop:done` 라벨 단일
+#       였다. 현재 contract 는 loop.sh 와 동일하게 task 저장소의 `loop:done` 라벨 단일
 #       의존으로 통합한다. mock gh 가 `loop:done` 을 echo 하므로, child issue 가
 #       라벨 부착된 상태를 흉내내고 dispatch status 가 "done" 을 보고하는지 확인.
 #
@@ -307,7 +307,7 @@ if [[ $T6_RC -ne 0 ]]; then
   exit 1
 fi
 echo "$T6_OUT" | grep -qE "^[[:space:]]*${T6_C}[[:space:]]+done$" \
-  || { echo "FAIL T6: dispatch child_state did not report 'done' for label-only completion (SPEC 175 AC2)" >&2
+  || { echo "FAIL T6: dispatch child_state did not report 'done' for label-only completion" >&2
        echo "$T6_OUT" >&2; exit 1; }
 
 echo "OK T6: dispatch child_state — label 단일 의존"
