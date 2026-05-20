@@ -95,7 +95,6 @@ jobs:
           GH_TOKEN: ${{ secrets.CODEX_REVIEW_GITHUB_TOKEN || github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
-          PR_BASE_SHA: ${{ steps.pr.outputs.base_sha }}
           PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           PR_TITLE: ${{ steps.pr.outputs.title }}
         run: |
