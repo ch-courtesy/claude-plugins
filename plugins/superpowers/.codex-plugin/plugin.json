@@ -1,0 +1,33 @@
+{
+  "name": "superpowers",
+  "version": "0.1.0",
+  "description": "Agentic development superpowers: reusable specs, plans, and workflows for autonomous coding loops.",
+  "author": {
+    "name": "예의상",
+    "email": "ch.courtesy@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "agentic-development",
+    "autonomous-loop",
+    "planning",
+    "specs",
+    "workflows"
+  ],
+  "interface": {
+    "displayName": "Superpowers",
+    "shortDescription": "Agentic development workflow patterns and references.",
+    "longDescription": "A local Codex plugin for reusable agentic development workflows, including autonomous-loop design notes, implementation plans, and dispatch-oriented patterns.",
+    "developerName": "예의상",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Use superpowers workflow guidance for this task.",
+      "Review the superpowers specs before planning.",
+      "Turn this idea into an agent-ready plan."
+    ],
+    "brandColor": "#2563EB"
+  }
+}
