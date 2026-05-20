@@ -109,33 +109,17 @@ fi
 ok "check 8: CODEX_ACCESS_TOKEN 기반 인증 제거됨"
 
 echo ""
-echo "=== check 9: reviewer GitHub App token is used for publishing ==="
-grep -q 'CODEX_REVIEW_APP_ID:.*secrets\.CODEX_REVIEW_APP_ID' "$WORKFLOW" \
-  || fail "CODEX_REVIEW_APP_ID secret env 매핑 부재"
-grep -q 'CODEX_REVIEW_APP_PRIVATE_KEY:.*secrets\.CODEX_REVIEW_APP_PRIVATE_KEY' "$WORKFLOW" \
-  || fail "CODEX_REVIEW_APP_PRIVATE_KEY secret env 매핑 부재"
-grep -q 'CODEX_REVIEW_APP_INSTALLATION_ID:.*secrets\.CODEX_REVIEW_APP_INSTALLATION_ID' "$WORKFLOW" \
-  || fail "CODEX_REVIEW_APP_INSTALLATION_ID optional secret env 매핑 부재"
-grep -q 'https://api\.github\.com/app/installations/\$installation_id/access_tokens' "$WORKFLOW" \
-  || fail "GitHub App installation token 발급 경로 부재"
-grep -q 'GH_TOKEN:.*steps\.reviewer-token\.outputs\.token' "$WORKFLOW" \
-  || fail "gh CLI publish 경로가 reviewer app token 을 사용하지 않음"
-grep -q 'github-token:.*steps\.reviewer-token\.outputs\.token' "$WORKFLOW" \
-  || fail "github-script publish 경로가 reviewer app token 을 사용하지 않음"
-ok "check 9: reviewer GitHub App installation token 을 publish token 으로 사용"
-
-echo ""
-echo "=== check 10: review output is posted idempotently ==="
+echo "=== check 9: review output is posted idempotently ==="
 grep -q '<!-- codex-cli-pr-review -->' "$WORKFLOW" \
   || fail "중복 방지 marker 부재"
 grep -q 'issues.updateComment' "$WORKFLOW" \
   || fail "기존 리뷰 코멘트 update 경로 부재"
 grep -q 'issues.createComment' "$WORKFLOW" \
   || fail "신규 리뷰 코멘트 create 경로 부재"
-ok "check 10: marker 기반 update/create 코멘트 경로 존재"
+ok "check 9: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
-echo "=== check 11: verdict is submitted through GitHub review API ==="
+echo "=== check 10: verdict is submitted through GitHub review API ==="
 grep -q 'gh pr review "\$PR_NUMBER".*--approve' "$WORKFLOW" \
   || fail "approve review 제출 경로 부재"
 grep -q 'gh pr review "\$PR_NUMBER".*--request-changes' "$WORKFLOW" \
@@ -148,14 +132,14 @@ grep -q 'confidence_score >= 80' "$WORKFLOW" \
   || fail "confidence threshold gate 부재"
 grep -q 'filter((finding)' "$WORKFLOW" && grep -q 'Number(finding\.confidence_score' "$WORKFLOW" \
   || fail "managed comment finding confidence 필터 부재"
-grep -q '리뷰어 앱 토큰으로 PR approve 제출에 실패해 comment review로 대체' "$WORKFLOW" \
+grep -q 'approve 제출이 허용되지 않아 comment review로 대체' "$WORKFLOW" \
   || fail "approve 실패 시 comment fallback 부재"
-grep -q '리뷰어 앱 토큰으로 request changes 제출에 실패해 comment review로 대체' "$WORKFLOW" \
+grep -q 'request changes 제출에 실패해 comment review로 대체' "$WORKFLOW" \
   || fail "request changes 실패 시 comment fallback 부재"
-ok "check 11: verdict 기반 GitHub review 제출 경로 존재"
+ok "check 10: verdict 기반 GitHub review 제출 경로 존재"
 
 echo ""
-echo "=== check 12: prompt captures token and confidence policies ==="
+echo "=== check 11: prompt captures token and confidence policies ==="
 grep -q '토큰 최적화 정책' "$PROMPT" \
   || fail "prompt 토큰 최적화 정책 부재"
 grep -q 'Confidence scoring' "$PROMPT" \
@@ -166,10 +150,10 @@ grep -q 'valid JSON' "$PROMPT" \
   || fail "prompt JSON-only 출력 규칙 부재"
 grep -q '사람이 읽는 문자열 값은 한국어로 작성' "$PROMPT" \
   || fail "prompt 한국어 출력 규칙 부재"
-ok "check 12: prompt 핵심 정책 존재"
+ok "check 11: prompt 핵심 정책 존재"
 
 echo ""
-echo "=== check 13: schema requires automation safety and context fields ==="
+echo "=== check 12: schema requires automation safety and context fields ==="
 grep -q '"automation_safety"' "$SCHEMA" \
   || fail "schema automation_safety 부재"
 grep -q '"reviewed_context"' "$SCHEMA" \
@@ -178,7 +162,7 @@ grep -q '"confidence_score"' "$SCHEMA" \
   || fail "schema confidence_score 부재"
 grep -q '"context_requests"' "$SCHEMA" \
   || fail "schema context_requests 부재"
-ok "check 13: schema 핵심 필드 존재"
+ok "check 12: schema 핵심 필드 존재"
 
 echo ""
 echo "ALL CHECKS PASSED"
