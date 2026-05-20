@@ -72,7 +72,6 @@ jobs:
         with:
           ref: refs/pull/${{ steps.pr.outputs.number }}/merge
           fetch-depth: 0
-          persist-credentials: false
 
       - name: Fetch review base
         env:
