@@ -112,6 +112,10 @@ echo ""
 echo "=== check 9: review output is posted idempotently ==="
 grep -q '<!-- codex-cli-pr-review -->' "$WORKFLOW" \
   || fail "중복 방지 marker 부재"
+grep -q 'CODEX_REVIEW_GITHUB_TOKEN || github.token' "$WORKFLOW" \
+  || fail "review publish token 이 CODEX_REVIEW_GITHUB_TOKEN fallback 을 사용하지 않음"
+grep -q 'users.getAuthenticated' "$WORKFLOW" \
+  || fail "managed comment 가 현재 token 사용자 기준으로 previous comment 를 찾지 않음"
 grep -q 'issues.updateComment' "$WORKFLOW" \
   || fail "기존 리뷰 코멘트 update 경로 부재"
 grep -q 'issues.createComment' "$WORKFLOW" \
@@ -132,9 +136,9 @@ grep -q 'confidence_score >= 80' "$WORKFLOW" \
   || fail "confidence threshold gate 부재"
 grep -q 'filter((finding)' "$WORKFLOW" && grep -q 'Number(finding\.confidence_score' "$WORKFLOW" \
   || fail "managed comment finding confidence 필터 부재"
-grep -q 'approve 제출이 허용되지 않아 comment review로 대체' "$WORKFLOW" \
+grep -q '현재 GitHub 토큰으로 PR approve 제출에 실패해 comment review로 대체' "$WORKFLOW" \
   || fail "approve 실패 시 comment fallback 부재"
-grep -q 'request changes 제출에 실패해 comment review로 대체' "$WORKFLOW" \
+grep -q '현재 GitHub 토큰으로 request changes 제출에 실패해 comment review로 대체' "$WORKFLOW" \
   || fail "request changes 실패 시 comment fallback 부재"
 ok "check 10: verdict 기반 GitHub review 제출 경로 존재"
 

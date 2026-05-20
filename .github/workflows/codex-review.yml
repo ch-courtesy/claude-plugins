@@ -92,7 +92,7 @@ jobs:
       - name: Run Codex review
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.CODEX_REVIEW_GITHUB_TOKEN || github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
           PR_BASE_SHA: ${{ steps.pr.outputs.base_sha }}
@@ -157,7 +157,7 @@ jobs:
 
       - name: Submit Codex review verdict
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.CODEX_REVIEW_GITHUB_TOKEN || github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
@@ -196,12 +196,12 @@ jobs:
             gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
           elif [[ "$verdict" == "approve" && "$may_approve" == "true" && "$blocking_count" == "0" ]]; then
             if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve --body-file "$body"; then
-              printf '\n\n> 참고: GitHub Actions 토큰으로는 PR approve 제출이 허용되지 않아 comment review로 대체합니다.\n' >> "$body"
+              printf '\n\n> 참고: 현재 GitHub 토큰으로 PR approve 제출에 실패해 comment review로 대체합니다.\n' >> "$body"
               gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
             fi
           elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
             if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --request-changes --body-file "$body"; then
-              printf '\n\n> 참고: GitHub Actions 토큰으로 request changes 제출에 실패해 comment review로 대체합니다.\n' >> "$body"
+              printf '\n\n> 참고: 현재 GitHub 토큰으로 request changes 제출에 실패해 comment review로 대체합니다.\n' >> "$body"
               gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
             fi
           else
@@ -214,7 +214,7 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           CODEX_REVIEW_MARKER: '<!-- codex-cli-pr-review -->'
         with:
-          github-token: ${{ github.token }}
+          github-token: ${{ secrets.CODEX_REVIEW_GITHUB_TOKEN || github.token }}
           script: |
             const fs = require('fs');
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
@@ -249,8 +249,9 @@ jobs:
               per_page: 100,
             });
 
+            const viewer = await github.rest.users.getAuthenticated();
             const previous = comments.find((comment) =>
-              comment.user?.login === 'github-actions[bot]' &&
+              comment.user?.login === viewer.data.login &&
               comment.body?.includes(marker)
             );
 
