@@ -132,6 +132,10 @@ grep -q 'confidence_score >= 80' "$WORKFLOW" \
   || fail "confidence threshold gate 부재"
 grep -q 'filter((finding)' "$WORKFLOW" && grep -q 'Number(finding\.confidence_score' "$WORKFLOW" \
   || fail "managed comment finding confidence 필터 부재"
+grep -q 'approve 제출이 허용되지 않아 comment review로 대체' "$WORKFLOW" \
+  || fail "approve 실패 시 comment fallback 부재"
+grep -q 'request changes 제출에 실패해 comment review로 대체' "$WORKFLOW" \
+  || fail "request changes 실패 시 comment fallback 부재"
 ok "check 10: verdict 기반 GitHub review 제출 경로 존재"
 
 echo ""
@@ -144,6 +148,8 @@ grep -q 'confidence_score < 80' "$PROMPT" \
   || fail "prompt confidence threshold 정책 부재"
 grep -q 'valid JSON' "$PROMPT" \
   || fail "prompt JSON-only 출력 규칙 부재"
+grep -q '사람이 읽는 문자열 값은 한국어로 작성' "$PROMPT" \
+  || fail "prompt 한국어 출력 규칙 부재"
 ok "check 11: prompt 핵심 정책 존재"
 
 echo ""

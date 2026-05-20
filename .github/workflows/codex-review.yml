@@ -195,9 +195,15 @@ jobs:
           if [[ "$eligibility" != "reviewed" || "$diff_truncated" != "false" ]]; then
             gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
           elif [[ "$verdict" == "approve" && "$may_approve" == "true" && "$blocking_count" == "0" ]]; then
-            gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve --body-file "$body"
+            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve --body-file "$body"; then
+              printf '\n\n> 참고: GitHub Actions 토큰으로는 PR approve 제출이 허용되지 않아 comment review로 대체합니다.\n' >> "$body"
+              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
+            fi
           elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
-            gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --request-changes --body-file "$body"
+            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --request-changes --body-file "$body"; then
+              printf '\n\n> 참고: GitHub Actions 토큰으로 request changes 제출에 실패해 comment review로 대체합니다.\n' >> "$body"
+              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
+            fi
           else
             gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
           fi

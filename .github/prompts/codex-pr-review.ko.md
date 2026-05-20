@@ -148,4 +148,6 @@ Evidence requirement:
 출력 규칙:
 반드시 valid JSON만 출력합니다.
 마크다운 설명, 코드블록, 추가 문장은 출력하지 않습니다.
-
+JSON field 이름과 enum 값은 schema에 맞춰 영어를 유지합니다.
+하지만 사람이 읽는 문자열 값은 한국어로 작성합니다.
+특히 `summary`, `eligibility.reason`, `automation_safety.reason`, `findings[].title`, `findings[].body`, `findings[].suggestion`, `resolved_threads[].reason`, `unresolved_threads[].reason`, `skipped_duplicates[].reason`, `context_requests[].reason`은 한국어로 작성합니다.
