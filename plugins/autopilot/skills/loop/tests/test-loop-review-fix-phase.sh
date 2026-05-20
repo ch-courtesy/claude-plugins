@@ -900,6 +900,12 @@ test_spec_171_is_secondary_worktree_detection() {
     git worktree add -q -b feat/sw-detect "$secondary" HEAD
   ) || fail "is_secondary_worktree setup"
 
+  # 소스 자체가 실패하면 이후 rc 비교가 vacuous pass 가 되므로 먼저 명시 검증.
+  ( cd "$project" && source "$SKILL_REFS/loop.sh" ) >/dev/null 2>&1 \
+    || fail "loop.sh source 실패 (주 작업트리) — 이후 rc 비교가 무효"
+  ( cd "$secondary" && source "$SKILL_REFS/loop.sh" ) >/dev/null 2>&1 \
+    || fail "loop.sh source 실패 (보조 worktree) — 이후 rc 비교가 무효"
+
   # 주 작업트리에서: 함수 호출 → non-zero (false) 기대
   local rc_main=0
   ( cd "$project"; source "$SKILL_REFS/loop.sh"; is_secondary_worktree ) >/dev/null 2>&1 \

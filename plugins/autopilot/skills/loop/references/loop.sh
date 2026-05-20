@@ -345,14 +345,15 @@ compute_paths() {
 # 판정 기준 (SPEC 171 제약):
 #   - 주 작업트리: top-level 의 .git 이 디렉토리.
 #   - 보조 worktree: top-level 의 .git 이 `gitdir: <main_repo>/.git/worktrees/<name>` 형태의
-#     파일. git 이 보조 worktree 에 항상 적용하는 표준 구조.
+#     파일. `worktrees` 경로 컴포넌트를 명시 검사해 submodule(`gitdir: ../.git/modules/...`)
+#     이 silent 하게 secondary 분기로 빠지는 것을 차단한다.
 #
-# 반환: 보조 worktree 면 0 (true), 주 작업트리 또는 git 저장소 외부면 non-zero (false).
-# bare repo·submodule·detached HEAD 등 비표준 환경은 보장 범위 외 (SPEC 171 제약).
+# 반환: 보조 worktree 면 0 (true), 주 작업트리·submodule·git 저장소 외부면 non-zero (false).
+# bare repo·detached HEAD 등 그 외 비표준 환경은 보장 범위 외 (SPEC 171 제약).
 is_secondary_worktree() {
   local top
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
-  [[ -f "$top/.git" ]]
+  [[ -f "$top/.git" ]] && grep -qE 'worktrees' "$top/.git"
 }
 
 # feat 브랜치 검색: input-id (정규화된 task-id 의 child 컴포넌트) 만으로 `feat/<id>` 또는
