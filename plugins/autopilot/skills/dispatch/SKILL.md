@@ -99,7 +99,7 @@ for wave in waves:
   while wave 진행 중:
     # references/dispatch.sh watch_wave <m> child1 child2 ...
     각 child의 sentinel watch (sleep 2s 폴링):
-      task 저장소 child issue 에 LOOP_DONE_LABEL 라벨 부착                → 성공 (SPEC 175)
+      task 저장소 child issue 에 LOOP_DONE_LABEL 라벨 부착                → 성공
       milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md             → 실패
 
     누군가 ESCALATION (watch_wave exit 101):
@@ -130,7 +130,7 @@ for wave in waves:
 
 이 외 exit code는 dispatch 자체 결함을 의미하므로 즉시 abort + 사용자에게 stderr·exit code 그대로 보고.
 
-**기존 loop과의 분업** — 워크트리·lock·iteration 상한·헌법 준수는 모두 `loop.sh`가 처리. dispatch는 두 sentinel 신호 — task 저장소 child issue 의 `LOOP_DONE_LABEL` 라벨(성공, SPEC 175) 과 워크트리 안 `.loop/ESCALATION.md` 파일(실패) — **존재만** 감시. 외부 셸 루프 표준 유지(in-process Stop 훅 미사용).
+**기존 loop과의 분업** — 워크트리·lock·iteration 상한·헌법 준수는 모두 `loop.sh`가 처리. dispatch는 두 sentinel 신호 — task 저장소 child issue 의 `LOOP_DONE_LABEL` 라벨(성공) 과 워크트리 안 `.loop/ESCALATION.md` 파일(실패) — **존재만** 감시. 외부 셸 루프 표준 유지(in-process Stop 훅 미사용).
 
 ## Subcommand
 

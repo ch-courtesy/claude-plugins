@@ -24,7 +24,7 @@ set -euo pipefail
 # ----- 스크립트 자신의 디렉토리 (references/) -----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ----- allowed-tools (SPEC 123 AC18) -----
+# ----- allowed-tools -----
 #
 # 완료 신호 이후 PR 생애주기 자동화 phase 그룹(rebase·review-fix·cleanup)의 *자식 claude CLI
 # 세션*(rebase 충돌 자동 해소, review-fix iter) 전용 도구 권한. review-fix-phase가
@@ -56,15 +56,14 @@ Bash(ls:*),\
 Read,Edit,Write,Glob,Grep"
 export AUTOPILOT_REBASE_ALLOWED_TOOLS
 
-# ----- task storage 검출 키 (SPEC 134 AC4) -----
+# ----- task storage 검출 키 -----
 #
 # 완료 신호의 검출 키는 task 식별자에 부속된 label 이름이다 (헌법 §12, SKILL.md).
 # 워커가 완료 시 `[done]` prefix comment(가독·로그)와 본 label 추가(검출 키)를 모두
 # 수행해야 드라이버가 done으로 판정한다. comment 본문은 더 이상 단일 검출 키가 아니다.
 #
 # LOOP_DONE_LABEL·task_issue_number·task_label_present·ensure_label_exists·
-# task_status_is_done 는 dispatch.sh 와 공유 (SPEC 175 AC6) — task-storage.sh
-# 단일 출처를 양쪽이 source 한다.
+# task_status_is_done 는 dispatch.sh 와 공유 — task-storage.sh 단일 출처를 양쪽이 source 한다.
 # shellcheck source=./task-storage.sh
 source "$SCRIPT_DIR/task-storage.sh"
 
@@ -107,15 +106,15 @@ normalize_task_id() {
 
 # ----- task ↔ GitHub issue 매핑 -----
 # task_issue_number·task_label_present·ensure_label_exists·task_status_is_done
-# 정의는 task-storage.sh 단일 출처 (SPEC 175 AC6 — dispatch.sh 와 공유).
+# 정의는 task-storage.sh 단일 출처 (dispatch.sh 와 공유).
 
-# task issue의 차단 신호 검사 (헌법 §5·§12, SPEC 134 §제약).
+# task issue의 차단 신호 검사 (헌법 §5·§12).
 # 정식 검출 키: Project Status field 값(`Blocked`) 단일 의존. comment 본문은 가독·
 # 로그 채널이며 판정에 사용되지 않는다 — 워커가 [blocked] prefix comment 발행과
 # 함께 Status=Blocked 전이 두 동작을 모두 수행해야 0(blocked)을 반환한다.
 # graceful degradation: AUTOPILOT_PROJECT_ITEM_ID 미설정·gh 부재·GraphQL 실패는
-# 1(판정 불가)로 조용히 폴백한다 (검출 키를 comment로 이중화하지 않는다 — SPEC 134
-# §제약 "판정 키는 label·status 단일 의존을 깨지 않는다"). 침묵 폴백 이유: 본 함수는
+# 1(판정 불가)로 조용히 폴백한다 (검출 키를 comment로 이중화하지 않는다 —
+# "판정 키는 label·status 단일 의존을 깨지 않는다"). 침묵 폴백 이유: 본 함수는
 # `list` 서브커맨드의 task별 순회와 `--watch` 모드의 60초 polling 루프에서 호출되어
 # WARN을 매번 출력하면 로그 플러딩 — 미설정 환경에서 idle 판정으로 자연 폴백하는 게
 # 설계 의도다. 디버깅 시 `gh api graphql` 직접 호출로 원인 분리.
@@ -298,7 +297,7 @@ compute_paths() {
   local milestone="${task_id%%/*}"
   local child="${task_id#*/}"
 
-  # SPEC 116 단일 컨벤션: feat 브랜치 이름의 slug 가 디렉토리 이름의 suffix.
+  # 단일 컨벤션: feat 브랜치 이름의 slug 가 디렉토리 이름의 suffix.
   # find_feat_branch 가 input-id (child) 만으로 `feat/<child>-<slug>` 또는 `feat/<child>` 를 찾는다.
   # 매칭 없음(rc=1)은 legacy/uninitialized 상태로 간주해 slug-less fallback.
   # 매칭 2+ (rc=2)는 모호성으로 즉시 die.
@@ -340,7 +339,7 @@ compute_paths() {
 }
 
 # feat 브랜치 검색: input-id (정규화된 task-id 의 child 컴포넌트) 만으로 `feat/<id>` 또는
-# `feat/<id>-<slug>` 패턴을 찾는다. SPEC 116 단일 컨벤션 — milestone prefix 는 사용하지 않는다.
+# `feat/<id>-<slug>` 패턴을 찾는다. 단일 컨벤션 — milestone prefix 는 사용하지 않는다.
 #
 # 반환:
 #   0 + stdout 에 단일 브랜치 이름     — 매칭 정확히 1개
@@ -367,7 +366,7 @@ find_feat_branch() {
   return 0
 }
 
-# feat 브랜치 이름에서 slug 추출. SPEC 116 단일 컨벤션 — `feat/<child>-<slug>` 패턴의 suffix.
+# feat 브랜치 이름에서 slug 추출. 단일 컨벤션 — `feat/<child>-<slug>` 패턴의 suffix.
 # 인자: $1 = child(input-id), $2 = branch 이름.
 # stdout: slug, 또는 빈 문자열(slug-less 브랜치·형식 불일치 시).
 slug_from_feat_branch() {
@@ -545,7 +544,7 @@ diff_vs_scope() {
   exclude_patterns=$(echo "$scope_yaml" | yq '.scope.exclude[]' 2>/dev/null || true)
   # 커밋된 diff: BASE..HEAD (워크트리 생성 시점부터 누적 변경) — HEAD~1..HEAD는 한 이터에 commit이
   # 2개 이상(워커 코드 commit + 드라이버 메타 commit) 발생할 때 가장 최근 commit만 보여 직전 commit의
-  # 위반을 false-negative로 통과시키는 결함이 있다 (SPEC 81). BASE..HEAD는 누적이라 모든 이터의
+  # 위반을 false-negative로 통과시키는 결함이 있다. BASE..HEAD는 누적이라 모든 이터의
   # 모든 commit을 포함하지만, 이전 이터의 in-scope commit은 재검사돼도 동일하게 통과한다.
   # 작업 트리 변경: claude 비정상 종료로 미커밋 변경이 남는 경우 추가로 차단.
   committed=$(cd "$WT" && git diff --name-only "$base_sha" HEAD 2>/dev/null || true)
@@ -562,8 +561,8 @@ diff_vs_scope() {
     # CLAUDE.md는 SPEC scope.exclude로 통제 — skip-worktree로 보통은 diff에 안 잡히지만,
     # 워커가 unskip + commit하면 여기서 정상 catch되어야 함 (워크트리 셋업 직후 자동 skip 처리).
     # SPEC.md(워커 명세)는 milestones/<m>/loops/<c>/ 단일 트리 안에 있으므로 그 경로 패턴으로
-    # 제외. 종료 신호는 task 저장소 LOOP_DONE_LABEL 라벨 단일 의존이라 워크트리 파일이 없다
-    # (SPEC 175). 이터간 메타(handoff/notes/done/blocked)는 task issue body·prefix
+    # 제외. 종료 신호는 task 저장소 LOOP_DONE_LABEL 라벨 단일 의존이라 워크트리 파일이 없다.
+    # 이터간 메타(handoff/notes/done/blocked)는 task issue body·prefix
     # comments로 위임됐으므로 워크트리 파일이 존재하지 않는다 (헌법 §11).
     case "$file" in
       milestones/*/loops/*/SPEC.md) continue ;;
@@ -607,7 +606,7 @@ grep_new_suppressors() {
   # 커밋된 diff(BASE..HEAD) + working tree 변경 양쪽 검사 (미커밋 suppressor도 catch).
   # SPEC.md는 워커 명세(헌법 인용 등 false positive 발생)이므로 검사 제외.
   # 이터간 메타는 task issue body·prefix comments로 위임됐으므로 워크트리 파일 검사 대상 아님 (헌법 §11).
-  # BASE..HEAD 근거는 diff_vs_scope 주석 참조 (SPEC 81).
+  # BASE..HEAD 근거는 diff_vs_scope 주석 참조.
   local base_sha="$1"
   cd "$WT" || return
   local meta_exclude=(
@@ -624,7 +623,7 @@ grep_new_suppressors() {
 
 check_secrets() {
   command -v gitleaks >/dev/null 2>&1 || return 0
-  # BASE..HEAD 누적 commit + 미커밋 staged 양쪽 검사. BASE..HEAD 근거는 diff_vs_scope 주석 참조 (SPEC 81).
+  # BASE..HEAD 누적 commit + 미커밋 staged 양쪽 검사. BASE..HEAD 근거는 diff_vs_scope 주석 참조.
   # 비고: gitleaks는 unstaged-tracked 변경의 직접 스캔 옵션이 없음 (--no-git은 워크트리
   #       전체 스캔이라 노이즈 큼) → unstaged-tracked는 본 게이트의 의도된 미커버.
   #       헌법이 매 이터 commit 강제하므로 일반 흐름에선 gap 없음.
@@ -637,7 +636,7 @@ check_secrets() {
 
 # 워크트리 생성 시점의 부모 브랜치 HEAD SHA를 읽어 반환. 부재·빈값이면 비-0 exit.
 # BASE 메타는 `$WT/.iterations/BASE_SHA` 단일 파일 (info/exclude로 자기 참조 회피).
-# 워크트리 생성 시 1회 기록되며 이후 변경되지 않는다 (SPEC 81 AC1).
+# 워크트리 생성 시 1회 기록되며 이후 변경되지 않는다.
 read_base_sha() {
   local f="$WT/.iterations/BASE_SHA"
   [[ -f "$f" ]] || return 1
@@ -780,13 +779,13 @@ iterate() {
     CLAUDE_FAIL_STREAK=0
   fi
 
-  # 종료 신호 검사 (먼저) — 헌법 §12, SPEC 150.
+  # 종료 신호 검사 (먼저) — 헌법 §12.
   # 검출 키: task 저장소에 LOOP_DONE_LABEL이 붙어 있는지 (task_status_is_done) 단일 의존.
   if task_status_is_done "$TASK_ID"; then
     return 100   # 메인 루프에서 정상 종료 처리
   fi
   # 워커가 진행 불가 보고 시 task issue에 [blocked] prefix comment + Status=Blocked 전이 (헌법 §5.2).
-  # 드라이버는 Project Status=Blocked 단일 의존으로 차단 신호를 감지한다 (SPEC 134 §제약).
+  # 드라이버는 Project Status=Blocked 단일 의존으로 차단 신호를 감지한다.
   if task_status_is_blocked "$TASK_ID"; then
     return 101   # 메인 루프에서 [blocked] 처리
   fi
@@ -802,8 +801,8 @@ iterate() {
     halt "의존성 변경 — 매니페스트 해시 변경"
   fi
 
-  # BASE SHA 메타 — 워크트리 생성 시점의 부모 브랜치 HEAD. 게이트 diff 비교 기준 (SPEC 81 AC2).
-  # 부재 시 명확한 에러로 halt (AC6: false-positive 통과 차단).
+  # BASE SHA 메타 — 워크트리 생성 시점의 부모 브랜치 HEAD. 게이트 diff 비교 기준.
+  # 부재 시 명확한 에러로 halt (false-positive 통과 차단).
   local base_sha
   if ! base_sha=$(read_base_sha); then
     halt "BASE SHA 메타 부재 — 워크트리 ${WT}의 .iterations/BASE_SHA 파일이 없습니다. 본 변경 이전에 생성된 pre-existing 워크트리로 의심됩니다. cleanup 후 재생성 필요 (loop.sh cleanup ${TASK_ID})."
@@ -873,8 +872,8 @@ cmd_start() {
         shift 2
         ;;
       --no-pr)
-        # AC2 (SPEC 103): PR 자동 생성 opt-out. 지정 시 완료 라벨 부착 직후 PR phase 건너뜀.
-        # default(없음): PR phase가 실행됨 (AC1).
+        # PR 자동 생성 opt-out. 지정 시 완료 라벨 부착 직후 PR phase 건너뜀.
+        # default(없음): PR phase가 실행됨.
         no_pr=1
         shift
         ;;
@@ -942,10 +941,10 @@ cmd_start() {
   # 5. 락 획득
   acquire_lock
 
-  # 5.5. 완료 신호 label self-bootstrap (SPEC 134 AC5).
+  # 5.5. 완료 신호 label self-bootstrap.
   # task storage에 LOOP_DONE_LABEL이 없으면 자동 생성. 권한 부족·gh 부재 시
   # WARN 후 비차단 — 워커가 label 추가에 실패하면 완료 검출이 누락되므로
-  # 헌법 §11.2가 워커에게 label 부착 동작을 강제한다 (SPEC 150).
+  # 헌법 §11.2가 워커에게 label 부착 동작을 강제한다.
   ensure_label_exists "$LOOP_DONE_LABEL" || true
 
   # 6. 워크트리 생성 (없는 경우)
@@ -964,7 +963,7 @@ cmd_start() {
       die "feat 브랜치 ${BRANCH} 워크트리 HEAD에 SPEC.md 부재 (기대: $WT/$LOOPS_DIR_REL/SPEC.md)"
     fi
 
-    # BASE SHA 메타 캡처 (SPEC 81 AC1) — 워크트리 생성 직후, baseline commit 전.
+    # BASE SHA 메타 캡처 — 워크트리 생성 직후, baseline commit 전.
     # 게이트(scope·suppressor·secret)의 BASE..HEAD diff 기준점. BASE_SHA는 git add된 적
     # 없는 untracked 파일이므로 `git diff --name-only` 시야 밖 — 자기 참조 게이트 검사에
     # 잡히지 않는다. info/exclude는 별개 효과로 워크트리 git status에서 `.iterations/`
@@ -994,8 +993,8 @@ cmd_start() {
     # 워크트리에는 메타 파일을 시드·commit하지 않는다 — feat 브랜치 HEAD가 그대로 BASE SHA가 된다.
 
     # 워크트리 로컬 비추적 등록 — .iterations/는 iter raw 로그, 어떤 git 브랜치에도
-    # commit되지 않음. 완료 신호는 task 저장소 라벨 단일 의존이라 워크트리 파일이 없다
-    # (SPEC 175) — exclude 패턴에서 제외.
+    # commit되지 않음. 완료 신호는 task 저장소 라벨 단일 의존이라 워크트리 파일이 없으므로
+    # exclude 패턴에서 제외.
     # 등록 위치 선택: --git-common-dir (공유 commondir의 info/exclude).
     # 배경: git은 워크트리별 $GIT_DIR/info/exclude(--git-dir)도 참조하지만 그 효과는
     #       해당 워크트리에만 한정된다. 본 패턴(CLAUDE.md·.iterations/)은 본 task의
@@ -1035,15 +1034,15 @@ cmd_start() {
     if [[ $iter_status -eq 100 ]]; then
       echo "[$(now_iso)] 완료 신호(LOOP_DONE_LABEL) 감지. 정상 종료."
 
-      # PR 생성·재사용 phase. SPEC 103 AC1: default로 실행 (opt-in 플래그 불필요).
-      # SPEC 103 AC2: --no-pr 플래그가 지정되면 건너뜀.
+      # PR 생성·재사용 phase. default로 실행 (opt-in 플래그 불필요).
+      # --no-pr 플래그가 지정되면 건너뜀.
       # 워크트리·로컬 브랜치는 후속 단계(리뷰 모니터·자동 fix)를 위해 보존한다.
       if (( no_pr == 1 )); then
         echo "[$(now_iso)] --no-pr 플래그 감지 — PR phase 건너뜀"
       else
-        # ----- SPEC 123: request_review opt-in 감지 (PR phase 진입 *전*에 확정) -----
-        # AC#1·#3: opt-in 활성 시 PR phase 진입 *직전*에 pre-PR rebase 실행.
-        # AC#4·#12·#16·#17: opt-in 활성 시 PR phase 직후 review-fix-phase background dispatch.
+        # ----- request_review opt-in 감지 (PR phase 진입 *전*에 확정) -----
+        # opt-in 활성 시 PR phase 진입 *직전*에 pre-PR rebase 실행.
+        # opt-in 활성 시 PR phase 직후 review-fix-phase background dispatch.
         local spec_md="$WT/$LOOPS_DIR_REL/SPEC.md"
         local request_review_val=""
         if [[ -f "$spec_md" ]]; then
@@ -1155,8 +1154,7 @@ cmd_status() {
   PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
 
-  # filter 지정 시 task-id 검증 + 정규화 (단일 컴포넌트 → regular/) + SPEC 116
-  # slug-bearing 디렉토리 매핑 (feat 브랜치 발견 시).
+  # filter 지정 시 task-id 검증 + 정규화 (단일 컴포넌트 → regular/) + slug-bearing 디렉토리 매핑 (feat 브랜치 발견 시).
   if [[ -n "$filter_task_id" ]]; then
     validate_task_id "$filter_task_id"
     filter_task_id="$(normalize_task_id "$filter_task_id")"
@@ -1235,7 +1233,7 @@ cmd_status() {
     if [[ -f "$lock_file" ]]; then
       state="running"
     elif [[ -d "$wt" ]]; then
-      # 차단 신호는 task issue의 Project Status=Blocked 단일 의존 (SPEC 134 §제약).
+      # 차단 신호는 task issue의 Project Status=Blocked 단일 의존.
       # gh 부재·미설정 시 task_status_is_blocked가 1을 반환해 자연스럽게 idle로 떨어진다.
       if task_status_is_blocked "$tid"; then
         state="blocked"
@@ -1410,7 +1408,7 @@ cmd_cleanup() {
     *) die "워크트리 경로 형식 부적절 (기대: */milestones/<m>/loops/<c>/.worktree): $WT" ;;
   esac
 
-  # 3. 완료 확인 — task 저장소 label 단일 의존 (SPEC 150).
+  # 3. 완료 확인 — task 저장소 label 단일 의존.
   if ! task_status_is_done "$task_id" && [[ $force -eq 0 ]]; then
     die "task $task_id 에 완료 신호가 없습니다 (LOOP_DONE_LABEL 미부착).\n--force 없이 cleanup하려면 먼저 task 저장소에 label이 붙어야 합니다: $0 cleanup $task_id --force"
   fi

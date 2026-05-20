@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-fix-phase.sh — SPEC 123 M2
+# review-fix-phase.sh
 #
 # DONE → PR 생성·재사용이 끝난 직후 background로 띄워지는 리뷰 fix 루프.
 # request_review: true opt-in일 때만 loop.sh가 호출한다.
@@ -7,28 +7,28 @@
 # 사용:
 #   bash review-fix-phase.sh <worktree> <branch> <task-id> <project-root> <pr-number>
 #
-# 동작 (SPEC 123 AC4·AC5·AC6·AC7·AC8·AC9·AC10·AC11·AC12·AC13·AC14·AC15·AC16):
+# 동작:
 #   1. 추상 상태 "리뷰 관련 상태" (Review) 전이 — gh project item-edit (envvar 부재 시 skip).
 #   2. LOOP_REVIEW_POLL_SECS(기본 30초) 주기로 폴링:
-#        a. PR state — MERGED → cleanup-phase 호출 후 종료 (auto-merge skip, AC13).
-#                       CLOSED(unmerged) → 모든 후속 단계 skip 후 종료 (AC15).
-#        b. reviewDecision == APPROVED → gh pr merge 시도, 성공 시 cleanup → 종료 (AC14).
+#        a. PR state — MERGED → cleanup-phase 호출 후 종료 (auto-merge skip).
+#                       CLOSED(unmerged) → 모든 후속 단계 skip 후 종료.
+#        b. reviewDecision == APPROVED → gh pr merge 시도, 성공 시 cleanup → 종료.
 #        c. owner의 코멘트 본문에 '/done' OR '합격' OR '통과' → gh pr merge → cleanup → 종료.
 #        d. 신규 PR-level comments · review threads · review summary 수집:
 #             - last-seen ID dedup, 없으면 sleep로 돌아감.
 #             - 새 이벤트 발견 시:
-#                 i.  요약 한 줄 stdout emit (AC6).
-#                 ii. rebase-phase.sh 호출 (AC7).
-#                 iii. claude CLI fix 세션 (AC8).
-#                 iv. 코드 변경 시 commit + push (AC9).
-#                 v.  세션 결과가 "DISPUTE: ..."로 시작하면 그 본문을 1개 PR 코멘트로 게시 (AC10).
-#                     AC11: 이 외 어떤 GitHub 게시도 수행하지 않음.
+#                 i.  요약 한 줄 stdout emit.
+#                 ii. rebase-phase.sh 호출.
+#                 iii. claude CLI fix 세션.
+#                 iv. 코드 변경 시 commit + push.
+#                 v.  세션 결과가 "DISPUTE: ..."로 시작하면 그 본문을 1개 PR 코멘트로 게시.
+#                     이 외 어떤 GitHub 게시도 수행하지 않음.
 #   3. LOOP_REVIEW_MAX_ITER 도달 시 무한 폴링 방지로 종료 (안전장치).
-#   4. 어느 단계든 비-zero exit은 stdout "ESCALATION review-fix-phase: ..." emit 후 종료 (AC19).
+#   4. 어느 단계든 비-zero exit은 stdout "ESCALATION review-fix-phase: ..." emit 후 종료.
 
 set -euo pipefail
 
-# ===== silent-fail 평가 (SPEC 181) — 단위 테스트 가능 =====
+# ===== silent-fail 평가 — 단위 테스트 가능 =====
 # 인자(8): fetch_fail pending total_checks reviews comments inline elapsed grace
 # stdout(택일): ESCALATE_FETCH_FAIL | GRACE_SKIP | EMPTY_ROLLUP_SKIP | ESCALATE_STUCK | RESET_COUNTER
 #
@@ -55,7 +55,7 @@ evaluate_silent_fail() {
   echo "RESET_COUNTER"
 }
 
-# ===== grace 기간 (silent-fail 조기 호출 방지) — SPEC 181 =====
+# ===== grace 기간 (silent-fail 조기 호출 방지) =====
 # 환경변수: LOOP_REVIEW_PR_GRACE_SECS
 # 기본값:  300 (5분) — GitHub Actions check 등록·큐 지연 흡수
 # floor:   0  (음수 입력 시 0으로 clamp — grace=0은 grace 비활성화 동등)
@@ -123,16 +123,16 @@ touch "$SEEN_FILE"
 is_seen() { grep -qxF "$1" "$SEEN_FILE" 2>/dev/null; }
 mark_seen() { echo "$1" >> "$SEEN_FILE"; }
 
-# 반박 코멘트 1회 게시 가드 — PR-level dispute에 한정 (SPEC 153 AC6 기존 동작 보존).
-# 인라인 thread reply는 별도 REPLIED_THREADS_FILE로 thread 단위 dedup (SPEC 153 AC4·AC5).
+# 반박 코멘트 1회 게시 가드 — PR-level dispute에 한정.
+# 인라인 thread reply는 별도 REPLIED_THREADS_FILE로 thread 단위 dedup.
 DISPUTE_FILE="$WT/.iterations/review-fix-dispute-posted"
 
 # 인라인 thread "응답 완료" 추적 — 본 phase 사이클 동안 같은 thread를 두 번 처리하지
-# 않게 가드 (AC4). FIX(코드 변경)·DISPUTE(thread reply) 두 액션 모두 처리 직후
+# 않게 가드. FIX(코드 변경)·DISPUTE(thread reply) 두 액션 모두 처리 직후
 # `mark_thread_replied`로 기록된다 — 그렇지 않으면 다음 iter의 polling이 같은 thread를
 # 다시 발견해 claude가 중복 FIX/DISPUTE를 emit할 수 있다 (불필요한 commit·reply).
-# 파일명은 SPEC 153 초기 명칭 보존(과거 호환), 의미는 "responded" 확장.
-# 서로 다른 thread들은 각각 처리 가능 (AC5: phase 단위 상한 없음).
+# 파일명은 초기 명칭 보존(과거 호환), 의미는 "responded" 확장.
+# 서로 다른 thread들은 각각 처리 가능 (phase 단위 상한 없음).
 REPLIED_THREADS_FILE="$WT/.iterations/review-fix-replied-threads"
 touch "$REPLIED_THREADS_FILE"
 
@@ -339,11 +339,11 @@ while (( iter < MAX_ITER )); do
   if [[ -z "$new_events" ]]; then
     CONSECUTIVE_IDLE=$((CONSECUTIVE_IDLE + 1))
     if (( CONSECUTIVE_IDLE >= CONSECUTIVE_IDLE_THRESHOLD )); then
-      # silent-fail / stuck 패턴 평가 — evaluate_silent_fail에 위임 (SPEC 181).
+      # silent-fail / stuck 패턴 평가 — evaluate_silent_fail에 위임.
       # 입력: fetch 실패 플래그 + rollup·활동 카운트 + PR 생성 후 경과 시간 + grace 기간.
       last_fetch_fail=$( cat "$FETCH_FAIL_FILE" 2>/dev/null || echo 0 )
       # statusCheckRollup·createdAt을 한 번에 fetch해 jq 필터 3종 적용 — API 호출·레이턴시 절감.
-      # SPEC 181 AC2: total_checks=0(빈 rollup)을 "체크 모두 완료"로 오판하지 않기 위해 별도 산출.
+      # total_checks=0(빈 rollup)을 "체크 모두 완료"로 오판하지 않기 위해 별도 산출.
       rollup_json=$( cd "$WT" && gh pr view "$PR_NUMBER" --json statusCheckRollup,createdAt 2>/dev/null || echo "" )
       pending_checks=$( printf '%s' "$rollup_json" | jq '[.statusCheckRollup[]? | select((.status // "COMPLETED") != "COMPLETED")] | length' 2>/dev/null || echo "" )
       total_checks=$( printf '%s' "$rollup_json" | jq '.statusCheckRollup | length' 2>/dev/null || echo "" )
@@ -415,7 +415,7 @@ while (( iter < MAX_ITER )); do
   fix_prompt_threads=$( cd "$WT" && gh api "repos/{owner}/{repo}/pulls/$PR_NUMBER/comments" 2>/dev/null || echo "[]" )
   fix_prompt_body=$(printf 'PR comments + reviews:\n%s\n\nReview thread inline comments:\n%s\n' "$fix_prompt_header" "$fix_prompt_threads")
   # Inline thread roots (in_reply_to_id == null) — 각 root이 INLINE per-thread 응답 1건의 대상.
-  # SPEC 153에서 thread_id == comment_id (root.id). (iv-A) 파서가 INLINE 라인을 읽으므로
+  # thread_id == comment_id (root.id). (iv-A) 파서가 INLINE 라인을 읽으므로
   # 본 변수를 프롬프트에 명시 주입해 dead-code 갭을 차단.
   # 이미 처리된 thread는 REPLIED_THREADS_FILE 기준으로 사전 제외 — (iv-A) dedup이
   # 후처리만 막을 뿐 claude의 edit·comment 자체는 이미 수행되므로, 프롬프트 진입 전에
@@ -441,29 +441,29 @@ $new_events
 Full PR comment/review context (for reference):
 $fix_prompt_body
 
-Active inline review threads requiring per-thread response (SPEC 153):
+Active inline review threads requiring per-thread response:
 $fix_prompt_inline_threads
 
 Goal:
   PR-level comments and review summaries (batched, collective verdict):
     - If reviewer is correct → fix the code (Edit/Write).
     - If reviewer is wrong → emit a single line: 'DISPUTE: <one-line dispute body>'
-      (the caller posts it as ONE PR-level comment — AC6 보존).
+      (the caller posts it as ONE PR-level comment).
 
-  EACH active inline review thread listed above (per-thread 1:1 response, SPEC 153 AC1·AC2·AC3):
+  EACH active inline review thread listed above (per-thread 1:1 response):
     - If reviewer is correct → fix the referenced code, then emit ONE line:
         INLINE <thread_id> <thread_id> FIX
-      AC2 fallback: 코드 변경 시도가 실패(빌드/테스트 실패·구문 오류 등)할 경우
+      Fallback: 코드 변경 시도가 실패(빌드/테스트 실패·구문 오류 등)할 경우
       해당 thread에 대해 INLINE <thread_id> <thread_id> DISPUTE <one-line 실패 사유>로
-      전환해 응답한다 (FIX → reply 자동 fallback, AC1 "정확히 하나" 보장 유지).
+      전환해 응답한다 (FIX → reply 자동 fallback, "정확히 하나" 보장 유지).
     - If reviewer is wrong → emit ONE line:
         INLINE <thread_id> <thread_id> DISPUTE <one-line dispute body>
-    - 보수적 판정 (SPEC §제약 요건): 타당성이 불확실하면 FIX 분기로 결정한다
+    - 보수적 판정: 타당성이 불확실하면 FIX 분기로 결정한다
       (DISPUTE 남발 방지·reviewer-bot 갈등 완화).
     - The INLINE line format depends on action:
         FIX:     INLINE <thread_id> <comment_id> FIX                       (4 tokens, no body)
         DISPUTE: INLINE <thread_id> <comment_id> DISPUTE <body...>         (5 tokens, body required)
-      Whitespace-separated. SPEC 153에서 thread_id와 comment_id는 같은 정수
+      Whitespace-separated. thread_id와 comment_id는 같은 정수
       (root comment DB id). FIX 라인에 본문이 붙어도 파서는 skip하므로 기능 영향
       없지만, 형식 일관성을 위해 FIX는 4토큰만 출력한다.
 
@@ -501,12 +501,12 @@ EOF
       || { echo "WARN: fix commit/push 실패 (iter $iter) — 다음 iter 재시도 (phase 계속)" >&2; sleep "$POLL_SECS"; continue; }
   fi
 
-  # (iv-A) INLINE per-comment thread reply POST (SPEC 153 AC1·AC3·AC4·AC5)
+  # (iv-A) INLINE per-comment thread reply POST
   # claude 출력에서 `INLINE <thread_id> <comment_id> <action> <body...>` 라인을 파싱.
   # action == DISPUTE 인 경우 해당 inline thread에 reply 1개 POST. thread_id 기준 dedup으로
-  # 같은 phase 사이클 동안 같은 thread는 최대 1 reply (AC4). 서로 다른 thread들은 각각 reply 가능 (AC5).
+  # 같은 phase 사이클 동안 같은 thread는 최대 1 reply. 서로 다른 thread들은 각각 reply 가능.
   # action == FIX는 claude가 이미 코드 변경을 적용했음을 의미 — 위 (iii) commit/push 경로가 처리.
-  # PR-level dispute(DISPUTE: ...) 본문은 본 블록과 무관, 아래 (iv-B)가 처리 — AC6 기존 동작 보존.
+  # PR-level dispute(DISPUTE: ...) 본문은 본 블록과 무관, 아래 (iv-B)가 처리.
   #
   # 구조: INLINE 파서·dedup 마킹은 OWNER_REPO 유무와 무관하게 항상 수행한다 —
   # FIX 액션도 dedup이 필요하므로(다음 iter 중복 commit 방지) OWNER_REPO 미식별 시에도
@@ -568,8 +568,8 @@ EOF
     fi
   done < <( grep -E '^INLINE[[:space:]]' "$WT/$fix_log" 2>/dev/null || true )
 
-  # (iv-B) PR-level DISPUTE 본문 감지 → PR 코멘트 1회 게시 (AC10·AC11 — SPEC 123 기존 경로)
-  # `DISPUTE: <body>` 라인은 PR-level 의견 — gh pr comment 경로 (AC6 보존).
+  # (iv-B) PR-level DISPUTE 본문 감지 → PR 코멘트 1회 게시
+  # `DISPUTE: <body>` 라인은 PR-level 의견 — gh pr comment 경로.
   # INLINE 라인은 본 블록 패턴(^DISPUTE:)에 일치하지 않으므로 영향 없음.
   dispute_line=$( grep -m1 -E '^DISPUTE:' "$WT/$fix_log" 2>/dev/null || true )
   if [[ -n "$dispute_line" && ! -f "$DISPUTE_FILE" ]]; then
