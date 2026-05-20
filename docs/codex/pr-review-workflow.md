@@ -16,11 +16,25 @@
 3. `.github/prompts/codex-pr-review.ko.md`를 system prompt처럼 붙인다.
 4. `codex exec --output-schema .github/prompts/codex-pr-review.schema.json`을 stdin 기반으로 실행한다.
 5. JSON schema를 검증한다.
-6. `verdict`에 따라 GitHub review를 제출한다.
+6. reviewer GitHub App installation token을 발급해 `GH_TOKEN`과 `github-script` token으로 사용한다.
+7. `verdict`에 따라 GitHub review를 제출한다.
    - `approve`: `gh pr review --approve`
    - `request_changes`: `gh pr review --request-changes`
    - `comment`, `needs_context`, `unavailable`: `gh pr review --comment`
-7. managed issue comment를 marker 기반으로 create/update한다.
+8. managed issue comment를 marker 기반으로 create/update한다.
+
+필수 secrets:
+
+- `CODEX_AUTH_JSON`: Codex CLI 인증용 `auth.json` 내용.
+- `CODEX_REVIEW_APP_ID`: 리뷰어 GitHub App ID.
+- `CODEX_REVIEW_APP_PRIVATE_KEY`: 리뷰어 GitHub App private key.
+- `CODEX_REVIEW_APP_INSTALLATION_ID`: 선택 값. 비워두면 repository installation endpoint에서 자동 조회한다.
+
+리뷰어 GitHub App 권한:
+
+- Contents: Read
+- Issues: Write
+- Pull requests: Write
 
 ## 단계적 고도화 계획
 
@@ -166,4 +180,3 @@ adapters/
 - user-provided PR body/title/comments는 untrusted context로만 다룬다.
 - approval은 JSON verdict와 automation safety가 모두 통과할 때만 수행한다.
 - schema validation 실패, context truncation, diff fetch 실패 시 approve하지 않는다.
-

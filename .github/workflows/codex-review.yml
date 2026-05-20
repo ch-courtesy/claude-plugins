@@ -89,10 +89,72 @@ jobs:
       - name: Install Codex CLI
         run: npm install -g @openai/codex@0.132.0
 
+      - name: Create reviewer app token
+        id: reviewer-token
+        env:
+          CODEX_REVIEW_APP_ID: ${{ secrets.CODEX_REVIEW_APP_ID }}
+          CODEX_REVIEW_APP_PRIVATE_KEY: ${{ secrets.CODEX_REVIEW_APP_PRIVATE_KEY }}
+          CODEX_REVIEW_APP_INSTALLATION_ID: ${{ secrets.CODEX_REVIEW_APP_INSTALLATION_ID }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$CODEX_REVIEW_APP_ID" ] || [ -z "$CODEX_REVIEW_APP_PRIVATE_KEY" ]; then
+            echo "CODEX_REVIEW_APP_ID and CODEX_REVIEW_APP_PRIVATE_KEY secrets are required for reviewer app comments." >&2
+            exit 1
+          fi
+
+          umask 077
+          key_file="$(mktemp)"
+          trap 'rm -f "$key_file"' EXIT
+          printf '%s' "$CODEX_REVIEW_APP_PRIVATE_KEY" > "$key_file"
+
+          b64url() {
+            openssl base64 -A | tr '+/' '-_' | tr -d '='
+          }
+
+          now="$(date +%s)"
+          iat="$((now - 60))"
+          exp="$((now + 540))"
+          header="$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)"
+          payload="$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' "$iat" "$exp" "$CODEX_REVIEW_APP_ID" | b64url)"
+          signature="$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$key_file" -binary | b64url)"
+          app_jwt="$header.$payload.$signature"
+
+          installation_id="$CODEX_REVIEW_APP_INSTALLATION_ID"
+          if [ -z "$installation_id" ]; then
+            installation_id="$(
+              curl -fsSL \
+                -H "Authorization: Bearer $app_jwt" \
+                -H "Accept: application/vnd.github+json" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/$GITHUB_REPOSITORY/installation" \
+              | jq -r '.id'
+            )"
+          fi
+
+          token="$(
+            curl -fsSL \
+              -X POST \
+              -H "Authorization: Bearer $app_jwt" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/app/installations/$installation_id/access_tokens" \
+              -d '{"permissions":{"contents":"read","issues":"write","pull_requests":"write"}}' \
+            | jq -r '.token'
+          )"
+
+          if [ -z "$token" ] || [ "$token" = "null" ]; then
+            echo "Failed to create reviewer GitHub App installation token." >&2
+            exit 1
+          fi
+
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
       - name: Run Codex review
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.reviewer-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
           PR_BASE_SHA: ${{ steps.pr.outputs.base_sha }}
@@ -157,7 +219,7 @@ jobs:
 
       - name: Submit Codex review verdict
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.reviewer-token.outputs.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
@@ -181,7 +243,7 @@ jobs:
               if ($findings | length) == 0 then
                 "고신뢰 finding 없음."
               else
-                "Finding 목록:\n" + (
+                "발견 사항:\n" + (
                   [$findings[] |
                     "- [" + .severity + "/" + (.confidence_score|tostring) + "] " +
                     .title + " (" + .file + ":" + ((.line // 1)|tostring) + ")\n  " +
@@ -196,12 +258,12 @@ jobs:
             gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
           elif [[ "$verdict" == "approve" && "$may_approve" == "true" && "$blocking_count" == "0" ]]; then
             if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve --body-file "$body"; then
-              printf '\n\n> 참고: GitHub Actions 토큰으로는 PR approve 제출이 허용되지 않아 comment review로 대체합니다.\n' >> "$body"
+              printf '\n\n> 참고: 리뷰어 앱 토큰으로 PR approve 제출에 실패해 comment review로 대체합니다.\n' >> "$body"
               gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
             fi
           elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
             if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --request-changes --body-file "$body"; then
-              printf '\n\n> 참고: GitHub Actions 토큰으로 request changes 제출에 실패해 comment review로 대체합니다.\n' >> "$body"
+              printf '\n\n> 참고: 리뷰어 앱 토큰으로 request changes 제출에 실패해 comment review로 대체합니다.\n' >> "$body"
               gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
             fi
           else
@@ -214,7 +276,7 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           CODEX_REVIEW_MARKER: '<!-- codex-cli-pr-review -->'
         with:
-          github-token: ${{ github.token }}
+          github-token: ${{ steps.reviewer-token.outputs.token }}
           script: |
             const fs = require('fs');
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
@@ -250,7 +312,7 @@ jobs:
             });
 
             const previous = comments.find((comment) =>
-              comment.user?.login === 'github-actions[bot]' &&
+              comment.user?.login !== 'github-actions[bot]' &&
               comment.body?.includes(marker)
             );
 
