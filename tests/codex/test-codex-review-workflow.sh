@@ -34,8 +34,10 @@ ok "check 2: umask 077 이 ~/.codex 생성 전에 적용됨"
 
 echo ""
 echo "=== check 3: codex review uses --base without a prompt argument ==="
-grep -q -- '--base "origin/\$PR_BASE_REF" \\' "$WORKFLOW" \
-  || fail "codex review base 지정 부재"
+grep -q 'REVIEW_BASE="$(git merge-base "origin/\$PR_BASE_REF" "refs/remotes/pull/\$PR_NUMBER/head")"' "$WORKFLOW" \
+  || fail "PR head 와 base branch 의 merge-base 계산 부재"
+grep -q -- '--base "\$REVIEW_BASE" \\' "$WORKFLOW" \
+  || fail "codex review 가 계산된 REVIEW_BASE 를 사용하지 않음"
 grep -q -- '--title "\$PR_TITLE"' "$WORKFLOW" \
   || fail "codex review title 지정 부재"
 if grep -q -- '- < \.codex-review/full-prompt\.md' "$WORKFLOW"; then

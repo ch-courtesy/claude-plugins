@@ -108,9 +108,10 @@ jobs:
           printf '%s' "$CODEX_AUTH_JSON" > "$HOME/.codex/auth.json"
 
           mkdir -p .codex-review
+          REVIEW_BASE="$(git merge-base "origin/$PR_BASE_REF" "refs/remotes/pull/$PR_NUMBER/head")"
 
           codex review \
-            --base "origin/$PR_BASE_REF" \
+            --base "$REVIEW_BASE" \
             --title "$PR_TITLE" \
             > .codex-review/output.md
 
