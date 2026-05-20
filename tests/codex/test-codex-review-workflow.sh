@@ -130,6 +130,8 @@ grep -q 'automation_safety\.may_approve' "$WORKFLOW" \
   || fail "approve safety gate 부재"
 grep -q 'confidence_score >= 80' "$WORKFLOW" \
   || fail "confidence threshold gate 부재"
+grep -q 'filter((finding)' "$WORKFLOW" && grep -q 'Number(finding\.confidence_score' "$WORKFLOW" \
+  || fail "managed comment finding confidence 필터 부재"
 ok "check 10: verdict 기반 GitHub review 제출 경로 존재"
 
 echo ""

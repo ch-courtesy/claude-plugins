@@ -173,18 +173,19 @@ jobs:
           blocking_count="$(jq '[.findings[] | select(.severity == "blocking" and .confidence_score >= 80)] | length' "$result")"
 
           {
-            printf '## Codex PR Review\n\n'
+            printf '## Codex PR 리뷰\n\n'
             jq -r '.summary' "$result"
             printf '\n\n'
             jq -r '
-              if (.findings | length) == 0 then
-                "No high-confidence findings."
+              ([.findings[] | select(.confidence_score >= 80)]) as $findings |
+              if ($findings | length) == 0 then
+                "고신뢰 finding 없음."
               else
-                "Findings:\n" + (
-                  [.findings[] |
+                "Finding 목록:\n" + (
+                  [$findings[] |
                     "- [" + .severity + "/" + (.confidence_score|tostring) + "] " +
                     .title + " (" + .file + ":" + ((.line // 1)|tostring) + ")\n  " +
-                    .body + "\n  Suggestion: " + .suggestion
+                    .body + "\n  제안: " + .suggestion
                   ] | join("\n")
                 )
               end
@@ -212,20 +213,22 @@ jobs:
             const fs = require('fs');
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
             const marker = process.env.CODEX_REVIEW_MARKER;
-            const findings = result.findings || [];
+            const findings = (result.findings || []).filter((finding) =>
+              Number(finding.confidence_score || 0) >= 80
+            );
             const findingText = findings.length === 0
-              ? 'No high-confidence findings.'
+              ? '고신뢰 finding 없음.'
               : findings.map((finding, index) => [
                   `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
                   `${finding.file}:${finding.line || 1}`,
                   finding.body,
-                  `Suggestion: ${finding.suggestion}`,
+                  `제안: ${finding.suggestion}`,
                 ].join('\n')).join('\n\n');
             const body = [
               marker,
-              '## Codex PR Review',
+              '## Codex PR 리뷰',
               '',
-              `Verdict: \`${result.verdict}\``,
+              `판정: \`${result.verdict}\``,
               '',
               result.summary || '주요 이슈 없음. 합격 기준 통과.',
               '',
