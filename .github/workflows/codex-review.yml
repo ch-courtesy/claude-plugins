@@ -234,7 +234,7 @@ jobs:
             printf '\n\n'
             jq -r '
               if (.findings | length) == 0 then
-                "No high-confidence findings."
+                "No findings."
               else
                 "Findings:\n" + (
                   [.findings[] |
@@ -259,12 +259,10 @@ jobs:
           marker="codex-formal-review head_sha=$PR_HEAD_SHA verdict=$verdict"
           printf '\n\n<!-- %s -->\n' "$marker" >> "$body"
 
-          if [[ "$review_mode" != "comment" ]]; then
-            if gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
-              | jq -e --arg marker "$marker" 'any(.[]; (.body // "") | contains($marker))' >/dev/null; then
-              echo "Formal Codex review already exists for $PR_HEAD_SHA / $verdict; skipping duplicate."
-              exit 0
-            fi
+          if gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
+            | jq -e --arg marker "$marker" 'any(.[]; (.body // "") | contains($marker))' >/dev/null; then
+            echo "Formal Codex review already exists for $PR_HEAD_SHA / $verdict; skipping duplicate."
+            exit 0
           fi
 
           submit_review() {
@@ -302,7 +300,7 @@ jobs:
             const marker = process.env.CODEX_REVIEW_MARKER;
             const findings = result.findings || [];
             const findingText = findings.length === 0
-              ? 'No high-confidence findings.'
+              ? 'No findings.'
               : findings.map((finding, index) => [
                   `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
                   `${finding.file}:${finding.line || 1}`,

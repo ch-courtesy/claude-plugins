@@ -173,6 +173,9 @@ grep -q 'codex-formal-review head_sha=' "$WORKFLOW" \
   || fail "formal review 중복 방지 marker 부재"
 grep -q 'pulls/\$PR_NUMBER/reviews' "$WORKFLOW" \
   || fail "기존 formal review 조회 부재"
+if grep -q 'No high-confidence findings' "$WORKFLOW"; then
+  fail "빈 findings 메시지가 high-confidence 표현을 사용함"
+fi
 ok "check 10: verdict 기반 GitHub review 제출 경로 존재"
 
 echo ""
