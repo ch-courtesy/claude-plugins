@@ -204,7 +204,7 @@ jobs:
             codex exec \
               --sandbox read-only \
               --output-schema "$REVIEW_SCHEMA" \
-              --output-last-message .codex-review/result.json \
+              --output-last-message "$result" \
               < "$second_prompt"
 
             jq empty "$result"

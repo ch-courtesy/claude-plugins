@@ -50,8 +50,9 @@ grep -q -- '--sandbox read-only' "$WORKFLOW" \
   || fail "codex exec sandbox 모드 지정 부재"
 grep -q -- '--output-schema "\$REVIEW_SCHEMA"' "$WORKFLOW" \
   || fail "codex exec output schema 지정 부재"
-grep -q -- '--output-last-message "\$result"' "$WORKFLOW" \
-  || fail "codex 최종 JSON 출력 파일 지정 부재"
+result_output_count="$(awk 'index($0, "--output-last-message \"$result\"") { count++ } END { print count + 0 }' "$WORKFLOW")"
+[[ "$result_output_count" == "2" ]] \
+  || fail "codex 최종 JSON 출력 파일 지정이 1차/2차 exec 모두에 없음"
 grep -q '< "\$initial_prompt"' "$WORKFLOW" \
   || fail "prompt 를 stdin 으로 전달하지 않음"
 if grep -q '"$(cat \.codex-review/full-prompt\.md)"' "$WORKFLOW"; then
