@@ -267,15 +267,21 @@ jobs:
             fi
           fi
 
+          submit_review() {
+            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" "$@" --body-file "$body"; then
+              echo "Formal Codex review submission failed; continuing with managed PR comment."
+            fi
+          }
+
           case "$review_mode" in
             approve)
-              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve --body-file "$body"
+              submit_review --approve
               ;;
             request-changes)
-              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --request-changes --body-file "$body"
+              submit_review --request-changes
               ;;
             comment)
-              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
+              submit_review --comment
               ;;
             *)
               echo "unknown review mode: $review_mode" >&2

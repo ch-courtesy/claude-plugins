@@ -152,12 +152,14 @@ ok "check 9: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
 echo "=== check 10: verdict is submitted through GitHub review API ==="
-grep -q 'gh pr review "\$PR_NUMBER".*--approve' "$WORKFLOW" \
+grep -q 'submit_review --approve' "$WORKFLOW" \
   || fail "approve review 제출 경로 부재"
-grep -q 'gh pr review "\$PR_NUMBER".*--request-changes' "$WORKFLOW" \
+grep -q 'submit_review --request-changes' "$WORKFLOW" \
   || fail "request changes review 제출 경로 부재"
-grep -q 'gh pr review "\$PR_NUMBER".*--comment' "$WORKFLOW" \
+grep -q 'submit_review --comment' "$WORKFLOW" \
   || fail "comment review 제출 경로 부재"
+grep -q 'gh pr review "\$PR_NUMBER".*--body-file "\$body"' "$WORKFLOW" \
+  || fail "GitHub review API 호출 함수 부재"
 grep -q 'automation_safety\.may_approve' "$WORKFLOW" \
   || fail "approve safety gate 부재"
 grep -q 'confidence_score >= 80' "$WORKFLOW" \
