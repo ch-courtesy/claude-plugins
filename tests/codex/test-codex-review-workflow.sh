@@ -48,6 +48,8 @@ grep -q 'REVIEW_SCHEMA="\.github/prompts/codex-pr-review\.schema\.json"' "$WORKF
   || fail "structured review schema 파일 참조 부재"
 grep -q 'codex exec' "$WORKFLOW" \
   || fail "codex exec 사용 부재"
+grep -q -- '--sandbox read-only' "$WORKFLOW" \
+  || fail "codex exec sandbox 모드 지정 부재"
 grep -q -- '--output-schema "\$REVIEW_SCHEMA"' "$WORKFLOW" \
   || fail "codex exec output schema 지정 부재"
 grep -q -- '--output-last-message \.codex-review/result\.json' "$WORKFLOW" \
