@@ -24,6 +24,8 @@ grep -q 'mkdir -p "\$HOME/\.codex"' "$WORKFLOW" \
   || fail "~/.codex 디렉토리 생성 부재"
 grep -q 'printf .*> "\$HOME/\.codex/auth\.json"' "$WORKFLOW" \
   || fail "~/.codex/auth.json 복원 부재"
+grep -q 'unset CODEX_AUTH_JSON' "$WORKFLOW" \
+  || fail "auth.json 작성 후 CODEX_AUTH_JSON env 제거 부재"
 ok "check 1: CODEX_AUTH_JSON secret을 ~/.codex/auth.json 으로 복원"
 
 echo ""

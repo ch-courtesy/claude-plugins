@@ -189,7 +189,7 @@ jobs:
             done <<< "$requested_files"
           fi
 
-          if find .review-extra-context -type f | read -r; then
+          if find .review-extra-context -type f -print -quit | grep -q .; then
             cp "$initial_prompt" "$second_prompt"
             {
               printf '\n\n---\n\n'
