@@ -353,7 +353,7 @@ compute_paths() {
 is_secondary_worktree() {
   local top
   top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
-  [[ -f "$top/.git" ]] && grep -qE 'worktrees' "$top/.git"
+  [[ -f "$top/.git" ]] && grep -qE '\.git/worktrees/' "$top/.git"
 }
 
 # feat 브랜치 검색: input-id (정규화된 task-id 의 child 컴포넌트) 만으로 `feat/<id>` 또는

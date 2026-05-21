@@ -921,6 +921,36 @@ test_spec_171_is_secondary_worktree_detection() {
   pass "SPEC 171: is_secondary_worktree 검출 (주=false, 보조=true)"
 }
 
+# ----- SPEC 171: .git 파일 경로의 worktrees 문자열 false-positive 방지 -----
+test_spec_171_is_secondary_worktree_ignores_worktrees_path_text() {
+  local project="$WORK_DIR/my-worktrees-backup/repo"
+  local gitdir="$WORK_DIR/my-worktrees-backup/gitdir"
+  mkdir -p "$project"
+  git init -q -b main --separate-git-dir "$gitdir" "$project"
+  (
+    cd "$project"
+    git config user.email "t@e.com"; git config user.name "T"
+    git commit --allow-empty -q -m initial
+  ) || fail "is_secondary_worktree false-positive setup"
+
+  local dotgit
+  dotgit=$(cat "$project/.git")
+  [[ "$dotgit" == *worktrees* ]] \
+    || fail "is_secondary_worktree false-positive fixture: .git 파일에 worktrees 문자열이 없음"
+  [[ "$dotgit" != *".git/worktrees/"* ]] \
+    || fail "is_secondary_worktree false-positive fixture: 실제 보조 worktree 경로가 됨"
+
+  ( cd "$project" && source "$SKILL_REFS/loop.sh" ) >/dev/null 2>&1 \
+    || fail "loop.sh source 실패 (worktrees 문자열 포함 별도 gitdir)"
+
+  local rc=0
+  ( cd "$project"; source "$SKILL_REFS/loop.sh"; is_secondary_worktree ) >/dev/null 2>&1 \
+    || rc=$?
+  [[ $rc -eq 0 ]] && fail "is_secondary_worktree: .git 파일 경로 문자열만으로 true 반환 — false 기대"
+
+  pass "SPEC 171: .git 파일 경로의 worktrees 문자열 false-positive 방지"
+}
+
 # ----- SPEC 171: 보조 worktree cwd 에서 cmd_start 호출 → nested .worktree 생성 생략 (AC3) -----
 test_spec_171_cmd_start_secondary_skips_nested_wt() {
   local project="$WORK_DIR/sw_skip_proj"
@@ -1044,6 +1074,7 @@ test_sync_conflict_failure_recovers_merge_path
 test_sync_conflict_failure_recovers_rebase_path
 test_spec_171_worktree_detection_static
 test_spec_171_is_secondary_worktree_detection
+test_spec_171_is_secondary_worktree_ignores_worktrees_path_text
 test_spec_171_cmd_start_secondary_skips_nested_wt
 test_spec_171_cmd_start_main_creates_nested_wt
 
