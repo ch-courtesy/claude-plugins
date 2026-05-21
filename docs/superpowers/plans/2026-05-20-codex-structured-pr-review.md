@@ -1,110 +1,110 @@
-# Codex Structured PR Review Implementation Plan
+# Codex 구조화 PR 리뷰 구현 계획
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **에이전트 작업자용:** 이 계획을 단계별로 실행할 때는 `superpowers:subagent-driven-development`(권장) 또는 `superpowers:executing-plans`를 사용한다. 각 단계는 진행 추적을 위해 체크박스(`- [ ]`) 형식을 쓴다.
 
-**Goal:** Replace free-form `codex review` output with structured JSON review output that can drive GitHub review actions and later support other code review platforms.
+**목표:** 자유 형식의 `codex review` 출력 대신 GitHub 리뷰 동작을 안정적으로 구동할 수 있는 structured JSON 리뷰 출력을 도입하고, 이후 다른 코드 리뷰 플랫폼에도 확장할 수 있게 한다.
 
-**Architecture:** Keep the review decision engine platform-neutral through a Korean prompt and JSON schema, then let platform adapters publish comments, resolve threads, and submit approvals. Phase 1 implements the GitHub Actions adapter with schema validation and verdict-based review submission.
+**아키텍처:** 한국어 프롬프트와 JSON schema로 리뷰 판단 코어를 플랫폼 중립으로 유지한다. 댓글 게시, thread resolve, approve 제출은 플랫폼 adapter가 담당한다. 1단계에서는 GitHub Actions adapter가 schema 검증과 verdict 기반 리뷰 제출을 수행한다.
 
-**Tech Stack:** GitHub Actions, GitHub CLI, Codex CLI, JSON Schema, `jq`, Bash.
+**기술 스택:** GitHub Actions, GitHub CLI, Codex CLI, JSON Schema, `jq`, Bash.
 
 ---
 
-### Task 1: Add Review Core Prompt And Schema
+### 작업 1: 리뷰 코어 프롬프트와 schema 추가
 
-**Files:**
-- Create: `.github/prompts/codex-pr-review.ko.md`
-- Create: `.github/prompts/codex-pr-review.schema.json`
+**파일:**
+- 생성: `.github/prompts/codex-pr-review.ko.md`
+- 생성: `.github/prompts/codex-pr-review.schema.json`
 
-- [x] **Step 1: Write Korean prompt**
+- [x] **단계 1: 한국어 프롬프트 작성**
 
-Create a prompt that covers diff-first review, token budgeting, multi-perspective review, confidence scoring, duplicate handling, approval policy, and JSON-only output.
+diff 우선 리뷰, 토큰 예산, 다중 관점 리뷰, confidence scoring, 중복 처리, 승인 정책, JSON-only 출력을 포함하는 프롬프트를 작성한다.
 
-- [x] **Step 2: Write JSON schema**
+- [x] **단계 2: JSON schema 작성**
 
-Create a strict schema requiring `eligibility`, `verdict`, `reviewed_context`, `automation_safety`, `findings`, thread state arrays, duplicate state, and context requests.
+`eligibility`, `verdict`, `reviewed_context`, `automation_safety`, `findings`, thread 상태 배열, 중복 상태, context 요청을 요구하는 strict schema를 작성한다.
 
-- [x] **Step 3: Validate schema**
+- [x] **단계 3: schema 검증**
 
-Run:
+실행:
 
 ```bash
 jq empty .github/prompts/codex-pr-review.schema.json
 ```
 
-Expected: exit 0.
+기대 결과: exit 0.
 
-### Task 2: Document Workflow And Cross-Platform Boundary
+### 작업 2: 워크플로와 크로스 플랫폼 경계 문서화
 
-**Files:**
-- Create: `docs/codex/pr-review-workflow.md`
-- Create: `docs/superpowers/plans/2026-05-20-codex-structured-pr-review.md`
+**파일:**
+- 생성: `docs/codex/pr-review-workflow.md`
+- 생성: `docs/superpowers/plans/2026-05-20-codex-structured-pr-review.md`
 
-- [x] **Step 1: Document current MVP**
+- [x] **단계 1: 현재 MVP 문서화**
 
-Describe `codex exec --output-schema`, schema validation, managed comment, and verdict-based GitHub review submission.
+`codex exec --output-schema`, schema 검증, managed comment, verdict 기반 GitHub review 제출 방식을 설명한다.
 
-- [x] **Step 2: Document phased roadmap**
+- [x] **단계 2: 단계적 로드맵 문서화**
 
-Capture phases for inline comments, thread lifecycle, token optimized chunking, and multi-perspective parallel review.
+inline comment, thread lifecycle, 토큰 최적화 chunking, 다중 관점 병렬 리뷰 단계를 정리한다.
 
-- [x] **Step 3: Separate review core from platform adapters**
+- [x] **단계 3: review core와 platform adapter 분리**
 
-Document which parts can be reused for GitLab and which must remain platform-specific.
+GitLab 등에서 재사용 가능한 부분과 플랫폼별로 남겨야 하는 부분을 구분해 문서화한다.
 
-### Task 3: Update GitHub Workflow
+### 작업 3: GitHub 워크플로 갱신
 
-**Files:**
-- Modify: `.github/workflows/codex-review.yml`
-- Modify: `tests/codex/test-codex-review-workflow.sh`
+**파일:**
+- 수정: `.github/workflows/codex-review.yml`
+- 수정: `tests/codex/test-codex-review-workflow.sh`
 
-- [x] **Step 1: Replace `codex review` with `codex exec`**
+- [x] **단계 1: `codex review`를 `codex exec`로 교체**
 
-Use stdin to avoid shell argument limits and `--output-schema` to force structured output.
+shell argument limit을 피하기 위해 stdin을 사용하고, `--output-schema`로 structured output을 강제한다.
 
-- [x] **Step 2: Collect trusted review context**
+- [x] **단계 2: 리뷰 context 수집**
 
-Collect base/head SHAs, PR metadata, changed files, existing comments, existing review comments, and the diff. Treat PR user text as untrusted context.
+base/head SHA, PR metadata, 변경 파일, 기존 comment, 기존 review comment, diff를 수집한다. PR 사용자 텍스트는 untrusted context로 취급한다.
 
-- [x] **Step 3: Publish verdict**
+- [x] **단계 3: verdict 게시**
 
-Use `gh pr review --approve`, `--request-changes`, or `--comment` based on validated JSON and automation safety.
+검증된 JSON과 automation safety에 따라 `gh pr review --approve`, `--request-changes`, `--comment` 중 하나를 사용한다.
 
-- [x] **Step 4: Preserve managed issue comment**
+- [x] **단계 4: managed issue comment 유지**
 
-Update the marker-based issue comment so humans can see the structured result even when a review event was submitted.
+review event가 제출된 경우에도 사람이 structured result를 볼 수 있도록 marker 기반 issue comment를 갱신한다.
 
-- [x] **Step 5: Add static tests**
+- [x] **단계 5: 정적 테스트 추가**
 
-Check that the workflow uses the prompt file, schema file, `codex exec`, stdin, `jq`, `gh pr review`, and keeps trusted `@codex` trigger guards.
+워크플로가 prompt 파일, schema 파일, `codex exec`, stdin, `jq`, `gh pr review`를 사용하고 trusted `@codex` trigger guard를 유지하는지 확인한다.
 
-### Task 4: Verification
+### 작업 4: 검증
 
-**Files:**
-- Test: `tests/codex/test-codex-review-workflow.sh`
-- Test: `.github/workflows/codex-review.yml`
-- Test: `.github/prompts/codex-pr-review.schema.json`
+**파일:**
+- 테스트: `tests/codex/test-codex-review-workflow.sh`
+- 테스트: `.github/workflows/codex-review.yml`
+- 테스트: `.github/prompts/codex-pr-review.schema.json`
 
-- [x] **Step 1: Run workflow contract tests**
+- [x] **단계 1: 워크플로 계약 테스트 실행**
 
 ```bash
 bash tests/codex/test-codex-review-workflow.sh
 ```
 
-Expected: all checks pass.
+기대 결과: 모든 check 통과.
 
-- [x] **Step 2: Parse workflow YAML**
+- [x] **단계 2: workflow YAML 파싱**
 
 ```bash
 yq e '.' .github/workflows/codex-review.yml >/dev/null
 ```
 
-Expected: exit 0.
+기대 결과: exit 0.
 
-- [x] **Step 3: Parse JSON schema**
+- [x] **단계 3: JSON schema 파싱**
 
 ```bash
 jq empty .github/prompts/codex-pr-review.schema.json
 ```
 
-Expected: exit 0.
+기대 결과: exit 0.

@@ -62,7 +62,6 @@ jobs:
 
             core.setOutput('number', String(pr.number));
             core.setOutput('base_ref', pr.base.ref);
-            core.setOutput('base_sha', pr.base.sha);
             core.setOutput('head_sha', pr.head.sha);
             core.setOutput('title', pr.title || '');
 
@@ -92,11 +91,9 @@ jobs:
       - name: Run Codex review
         env:
           CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.CODEX_REVIEW_GITHUB_TOKEN || github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
-          PR_BASE_SHA: ${{ steps.pr.outputs.base_sha }}
           PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           PR_TITLE: ${{ steps.pr.outputs.title }}
         run: |
@@ -108,6 +105,7 @@ jobs:
           umask 077
           mkdir -p "$HOME/.codex"
           printf '%s' "$CODEX_AUTH_JSON" > "$HOME/.codex/auth.json"
+          unset CODEX_AUTH_JSON
 
           mkdir -p .codex-review
           REVIEW_BASE="$(git merge-base "origin/$PR_BASE_REF" "refs/remotes/pull/$PR_NUMBER/head")"
@@ -148,6 +146,7 @@ jobs:
             printf '\n'
           } >> .codex-review/prompt.md
 
+          unset GH_TOKEN
           codex exec \
             --sandbox read-only \
             --output-schema "$REVIEW_SCHEMA" \
@@ -158,13 +157,31 @@ jobs:
 
       - name: Submit Codex review verdict
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.CODEX_REVIEW_GITHUB_TOKEN || github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
 
           result=".codex-review/result.json"
           body=".codex-review/review-body.md"
+          approved_label="approved"
+
+          ensure_approved_label() {
+            gh label create "$approved_label" \
+              --repo "$GITHUB_REPOSITORY" \
+              --color "0E8A16" \
+              --description "Automated review found no high-confidence blocking findings." \
+              >/dev/null 2>&1 || true
+          }
+
+          add_approved_label() {
+            ensure_approved_label
+            gh issue edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$approved_label"
+          }
+
+          remove_approved_label() {
+            gh issue edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$approved_label" >/dev/null 2>&1 || true
+          }
 
           verdict="$(jq -r '.verdict' "$result")"
           may_approve="$(jq -r '.automation_safety.may_approve' "$result")"
@@ -173,19 +190,26 @@ jobs:
           diff_truncated="$(jq -r '.reviewed_context.diff_truncated' "$result")"
           blocking_count="$(jq '[.findings[] | select(.severity == "blocking" and .confidence_score >= 80)] | length' "$result")"
 
+          if [[ "$eligibility" == "skipped" ]]; then
+            remove_approved_label
+            touch .codex-review/skip-posting
+            exit 0
+          fi
+
           {
-            printf '## Codex PR Review\n\n'
+            printf '## Codex PR 리뷰\n\n'
             jq -r '.summary' "$result"
             printf '\n\n'
             jq -r '
-              if (.findings | length) == 0 then
-                "No high-confidence findings."
+              ([.findings[] | select(.confidence_score >= 80)]) as $findings |
+              if ($findings | length) == 0 then
+                "고신뢰 finding 없음."
               else
-                "Findings:\n" + (
-                  [.findings[] |
+                "발견 사항:\n" + (
+                  [$findings[] |
                     "- [" + .severity + "/" + (.confidence_score|tostring) + "] " +
-                    .title + " (" + .file + ":" + ((.line // 1)|tostring) + ")\n  " +
-                    .body + "\n  Suggestion: " + .suggestion
+                    .title + " (" + .file + ":" + (if .line == null then "N/A" else (.line|tostring) end) + ")\n  " +
+                    .body + "\n  제안: " + .suggestion
                   ] | join("\n")
                 )
               end
@@ -193,12 +217,22 @@ jobs:
           } > "$body"
 
           if [[ "$eligibility" != "reviewed" || "$diff_truncated" != "false" ]]; then
+            remove_approved_label
             gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
           elif [[ "$verdict" == "approve" && "$may_approve" == "true" && "$blocking_count" == "0" ]]; then
-            gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve --body-file "$body"
+            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve --body-file "$body"; then
+              printf '\n\n> 참고: 현재 GitHub 토큰으로 PR approve 제출에 실패해 comment review로 대체하고 `approved` 라벨을 부착합니다.\n' >> "$body"
+              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
+            fi
+            add_approved_label
           elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
-            gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --request-changes --body-file "$body"
+            remove_approved_label
+            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --request-changes --body-file "$body"; then
+              printf '\n\n> 참고: 현재 GitHub 토큰으로 request changes 제출에 실패해 comment review로 대체합니다.\n' >> "$body"
+              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
+            fi
           else
+            remove_approved_label
             gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
           fi
 
@@ -208,25 +242,35 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           CODEX_REVIEW_MARKER: '<!-- codex-cli-pr-review -->'
         with:
-          github-token: ${{ github.token }}
+          github-token: ${{ secrets.CODEX_REVIEW_GITHUB_TOKEN || github.token }}
           script: |
             const fs = require('fs');
+            if (fs.existsSync('.codex-review/skip-posting')) {
+              core.info('Codex review was skipped; no duplicate review comment will be posted.');
+              return;
+            }
+
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
             const marker = process.env.CODEX_REVIEW_MARKER;
-            const findings = result.findings || [];
+            const findings = (result.findings || []).filter((finding) =>
+              Number(finding.confidence_score || 0) >= 80
+            );
             const findingText = findings.length === 0
-              ? 'No high-confidence findings.'
-              : findings.map((finding, index) => [
-                  `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
-                  `${finding.file}:${finding.line || 1}`,
-                  finding.body,
-                  `Suggestion: ${finding.suggestion}`,
-                ].join('\n')).join('\n\n');
+              ? '고신뢰 finding 없음.'
+              : findings.map((finding, index) => {
+                  const lineLabel = finding.line == null ? 'N/A' : String(finding.line);
+                  return [
+                    `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
+                    `${finding.file}:${lineLabel}`,
+                    finding.body,
+                    `제안: ${finding.suggestion}`,
+                  ].join('\n');
+                }).join('\n\n');
             const body = [
               marker,
-              '## Codex PR Review',
+              '## Codex PR 리뷰',
               '',
-              `Verdict: \`${result.verdict}\``,
+              `판정: \`${result.verdict}\``,
               '',
               result.summary || '주요 이슈 없음. 합격 기준 통과.',
               '',
@@ -241,8 +285,15 @@ jobs:
               per_page: 100,
             });
 
+            let currentLogin = 'github-actions[bot]';
+            try {
+              const viewer = await github.rest.users.getAuthenticated();
+              currentLogin = viewer.data.login;
+            } catch (error) {
+              core.info('Authenticated user lookup is unavailable for this token; falling back to github-actions[bot].');
+            }
             const previous = comments.find((comment) =>
-              comment.user?.login === 'github-actions[bot]' &&
+              comment.user?.login === currentLogin &&
               comment.body?.includes(marker)
             );
 

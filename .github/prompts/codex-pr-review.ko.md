@@ -27,7 +27,7 @@
 - PR이 draft 상태입니다.
 - 자동 생성된 trivial PR입니다.
 - 변경이 문서, 포맷, lockfile 등으로만 구성되어 있고 correctness 위험이 없습니다.
-- 동일 head_sha에 대해 Codex 리뷰가 이미 완료되었습니다.
+- 동일 head_sha에 대해 Codex 리뷰가 이미 완료되었습니다. 이 경우 중복 리뷰 코멘트가 게시되지 않도록 `skipped` eligibility를 반환합니다.
 
 리뷰 원칙:
 1. 항상 diff부터 검토합니다.
@@ -148,3 +148,6 @@ Evidence requirement:
 출력 규칙:
 반드시 valid JSON만 출력합니다.
 마크다운 설명, 코드블록, 추가 문장은 출력하지 않습니다.
+JSON field 이름과 enum 값은 schema에 맞춰 영어를 유지합니다.
+하지만 사람이 읽는 문자열 값은 한국어로 작성합니다.
+특히 `summary`, `eligibility.reason`, `automation_safety.reason`, `findings[].title`, `findings[].body`, `findings[].suggestion`, `resolved_threads[].reason`, `unresolved_threads[].reason`, `skipped_duplicates[].reason`, `context_requests[].reason`은 한국어로 작성합니다.
