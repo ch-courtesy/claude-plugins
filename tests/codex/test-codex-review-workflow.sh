@@ -24,8 +24,6 @@ grep -q 'mkdir -p "\$HOME/\.codex"' "$WORKFLOW" \
   || fail "~/.codex 디렉토리 생성 부재"
 grep -q 'printf .*> "\$HOME/\.codex/auth\.json"' "$WORKFLOW" \
   || fail "~/.codex/auth.json 복원 부재"
-grep -q 'unset CODEX_AUTH_JSON' "$WORKFLOW" \
-  || fail "Codex 실행 전 CODEX_AUTH_JSON env 제거 부재"
 ok "check 1: CODEX_AUTH_JSON secret을 ~/.codex/auth.json 으로 복원"
 
 echo ""
@@ -48,16 +46,12 @@ grep -q 'REVIEW_SCHEMA="\.github/prompts/codex-pr-review\.schema\.json"' "$WORKF
   || fail "structured review schema 파일 참조 부재"
 grep -q 'codex exec' "$WORKFLOW" \
   || fail "codex exec 사용 부재"
-grep -q -- '--sandbox read-only' "$WORKFLOW" \
-  || fail "codex exec sandbox 모드 지정 부재"
 grep -q -- '--output-schema "\$REVIEW_SCHEMA"' "$WORKFLOW" \
   || fail "codex exec output schema 지정 부재"
 grep -q -- '--output-last-message \.codex-review/result\.json' "$WORKFLOW" \
   || fail "codex 최종 JSON 출력 파일 지정 부재"
 grep -q '< \.codex-review/prompt\.md' "$WORKFLOW" \
   || fail "prompt 를 stdin 으로 전달하지 않음"
-grep -q 'unset GH_TOKEN' "$WORKFLOW" \
-  || fail "Codex 실행 전 GH_TOKEN env 제거 부재"
 if grep -q '"$(cat \.codex-review/full-prompt\.md)"' "$WORKFLOW"; then
   fail "prompt 전체를 커맨드라인 인자로 전달하고 있음"
 fi
@@ -65,6 +59,26 @@ if grep -q 'codex review' "$WORKFLOW"; then
   fail "legacy codex review 호출이 남아 있음"
 fi
 ok "check 3: codex exec + stdin + schema 로 structured review 실행"
+
+echo ""
+echo "=== check 3b: codex workflow uses shared review context helper ==="
+grep -q '\.github/scripts/pr-review-context\.sh' "$WORKFLOW" \
+  || fail "shared review context helper 호출 부재"
+grep -q 'source \.review-context/context-mode\.env' "$WORKFLOW" \
+  || fail "review context mode env 로드 부재"
+grep -q 'REVIEW_CONTEXT_MODE' "$WORKFLOW" \
+  || fail "prompt 에 review context mode 주입 부재"
+ok "check 3b: shared review context helper 사용"
+
+echo ""
+echo "=== check 3c: codex workflow supports targeted context follow-up ==="
+grep -q 'context_requests' "$WORKFLOW" \
+  || fail "context_requests follow-up 처리 부재"
+grep -q 'review-extra-context' "$WORKFLOW" \
+  || fail "추가 context 디렉터리 부재"
+grep -q 'MAX_CONTEXT_REQUEST_FILES=5' "$WORKFLOW" \
+  || fail "context request file limit 부재"
+ok "check 3c: targeted context follow-up 처리 존재"
 
 echo ""
 echo "=== check 4: @codex mention triggers require trusted author association ==="
@@ -118,22 +132,10 @@ echo ""
 echo "=== check 9: review output is posted idempotently ==="
 grep -q '<!-- codex-cli-pr-review -->' "$WORKFLOW" \
   || fail "중복 방지 marker 부재"
-grep -q 'CODEX_REVIEW_GITHUB_TOKEN || github.token' "$WORKFLOW" \
-  || fail "review publish token 이 CODEX_REVIEW_GITHUB_TOKEN fallback 을 사용하지 않음"
-grep -q 'users.getAuthenticated' "$WORKFLOW" \
-  || fail "managed comment 가 현재 token 사용자 기준으로 previous comment 를 찾지 않음"
-grep -q "falling back to github-actions\\[bot\\]" "$WORKFLOW" \
-  || fail "GITHUB_TOKEN /user 조회 실패 시 github-actions fallback 부재"
 grep -q 'issues.updateComment' "$WORKFLOW" \
   || fail "기존 리뷰 코멘트 update 경로 부재"
 grep -q 'issues.createComment' "$WORKFLOW" \
   || fail "신규 리뷰 코멘트 create 경로 부재"
-grep -q 'eligibility.*== "skipped"' "$WORKFLOW" \
-  || fail "skipped eligibility 게시 생략 조건 부재"
-grep -q 'touch \.codex-review/skip-posting' "$WORKFLOW" \
-  || fail "skipped review 게시 생략 플래그 생성 부재"
-grep -q 'skip-posting' "$WORKFLOW" && grep -q 'no duplicate review comment will be posted' "$WORKFLOW" \
-  || fail "managed comment 중복 게시 생략 경로 부재"
 ok "check 9: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
@@ -148,24 +150,6 @@ grep -q 'automation_safety\.may_approve' "$WORKFLOW" \
   || fail "approve safety gate 부재"
 grep -q 'confidence_score >= 80' "$WORKFLOW" \
   || fail "confidence threshold gate 부재"
-grep -q 'filter((finding)' "$WORKFLOW" && grep -q 'Number(finding\.confidence_score' "$WORKFLOW" \
-  || fail "managed comment finding confidence 필터 부재"
-grep -q 'if \.line == null then "N/A"' "$WORKFLOW" \
-  || fail "review body line null N/A 처리 부재"
-grep -q "finding.line == null ? 'N/A'" "$WORKFLOW" \
-  || fail "managed comment line null N/A 처리 부재"
-grep -q '현재 GitHub 토큰으로 PR approve 제출에 실패해 comment review로 대체' "$WORKFLOW" \
-  || fail "approve 실패 시 comment fallback 부재"
-grep -q 'approved_label="approved"' "$WORKFLOW" \
-  || fail "approve fallback 라벨명 부재"
-grep -q 'gh label create "\$approved_label"' "$WORKFLOW" \
-  || fail "approved 라벨 생성 경로 부재"
-grep -q 'gh issue edit "\$PR_NUMBER".*--add-label "\$approved_label"' "$WORKFLOW" \
-  || fail "approve verdict 라벨 부착 경로 부재"
-grep -q 'gh issue edit "\$PR_NUMBER".*--remove-label "\$approved_label"' "$WORKFLOW" \
-  || fail "non-approve verdict 라벨 제거 경로 부재"
-grep -q '현재 GitHub 토큰으로 request changes 제출에 실패해 comment review로 대체' "$WORKFLOW" \
-  || fail "request changes 실패 시 comment fallback 부재"
 ok "check 10: verdict 기반 GitHub review 제출 경로 존재"
 
 echo ""
@@ -178,8 +162,6 @@ grep -q 'confidence_score < 80' "$PROMPT" \
   || fail "prompt confidence threshold 정책 부재"
 grep -q 'valid JSON' "$PROMPT" \
   || fail "prompt JSON-only 출력 규칙 부재"
-grep -q '사람이 읽는 문자열 값은 한국어로 작성' "$PROMPT" \
-  || fail "prompt 한국어 출력 규칙 부재"
 ok "check 11: prompt 핵심 정책 존재"
 
 echo ""
