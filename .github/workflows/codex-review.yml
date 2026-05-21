@@ -71,7 +71,6 @@ jobs:
         with:
           ref: refs/pull/${{ steps.pr.outputs.number }}/merge
           fetch-depth: 0
-          persist-credentials: false
 
       - name: Fetch review base
         env:
@@ -109,6 +108,7 @@ jobs:
           umask 077
           mkdir -p "$HOME/.codex"
           printf '%s' "$CODEX_AUTH_JSON" > "$HOME/.codex/auth.json"
+          unset CODEX_AUTH_JSON
 
           mkdir -p .codex-review
           REVIEW_BASE="$(git merge-base "origin/$PR_BASE_REF" "refs/remotes/pull/$PR_NUMBER/head")"
@@ -123,6 +123,7 @@ jobs:
           GITHUB_EVENT_PATH="$GITHUB_EVENT_PATH" \
           GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
           PR_NUMBER="$PR_NUMBER" \
+          PR_BASE_SHA="$PR_BASE_SHA" \
           PR_HEAD_SHA="$PR_HEAD_SHA" \
           .github/scripts/pr-review-context.sh
 
@@ -151,6 +152,8 @@ jobs:
             cat .review-context/diff.patch
             printf '\n'
           } >> "$initial_prompt"
+
+          unset GH_TOKEN
 
           codex exec \
             --sandbox read-only \

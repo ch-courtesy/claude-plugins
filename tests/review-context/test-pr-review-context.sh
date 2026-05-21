@@ -45,7 +45,7 @@ case "$*" in
   'diff --patch before123 head456')
     printf 'diff --git a/src/inc.js b/src/inc.js\n+incremental\n'
     ;;
-  'diff --patch HEAD~1 head456 -- src/thread.js')
+  'diff --patch base000 head456 -- src/thread.js')
     printf 'diff --git a/src/thread.js b/src/thread.js\n+thread\n'
     ;;
   *)
@@ -64,6 +64,7 @@ GITHUB_EVENT_NAME=pull_request \
 GITHUB_EVENT_PATH="$FIXTURES/synchronize-event.json" \
 GITHUB_REPOSITORY=owner/repo \
 PR_NUMBER=12 \
+PR_BASE_SHA=base000 \
 PR_HEAD_SHA=head456 \
 REVIEW_OUTPUT_DIR="$out" \
 "$SCRIPT"
@@ -80,6 +81,7 @@ GITHUB_EVENT_NAME=pull_request_review_comment \
 GITHUB_EVENT_PATH="$FIXTURES/thread-reply-event.json" \
 GITHUB_REPOSITORY=owner/repo \
 PR_NUMBER=12 \
+PR_BASE_SHA=base000 \
 PR_HEAD_SHA=head456 \
 REVIEW_OUTPUT_DIR="$out" \
 "$SCRIPT"
@@ -89,5 +91,22 @@ grep -q '^REVIEW_CONTEXT_MODE=thread$' "$out/context-mode.env" \
 grep -q '"path": "src/thread.js"' "$out/thread.json" \
   || fail "thread mode should persist target thread metadata"
 ok "thread reply event uses thread context"
+
+out="$tmp/full-out"
+mkdir -p "$out"
+GITHUB_EVENT_NAME=pull_request \
+GITHUB_EVENT_PATH="$FIXTURES/opened-event.json" \
+GITHUB_REPOSITORY=owner/repo \
+PR_NUMBER=12 \
+PR_BASE_SHA=base000 \
+PR_HEAD_SHA=head456 \
+REVIEW_OUTPUT_DIR="$out" \
+"$SCRIPT"
+
+grep -q '^REVIEW_CONTEXT_MODE=full$' "$out/context-mode.env" \
+  || fail "opened pull_request event should use full mode"
+grep -q '+full' "$out/diff.patch" \
+  || fail "full mode should use gh pr diff fallback"
+ok "opened pull_request event uses full context"
 
 echo "ALL CHECKS PASSED"

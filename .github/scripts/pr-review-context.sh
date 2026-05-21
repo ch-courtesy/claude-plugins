@@ -24,7 +24,7 @@ if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$action" == "synchronize" && -n
   incremental_base="$event_before"
 elif [[ "$GITHUB_EVENT_NAME" == "pull_request_review_comment" && -n "$reply_to_id" && -n "$comment_path" ]]; then
   mode="thread"
-  incremental_base="${event_before:-HEAD~1}"
+  incremental_base="${PR_BASE_SHA:-${event_before:-HEAD~1}}"
 fi
 
 gh pr view "$PR_NUMBER" \

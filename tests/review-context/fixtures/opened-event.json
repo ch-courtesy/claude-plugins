@@ -1,0 +1,9 @@
+{
+  "action": "opened",
+  "pull_request": {
+    "number": 12,
+    "base": { "ref": "main", "sha": "base000" },
+    "head": { "sha": "head456" },
+    "draft": false
+  }
+}
