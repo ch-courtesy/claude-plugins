@@ -226,7 +226,13 @@ jobs:
           may_request_changes="$(jq -r '.automation_safety.may_request_changes' "$result")"
           eligibility="$(jq -r '.eligibility.status' "$result")"
           diff_truncated="$(jq -r '.reviewed_context.diff_truncated' "$result")"
+          findings_count="$(jq '.findings | length' "$result")"
           blocking_count="$(jq '[.findings[] | select(.severity == "blocking" and .confidence_score >= 80)] | length' "$result")"
+
+          if [[ "$eligibility" != "reviewed" || "$findings_count" == "0" ]]; then
+            echo "No review comments to post."
+            exit 0
+          fi
 
           {
             printf '## Codex PR Review\n\n'
@@ -299,6 +305,10 @@ jobs:
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
             const marker = process.env.CODEX_REVIEW_MARKER;
             const findings = result.findings || [];
+            if (result.eligibility?.status !== 'reviewed' || findings.length === 0) {
+              core.info('No managed Codex review comment to post.');
+              return;
+            }
             const findingText = findings.length === 0
               ? 'No findings.'
               : findings.map((finding, index) => [

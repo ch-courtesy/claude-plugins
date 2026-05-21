@@ -159,6 +159,12 @@ ok "check 9: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
 echo "=== check 10: verdict is submitted through GitHub review API ==="
+grep -q 'findings_count=' "$WORKFLOW" \
+  || fail "findings count 계산 부재"
+grep -q 'No review comments to post' "$WORKFLOW" \
+  || fail "skipped/no findings formal review 생략 경로 부재"
+grep -q 'No managed Codex review comment to post' "$WORKFLOW" \
+  || fail "skipped/no findings managed comment 생략 경로 부재"
 grep -q 'submit_review --approve' "$WORKFLOW" \
   || fail "approve review 제출 경로 부재"
 grep -q 'submit_review --request-changes' "$WORKFLOW" \
