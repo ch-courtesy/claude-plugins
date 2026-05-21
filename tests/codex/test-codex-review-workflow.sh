@@ -50,9 +50,9 @@ grep -q -- '--sandbox read-only' "$WORKFLOW" \
   || fail "codex exec sandbox 모드 지정 부재"
 grep -q -- '--output-schema "\$REVIEW_SCHEMA"' "$WORKFLOW" \
   || fail "codex exec output schema 지정 부재"
-grep -q -- '--output-last-message \.codex-review/result\.json' "$WORKFLOW" \
+grep -q -- '--output-last-message "\$result"' "$WORKFLOW" \
   || fail "codex 최종 JSON 출력 파일 지정 부재"
-grep -q '< \.codex-review/prompt\.md' "$WORKFLOW" \
+grep -q '< "\$initial_prompt"' "$WORKFLOW" \
   || fail "prompt 를 stdin 으로 전달하지 않음"
 if grep -q '"$(cat \.codex-review/full-prompt\.md)"' "$WORKFLOW"; then
   fail "prompt 전체를 커맨드라인 인자로 전달하고 있음"

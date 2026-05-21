@@ -159,8 +159,8 @@ jobs:
           codex exec \
             --sandbox read-only \
             --output-schema "$REVIEW_SCHEMA" \
-            --output-last-message .codex-review/result.json \
-            < .codex-review/prompt.md
+            --output-last-message "$result" \
+            < "$initial_prompt"
 
           jq empty "$result"
 
