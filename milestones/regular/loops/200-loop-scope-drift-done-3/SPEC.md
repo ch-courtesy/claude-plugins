@@ -7,7 +7,7 @@ scope:
     - rules/**
     - milestones/**
     - CLAUDE.md
-verify: "grep -qE 'scope drift|scope\\.include 외|drift 게이트' plugins/autopilot/skills/loop/references/loop.sh && grep -qE '명시 done|loop:done.*감지|즉시 수렴' plugins/autopilot/skills/loop/references/loop.sh && grep -qE '자기-규율 게이트|객관 검증|self-review.*외부' plugins/autopilot/skills/loop/references/constitution.md && grep -qE 'scope\\.include.*누락|scope\\.include.*빈 list' plugins/autopilot/skills/loop/references/loop.sh"
+verify: "grep -qE 'Scope 위반' plugins/autopilot/skills/loop/references/loop.sh && grep -qE 'task_status_is_done' plugins/autopilot/skills/loop/references/loop.sh && grep -qE '자기-규율 게이트|객관 검증|self-review.*외부' plugins/autopilot/skills/loop/references/constitution.md && grep -qE 'scope\\.include가 비어' plugins/autopilot/skills/loop/references/loop.sh"
 # test_sweep_paths: reviewed-no-sweep
 ears_language: ko
 request_review: true
@@ -50,13 +50,13 @@ frontmatter `verify` 명령이 0 exit으로 끝나야 합니다 (4개 grep -qE �
 
 ```bash
 # AC1 (이터 종료 후 drift 검출)
-grep -qE 'scope drift|scope\.include 외|drift 게이트' plugins/autopilot/skills/loop/references/loop.sh && \
+grep -qE 'Scope 위반' plugins/autopilot/skills/loop/references/loop.sh && \
 # AC2 (이터 종료 후 명시 done 신호 인지)
-grep -qE '명시 done|loop:done.*감지|즉시 수렴' plugins/autopilot/skills/loop/references/loop.sh && \
+grep -qE 'task_status_is_done' plugins/autopilot/skills/loop/references/loop.sh && \
 # AC4 (헌법 — 객관 검증 우선·self-review 면책 차단)
 grep -qE '자기-규율 게이트|객관 검증|self-review.*외부' plugins/autopilot/skills/loop/references/constitution.md && \
 # AC3 (loop start 진입 시 scope.include 누락·빈 list 거부) — scope.include 맥락에 묶어 범용 키워드 false-positive 회피
-grep -qE 'scope\.include.*누락|scope\.include.*빈 list' plugins/autopilot/skills/loop/references/loop.sh
+grep -qE 'scope\.include가 비어' plugins/autopilot/skills/loop/references/loop.sh
 ```
 
 PR 리뷰 시점 보조 검사 (수동):
