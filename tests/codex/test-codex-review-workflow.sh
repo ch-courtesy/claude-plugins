@@ -55,6 +55,8 @@ result_output_count="$(awk 'index($0, "--output-last-message \"$result\"") { cou
   || fail "codex 최종 JSON 출력 파일 지정이 1차/2차 exec 모두에 없음"
 grep -q '< "\$initial_prompt"' "$WORKFLOW" \
   || fail "prompt 를 stdin 으로 전달하지 않음"
+grep -q 'unset GH_TOKEN' "$WORKFLOW" \
+  || fail "Codex 실행 전 GH_TOKEN env 제거 부재"
 if grep -q '"$(cat \.codex-review/full-prompt\.md)"' "$WORKFLOW"; then
   fail "prompt 전체를 커맨드라인 인자로 전달하고 있음"
 fi
