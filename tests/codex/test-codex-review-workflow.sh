@@ -128,6 +128,12 @@ grep -q 'issues.updateComment' "$WORKFLOW" \
   || fail "기존 리뷰 코멘트 update 경로 부재"
 grep -q 'issues.createComment' "$WORKFLOW" \
   || fail "신규 리뷰 코멘트 create 경로 부재"
+grep -q 'eligibility.*== "skipped"' "$WORKFLOW" \
+  || fail "skipped eligibility 게시 생략 조건 부재"
+grep -q 'touch \.codex-review/skip-posting' "$WORKFLOW" \
+  || fail "skipped review 게시 생략 플래그 생성 부재"
+grep -q 'skip-posting' "$WORKFLOW" && grep -q 'no duplicate review comment will be posted' "$WORKFLOW" \
+  || fail "managed comment 중복 게시 생략 경로 부재"
 ok "check 9: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""

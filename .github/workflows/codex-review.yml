@@ -190,6 +190,12 @@ jobs:
           diff_truncated="$(jq -r '.reviewed_context.diff_truncated' "$result")"
           blocking_count="$(jq '[.findings[] | select(.severity == "blocking" and .confidence_score >= 80)] | length' "$result")"
 
+          if [[ "$eligibility" == "skipped" ]]; then
+            remove_approved_label
+            touch .codex-review/skip-posting
+            exit 0
+          fi
+
           {
             printf '## Codex PR 리뷰\n\n'
             jq -r '.summary' "$result"
@@ -239,6 +245,11 @@ jobs:
           github-token: ${{ secrets.CODEX_REVIEW_GITHUB_TOKEN || github.token }}
           script: |
             const fs = require('fs');
+            if (fs.existsSync('.codex-review/skip-posting')) {
+              core.info('Codex review was skipped; no duplicate review comment will be posted.');
+              return;
+            }
+
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
             const marker = process.env.CODEX_REVIEW_MARKER;
             const findings = (result.findings || []).filter((finding) =>
