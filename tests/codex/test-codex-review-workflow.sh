@@ -109,6 +109,16 @@ fi
 ok "check 6: checkout 이 persist-credentials:false 를 사용하지 않음"
 
 echo ""
+echo "=== check 6b: checkout credentials are cleared before codex exec ==="
+unset_extraheader_line="$(awk 'index($0, "git config --local --unset-all http.https://github.com/.extraheader") { print NR; exit }' "$WORKFLOW")"
+codex_exec_line="$(awk '/codex exec \\/ { print NR; exit }' "$WORKFLOW")"
+[[ -n "$unset_extraheader_line" ]] \
+  || fail "codex exec 전 checkout credential extraheader 제거 부재"
+(( unset_extraheader_line < codex_exec_line )) \
+  || fail "checkout credential extraheader 제거가 codex exec 이후에 위치함"
+ok "check 6b: codex exec 전 checkout credential extraheader 제거"
+
+echo ""
 echo "=== check 7: third-party actions and Codex CLI are pinned ==="
 if grep -qE 'uses: actions/[a-z-]+@v[0-9]+' "$WORKFLOW"; then
   fail "GitHub Actions가 mutable version tag 로 참조됨"
