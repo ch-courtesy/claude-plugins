@@ -85,6 +85,8 @@ grep -q 'review-extra-context' "$WORKFLOW" \
   || fail "추가 context 디렉터리 부재"
 grep -q 'MAX_CONTEXT_REQUEST_FILES=5' "$WORKFLOW" \
   || fail "context request file limit 부재"
+grep -q 'truncated at 400 lines' "$WORKFLOW" \
+  || fail "추가 context 파일 절단 표시 부재"
 ok "check 3c: targeted context follow-up 처리 존재"
 
 echo ""

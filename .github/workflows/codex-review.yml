@@ -197,7 +197,7 @@ jobs:
               find .review-extra-context -type f | sort | while IFS= read -r file; do
                 original="${file#.review-extra-context/}"
                 printf '\n\n--- %s ---\n' "$original"
-                sed -n '1,400p' "$file"
+                awk 'NR <= 400 { print } NR == 401 { print "# ... (truncated at 400 lines)"; exit }' "$file"
               done
             } >> "$second_prompt"
 
