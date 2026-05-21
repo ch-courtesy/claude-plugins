@@ -214,6 +214,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
+          PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         run: |
           set -euo pipefail
 
@@ -246,15 +247,41 @@ jobs:
             ' "$result"
           } > "$body"
 
+          review_mode="comment"
           if [[ "$eligibility" != "reviewed" || "$diff_truncated" != "false" ]]; then
-            gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
+            review_mode="comment"
           elif [[ "$verdict" == "approve" && "$may_approve" == "true" && "$blocking_count" == "0" ]]; then
-            gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve --body-file "$body"
+            review_mode="approve"
           elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
-            gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --request-changes --body-file "$body"
-          else
-            gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
+            review_mode="request-changes"
           fi
+
+          marker="codex-formal-review head_sha=$PR_HEAD_SHA verdict=$verdict"
+          printf '\n\n<!-- %s -->\n' "$marker" >> "$body"
+
+          if [[ "$review_mode" != "comment" ]]; then
+            if gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
+              | jq -e --arg marker "$marker" 'any(.[]; (.body // "") | contains($marker))' >/dev/null; then
+              echo "Formal Codex review already exists for $PR_HEAD_SHA / $verdict; skipping duplicate."
+              exit 0
+            fi
+          fi
+
+          case "$review_mode" in
+            approve)
+              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve --body-file "$body"
+              ;;
+            request-changes)
+              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --request-changes --body-file "$body"
+              ;;
+            comment)
+              gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment --body-file "$body"
+              ;;
+            *)
+              echo "unknown review mode: $review_mode" >&2
+              exit 1
+              ;;
+          esac
 
       - name: Post Codex review comment
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b

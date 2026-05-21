@@ -162,6 +162,10 @@ grep -q 'automation_safety\.may_approve' "$WORKFLOW" \
   || fail "approve safety gate 부재"
 grep -q 'confidence_score >= 80' "$WORKFLOW" \
   || fail "confidence threshold gate 부재"
+grep -q 'codex-formal-review head_sha=' "$WORKFLOW" \
+  || fail "formal review 중복 방지 marker 부재"
+grep -q 'pulls/\$PR_NUMBER/reviews' "$WORKFLOW" \
+  || fail "기존 formal review 조회 부재"
 ok "check 10: verdict 기반 GitHub review 제출 경로 존재"
 
 echo ""
