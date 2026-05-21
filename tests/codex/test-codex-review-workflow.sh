@@ -142,6 +142,10 @@ grep -q 'confidence_score >= 80' "$WORKFLOW" \
   || fail "confidence threshold gate 부재"
 grep -q 'filter((finding)' "$WORKFLOW" && grep -q 'Number(finding\.confidence_score' "$WORKFLOW" \
   || fail "managed comment finding confidence 필터 부재"
+grep -q 'if \.line == null then "N/A"' "$WORKFLOW" \
+  || fail "review body line null N/A 처리 부재"
+grep -q "finding.line == null ? 'N/A'" "$WORKFLOW" \
+  || fail "managed comment line null N/A 처리 부재"
 grep -q '현재 GitHub 토큰으로 PR approve 제출에 실패해 comment review로 대체' "$WORKFLOW" \
   || fail "approve 실패 시 comment fallback 부재"
 grep -q 'approved_label="approved"' "$WORKFLOW" \

@@ -202,7 +202,7 @@ jobs:
                 "발견 사항:\n" + (
                   [$findings[] |
                     "- [" + .severity + "/" + (.confidence_score|tostring) + "] " +
-                    .title + " (" + .file + ":" + ((.line // 1)|tostring) + ")\n  " +
+                    .title + " (" + .file + ":" + (if .line == null then "N/A" else (.line|tostring) end) + ")\n  " +
                     .body + "\n  제안: " + .suggestion
                   ] | join("\n")
                 )
@@ -246,12 +246,15 @@ jobs:
             );
             const findingText = findings.length === 0
               ? '고신뢰 finding 없음.'
-              : findings.map((finding, index) => [
-                  `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
-                  `${finding.file}:${finding.line || 1}`,
-                  finding.body,
-                  `제안: ${finding.suggestion}`,
-                ].join('\n')).join('\n\n');
+              : findings.map((finding, index) => {
+                  const lineLabel = finding.line == null ? 'N/A' : String(finding.line);
+                  return [
+                    `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
+                    `${finding.file}:${lineLabel}`,
+                    finding.body,
+                    `제안: ${finding.suggestion}`,
+                  ].join('\n');
+                }).join('\n\n');
             const body = [
               marker,
               '## Codex PR 리뷰',
