@@ -174,6 +174,8 @@ grep -Fq 'user.login == "github-actions[bot]"' "$WORKFLOW" \
   || fail "approve 중복 체크가 봇 자신의 리뷰로 제한되지 않음"
 grep -q 'approval-failed' "$WORKFLOW" \
   || fail "approve 실패 시 managed comment fallback marker 부재"
+grep -A3 'touch \.codex-review/approval-failed' "$WORKFLOW" | grep -q 'exit 0' \
+  || fail "approve 실패 후 managed comment step 으로 넘기기 위한 정상 종료 부재"
 grep -q 'No managed Codex review comment to post' "$WORKFLOW" \
   || fail "skipped/no findings managed comment 생략 경로 부재"
 if grep -q 'submit_review --approve' "$WORKFLOW"; then
