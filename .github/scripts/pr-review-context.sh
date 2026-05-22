@@ -48,7 +48,7 @@ case "$mode" in
     jq -n \
       --arg reply_to_id "$reply_to_id" \
       --arg path "$comment_path" \
-      --argjson line "${comment_line:-0}" \
+      --argjson line "${comment_line:-null}" \
       '{reply_to_id: $reply_to_id, path: $path, line: $line}' \
       > "$REVIEW_OUTPUT_DIR/thread.json"
     git diff --patch "$incremental_base" "$PR_HEAD_SHA" -- "$comment_path" > "$REVIEW_OUTPUT_DIR/diff.patch" || {
