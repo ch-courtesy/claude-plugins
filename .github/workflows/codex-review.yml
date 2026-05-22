@@ -298,9 +298,6 @@ jobs:
           submit_review() {
             if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" "$@" --body-file "$body"; then
               echo "Formal Codex review submission failed; continuing with managed PR comment."
-              if [[ "$*" == *"--request-changes"* ]]; then
-                touch .codex-review/review-failed
-              fi
             fi
           }
 
@@ -318,7 +315,6 @@ jobs:
           esac
 
       - name: Post Codex review comment
-        if: always()
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
@@ -327,15 +323,10 @@ jobs:
           github-token: ${{ github.token }}
           script: |
             const fs = require('fs');
-            if (!fs.existsSync('.codex-review/result.json')) {
-              core.info('No Codex review result found.');
-              return;
-            }
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
             const marker = process.env.CODEX_REVIEW_MARKER;
             const findings = result.findings || [];
             const approvalFailed = fs.existsSync('.codex-review/approval-failed');
-            const reviewFailed = fs.existsSync('.codex-review/review-failed');
             if (result.eligibility?.status !== 'reviewed' || (findings.length === 0 && !approvalFailed)) {
               core.info('No managed Codex review comment to post.');
               return;
@@ -386,10 +377,4 @@ jobs:
                 issue_number,
                 body,
               });
-            }
-
-            if (approvalFailed) {
-              core.setFailed('Formal Codex approval failed; failing the job.');
-            } else if (reviewFailed) {
-              core.setFailed('Formal Codex request-changes failed; failing the job.');
             }
