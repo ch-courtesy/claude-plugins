@@ -27,7 +27,6 @@
 - PR이 draft 상태입니다.
 - 자동 생성된 trivial PR입니다.
 - 변경이 문서, 포맷, lockfile 등으로만 구성되어 있고 correctness 위험이 없습니다.
-- 동일 head_sha에 대해 Codex 리뷰가 이미 완료되었습니다.
 
 리뷰 원칙:
 1. 항상 diff부터 검토합니다.

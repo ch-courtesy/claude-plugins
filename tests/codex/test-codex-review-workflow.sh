@@ -50,6 +50,9 @@ grep -q 'codex exec' "$WORKFLOW" \
   || fail "codex exec 사용 부재"
 grep -q -- '--sandbox read-only' "$WORKFLOW" \
   || fail "codex exec sandbox 모드 지정 부재"
+reasoning_count="$(awk 'index($0, "--config model_reasoning_effort=\\\"high\\\"") { count++ } END { print count + 0 }' "$WORKFLOW")"
+[[ "$reasoning_count" == "2" ]] \
+  || fail "codex review 1차/2차 exec 모두 high reasoning effort 로 실행되지 않음"
 grep -q -- '--output-schema "\$REVIEW_SCHEMA"' "$WORKFLOW" \
   || fail "codex exec output schema 지정 부재"
 result_output_count="$(awk 'index($0, "--output-last-message \"$result\"") { count++ } END { print count + 0 }' "$WORKFLOW")"
@@ -212,6 +215,9 @@ grep -q 'confidence_score < 80' "$PROMPT" \
   || fail "prompt confidence threshold 정책 부재"
 grep -q 'valid JSON' "$PROMPT" \
   || fail "prompt JSON-only 출력 규칙 부재"
+if grep -q '동일 head_sha에 대해 Codex 리뷰가 이미 완료' "$PROMPT"; then
+  fail "prompt 가 동일 head_sha 기존 Codex 리뷰만으로 리뷰를 skip 하도록 지시함"
+fi
 ok "check 11: prompt 핵심 정책 존재"
 
 echo ""

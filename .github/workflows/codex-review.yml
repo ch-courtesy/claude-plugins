@@ -158,6 +158,7 @@ jobs:
 
           codex exec \
             --sandbox read-only \
+            --config model_reasoning_effort=\"high\" \
             --output-schema "$REVIEW_SCHEMA" \
             --output-last-message "$result" \
             < "$initial_prompt"
@@ -203,6 +204,7 @@ jobs:
 
             codex exec \
               --sandbox read-only \
+              --config model_reasoning_effort=\"high\" \
               --output-schema "$REVIEW_SCHEMA" \
               --output-last-message "$result" \
               < "$second_prompt"
