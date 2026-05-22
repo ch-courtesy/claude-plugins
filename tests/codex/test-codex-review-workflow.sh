@@ -169,8 +169,9 @@ grep -q 'state == "APPROVED"' "$WORKFLOW" \
   || fail "동일 head approve 중복 방지 부재"
 grep -q 'No managed Codex review comment to post' "$WORKFLOW" \
   || fail "skipped/no findings managed comment 생략 경로 부재"
-grep -q 'submit_review --approve' "$WORKFLOW" \
-  || fail "approve review 제출 경로 부재"
+if grep -q 'submit_review --approve' "$WORKFLOW"; then
+  fail "finding 없는 approve 는 body 없는 전용 경로만 사용해야 함"
+fi
 grep -q 'submit_review --request-changes' "$WORKFLOW" \
   || fail "request changes review 제출 경로 부재"
 grep -q 'submit_review --comment' "$WORKFLOW" \
@@ -187,6 +188,13 @@ grep -q 'pulls/\$PR_NUMBER/reviews' "$WORKFLOW" \
   || fail "기존 formal review 조회 부재"
 if grep -q 'No high-confidence findings' "$WORKFLOW"; then
   fail "빈 findings 메시지가 high-confidence 표현을 사용함"
+fi
+grep -q 'then "N/A"' "$WORKFLOW" \
+  || fail "null line 을 N/A 로 표시하는 jq 포맷 부재"
+grep -q "finding.line ?? 'N/A'" "$WORKFLOW" \
+  || fail "managed comment null line N/A 표시 부재"
+if grep -q 'const findingText = findings.length === 0' "$WORKFLOW"; then
+  fail "managed comment findings.length === 0 도달 불가 분기 존재"
 fi
 ok "check 10: verdict 기반 GitHub review 제출 경로 존재"
 

@@ -273,7 +273,7 @@ jobs:
                 "Findings:\n" + (
                   [.findings[] |
                     "- [" + .severity + "/" + (.confidence_score|tostring) + "] " +
-                    .title + " (" + .file + ":" + ((.line // 1)|tostring) + ")\n  " +
+                    .title + " (" + .file + ":" + (if .line == null or .line == 0 then "N/A" else (.line|tostring) end) + ")\n  " +
                     .body + "\n  Suggestion: " + .suggestion
                   ] | join("\n")
                 )
@@ -297,9 +297,6 @@ jobs:
           }
 
           case "$review_mode" in
-            approve)
-              submit_review --approve
-              ;;
             request-changes)
               submit_review --request-changes
               ;;
@@ -328,11 +325,9 @@ jobs:
               core.info('No managed Codex review comment to post.');
               return;
             }
-            const findingText = findings.length === 0
-              ? 'No findings.'
-              : findings.map((finding, index) => [
+            const findingText = findings.map((finding, index) => [
                   `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
-                  `${finding.file}:${finding.line || 1}`,
+                  `${finding.file}:${finding.line ?? 'N/A'}`,
                   finding.body,
                   `Suggestion: ${finding.suggestion}`,
                 ].join('\n')).join('\n\n');
