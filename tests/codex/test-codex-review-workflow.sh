@@ -168,6 +168,8 @@ grep -q 'No review output to post' "$WORKFLOW" \
   || fail "skipped review 생략 경로 부재"
 grep -q 'approve_without_body=' "$WORKFLOW" \
   || fail "finding 없는 approve 의 무본문 처리 부재"
+grep -Fq 'elif [[ "$verdict" == "comment" || "$verdict" == "needs_context" ]]; then' "$WORKFLOW" \
+  || fail "finding 없는 comment/needs_context verdict 의 formal comment 제출 경로 부재"
 grep -q 'state == "APPROVED"' "$WORKFLOW" \
   || fail "동일 head approve 중복 방지 부재"
 grep -Fq 'user.login == "github-actions[bot]"' "$WORKFLOW" \

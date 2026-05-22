@@ -242,6 +242,8 @@ jobs:
             if [[ "$verdict" == "approve" && "$may_approve" == "true" && "$diff_truncated" == "false" ]]; then
               review_mode="approve"
               approve_without_body=true
+            elif [[ "$verdict" == "comment" || "$verdict" == "needs_context" ]]; then
+              review_mode="comment"
             else
               echo "No review output to post."
               exit 0
