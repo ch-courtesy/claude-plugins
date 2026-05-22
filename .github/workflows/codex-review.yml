@@ -333,7 +333,7 @@ jobs:
             }
             const findingText = findings.map((finding, index) => [
                   `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
-                  `${finding.file}:${finding.line ?? 'N/A'}`,
+                  `${finding.file}:${finding.line == null || finding.line === 0 ? 'N/A' : finding.line}`,
                   finding.body,
                   `Suggestion: ${finding.suggestion}`,
                 ].join('\n')).join('\n\n');

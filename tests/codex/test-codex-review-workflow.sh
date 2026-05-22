@@ -202,8 +202,8 @@ if grep -q 'No high-confidence findings' "$WORKFLOW"; then
 fi
 grep -q 'then "N/A"' "$WORKFLOW" \
   || fail "null line 을 N/A 로 표시하는 jq 포맷 부재"
-grep -q "finding.line ?? 'N/A'" "$WORKFLOW" \
-  || fail "managed comment null line N/A 표시 부재"
+grep -Fq "finding.line == null || finding.line === 0 ? 'N/A' : finding.line" "$WORKFLOW" \
+  || fail "managed comment null/zero line N/A 표시 부재"
 if grep -q 'const findingText = findings.length === 0' "$WORKFLOW"; then
   fail "managed comment findings.length === 0 도달 불가 분기 존재"
 fi
