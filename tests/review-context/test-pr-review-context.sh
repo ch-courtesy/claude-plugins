@@ -45,6 +45,9 @@ case "$*" in
   'diff --patch before123 head456')
     printf 'diff --git a/src/inc.js b/src/inc.js\n+incremental\n'
     ;;
+  'diff --patch missing123 head456')
+    exit 1
+    ;;
   'diff --patch base000 head456 -- src/thread.js')
     printf 'diff --git a/src/thread.js b/src/thread.js\n+thread\n'
     ;;
@@ -74,6 +77,23 @@ grep -q '^REVIEW_CONTEXT_MODE=incremental$' "$out/context-mode.env" \
 grep -q '+incremental' "$out/diff.patch" \
   || fail "incremental mode should use before..head diff"
 ok "synchronize event uses incremental diff"
+
+out="$tmp/incremental-fallback-out"
+mkdir -p "$out"
+GITHUB_EVENT_NAME=pull_request \
+GITHUB_EVENT_PATH="$FIXTURES/synchronize-missing-before-event.json" \
+GITHUB_REPOSITORY=owner/repo \
+PR_NUMBER=12 \
+PR_BASE_SHA=base000 \
+PR_HEAD_SHA=head456 \
+REVIEW_OUTPUT_DIR="$out" \
+"$SCRIPT"
+
+grep -q '^REVIEW_CONTEXT_MODE=incremental$' "$out/context-mode.env" \
+  || fail "synchronize event with missing before should still use incremental mode"
+grep -q '+full' "$out/diff.patch" \
+  || fail "incremental diff failure should fallback to gh pr diff"
+ok "incremental diff failure falls back to full PR diff"
 
 out="$tmp/thread-out"
 mkdir -p "$out"

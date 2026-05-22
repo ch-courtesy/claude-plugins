@@ -40,7 +40,9 @@ gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" \
 
 case "$mode" in
   incremental)
-    git diff --patch "$incremental_base" "$PR_HEAD_SHA" > "$REVIEW_OUTPUT_DIR/diff.patch"
+    git diff --patch "$incremental_base" "$PR_HEAD_SHA" > "$REVIEW_OUTPUT_DIR/diff.patch" || {
+      gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch > "$REVIEW_OUTPUT_DIR/diff.patch"
+    }
     ;;
   thread)
     jq -n \

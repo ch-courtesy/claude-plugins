@@ -167,6 +167,10 @@ grep -q 'approve_without_body=' "$WORKFLOW" \
   || fail "finding 없는 approve 의 무본문 처리 부재"
 grep -q 'state == "APPROVED"' "$WORKFLOW" \
   || fail "동일 head approve 중복 방지 부재"
+grep -Fq 'user.login == "github-actions[bot]"' "$WORKFLOW" \
+  || fail "approve 중복 체크가 봇 자신의 리뷰로 제한되지 않음"
+grep -q 'approval-failed' "$WORKFLOW" \
+  || fail "approve 실패 시 managed comment fallback marker 부재"
 grep -q 'No managed Codex review comment to post' "$WORKFLOW" \
   || fail "skipped/no findings managed comment 생략 경로 부재"
 if grep -q 'submit_review --approve' "$WORKFLOW"; then
