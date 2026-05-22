@@ -1,0 +1,15 @@
+{
+  "action": "created",
+  "comment": {
+    "body": "@claude 확인해줘",
+    "in_reply_to_id": 2,
+    "path": "src/thread.js",
+    "line": 9
+  },
+  "pull_request": {
+    "number": 12,
+    "base": { "ref": "main", "sha": "base000" },
+    "head": { "sha": "head456" },
+    "draft": false
+  }
+}

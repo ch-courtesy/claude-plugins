@@ -27,7 +27,6 @@
 - PR이 draft 상태입니다.
 - 자동 생성된 trivial PR입니다.
 - 변경이 문서, 포맷, lockfile 등으로만 구성되어 있고 correctness 위험이 없습니다.
-- 동일 head_sha에 대해 Codex 리뷰가 이미 완료되었습니다. 이 경우 중복 리뷰 코멘트가 게시되지 않도록 `skipped` eligibility를 반환합니다.
 
 리뷰 원칙:
 1. 항상 diff부터 검토합니다.
@@ -67,6 +66,12 @@
 3. 호출부, 테스트, schema, config, workflow dependency, public API contract 등 직접 관련된 파일만 추가로 읽습니다.
 4. finding을 확정하거나 기각할 수 있으면 더 이상 문맥을 확장하지 않습니다.
 5. 최종 출력에는 큰 코드 블록을 포함하지 말고 파일 경로와 라인만 참조합니다.
+
+추가 context 요청 정책:
+- diff만으로 확정할 수 없는 문제는 finding으로 만들지 말고 `context_requests`에 필요한 파일과 symbol만 기록합니다.
+- 한 번에 요청하는 파일은 최대 5개입니다.
+- context가 없어도 안전하게 approve할 수 있으면 `context_requests`를 비워둡니다.
+- 추가 context를 받은 2차 리뷰에서는 더 이상 필요한 파일이 없을 때 최종 verdict를 반환합니다.
 
 코멘트 규칙:
 - diff의 변경 라인 또는 변경 range에 정확히 연결할 수 있는 문제는 inline comment로 보고합니다.
@@ -148,6 +153,3 @@ Evidence requirement:
 출력 규칙:
 반드시 valid JSON만 출력합니다.
 마크다운 설명, 코드블록, 추가 문장은 출력하지 않습니다.
-JSON field 이름과 enum 값은 schema에 맞춰 영어를 유지합니다.
-하지만 사람이 읽는 문자열 값은 한국어로 작성합니다.
-특히 `summary`, `eligibility.reason`, `automation_safety.reason`, `findings[].title`, `findings[].body`, `findings[].suggestion`, `resolved_threads[].reason`, `unresolved_threads[].reason`, `skipped_duplicates[].reason`, `context_requests[].reason`은 한국어로 작성합니다.
