@@ -238,16 +238,14 @@ jobs:
           fi
 
           review_mode="comment"
-          if [[ "$findings_count" == "0" ]]; then
-            if [[ "$verdict" == "approve" && "$may_approve" == "true" && "$diff_truncated" == "false" ]]; then
-              review_mode="approve"
-              approve_without_body=true
-            elif [[ "$verdict" == "comment" || "$verdict" == "needs_context" ]]; then
-              review_mode="comment"
-            else
-              echo "No review output to post."
-              exit 0
-            fi
+          if [[ "$findings_count" == "0" && "$verdict" == "approve" && "$may_approve" == "true" && "$diff_truncated" == "false" ]]; then
+            review_mode="approve"
+            approve_without_body=true
+          elif [[ "$findings_count" == "0" && ( "$verdict" == "comment" || "$verdict" == "needs_context" ) ]]; then
+            review_mode="comment"
+          elif [[ "$findings_count" == "0" ]]; then
+            echo "No review output to post."
+            exit 0
           elif [[ "$diff_truncated" != "false" ]]; then
             review_mode="comment"
           elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
