@@ -50,9 +50,9 @@ grep -q 'codex exec' "$WORKFLOW" \
   || fail "codex exec 사용 부재"
 grep -q -- '--sandbox read-only' "$WORKFLOW" \
   || fail "codex exec sandbox 모드 지정 부재"
-reasoning_count="$(awk 'index($0, "--config model_reasoning_effort=\\\"high\\\"") { count++ } END { print count + 0 }' "$WORKFLOW")"
+reasoning_count="$(awk 'index($0, "--config model_reasoning_effort=\\\"medium\\\"") { count++ } END { print count + 0 }' "$WORKFLOW")"
 [[ "$reasoning_count" == "2" ]] \
-  || fail "codex review 1차/2차 exec 모두 high reasoning effort 로 실행되지 않음"
+  || fail "codex review 1차/2차 exec 모두 medium reasoning effort 로 실행되지 않음"
 grep -q -- '--output-schema "\$REVIEW_SCHEMA"' "$WORKFLOW" \
   || fail "codex exec output schema 지정 부재"
 result_output_count="$(awk 'index($0, "--output-last-message \"$result\"") { count++ } END { print count + 0 }' "$WORKFLOW")"
