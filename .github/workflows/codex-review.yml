@@ -228,9 +228,37 @@ jobs:
           diff_truncated="$(jq -r '.reviewed_context.diff_truncated' "$result")"
           findings_count="$(jq '.findings | length' "$result")"
           blocking_count="$(jq '[.findings[] | select(.severity == "blocking" and .confidence_score >= 80)] | length' "$result")"
+          approve_without_body=false
 
-          if [[ "$eligibility" != "reviewed" || "$findings_count" == "0" ]]; then
-            echo "No review comments to post."
+          if [[ "$eligibility" != "reviewed" ]]; then
+            echo "No review output to post."
+            exit 0
+          fi
+
+          review_mode="comment"
+          if [[ "$findings_count" == "0" ]]; then
+            if [[ "$verdict" == "approve" && "$may_approve" == "true" && "$diff_truncated" == "false" ]]; then
+              review_mode="approve"
+              approve_without_body=true
+            else
+              echo "No review output to post."
+              exit 0
+            fi
+          elif [[ "$diff_truncated" != "false" ]]; then
+            review_mode="comment"
+          elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
+            review_mode="request-changes"
+          fi
+
+          if [[ "$approve_without_body" == "true" ]]; then
+            if gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
+              | jq -e --arg head "$PR_HEAD_SHA" 'any(.[]; .state == "APPROVED" and .commit_id == $head)' >/dev/null; then
+              echo "Formal Codex approval already exists for $PR_HEAD_SHA; skipping duplicate."
+              exit 0
+            fi
+            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve; then
+              echo "Formal Codex approval failed; continuing without a comment."
+            fi
             exit 0
           fi
 
@@ -252,15 +280,6 @@ jobs:
               end
             ' "$result"
           } > "$body"
-
-          review_mode="comment"
-          if [[ "$eligibility" != "reviewed" || "$diff_truncated" != "false" ]]; then
-            review_mode="comment"
-          elif [[ "$verdict" == "approve" && "$may_approve" == "true" && "$blocking_count" == "0" ]]; then
-            review_mode="approve"
-          elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
-            review_mode="request-changes"
-          fi
 
           marker="codex-formal-review head_sha=$PR_HEAD_SHA verdict=$verdict"
           printf '\n\n<!-- %s -->\n' "$marker" >> "$body"

@@ -161,8 +161,12 @@ echo ""
 echo "=== check 10: verdict is submitted through GitHub review API ==="
 grep -q 'findings_count=' "$WORKFLOW" \
   || fail "findings count 계산 부재"
-grep -q 'No review comments to post' "$WORKFLOW" \
-  || fail "skipped/no findings formal review 생략 경로 부재"
+grep -q 'No review output to post' "$WORKFLOW" \
+  || fail "skipped review 생략 경로 부재"
+grep -q 'approve_without_body=' "$WORKFLOW" \
+  || fail "finding 없는 approve 의 무본문 처리 부재"
+grep -q 'state == "APPROVED"' "$WORKFLOW" \
+  || fail "동일 head approve 중복 방지 부재"
 grep -q 'No managed Codex review comment to post' "$WORKFLOW" \
   || fail "skipped/no findings managed comment 생략 경로 부재"
 grep -q 'submit_review --approve' "$WORKFLOW" \
