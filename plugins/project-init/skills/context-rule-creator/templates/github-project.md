@@ -13,12 +13,14 @@ inputs:
         description: "본문에 'gh project list로 확인 후 채움' TODO를 남깁니다"
         value: "<TODO: gh project list --owner <소유자> 결과로 확인 후 채움>"
 on_create: |
-  추가 파일은 만들지 않는다. 입력 단계에서 받은 Project URL/번호는 이미 본문에 치환되어 있다. 사용자가 옵션 중 하나로 TODO 마커를 남긴 경우 그 마커를 직접 채워야 한다고 안내한다. Status field 옵션 셋업은 GitHub UI 또는 `gh` CLI로 사용자가 직접 진행해야 한다고 안내한다. `[decision]`/`[handoff]`는 GitHub 라벨이 아니라 comment 본문 prefix 컨벤션이므로 별도 셋업이 필요하지 않다는 점도 함께 안내한다.
+  추가 파일은 만들지 않는다. TODO 마커가 남았으면 사용자가 직접 채워야 한다고 안내한다.
+  Status field 옵션은 GitHub UI 또는 `gh` CLI로 설정해야 한다고 안내한다.
+  `[decision]`/`[handoff]`는 comment prefix이므로 별도 라벨 셋업이 필요 없다고 안내한다.
 ---
 
 # 컨텍스트 관리 지침
 
-AI 에이전트 간에 작업 컨텍스트를 전달하기 위한 영속성 규칙입니다. 휘발 메모리(세션·대화)에 의존하지 않고, 한 에이전트가 끝낸 작업을 다른 에이전트가 이어받을 수 있어야 합니다.
+AI 에이전트 간 작업 컨텍스트를 영속화하는 규칙입니다. 세션 기억에 의존하지 않고 다음 에이전트가 이어받을 수 있어야 합니다.
 
 이 프로젝트는 **GitHub Project 백엔드**를 사용합니다. 모든 태스크는 GitHub Issue로 만들고 Project에 추가합니다.
 
@@ -28,16 +30,16 @@ AI 에이전트 간에 작업 컨텍스트를 전달하기 위한 영속성 규�
 
 ## 태스크 우선 원칙 (no-task-no-work)
 
-비자명한 작업은 **관련 issue가 존재한 상태에서만 시작합니다**. 없으면 작업을 멈추고 먼저 issue를 만듭니다 — `Backlog`는 제목 + 1-2줄 설명만으로 캡처 가능하므로 비용은 매우 낮습니다. "작은 작업이라"·"즉흥적이라"는 면제 사유가 아닙니다.
+비자명한 작업은 **관련 issue가 있을 때만 시작합니다**. 없으면 먼저 issue를 만듭니다. `Backlog`는 제목 + 1-2줄 설명만으로 충분하며, "작다"·"즉흥적"이라는 이유로 생략하지 않습니다.
 
-### 작업 시작 신호 (이 중 하나라도 발생하면 issue 존재 확인 필수)
+### 작업 시작 신호
 
 - 첫 `Edit`/`Write` 호출
 - `git add`/`git commit` 호출
 - 외부 상태를 바꾸는 도구 호출 (`gh issue create`, `gh project item-*`, 외부 API, 인프라 변경 등)
 - 한 카테고리에서 다파일 변경을 시작할 때
 
-신호 발생 시 issue가 없으면 즉시 작업 중단 → issue 생성 → Project 추가 → 작업 재개. 사용자에게 "issue가 없어 먼저 만들었습니다"라고 알립니다.
+신호 발생 시 issue가 없으면 작업 중단 → issue 생성 → Project 추가 → 작업 재개. 사용자에게 생성 사실을 알립니다.
 
 ### 예외
 
@@ -46,14 +48,13 @@ AI 에이전트 간에 작업 컨텍스트를 전달하기 위한 영속성 규�
 
 ### 계획 섹션 채움
 
-- **`Backlog`는 계획이 비어 있어도 됩니다.** 제목 + 1-2줄로 아이디어를 캡처해 즉시 영구 저장소에 남기기 위함입니다.
-- **`In Design` 또는 `In Progress`로 전이할 때는 계획 섹션이 채워져 있어야 합니다.** issue body의 계획 섹션(목표·배경·제안·검증 계획·완료 기준)을 다른 에이전트가 이해할 수 있을 만큼 채웁니다. 빈 섹션이나 `TBD`로 전이하지 않습니다.
-- 사소한 태스크라도 각 섹션은 짧게라도 명확히 작성합니다. 분량이 짧은 것은 괜찮지만 비어 있는 것은 안 됩니다.
-- 시작한 뒤 알게 된 사항은 comments에 기록하고, 필요하면 issue body의 계획 섹션도 갱신합니다.
+- `Backlog`는 제목 + 1-2줄 설명만 있어도 됩니다.
+- `In Design` 또는 `In Progress`로 전이할 때는 목표·배경·제안·검증 계획·완료 기준을 채웁니다. 빈 섹션이나 `TBD`로 전이하지 않습니다.
+- 짧아도 명확해야 합니다. 시작 후 알게 된 사항은 comments에 남기고, 필요하면 issue body도 갱신합니다.
 
 ### 위반 발견 시
 
-작업이 이미 진행되었는데 관련 issue가 없음을 인지·지적당하면, 즉시 작업을 멈추고 retroactive issue를 만듭니다. 마지막 `[handoff]` prefix comment에 retroactive 사유를 기록한 뒤 작업을 재개합니다. 같은 세션 내에서 동일 누락을 두 번째 반복하지 않도록 합니다.
+작업 중 issue 누락을 발견하면 즉시 멈추고 retroactive issue를 만듭니다. 마지막 `[handoff]` comment에 사유를 남긴 뒤 재개합니다.
 
 ## 태스크 = Issue
 
@@ -71,54 +72,43 @@ AI 에이전트 간에 작업 컨텍스트를 전달하기 위한 영속성 규�
 
 ## Issue body 구조 (순서 고정)
 
-새 태스크 issue를 만들 때 본문은 다음 섹션 순서로 구성합니다.
+새 태스크 issue 본문은 다음 섹션 순서로 작성합니다.
 
 ```markdown
 ## 목표
-무엇을 달성하려는지. 결과 상태를 측정·확인 가능한 형태로 1~3 문장.
+측정·확인 가능한 결과 상태를 1~3문장으로 작성.
 
 ## 배경
-왜 필요한지. 어떤 문제·상황에서 출발했고 무엇이 걸려 있는지. 처음 보는 사람도 맥락을 잡을 수 있을 만큼.
+문제·상황·리스크를 처음 보는 사람도 이해할 만큼 작성.
 
 ## 제안
-어떤 접근·단계·대안으로 목표를 달성할지. 구현 순서, 사용할 도구·라이브러리, 검토한 대안과 선택 이유. 다른 에이전트가 받아 들었을 때 자체 판단 없이 이어갈 수 있을 만큼.
+접근, 구현 순서, 도구·라이브러리, 대안과 선택 이유를 이어서 실행 가능하게 작성.
 
 ## 검증 계획
-결과를 어떻게 확인할지. 사용할 테스트·도구·관찰 지표·수동 단계. DoD의 각 항목을 어떤 방법으로 확인하는지 매핑.
+테스트·도구·관찰 지표·수동 단계로 DoD 확인 방법을 작성.
 
 ## 완료 기준 (Definition of Done)
 - [ ] ...
 - [ ] ...
 ```
 
-- **계획 섹션(목표·배경·제안·검증 계획·DoD)은 issue 생성 시 모두 채웁니다.** 빈 채로 작업을 시작하지 않습니다.
-- **목표·제안·DoD는 다른 층위입니다**: 목표는 "무엇을(What)", 제안은 "어떻게(How)", DoD는 "끝났는가(Done?)"의 체크리스트.
-- **검증 계획과 DoD는 분리합니다**: DoD는 "끝났는가"의 체크리스트, 검증 계획은 그 체크리스트를 "어떻게 확인하는가"의 방법론.
-- 진행 로그·결정은 issue body가 아니라 **comments**에 누적합니다. comments는 GitHub가 시각·작성자를 자동 기록하므로 본문에 별도 메타데이터를 적지 않습니다.
+- 목표는 무엇, 제안은 어떻게, DoD는 끝났는지의 체크리스트입니다.
+- 검증 계획은 DoD를 확인하는 방법입니다.
+- 진행 로그·결정은 issue body가 아니라 comments에 누적합니다. 시각·작성자는 GitHub 메타데이터를 사용합니다.
 
 ## comments에 기록할 것
 
-- 결정·차단 사유·놀라운 발견·외부 영향이 있는 변경.
-- 모든 도구 호출이나 사소한 시도까지는 적지 않습니다 (잡음 폭증 방지).
-- 결정은 comment 첫 줄에 `[decision]` prefix를 달아 식별 가능하게 합니다. 인계 comment는 `[handoff]` prefix를 사용합니다. 이 prefix는 GitHub의 라벨 기능이 아니라 본문 마커 컨벤션이며, GitHub 검색(`is:comment "[decision]"`)으로 필터링합니다.
+- 결정·차단 사유·놀라운 발견·외부 영향이 있는 변경만 적습니다.
+- 모든 도구 호출이나 사소한 시도는 적지 않습니다.
+- 결정은 `[decision]`, 인계는 `[handoff]` prefix를 comment 첫 줄에 둡니다. 라벨이 아니라 본문 마커입니다.
 
-## 상태 어휘 (Project Status field)
+## 상태와 전이
 
-`Backlog` → `In Design` → `In Progress` → `Review` → `Done`
+기본 흐름: `Backlog` → `In Design` → `In Progress` → `Review` → `Done`
 
-- `Backlog`: 캡처만 된 상태 (계획 비어도 OK).
-- `In Design`: 계획 작성 중. 본격 실행 전 단계.
-- `In Progress`: 실행 중.
-- `Review`: 검토 중 (예: PR 리뷰).
-- `Done`: 완료.
-- `Blocked`: 차단으로 일시 정지. 해소되면 직전 상태로 복귀합니다.
-- `Cancelled`: 사유는 종료 comment에 기록합니다.
+보조 상태: `Blocked`(차단, 해소 시 직전 상태 복귀), `Cancelled`(사유 comment 후 종료)
 
-상태 전이는 Project의 Status field 값으로만 표현하고, 같은 의미의 라벨을 중복으로 붙이지 않습니다.
-
-## Status 전이 (작업 에이전트의 책임)
-
-Status 전이는 작업을 수행하는 에이전트의 책임입니다. 아래 이벤트가 발생하면 즉시 본인이 전이하며 사용자에게 떠넘기지 않습니다.
+상태는 Project Status field로만 표현하고 중복 라벨을 붙이지 않습니다. 전이는 작업 에이전트 책임입니다.
 
 | 이벤트 | 전이 |
 |---|---|
@@ -128,25 +118,25 @@ Status 전이는 작업을 수행하는 에이전트의 책임입니다. 아래 
 | 차단 사유 발견 | Any → **`Blocked`** (`[blocked]` prefix comment에 사유 기록) |
 | 차단 해제 | `Blocked` → 직전 상태 |
 
-예외: `Review` → `Done`은 **사용자의 명시적 신호**에 한해서만 전이합니다 — 검토 전 자동 Done은 권한 초과로 금지.
+`Review` → `Done`은 사용자 명시 신호가 있을 때만 수행합니다.
 
 ## 운영 규칙
 
-1. **시작 전**: 관련 issue 존재 확인. 없으면 작업을 멈추고 새 issue를 먼저 만듭니다. issue body·comments를 읽고 **마지막 `[handoff]` prefix comment를 가장 먼저** 확인합니다.
-2. **시작 시**: Status를 `In Progress`로, Assignee를 본인으로 설정합니다. "시작" comment를 남깁니다.
-3. **진행 중**: 의미 있는 발견·결정·차단을 **즉시** comment로 기록합니다. 계획 섹션이 변경되면 issue body의 해당 섹션도 갱신합니다.
-4. **commit 전**: issue body의 "검증 계획"에 명시된 항목 중 자동화 가능한 것은 commit 전에 모두 실행해 통과를 확인합니다. 통과 흔적은 commit message 또는 issue comment(`[verification]` prefix 권장)에 남깁니다. 미통과 시 commit 중단 → 원인 수정 → 재검증. **검증 미실행·미통과 상태로 commit하지 않습니다 — "급하다"·"작은 변경이라"는 면제 사유가 아닙니다.** 사용자 환경이 필요한 수동 검증 항목은 마지막 `[handoff]` prefix comment에 누가·언제 진행할지 명시합니다.
-5. **완료 시**: 검증 계획에 따라 DoD 점검 → Status를 `Review` 또는 `Done`으로 → `[handoff]` prefix comment 추가 → Assignee 해제.
+1. **시작 전**: 관련 issue를 확인하고 없으면 만듭니다. issue body와 마지막 `[handoff]`를 먼저 읽습니다.
+2. **시작 시**: Status를 `In Progress`로, Assignee를 본인으로 설정하고 시작 comment를 남깁니다.
+3. **진행 중**: 의미 있는 발견·결정·차단을 즉시 comment로 기록합니다. 계획이 바뀌면 issue body도 갱신합니다.
+4. **commit 전**: 자동화 가능한 검증 계획을 모두 실행합니다. 실패하면 commit하지 말고 수정 후 재검증합니다. 수동 검증은 마지막 `[handoff]`에 담당자·시점을 남깁니다.
+5. **완료 시**: DoD 점검 → `Review` 또는 `Done` 전이 → `[handoff]` 추가 → Assignee 해제.
 6. **append-only**: comments는 수정·삭제하지 않습니다. 정정은 새 comment로 추가합니다.
 
 ## 태스크 단위
 
-- 1 issue ≈ 한 에이전트가 한 세션에 끝낼 수 있는 분량.
+- 1 issue는 한 에이전트가 한 세션에 끝낼 수 있는 분량을 권장합니다.
 - 더 크면 sub-issue로 분할합니다. 부모 issue는 sub-issue 목록과 진행 요약을 유지합니다.
 - 깊이는 2~3 단계 이내를 권장합니다.
 
 ## 공통 규칙
 
-- 코드 변경의 commit message·PR description에 issue 번호를 포함해 자동 cross-reference를 만듭니다 (예: `Closes #42`, `Refs #42`).
+- commit message·PR description에 issue 번호를 포함해 cross-reference를 만듭니다 (예: `Closes #42`, `Refs #42`).
 - 시각·작성자 메타데이터는 GitHub가 자동 기록하므로 본문에 중복 작성하지 않습니다.
 - Project URL, Status field 옵션은 사람이 결정하고 GitHub UI/CLI로 진행합니다 (이 지침의 범위 밖). `[decision]`/`[handoff]`는 라벨이 아니라 comment 본문 prefix 컨벤션이므로 별도 셋업이 필요 없습니다.
