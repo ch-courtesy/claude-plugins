@@ -5,196 +5,60 @@ description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave
 
 # dispatch
 
-`autopilot:prd` 스킬이 작성한 `milestones/<m>/prd/PRD.md`를 child SPEC들로 자동 분해하고, DAG(wave) 단위로 `autopilot:loop`을 병렬 실행하는 오케스트레이션 인터페이스.
+`autopilot:prd`가 만든 `milestones/<m>/prd/PRD.md`를 child SPEC으로 분해하고 DAG wave 단위로 `autopilot:loop`을 실행한다. milestone-level ops도 본 스킬이 맡는다.
 
-본 스킬은 milestone-level ops도 책임 — 별도 `milestone` 스킬을 두지 않는다.
-
-## 호출 방법
+## 호출
 
 `Skill(skill: "dispatch", args: "<subcommand> [<args>]")`
 
-또는 사용자가 자연어로 의도 전달 시 모델이 자동 호출.
+## start 흐름
 
-서브커맨드 7종 — 자세한 동작은 §Subcommand 참조.
+1. `dispatch start <m>` 입력 검증: PRD 존재, `[NEEDS CLARIFICATION` 마커 0개. 미충족 시 abort + `prd <m> --resume` 안내. `regular`는 PRD 없는 catch-all이므로 거부.
+2. `references/decomposition-algorithm.md`로 단위 후보를 뽑고 3조건(단일 컨텍스트 윈도우 fit, 테스트 폐쇄성, 격리성)과 hard cap(1차 <= 8, 깊이 <= 2, 최종 <= 20)을 검사한다. 초과·cycle은 abort.
+3. 게이트 1: wave별 분해 plan을 보여주고 `(a) 승인`, `(b) 분해 수정`, `(c) 취소`를 묻는다. 승인 시 `references/dag-template.md`로 `milestones/<m>/dispatch/DAG.md` 작성.
+4. 게이트 2: DAG 레벨 wave·child·예상 verify·의존성 표를 재제시하고 `(a) 실행 시작`, `(b) 취소`를 묻는다.
+5. 게이트 3: wave 단위로 순차 진행한다. 각 wave의 child마다 `Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>")`을 호출한다. child task-id는 spec이 생성하므로 dispatch는 보유하지 않는다.
+6. spec 위임 전후 `milestones/<m>/loops/` 스냅샷 차이로 새 `milestones/<m>/loops/<c>-<slug>/SPEC.md`만 식별한다. spec의 dispatch 위임 모드가 auto-loop-start를 수행하므로 dispatch가 별도 `loop start`를 중복 호출하지 않는다.
+7. `Bash(dispatch.sh watch_wave <m> child...)`로 wave 완료를 감시한다. 성공한 wave 뒤에만 다음 wave의 spec 위임을 시작한다.
 
-## 단일 흐름
+## watch_wave
 
-```
-1. dispatch start <m>
-   → PRD 검증 (milestones/<m>/prd/PRD.md 존재 + [NEEDS CLARIFICATION 마커 0개]
-   → 분해 (단위 후보 추출 + 3 조건 검사 + 하드 캡 검사)
-   → 게이트 ① 분해 plan 승인 (사용자 AskUserQuestion)
-   → DAG.md 작성 (milestones/<m>/dispatch/DAG.md)
-   → 게이트 ② 최종 확인 (DAG 레벨 wave·child·예상 verify·의존성 표 + 사용자 승인. SPEC 자체는 각 wave 진입 시 비로소 작성)
-   → wave 단위 순차 실행 (wave 안 child 간은 병렬):
-     · 게이트 ③ spec 위임 (per-wave): 그 wave 의 각 child 분해 plan 항목에 Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>") — task-id 는 spec 이 task 생성 단계에서 결정. spec 의 dispatch-위임 모드 auto-loop-start 로 그 wave 의 child loop 가 자동 시작
-     · sentinel watch (Bash(dispatch.sh watch_wave ...)) — 이 wave 의 완료 라벨(`LOOP_DONE_LABEL`)/ESCALATION.md 감시
-     · 성공 시 다음 wave 의 게이트 ③ per-wave 로 진행. wave 끝까지 반복
-       (sentinel watch · fail-fast 는 per-wave 단계에 포함 — 마일스톤 레벨 별도 sentinel 없음)
-   → wave 모두 통과 후 최종 보고
-```
+watch는 child issue의 완료 라벨(`LOOP_DONE_LABEL`)과 worktree `.loop/ESCALATION.md`만 본다. loop의 worktree·lock·iteration·헌법 준수는 `loop.sh` 책임이다.
 
-## 분해 알고리즘
+| exit | 의미 | 후속 |
+|---|---|---|
+| `100` | wave 내 모든 child 완료 라벨 | DISPATCH_LOG 기록 후 다음 wave |
+| `101` | 누군가 ESCALATION | watch_wave가 나머지 stop, 로그·보고, 다음 wave 차단 |
+| `102` | timeout(`WATCH_TIMEOUT_SECONDS`, 기본 7200s) | 진행 중 child stop, partial 결과 보고, 다음 wave 차단 |
 
-자세한 내용: `references/decomposition-algorithm.md`. 핵심:
+그 외 exit은 dispatch 결함으로 보고 stderr·exit code를 그대로 알린다.
 
-**입력 검증** — `milestones/<m>/prd/PRD.md` 존재 + `[NEEDS CLARIFICATION` 마커 0개. 미충족 시 abort + `prd <m> --resume` 안내.
+## Subcommands
 
-**3 조건 동시 충족** (단위 후보별 검사)
-1. **단일 컨텍스트 윈도우 fit**: spec 9-step + loop 30 iter 안에 끝낼 수 있는가
-2. **테스트 폐쇄성**: 자체 verify 명령으로 닫히는가
-3. **격리성**: 다른 단위와 같은 파일을 동시 수정하지 않는가
+- `start <m>` 또는 `dispatch <m>`: 분해+실행.
+- `status <m>`: `dispatch.sh status <m>`. PRD/DAG/wave와 child loop state 출력. `regular`는 child 상태만.
+- `stop <m>`: 진행 중 모든 child loop stop + DISPATCH_LOG 기록.
+- `list`: 모든 milestone(regular 포함) 상태.
+- `cleanup [<m>]`: 완료된 worktree·child loop 상태 제거. PRD/DAG 보존.
+- `logs <m>`: `DISPATCH_LOG.md` 출력.
+- `resume <m>`: 분해 미완이면 게이트 1, wave 중단이면 다음 wave부터 재개.
+- 인자 없음: 사용법과 subcommand 목록 출력.
 
-**하드 캡** — 1차 분해 ≤ 8 단위, 재귀 분해 깊이 ≤ 2, 최종 산출 ≤ 20 단위. 초과 시 abort + 사용자에게 PRD 자체 분해 권고.
-
-**의존성·wave** — 단위 간 dependency(파일·산출물) 추출 → 토포 정렬 → wave 그룹화. cycle 감지 시 abort.
-
-## 게이트 3종
-
-### 게이트 ① 분해 plan 승인
-
-분해 결과를 wave별 표로 제시:
-```
-wave 1 (parallel-safe): [child-a, child-b]
-  - child-a: <한 줄> | 파일 [src/a/**] | verify [pytest tests/a]
-  - child-b: <한 줄> | 파일 [src/b/**] | verify [pytest tests/b]
-wave 2 (depends on wave 1): [child-c]
-  - child-c: ...
-```
-
-`AskUserQuestion` 옵션: `(a) 승인`, `(b) 분해 수정` (자연어 피드백으로 재실행), `(c) 취소`.
-
-승인 시 `references/dag-template.md` 치환해 `milestones/<m>/dispatch/DAG.md` 기록 (`mkdir -p milestones/<m>/dispatch/` 후).
-
-### 게이트 ② 최종 확인 (DAG 레벨)
-
-모든 wave 의 plan 표를 재제시. SPEC 자체는 wave 별 spec 위임 시점에 비로소 작성되므로, 본 표는 분해 plan 단계에서 추출한 child 한 줄 요약·예상 verify 명령·DAG 의존성을 보여준다 (실제 SPEC 경로는 wave 별 위임 직후 DISPATCH_LOG 에 기록):
-```
-| wave | child   | 한 줄 요약          | 예상 verify 명령      | 의존성    |
-|------|---------|---------------------|-----------------------|-----------|
-| 1    | child-a | <한 줄>             | pytest tests/a        | 없음      |
-| 1    | child-b | <한 줄>             | pytest tests/b        | 없음      |
-| 2    | child-c | <한 줄>             | pytest tests/c        | child-a   |
-```
-
-`AskUserQuestion` 옵션: `(a) 실행 시작`, `(b) 취소`. 승인 시 wave 1 의 게이트 ③ per-wave spec 위임 → `watch_wave` 순차 실행 시작.
-
-### 게이트 ③ spec 위임 (wave 단위 순차)
-
-dispatch 는 spec 위임을 **wave 단위로 순차** 실행한다 — wave 1 부터 시작해 직전 wave 의 `watch_wave` 가 성공 (exit 100) 으로 종료한 직후 다음 wave 로 진행. 한 wave 안에서는 그 wave 의 child 분해 plan 항목들에 대해 `Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>")` 를 호출한다 (한 wave 안 child 위임은 병렬·순서 무관) — milestone 은 명시 플래그로, child 식별자 (task-id) 는 dispatch 가 보유하지 않고 spec 이 task 생성 단계에서 결정한다. PRD 본문·분해 plan 항목은 자연어 인자 안에 포함해 전달.
-
-**child 명세 경로 식별 (스냅샷 차이)** — dispatch 는 각 위임 호출 직전에 `milestones/<m>/loops/` 디렉토리 스냅샷을 찍고, 호출 직후 스냅샷 차이로 새로 생성된 `milestones/<m>/loops/<c>-<slug>/SPEC.md` 경로만 식별한다. `<c>` 자체는 dispatch 가 참조하지 않으며, 이후 단계(`watch_wave` 인자·DISPATCH_LOG)는 식별한 명세 경로로 작동.
-
-spec 스킬은 dispatch 위임 모드를 인식해 step 10 사용자 최종 검토의 세 옵션 질문을 생략하고 후속 자율 루프 자동 시작까지 단일 호출에서 완수(상세는 `plugins/autopilot/skills/spec/SKILL.md` §호출 방법 — dispatch 위임 모드). **즉 한 wave 의 spec 위임 호출 시점에 그 wave 의 child loop 가 자동 시작되며, 이후 같은 wave 의 실행 섹션은 sentinel watch 전용 — `loop start` 중복 호출 금지**. wave 순서 보장은 start-time 게이팅이 아닌 **spec 위임 자체를 wave 단위로 순차화** 함으로써 강제된다 — wave 2+ child loop 는 의존 wave 의 `watch_wave` 가 성공으로 종료한 *후* 비로소 spec 위임을 통해 시작되므로, `loop/SKILL.md` 에 별도 inter-wave runtime 의존성 검사 메커니즘이 없어도 dependency 순서가 깨지지 않는다.
-
-## 실행 (wave 단위 순차, wave 안 child 병렬)
-
-```
-for wave in waves:
-  # 1) per-wave 게이트 ③ spec 위임: 그 wave 의 각 child 에 Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>") 호출.
-  #    spec 의 dispatch-위임 모드 auto-loop-start 로 그 wave 의 child loop 가 자동 시작된다.
-  #    이전 wave 들의 loop 는 그 wave 의 watch_wave 가 이미 완료(exit 100)로 종료한 상태 — 의존 산출물 준비 완료.
-  #    dispatch 는 별도 `loop start` 호출 없이 sentinel watch 만 수행 (중복 시작 방지).
-
-  while wave 진행 중:
-    # references/dispatch.sh watch_wave <m> child1 child2 ...
-    각 child의 sentinel watch (sleep 2s 폴링):
-      task 저장소 child issue 에 LOOP_DONE_LABEL 라벨 부착                → 성공
-      milestones/<m>/loops/<c>/.worktree/.loop/ESCALATION.md             → 실패
-
-    누군가 ESCALATION (watch_wave exit 101):
-      watch_wave가 나머지 진행 중 child들에 kill -TERM (fail-fast, 자동)
-      milestones/<m>/dispatch/DISPATCH_LOG.md 기록
-      ESCALATION 카테고리·보고서 사용자 제시
-      다음 wave 차단 + 종료 (재계획은 사용자)
-
-    모두 완료 라벨 부착 (watch_wave exit 100):
-      DISPATCH_LOG.md 기록 → 다음 wave 의 per-wave 게이트 ③ spec 위임으로 진입
-
-    타임아웃 (watch_wave exit 102):
-      watch_wave가 진행 중 child들에 kill -TERM (orphan 방지, 자동)
-      DISPATCH_LOG.md에 타임아웃 + 진행 단계 기록
-      사용자에게 진행 상황·재개 옵션 보고
-      다음 wave 차단 + 종료
-
-모든 wave 통과: 최종 보고서 + 종료
-```
-
-### watch_wave exit code 매핑
-
-| exit | 의미 | child stop 처리 | 모델 후속 행동 |
-|---|---|---|---|
-| `100` | wave 내 모든 child 가 완료 라벨(`LOOP_DONE_LABEL`) 부착 | 불필요 | DISPATCH_LOG에 wave 성공 기록 → 다음 wave 진입 |
-| `101` | wave 내 누군가 ESCALATION (fail-fast) | watch_wave가 자동 stop | DISPATCH_LOG에 escalation 기록, ESCALATION.md 본문·카테고리 사용자 제시, **다음 wave 차단**, 재계획은 사용자 책임 |
-| `102` | `WATCH_TIMEOUT_SECONDS` 초과 (기본 7200s) | watch_wave가 자동 stop | DISPATCH_LOG에 timeout 기록, 진행 단계·partial 결과 사용자 제시, **다음 wave 차단**, `dispatch resume <m>`으로 이어갈지 사용자 결정 |
-
-이 외 exit code는 dispatch 자체 결함을 의미하므로 즉시 abort + 사용자에게 stderr·exit code 그대로 보고.
-
-**기존 loop과의 분업** — 워크트리·lock·iteration 상한·헌법 준수는 모두 `loop.sh`가 처리. dispatch는 두 sentinel 신호 — task 저장소 child issue 의 `LOOP_DONE_LABEL` 라벨(성공) 과 워크트리 안 `.loop/ESCALATION.md` 파일(실패) — **존재만** 감시. 외부 셸 루프 표준 유지(in-process Stop 훅 미사용).
-
-## Subcommand
-
-### start <m> (또는 dispatch <m>)
-
-분해+실행. PRD 부재 시 거부. PRD 마커 잔존 시 거부 + `prd --resume` 안내.
-
-`regular` milestone은 PRD 부재로 자동 거부 (catch-all로 PRD 없음).
-
-### status <m>
-
-`Bash(bash $SKILL_DIR/references/dispatch.sh status <m>)`. 출력:
-- PRD 존재 / DAG 존재 / wave 진행 상태
-- 각 child loop의 state (running/done/escalated/idle/missing/archived)
-- `regular` milestone의 경우 child loop 상태만 (PRD/DAG 없음)
-
-### stop <m>
-
-`Bash(bash $SKILL_DIR/references/dispatch.sh stop <m>)`. 진행 중 모든 child loop에 `loop stop` 호출 + DISPATCH_LOG.md 기록.
-
-### list
-
-`Bash(bash $SKILL_DIR/references/dispatch.sh list)`. 모든 milestone (regular 포함) 목록 + 상태.
-
-### cleanup [<m>]
-
-`Bash(bash $SKILL_DIR/references/dispatch.sh cleanup [<m>])`. 완료된 워크트리·child loop 상태 제거. PRD/DAG는 보존. `<m>` 미지정 시 모든 완료 milestone.
-
-### logs <m>
-
-`Bash(bash $SKILL_DIR/references/dispatch.sh logs <m>)`. `milestones/<m>/dispatch/DISPATCH_LOG.md` 출력.
-
-### resume <m>
-
-현재 상태(분해 미완 vs 실행 중단) 감지 후 올바른 단계에서 이어가기. 분해 미완이면 게이트 ①부터, wave 중단이면 다음 wave부터.
-
-### 인자 없는 호출
-
-사용법 안내 + 사용 가능한 subcommand 목록 출력.
-
-## 자기완결성 가드
-
-본 스킬은 PRD 마커 거부자 역할. `[NEEDS CLARIFICATION` 마커가 PRD 본문에 1개라도 잔존하면 `start` 거부 + `prd --resume` 안내. 이 가드 + spec 스킬의 자체 마커 차단으로 wave 실행 시점에는 마커가 없음이 보장된다.
-
-## 모듈 구성 (references/)
+## references
 
 | 파일 | 역할 |
 |---|---|
-| `dispatch.sh` | 외부 셸 드라이버. 셸 위임 서브커맨드(status/stop/list/cleanup/logs/watch_wave/log_event) + sentinel watch + DAG 파싱. `resume`은 모델 직접 처리(셸 위임 없음) |
-| `dag-template.md` | DAG.md placeholder 템플릿 (wave 표·의존성 목록) |
-| `decomposition-algorithm.md` | 3 조건 + 하드 캡 + 토포 정렬 + cycle 감지 휴리스틱 |
+| `dispatch.sh` | status/stop/list/cleanup/logs/watch_wave/log_event driver |
+| `dag-template.md` | DAG.md 템플릿 |
+| `decomposition-algorithm.md` | 3조건, hard cap, 토포 정렬, cycle 감지 |
 
-## 의존성 (target 프로젝트)
+## 의존성
 
-- `git` (worktree 지원)
-- `bash` 3.2+ (macOS 호환)
-- `claude` CLI
-- loop 스킬 (`Skill(skill: "loop", args: "...")` 또는 `Bash(loop.sh ...)`)
-- spec 스킬 (`Skill(skill: "spec", args: "...")`)
+`git`, `bash` 3.2+(macOS), `claude` CLI, `spec` 스킬, `loop` 스킬.
 
 ## 규칙
 
-- 본 스킬은 target 프로젝트의 `milestones/<m>/dispatch/` 디렉터리만 직접 작성한다 (DAG.md·DISPATCH_LOG.md).
-- spec 위임은 항상 `Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>")` 형식 — milestone 플래그 + 자연어 본문, task-id 는 spec 이 task 생성 단계에서 결정. child 식별은 호출 전후 `milestones/<m>/loops/` 디렉토리 스냅샷 차이로.
-- loop 실행은 항상 `<m>/<c>` 2-컴포넌트 task-id로 (child 식별 후).
-- `regular` milestone-id는 ad-hoc 단일 task catch-all이므로 PRD가 없고 `dispatch start regular`는 거부.
-- 모든 결정·승인은 `AskUserQuestion`으로 (CLAUDE.md 규칙).
+- 직접 작성 범위는 `milestones/<m>/dispatch/`의 `DAG.md`와 `DISPATCH_LOG.md`.
+- spec 위임은 항상 `--milestone <m> <자연어 task 설명>` 형식. task-id는 spec이 결정한다.
+- loop 실행 식별은 스냅샷 차이로 찾은 SPEC 경로를 기준으로 한다.
+- 모든 결정·승인은 `AskUserQuestion`.

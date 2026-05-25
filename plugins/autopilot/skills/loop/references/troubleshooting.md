@@ -1,62 +1,31 @@
-# ESCALATION 카테고리별 처리 가이드
+# ESCALATION troubleshooting (optimized)
 
-정지된 task의 차단 신호 본문 `**카테고리**` 필드 별 사람의 처리 권장 흐름. 신호 본문은 task 메모리에서 task 식별자로 조회해 읽고, 차단 해제는 task에 `[unblocked]` 또는 `[resume]` 신호를 발행합니다 — `[unblocked] 해제 사유` 신호. (`task_status_is_blocked`가 가장 최근 매치된 신호를 단일 진실원으로 보므로, task 상태 UI에서 상태를 변경하는 것만으로는 차단이 유지됩니다 — `[unblocked]`/`[resume]` 신호 발행이 정식 절차.)
+차단 신호의 `**카테고리**`별 처리. 차단 해제는 task에 `[unblocked]` 또는 `[resume]` 신호를 발행하는 것이 정식 절차다. UI 상태만 바꾸면 차단이 유지될 수 있다.
 
-## config-gap (환경 설정·도구 부재)
+## config-gap
 
-증상: 도구 미설치, 자격증명 부재, 환경 변수 누락 등.
+도구 미설치, 자격증명, env var 누락. missing item 확인 -> 환경 조정 -> `[unblocked] <사유>` -> restart 또는 watch 자동 재개.
 
-처리:
-1. 차단 신호 본문 읽고 missing item 식별 (task 메모리에서 task 식별자로 조회)
-2. target 프로젝트 환경 조정 (도구 설치, env var 설정 등)
-3. `[unblocked] <해제 사유>` 신호 발행해 차단 해제 (`[resume]` 신호도 동등)
-4. `start <task-id>` 또는 watch 모드면 자동 재개
+## spec-gap
 
-## spec-gap (SPEC.md 결함)
+모호한 수용 기준, verify 부적합, scope 미흡. 필요한 결정 확인 -> SPEC 보정(`Skill(skill: "spec", args: "<task-id>")` 또는 worktree SPEC 수정) -> `[unblocked] SPEC 보정 완료` -> 재시작.
 
-증상: 모호한 수용 기준, 검증 명령 부적합, scope 정의 미흡 등.
+## architecture-gap
 
-처리:
-1. 차단 신호 본문의 "필요한 결정" 섹션 검토
-2. 워크트리의 SPEC.md 직접 수정. 워크트리 루트는 `milestones/<m>/loops/<c>/.worktree`이고 그 안 SPEC 위치는 `milestones/<m>/loops/<c>/SPEC.md`. (SPEC 작성은 spec 스킬 사용: Skill(skill: "spec", args: "<task-id>"))
-3. `[unblocked] SPEC 보정 완료` 신호 발행해 차단 해제 후 재시작
+현재 구조로 해결 불가. 본 task 정지, 별도 architecture task 수행, 이후 SPEC scope 조정 또는 cleanup 후 새 task.
 
-## architecture-gap (코드 구조 변경 필요)
+## environment-gap
 
-증상: 현재 코드 구조로 task 해결 불가. 더 큰 design 결정 필요.
-
-처리:
-1. 본 task는 정지하고 사람이 architecture 작업 (별도 task로 분리)
-2. architecture 작업 완료 후 본 task의 SPEC.md scope 조정
-3. 또는 본 task를 cleanup하고 새 task로 재시작
-
-## environment-gap (외부 시스템 일시 문제)
-
-증상: API rate limit, 네트워크, 외부 서비스 다운 등.
-
-처리:
-1. 외부 시스템 상태 확인
-2. 일시적 문제면 시간 후 재시작
-3. 영구적 문제면 mock·테스트 더블로 우회 또는 spec 조정
+API rate limit, 네트워크, 외부 서비스 장애. 일시 문제면 대기 후 재시작, 영구 문제면 mock/test double 또는 spec 조정.
 
 ## other
 
-증상: 위 4종에 안 맞는 케이스.
+차단 본문을 읽고 사람이 판단.
 
-처리: 차단 신호 본문 내용 검토 후 사람의 판단.
+## halt 후 stash
 
-## halt 발생 시 stash 확인
+driver halt 시 미커밋 변경은 자동 stash될 수 있다. 워크트리에서 `git stash list`, 필요 시 `git stash pop`.
 
-drive가 자동 정지(halt)할 때 워크트리의 미커밋 변경은 자동 stash됨. 워크트리 들어가서 `git stash list`로 확인, 필요 시 `git stash pop`으로 복원.
+## v0.1 -> v0.2 migration
 
-## v0.1 → v0.2 마이그레이션 (`.loops/` 잔존 정리)
-
-v0.2 cutover로 워크트리·lock·SPEC이 모두 `milestones/<m>/loops/<c>/` 단일 트리로 이동했습니다. 기존 `.loops/` 디렉터리에 in-flight SPEC·stale lock이 남아 있을 수 있으나, 새 코드는 이를 감지·자동 이동하지 않습니다 — 사용자가 수동으로 처리:
-
-1. **활성 task 정지·머지**: 진행 중이던 task가 있으면 v0.1 환경(`loop stop <task-id>` 후 그 시점 워크트리에서 변경 머지)에서 종결합니다.
-2. **SPEC 이전**: `.loops/<task-id>/SPEC.md` 내용을 `milestones/regular/loops/<task-id>/SPEC.md`로 이동 (`mkdir -p milestones/regular/loops/<task-id> && mv .loops/<task-id>/SPEC.md $_/`)
-3. **stale lock 제거**: `.loops/locks/*.lock`는 모두 안전하게 삭제 (`rm -f .loops/locks/*.lock`)
-4. **빈 디렉터리 제거**: `rm -rf .loops/`
-5. **외부 sibling 워크트리**: 기존 `<project>-loops/` 가 있다면 `git worktree list`로 확인 후 `git worktree remove`로 정리하고 디렉터리 삭제
-
-`.gitignore`의 새 패턴은 첫 `loop start` 호출 시 자동 정렬됩니다.
+새 경로는 `milestones/<m>/loops/<c>/`. 기존 `.loops/`는 자동 이동하지 않는다. 진행 task를 v0.1에서 종결하고, 필요한 SPEC은 `milestones/regular/loops/<task-id>/SPEC.md`로 수동 이동, stale lock 삭제, 빈 `.loops/`와 sibling worktree 정리.

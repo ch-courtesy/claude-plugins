@@ -64,171 +64,78 @@ allowed-tools:
 
 # spec
 
-`autopilot:loop` 스킬이 입력으로 받는 `milestones/<m>/loops/<c>/SPEC.md`를 대화형으로 생성. 자율 loop이 도중 질문 없이 완수할 수 있는 자기완결적 SPEC이 목표.
+`autopilot:loop` 입력인 `milestones/<m>/loops/<c>-<slug>/SPEC.md`를 대화형으로 작성한다. 목표는 loop이 중간 질문 없이 수행 가능한 자기완결 SPEC이다.
 
-## 호출 방법
+## 호출
 
 - 새 SPEC: `Skill(skill: "spec", args: "<task-id> [--milestone <m>]")`
-- 마커 해결 모드: `Skill(skill: "spec", args: "<task-id> [--milestone <m>] --resume")`
+- 마커 해결: `Skill(skill: "spec", args: "<task-id> [--milestone <m>] --resume")`
+- dispatch 위임: `Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>")`
 
-milestone 미지정 시 `regular`(catch-all)을 default로 적용 — sibling `autopilot:loop`이 단일 컴포넌트 task-id를 `regular/<task-id>`로 정규화하는 컨벤션과 일치. `autopilot:dispatch` 등 milestone 분해 컨텍스트에서 호출할 때는 `--milestone <m>`을 명시.
-
-또는 사용자가 자연어로 의도 전달 시 모델이 자동 호출.
-
-### dispatch 위임 모드
-
-`autopilot:dispatch` 가 본 스킬을 위임 호출할 때는 단일 args 형식 `--milestone <m> <자연어 task 설명>` 으로 전달한다 — task 식별자는 dispatch 가 보유하지 않으며 본 스킬이 step 2 task 생성 단계에서 결정한다. dispatch 의 위임 호출로 인식한 경우, step 10 최종 검토의 세 옵션 사용자 질문을 생략하고 후속 **자율 루프를 자동** 시작한다(`Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계). 사용자가 본 스킬을 직접 호출한 경우에는 step 10 의 세 옵션 (loop start · SPEC 만 확정 · 변경) 이 그대로 유지된다.
-
-위임 호출 인식 휴리스틱: args 본문이 task-id 패턴이 아닌 자연어이고, **현재 Skill 호출의 직접 부모(immediate caller)가 `autopilot:dispatch`** 인 경우 — 같은 대화 히스토리 안에서 과거 턴에 dispatch 가 사용됐다 해도 현재 호출의 직접 부모가 아니면 위임 모드가 아니다. 모호 시 사용자 직접 호출로 간주(safe-default 가 직접 부모 판별 불가 케이스를 커버).
+`--milestone` 기본값은 `regular`. args 본문에는 task-id 또는 자연어 설명 하나만 둔다. dispatch 위임 모드는 현재 호출의 직접 부모가 `autopilot:dispatch`이고 본문이 자연어일 때만 인정한다. 이때 step 10의 사용자 질문 없이 `Skill(skill: "loop", args: "start <m>/<c>")`까지 자동 연계한다. 모호하면 사용자 직접 호출로 처리한다.
 
 ## 10단계 워크플로
 
-호출 시 다음 10단계를 TodoWrite로 등록·실행. 각 단계는 사용자 결정·승인을 `AskUserQuestion`으로 받습니다.
+호출 시 10단계를 TodoWrite로 등록한다. 모든 결정·승인은 `AskUserQuestion`으로 받고, 후속 스킬 호출도 AskUserQuestion 확인 후 invoke한다.
 
 ### 1. 사전 검사
 
-- args 본문(플래그 제외) 형식 검증 (loop.sh 의 `validate_task_id` 와 **동일한 기본 규칙 + 슬래시 추가 제약**): 비어 있거나 `..` 포함, `.` 단독 컴포넌트(`.`·`./foo`·`foo/.`·`a/./b`), `__` 포함, 공백 포함 시 실패. **args 본문에 슬래시(`/`) 포함 시 거부** — `validate_task_id` 자체는 nested task-id 표기를 위해 슬래시를 허용하지만, spec 본문은 슬래시를 거부하는 추가 제약을 둔다. milestone 은 항상 `--milestone <m>` 플래그로만 전달하고, args 본문에는 task 식별자 또는 자연어 task 설명 한 값만 들어간다(한 정보는 한 위치). 과거 컨벤션이던 `<m>/<c>` 본문 형식은 폐기. spec·loop 이 같은 (milestone, task-id) 쌍을 받아야 `--resume` 라운드트립이 성립.
-- milestone 인자 파싱: `--milestone <m>` 명시 시 `<m>` 사용, 미지정 시 **기본 milestone (`regular`)** 적용 — sibling `autopilot:loop` 이 단일 컴포넌트 task-id 를 `regular/<task-id>` 로 정규화하는 컨벤션과 일치. milestone 에도 동일 형식 검증 적용 (단일 컴포넌트 — `/` 미허용).
-- 자연어 입력 감지: args 본문이 task-id 패턴이 아닌 자연어 문장(물음표·따옴표·문장 부호 다중, 길이 ≥ 40자 등 휴리스틱)이면 task 생성 입력으로 분류 — 사용자 직접 호출 시 아래 **검증 실패 라우팅**, dispatch 위임 호출(§호출 방법 — dispatch 위임 모드)에서는 자연어 본문이 정상 입력이므로 task 생성 단계로 바로 진입.
-- 어떤 형태의 검증 실패든 직접 abort/die 하지 않고 라우팅으로 분기. 통과 시 일반/--resume 모드 분기로 진행.
-- **일반 모드**: `milestones/<m>/loops/<c>/` 존재 시 abort + `AskUserQuestion` 3옵션 (다른 task-id / `--resume` / 백업 후 새로). 이하 `<c>`는 task-id 지칭.
-- **--resume 모드**: `milestones/<m>/loops/<c>/SPEC.md` 부재 시 abort. 잔존 `[NEEDS CLARIFICATION` 마커 0개 시 "해결할 마커 없음" 안내 후 종료
+- task-id 검증: `validate_task_id` 기본 규칙(빈 값, `..`, `.` 단독 컴포넌트, `__`, 공백 금지)에 더해 args 본문 `/` 금지. milestone도 단일 컴포넌트로 검증한다.
+- 자연어 문장으로 보이면 task 생성 입력이다. 직접 호출에서는 검증 실패 라우팅으로, dispatch 위임에서는 정상 입력으로 step 2에 진입한다.
+- 일반 모드: 기존 `milestones/<m>/loops/<c>/`가 있으면 abort 후 다른 task-id / `--resume` / 백업 후 새로 중 하나를 묻는다.
+- `--resume`: SPEC.md가 없으면 abort. `[NEEDS CLARIFICATION` 마커가 없으면 종료.
 
-#### 1.1 검증 실패 라우팅 (요약)
+#### 1.1 검증 실패 라우팅
 
-검증 실패·자연어 입력 시 즉시 종료 대신 `AskUserQuestion` 3옵션: **(a)** task-id 재입력 후 재시도, **(b)** 사전 명확화 라운드 진입(§1.2), **(c)** 종료 — 어떤 산출물도 작성하지 않고 안전 종료(산출물 미작성). 옵션 표기 `(a)`/`(b)`/`(c)`. "다음 단계: Skill(...)" 자유 텍스트 금지. 전체 절차는 `references/pre-clarification.md` §1.1 참조.
+검증 실패·자연어 직접 입력은 즉시 종료하지 않고 `(a)` task-id 재입력 후 재시도, `(b)` 사전 명확화 라운드, `(c)` 종료를 묻는다. `(c)` 또는 취소 시 어떤 산출물도 작성하지 않는다. "다음 단계: Skill(...)" 같은 자유 텍스트 안내는 금지. 상세는 `references/pre-clarification.md`.
 
-#### 1.2 사전 명확화 라운드 (요약)
+#### 1.2 사전 명확화 라운드
 
-(b) 선택 시 진입. step 5 메커니즘을 task-id 확보 *전*으로 앞당겨 재사용(별도 phase·모듈 없음). 수집은 task 미정의 상태에 맞춰 `문제·목표·범위·제약`으로 확장. 매 라운드 "충분" 종결·명시적 취소 안전 종료(취소 시 어떤 산출물도 남기지 않고 종료) 포함. 규모 분기: 단일 task → 프로젝트의 태스크 관련 지침(태스크 트래커 컨벤션)으로 task 생성 후 step 2 재진입, 마일스톤 규모 → `AskUserQuestion` 명시 승인 후 PRD 스킬 invoke(milestone-id를 PRD 스킬에 인자로 전달). 수집 항목·라운드 규칙·1.2.1/1.2.2 분기 상세는 `references/pre-clarification.md` §1.2 참조.
+`(b)` 선택 시 step 5 메커니즘을 task-id 확보 전으로 앞당겨 재사용한다. 별도 phase를 만들지 말고 한 번에 한 질문으로 `문제·목표·범위·제약`을 수집한다. 단일 task로 수렴하면 프로젝트 태스크 관련 지침에 따라 task를 생성하고 반환된 task-id로 step 2부터 재개한다. 마일스톤 규모면 `AskUserQuestion` 명시적 승인 후 milestone-id를 인자로 PRD 스킬을 invoke한다.
 
-⚠ task-id 는 항상 task 생성 호출의 응답값을 그대로 사용한다 — 추측·예측·작명 금지
+### 2. task 상태 정합 (일반·--resume 두 모드)
 
-### 2. task 상태 정합 (일반·--resume 두 모드 공통)
+사전 검사 통과 직후 실행한다. GitHub Issue/Project 같은 백킹 시스템 매핑은 `rules/context.md`, 상세 절차는 `references/task-state-alignment.md`가 단일 출처다.
 
-**사전 검사 통과 직후** 실행. task-id로 식별되는 외부 task를 조회해 4갈래 분기로 설계 상태로 정합. 일반·`--resume` 모드 공통.
-
-4갈래 요약: **(a)** task 부재 → 새 task 생성·task 상태를 설계 상태로 설정·task-id 교체·사전 검사 재적용. **(b)** 기존 설계 상태 → 변경 없이 진행(resume). **(c)** 기존 설계 이전 상태 → 설계 상태로 전이. **(d)** 기존 설계 이후 상태 → 새 task 생성·task-id 교체(a와 동일).
-
-⚠ task-id 는 항상 task 생성 호출의 응답값을 그대로 사용한다 — 추측·예측·작명 금지
-
-백엔드 매핑 위임(추상 ↔ 구체 매핑은 `rules/context.md` 단일 출처), 조회·생성·편집·상태 전이 호출의 추상화, (a)·(d) 새 task title/body 수집(고정 2줄 본문, `<m>`/`<new-task-id>` 2단계 치환), 호출 실패 abort, 범위 외(loop start 설계 상태 → 진행 상태 전이는 본 단계 책임 아님)의 전체 절차는 `references/task-state-alignment.md` 참조.
+4갈래 분기: (a) task 부재/없으면 새 task 생성, 설계 상태로 설정, task-id 교체 후 안내. (b) 설계 상태/In Design이면 그대로 진행. (c) 설계 이전/Backlog이면 설계 상태로 전이. (d) 설계 이후/In Progress/Review/Done이면 새 task를 만들고 새 task-id로 교체한다. (a)/(d)의 title은 AskUserQuestion으로 한 줄 제목 수집, 없으면 task-id 문자열 fallback. body는 최소 고정 placeholder 2줄이며 `<m>`은 create 호출 전 치환하고, 반환된 issue number로 `<new-task-id>`를 gh issue edit body 치환한다. 조회·생성·전이·edit 호출 실패 시 abort.
 
 ### 3. 컨텍스트 탐색
 
-다음 명령으로 프로젝트 컨텍스트 자동 수집(사용자에게 요약만):
-```
-git log --oneline -5
-ls -A
-cat CLAUDE.md  # 있으면
-ls rules/      # 있으면
-find . -maxdepth 3 -type d \( -name 'tests' -o -name 'test' -o -name '__tests__' -o -name 'spec' \) 2>/dev/null | head -5
-```
-
-목적: 테스트 컨벤션·CLAUDE.md 룰·디렉터리 구조 파악. 모노레포여도 step 5에서 좁힐 것이므로 깊이 탐색 생략.
-
-#### 3.1 subagent 위임 (선택)
-
-자동 수집이 부족하면 `references/agent-prompts.md`의 **`spec-context-explorer`** 양식으로 `Agent` 위임. 권장 도입 휴리스틱(하나라도 해당): `rules/` 다수(≈5개 초과)이고 적용 룰 자명하지 않음, 기존 `milestones/*/loops/*/SPEC.md` 다수 선례, multi-file 영향, 사용자가 자연어 의도만 전달. 그 외엔 위임하지 않는다 — 단순 1~2 query는 메인이 직접 호출(헌법 §11.6). subagent는 사실 수집·인용만, **결정·합성은 메인 책임**.
+`git log --oneline -5`, `ls -A`, 선택적 `cat CLAUDE.md`, `ls rules/`, 얕은 테스트 디렉터리 탐색으로 테스트 컨벤션·룰·구조만 요약한다. 부족하면 `references/agent-prompts.md`의 `spec-context-explorer`를 Agent로 위임한다. 권장 도입 휴리스틱: 적용 룰이 많음, 기존 SPEC 선례가 많음, multi-file 영향, 자연어 의도만 있음. subagent는 사실 수집만 하며 결정·합성은 메인 책임이다(헌법 §11.6, 이터 내 서브 도구 위임).
 
 ### 4. 범위 분해 게이트
 
-`references/decomposition-gate.md` 휴리스틱으로 다중 서브시스템 검사. 감지 시 사용자에게 분해 제안.
-
-`--resume` 모드: 이 단계 생략 (이미 SPEC 존재).
+`references/decomposition-gate.md`로 다중 서브시스템 여부를 확인하고, 감지 시 사용자에게 분해를 제안한다. `--resume`에서는 생략한다.
 
 ### 5. 명확화 라운드
 
-한 번에 한 질문 (`AskUserQuestion`, 가능하면 멀티초이스). 답변이 다음 질문 형태를 결정.
+한 번에 한 질문(`AskUserQuestion`)으로 목적, 성공 기준, 제약, 위험을 수집한다. `--resume`에서는 마커 섹션만 묻는다.
 
-수집할 정보:
-- task의 핵심 목적 (한 줄)
-- 성공 기준 (어떻게 "완료"를 판정하는가)
-- 알려진 제약 (환경·도구·호환성)
-- 알려진 위험 (이미 시도한 dead-end·금지 영역)
+#### 5.1 test 코드 변경 sweep
 
-`--resume` 모드: 마커가 박힌 섹션 관련 질문만.
+라운드 마지막에 test 코드 변경(rename·cleanup·삭제·내용 수정 등) 포함 여부를 자동 판단한다. 포함 신호가 있으면 sweep 화이트리스트 후보 경로를 추출하고 단발 yes/no 확인으로 SPEC frontmatter `test_sweep_paths` 등록 여부를 묻는다. yes면 `test_sweep_paths` 키와 경로 목록을 기록한다. no 또는 test 변경 없음이면 `test_sweep_paths` 키 부재 상태로 두고 `# test_sweep_paths: reviewed-no-sweep` 주석만 치환한다. 후보가 0개면 사용자에게 빈 목록을 보이지 않는다.
 
-#### 5.1 test 코드 변경 sweep 화이트리스트 자동 판단 (라운드 마지막)
+### 6. 접근법 비교
 
-명확화 라운드 마지막에 다음 절차를 한 번 수행한다. 본 task가 합법적 test 코드 sweep (rename·cleanup·삭제·내용 수정 등)을 포함하면 loop 단계의 weakening 게이트가 그 변경을 "테스트 약화"로 오인하지 않도록 SPEC frontmatter에 `test_sweep_paths` 화이트리스트를 미리 박는다 (rules/loop의 `test_sweep_paths` 컨벤션과 정합).
+비자명한 결정(모호 요구, 둘 이상의 패턴, 외부 의존성 선택)이 있으면 2-3 접근법, trade-off, 추천을 제시한다. 자명하면 생략한다.
 
-1. **자동 판단** — 수집된 scope·의도로 본 task가 test 코드 변경을 포함하는지 모델이 판단한다. 신호: 사용자 의도 본문에 "테스트 rename", "tests 정리", "test cleanup", "스펙 삭제" 등 어구 / scope 후보 경로가 `tests/**`·`test/**`·`__tests__/**`·`spec/**`·`*_test.*`·`*.test.*`·`*_spec.*` 패턴에 매칭 / WHAT/HOW 의도가 기존 테스트 파일의 rename·이동·삭제·내용 변경을 시사. (모델 휴리스틱이므로 위양성·위음성 가능 — 다음 단계의 사용자 단발 yes/no가 안전망.)
-2. **변경 없음 분기**: 자동 판단이 "test 변경 없음"이면 어떤 추가 prompt도 노출하지 않고 라운드를 종료한다. 본 task SPEC frontmatter에 `test_sweep_paths` 키 자체는 추가하지 않되, **§5.1 절차를 거쳤음을 명시하는 흔적**으로 frontmatter에 YAML 주석 `# test_sweep_paths: reviewed-no-sweep` 한 줄을 박는다 (자체 검토 §3의 sweep 화이트리스트 검사가 "절차 누락"과 "검토 후 no-sweep 결정"을 구분하기 위한 명시 표식 — 흔적이 있으면 검사 통과).
-3. **변경 포함 분기 — 후보 경로 추출**: 모델이 sweep 화이트리스트 후보 경로 (git pathspec)를 scope·의도에서 추출한다 (예: rename 대상이 `tests/legacy_to_remove/` 디렉토리면 `tests/legacy_to_remove/**` 후보). **추출 결과 0개 처리**: 모델이 구체 경로를 하나도 뽑지 못한 경우 (예: "테스트 파일 몇 개 정리" 같은 모호한 의도) — (a) step 1의 신호 경로(패턴 매칭으로 감지된 `tests/**` 등 후보)가 하나라도 있으면 그 신호 경로 list를 fallback 후보로 사용해 step 4로 진행, (b) 신호 경로도 0개면 step 2 "변경 없음 분기"와 동일하게 처리한다 (사용자에 빈 목록 노출 금지).
-4. **단발 yes/no 확인**: `AskUserQuestion`으로 사용자에게 단일 질문 — 추출 후보 경로 목록을 보여주고 "이 경로들을 SPEC frontmatter `test_sweep_paths`에 화이트리스트로 등록할까요? (yes/no)" — 단발(라운드 반복 없음). yes 응답 시 후보 경로를 step 8 SPEC.md 치환의 `test_sweep_paths` 입력으로 보존. no 응답 시 변경 없음 분기와 동일하게 키 부재로 진행하되, frontmatter에 YAML 주석 `# test_sweep_paths: reviewed-no-sweep` 한 줄을 박아 "검토 후 no-sweep 결정" 흔적을 남긴다.
+### 7. 섹션별 SPEC 승인
 
-### 6. 접근법 비교 (조건부)
-
-비-자명한 설계 결정 포함 시 2-3 접근법 + 트레이드오프 + 추천 제시. 자명하면 생략. 판단 기준(하나라도 해당): 사용자가 "어떻게 할까?" 묻거나 모호 요구, 둘 이상의 다른 패턴 사이 선택, 외부 의존성·라이브러리 선택이 task 결과에 큰 영향.
-
-### 7. 섹션별 SPEC 제시·승인
-
-순서대로 한 섹션씩 제시 → `AskUserQuestion`으로 "이 섹션 OK?":
-1. 제목
-2. 무엇을 만들 것인가 (WHAT/HOW 방어선 — 기술 스택·파일 경로·라이브러리·클래스명 금지)
-3. 수용 기준 (EARS, `references/ears-patterns.md`)
-4. 범위 (포함·비-목표)
-5. 검증 (실행 가능한 명령)
-6. 제약 (있을 때만)
-7. 위험 (있을 때만)
-
-미승인 섹션은 재제시·수정. 통째로 보여주지 않음.
-
-**EARS 작성 언어**: SPEC frontmatter `ears_language`(값 `en`·`ko`·`hybrid`, 미명시 시 default `ko`)에 따라 산출·사용자에 다시 묻지 않음. 3모드 형식·5패턴·변환 규칙은 `references/ears-patterns.md` "EARS 작성 언어" 절(단일 출처) 참조.
-
-`--resume` 모드: 마커 박힌 섹션만.
+제목, 무엇을 만들 것인가(WHAT/HOW 방어선: 기술 스택·파일 경로·라이브러리·클래스명 금지), 수용 기준(EARS), 범위, 검증, 제약, 위험을 한 섹션씩 제시하고 승인받는다. EARS 언어(`en`/`ko`/`hybrid`, 기본 `ko`)와 5패턴은 `references/ears-patterns.md`를 따른다.
 
 ### 8. SPEC.md 작성
 
-`references/spec-template.md` 읽어 placeholder 치환:
-- `{{task_title}}` → 단계 7 합의 제목 (없으면 task-id)
-- `{{task_description}}` → 섹션 2 내용
-- `{{acceptance_criteria}}` → 섹션 3 (EARS 포맷)
-- `{{scope_in}}` / `{{scope_out}}` → 본문 섹션 4
-- `{{scope_include}}` → frontmatter `scope.include` (YAML inline flow list, 예: `["src/**", "tests/**"]`)
-- `{{verify_command}}` → 본문 섹션 5 + frontmatter `verify` (둘 다 같은 placeholder)
-- `{{test_sweep_paths}}` → frontmatter `test_sweep_paths` 영역. 자체 한 줄을 차지하는 placeholder로 다음 두 분기를 따른다:
-  - **step 5.1 yes 응답** (test 코드 변경 포함 + 사용자 확정): `test_sweep_paths` YAML 키와 후보 경로 list로 치환. 예시 multi-line 출력:
+`references/spec-template.md` placeholder를 치환한다: `{{task_title}}`, `{{task_description}}`, `{{acceptance_criteria}}`, `{{scope_in}}`, `{{scope_out}}`, `{{scope_include}}`, `{{verify_command}}`, `{{test_sweep_paths}}`, `{{constraints}}`, `{{risks}}`. 미해결 항목은 `[NEEDS CLARIFICATION: <구체 질문>]` 마커로 남긴다. 저장 경로는 `milestones/<m>/loops/<c>-<slug>/SPEC.md`; slug는 `references/feat-branch-commit.md` §9.5.1 규칙으로 만든다. 빈 slug는 fallback 없이 abort하고 제목 수정을 요청한다.
 
-    ```
-    test_sweep_paths:
-      - "tests/legacy_to_remove/**"
-      - "tests/test_specific_to_rename.py"
-    ```
+### 8.2 SPEC.md write -> Issue body sync (단일 trigger)
 
-  - **step 5.1 변경 없음/no 응답**: placeholder 자리에 YAML 주석 한 줄 `# test_sweep_paths: reviewed-no-sweep`만 출력한다 — `test_sweep_paths` 키 자체는 추가하지 않되 (빈 list `[]`도 아님), 주석이 "§5.1 절차를 거쳐 no-sweep으로 결정됨" 흔적이 되어 자체 검토 §3 sweep 화이트리스트 검사가 통과 처리한다.
-- `{{constraints}}` / `{{risks}}` → 섹션 6/7. 빈 값이면 빈 줄 1개 치환(헤더 유지)
-- frontmatter `scope.exclude`는 고정 default(`rules/**`, `milestones/**`, `CLAUDE.md`) — 치환 대상 아님
+SPEC.md 최초 작성, 자체 검토 재작성, 변경 재진입, `--resume` 재작성마다 단일 trigger로 GitHub Issue body를 sync한다. 첫 두 줄 placeholder는 `references/task-state-alignment.md` 표준과 일치해야 하며 불일치 시 abort.
 
-미해결 항목은 `[NEEDS CLARIFICATION: <구체 질문>]` 마커로 박은 채 작성.
+Issue body 동기화 블록 구조:
 
-#### 8.1 SPEC.md 저장 경로 (slug-bearing 단일 컨벤션)
-
-`<slug>`는 `references/feat-branch-commit.md` §9.5.1 결정적 규칙으로 step 7 §1 H1 제목에서 산출. 단일 컨벤션 경로:
-
-- `milestones/<m>/loops/<c>-<slug>/SPEC.md`
-
-`<slug>` 가 빈 문자열로 환원되면 fallback 경로를 만들지 않는다 — 단일 컨벤션이고 sibling pr-phase 도 슬러그 없는 브랜치는 abort. 빈 slug 시 `references/feat-branch-commit.md` §9.5.3 실패 처리로 분기·§1 H1 제목 수정(step 7 재진입) 요청.
-
-`<c>` 는 input task-id (단계 1 통과값). 본 디렉토리 이름의 `<slug>` 가 sibling `autopilot:loop` 이 발견하는 feat 브랜치 `feat/<c>-<slug>` 의 `<slug>` 와 동일해 spec→loop 라운드트립이 단일 컨벤션으로 정합. `mkdir -p` 후 `SPEC.md` 기록.
-
-기록 직후 §8.2 «SPEC.md write → Issue body sync» 절차가 단일 trigger로 발동된다.
-
-### 8.2 SPEC.md write → Issue body sync (단일 trigger)
-
-SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점에서 본 절차가 단일 trigger로 발동된다. 발동 경로:
-
-- step 8 최초 작성 직후
-- step 9 자체 검토 인라인 수정으로 SPEC.md를 재기록한 직후
-- step 10 "변경" 분기 → step 7/8 재진입 후 재기록한 직후
-- `--resume` 모드에서의 마커 해결 후 재기록한 직후
-
-발동 시점에 task-id에 해당하는 GitHub Issue body를 다음 구조로 갱신한다 (`rules/context.md`의 Issue body 구조 규약과 step 2가 박은 자리표시를 모두 유지):
-
-```
-<step 2가 박은 자리표시 1줄 — spec 워크플로우 step 2에서 자동 생성. 본문은 SPEC.md 작성·승인 후 갱신될 예정.>
-<step 2가 박은 자리표시 2줄 — SPEC: milestones/<m>/loops/<task-id>/SPEC.md>
+```text
+<step 2 placeholder line 1>
+<step 2 placeholder line 2: SPEC: milestones/<m>/loops/<task-id>/SPEC.md>
 
 <!-- autopilot:spec-sync:begin -->
 ## SPEC.md (auto-synced)
@@ -237,111 +144,41 @@ SPEC.md가 `milestones/<m>/loops/<c>/SPEC.md`에 (재)기록되는 모든 시점
 <!-- autopilot:spec-sync:end -->
 ```
 
-동기화 블록의 경계는 **고유 HTML 코멘트 fence** — `<!-- autopilot:spec-sync:begin -->` ~ `<!-- autopilot:spec-sync:end -->` — 로만 식별한다. SPEC.md가 YAML frontmatter(`---` … `---`)를 포함해도 본문 안의 `---`를 경계로 오해할 여지가 없다. fence는 GitHub Markdown에 렌더되지 않으므로 사용자 가독성에는 영향이 없다.
-
-#### 8.2.1 절차
-
-1. `gh issue view <task-id> --json body --jq .body`로 현재 Issue body를 읽는다.
-2. `milestones/<m>/loops/<c>/SPEC.md`에서 SPEC.md 전문을 읽는다.
-3. 새 body를 구성한다 — 다음 두 하위 단계를 순서대로 적용:
-
-   **3-a. 자리표시 2줄 검증 (abort 게이트)**
-
-   `references/task-state-alignment.md`가 정의한 step 2 자리표시 2줄 패턴을 기준으로 Issue body의 첫 두 줄이 다음과 정확히 일치하는지 확인 (placeholder 유지·보존). 두 줄 모두 정규식과 일치해야 한다:
-
-   - **line 1**: `^spec 워크플로우 step 2에서 자동 생성\.` 로 시작
-   - **line 2**: `^SPEC: milestones/[^/]+/loops/[^/]+/SPEC\.md$`
-
-   하나라도 불일치 시 비표준 입력으로 즉시 **abort** — 본 SPEC 범위는 step 2가 만든 표준 구조의 issue로 한정.
-
-   **3-b. first-sync vs re-sync 분기**
-
-   기존 body 안에 `<!-- autopilot:spec-sync:begin -->` ~ `<!-- autopilot:spec-sync:end -->` fence 쌍이 존재하는지 검사한 결과로 분기:
-
-   - **first-sync (fence 부재)**: 자리표시 2줄을 그대로 유지한 채, 그 *아래에* 빈 줄 · `<!-- autopilot:spec-sync:begin -->` · `## SPEC.md (auto-synced)` 헤딩 · 빈 줄 · SPEC.md 전문 · `<!-- autopilot:spec-sync:end -->` 를 *append*. 기존 body의 자리표시 2줄 이후 사용자 추가 섹션이 있으면(드문 케이스이나 가능), end fence 이후로 그대로 밀어 보존한다 — 덮어쓰지 않는다.
-   - **re-sync (fence 쌍 존재)**: begin/end fence *사이*만 새 헤딩·빈 줄·SPEC.md 전문으로 replace. fence 자체와 fence *바깥* 모든 내용(자리표시 2줄, end fence 이후 사용자 추가 섹션 등)은 그대로 보존한다.
-
-   두 분기 모두 동기화 블록 바깥의 사용자 추가 내용은 보존이 원칙이며, 어느 분기에서도 덮어쓰지 않는다.
-4. `gh issue edit <task-id> --body-file <tempfile>`로 update. SPEC.md 전문은 멀티라인·frontmatter·backtick을 포함하므로 인라인 `--body "..."`로 셸 전달하면 파싱이 실패한다. 반드시 임시 파일을 거친다:
-
-   ```bash
-   tmp=$(mktemp)
-   printf '%s' "$new_body" > "$tmp"
-   gh issue edit <task-id> --body-file "$tmp"
-   rm -f "$tmp"
-   ```
-
-5. 호출이 0이 아닌 exit으로 실패하면 step 2의 기존 `gh` 실패 처리와 동일하게 명확한 에러 메시지와 함께 **abort(중단)**. 자동 roll-back은 수행하지 않으며 disk의 SPEC.md는 그대로 두고 Issue body만 옛 상태로 남는 부분 상태를 사용자에게 명시적으로 알린다. tempfile은 abort 경로에서도 `rm -f`로 정리한다.
-
-#### 8.2.2 한도·경쟁·범위 외
-
-- 큰 SPEC.md가 GitHub Issue body 길이 한도(65536 chars)를 초과하면 step 4와 동일하게 abort + 사용자 안내. 일반 SPEC 규모로는 드문 케이스.
-- 동일 task에 spec 호출이 동시 실행되는 경우 Issue body update 순서에 경쟁 조건이 발생할 수 있다 — spec 호출은 일반적으로 대화형으로 직렬화되므로 실무 발생 확률 낮음. 경쟁 탐지·잠금은 본 SPEC 범위 외.
-- 기존 비표준 Issue body(수동 생성·구분자 없음)의 retroactive migration은 본 SPEC 범위 외 — abort + 사용자 안내로 처리.
-- 역방향 sync(Issue body → SPEC.md), 라벨·assignee 등 다른 metadata 변경은 본 SPEC 범위 외.
-
-#### 8.2.3 Self-referential 규약과 현재 호출 면제
-
-본 스킬은 자기 자신에게도 적용된다 — 본 §8.2 규약을 정의하는 SPEC.md가 이후 `--resume`되거나 다른 task의 spec 호출이 일어나면 그 시점부터는 자기 issue body도 sync 대상이다.
-
-다만 **메모리 노트 `feedback_no_self_apply_during_spec`에 따라**, 본 SPEC.md를 작성하는 *현재 호출*에서는 새 contract를 선행 적용하지 않고 현 스킬 규칙으로 마친다 — 새 동작은 다음 spec 호출부터 적용된다. (self-referential SPEC를 같은 호출의 산출물에 미리 선행 적용하지 않는 규약, 단 현재 호출 면제.)
+sync 영역은 `<!-- autopilot:spec-sync:begin -->` / `<!-- autopilot:spec-sync:end -->` fence로만 식별한다. first-sync는 placeholder 아래 append, re-sync는 fence 사이(`## SPEC.md (auto-synced)` + SPEC 전문)만 replace하고 바깥 사용자 내용은 보존한다. `gh issue view <task-id> --json body --jq .body`, SPEC 전문 읽기, tempfile 경유 `gh issue edit <task-id> --body-file <tempfile>` 순서로 수행한다. GitHub 한도 초과, 비표준 body, 호출 실패는 abort하며 역방향 sync와 metadata 변경은 범위 외다.
 
 ### 9. 자체 검토
 
-`references/self-review.md` 5항목 체크 (placeholder · 모순 · 범위 · 모호성 · EARS fail-가능성). 발견 시 인라인 수정 또는 `[NEEDS CLARIFICATION]` 마커만 — 사용자 Q&A 없음(단계 10에서 일괄 해결). 재루프 없음. 수정·마커 후 SPEC.md 재기록 — 재기록 직후 §8.2 sync trigger가 다시 발동된다.
+`references/self-review.md` 5축(placeholder, 모순, 범위, 모호성, EARS fail-가능성)을 검사한다. 수정 또는 `[NEEDS CLARIFICATION]` 마커만 남기고 사용자 Q&A와 재루프는 하지 않는다. 초안이 100줄 이상이거나 마커 2개 이상이면 `references/agent-prompts.md`의 `spec-self-reviewer`를 권장 도입한다. subagent는 발견만 보고하고 수정·마커 박기는 메인이 한다.
 
-#### 9.1 subagent 위임 (선택)
+### 9.5 feat 브랜치 + SPEC.md commit
 
-SPEC 초안이 길거나 잔존 마커가 다수면 `references/agent-prompts.md`의 **`spec-self-reviewer`** 양식으로 독립 검토 위임. 휴리스틱(하나라도 해당): 본문 ≈100줄 초과, 잔존 `[NEEDS CLARIFICATION]` 마커 2개 이상, 호출자의 명시적 요청. subagent는 5축 발견만 보고하고 **SPEC.md 수정·마커 박기는 메인이 수행**(헌법 §11.6 — patch 생성은 위임하지 않음). step 9 본문 원칙("사용자 Q&A 없음, 재루프 없음")은 위임 여부와 무관.
-
-### 9.5. feat 브랜치 + SPEC.md commit + default 브랜치 자동 ff-merge (main 작업트리 무손상)
-
-SPEC.md 작성·자체 검토 후 sibling `autopilot:loop`의 worktree base가 될 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·생성하고 SPEC.md만 그 브랜치에 commit. main 작업트리 상태(staged/unstaged/untracked) 변경 금지. 단계 10 *전*에 수행 — 이후 단계 10에서 "변경" 선택 시 단계 7/8 재진입 후 본 단계 commit amend·추가(자동).
-
-본 단계가 단일 출처로 삼는 **슬러그 도출 코드 조각은 `references/feat-branch-commit.md` §9.5.1**에 보존되며, 안전장치(`references/test-spec-loop-contract.sh`)는 그 새 위치를 검사한다.
-
-SPEC.md commit 직후 본 단계는 **자동으로 default 브랜치(main)·feat 브랜치를 원격 default 브랜치(`origin/main`) 최신 위로 정렬·동기화**한다 — `git fetch origin` 으로 `origin/main` 을 갱신한 뒤 feat 브랜치를 `origin/main` 위로 rebase하고, default 브랜치로 전환해 feat 브랜치로부터 **fast-forward** merge를 적용한 다음, 사용자 재확인 없이 default 브랜치와 feat 브랜치를 모두 원격에 `git push origin <branch>` 로 push한다 (예: `push origin main`, `push origin feat/<c>-<slug>`). 충돌·push 거부 시에는 강제 push(`--force`·`--force-with-lease`)를 절대 시도하지 않고 abort + 호출 이전 상태 복구 + 사용자 안내로 처리한다. 전체 흐름이 끝나면 호출 시점의 원래 브랜치로 복귀하며 default 브랜치 작업트리(staged/unstaged/untracked)는 호출 이전과 동일하게 유지된다.
-
-결정적 슬러그화 규칙(§9.5.1), 브랜치 생성·commit 9단계 절차(§9.5.2), 실패 처리·빈-slug abort·rebase 충돌·push 거부 abort 흐름(§9.5.3), 그리고 default 브랜치 자동 fast-forward merge·원격 `push origin` 절차(§9.5.4)의 전체 단계는 `references/feat-branch-commit.md` 참조.
+step 10 전, `feat/<task-id>-<slug>` 브랜치를 만들고 SPEC.md만 commit한다. main 작업트리(staged/unstaged/untracked)는 호출 전 상태로 보존한다. 슬러그화, 브랜치 생성, commit, 실패 처리, default 브랜치 자동 fast-forward merge, `push origin main`, `push origin feat/<c>-<slug>`, force push 금지는 모두 `references/feat-branch-commit.md`가 단일 출처다.
 
 ### 10. 사용자 최종 검토
 
-**호출 모드 분기**:
+dispatch 위임 모드는 질문 없이 loop start까지 자동 연계한다. 직접 호출은 SPEC 경로·요약을 제시하고 세 옵션을 묻는다: 지금 loop start 호출(Recommended), SPEC만 확정, 변경. loop start 선택 시 `--events-only` opt-out 여부를 한 번 더 묻고 yes면 `Skill(skill: "loop", args: "start <m>/<c> --events-only")`, no면 raw Monitor 기본 동작을 쓴다.
 
-- **dispatch 위임 모드** (§호출 방법 — dispatch 위임 모드): 본 단계의 세 옵션 사용자 질문을 생략하고 `Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계 — task 생성 → SPEC 작성 → 설계 브랜치 준비 → 자율 루프 자동 시작까지 단일 호출에서 완수.
-- **사용자 직접 호출 모드** (default): SPEC.md 경로(§8.1 slug-bearing)·요약 안내 후 `AskUserQuestion`으로 **명시적 결정 입력**(자유 텍스트 종결구 금지 — CLAUDE.md 규칙). 옵션 3개(상호배타):
+## --resume 요약
 
-  - **지금 loop start 호출** (Recommended) — `Skill(skill: "loop", args: "start <m>/<c>")` 자동 연계. loop 기본 동작(자동 Monitor 가설 포함, `plugins/autopilot/skills/loop/SKILL.md`) 적용. default `regular`이면 `start <c>` 단축형 동등.
-    - 이 옵션을 선택하면 **`--events-only` opt-out** 여부를 `AskUserQuestion`으로 명시 확인한다 — Yes 시 자동 연계 args 끝에 `--events-only` 토큰을 추가해 `Skill(skill: "loop", args: "start <m>/<c> --events-only")`로 호출하고, No(default)는 raw-stream Monitor 동작을 유지한다. opt-out 의미·동작은 `plugins/autopilot/skills/loop/SKILL.md`의 `--events-only` 정의 참조.
-  - **SPEC만 확정** — 경로 안내·종료. 사용자가 별도 시점에 `Skill(skill: "loop", args: "start <m>/<c>")` 직접 호출.
-  - **변경** — 변경 섹션을 묻고 단계 7/8 재진입.
-
-## --resume 모드 요약
-
-- 1: 마커 0개 시 즉시 종료
-- 2: 일반 모드와 동일(보통 (b) 설계 상태 분기로 변경 없이 통과)
-- 4: 생략 (이미 SPEC 존재)
-- 5, 6, 7: 마커 박힌 섹션만
-- 8 / 8.1: SPEC.md를 재기록하므로 §8.2 sync trigger가 동일하게 발동된다.
-- 나머지 동일
+1은 마커 없으면 종료, 2는 동일, 4는 생략, 5-7은 마커 섹션만, 8/8.2는 재작성·sync, 나머지는 동일.
 
 ## 모듈 구성 (references/)
 
 | 파일 | 역할 |
 |---|---|
 | `spec-template.md` | SPEC.md placeholder 템플릿 |
-| `ears-patterns.md` | 5 EARS 패턴·변환·Independent-Test |
+| `ears-patterns.md` | EARS 5패턴·언어 규칙 |
 | `self-review.md` | 자체 검토 5항목 |
-| `decomposition-gate.md` | 다중 서브시스템 감지·분해 제안 |
+| `decomposition-gate.md` | 다중 서브시스템 감지 |
 | `agent-prompts.md` | step 3·9 subagent dispatch 양식 (헌법 §11.6) |
-| `pre-clarification.md` | step 1.1 라우팅 + 1.2 사전 명확화 라운드 |
-| `task-state-alignment.md` | step 2 task 상태 정합 4갈래 분기 |
-| `feat-branch-commit.md` | step 9.5 feat 브랜치·commit + 슬러그화 단일 출처 |
-| `test-spec-loop-contract.sh` | spec↔loop 단일 규약 contract verifier |
+| `pre-clarification.md` | 검증 실패 라우팅·사전 명확화 |
+| `task-state-alignment.md` | task 상태 정합 4갈래 분기 |
+| `feat-branch-commit.md` | feat 브랜치·commit·slug 단일 출처 |
+| `test-spec-loop-contract.sh` | spec↔loop contract verifier |
 
 ## 규칙
 
-- 본 스킬은 target 프로젝트의 `milestones/<m>/loops/<c>/SPEC.md`만 작성한다. 다른 파일 생성·수정 안 함.
-- 모든 결정·선택·확인은 `AskUserQuestion`으로. 자유 텍스트 끝에 질문 종결구 다는 방식 금지 (CLAUDE.md 규칙).
-- 한 주제씩 (한 `AskUserQuestion` 호출에 관련 소문항 최대 4개 허용).
-- `[NEEDS CLARIFICATION` 마커는 `loop start`에서 차단됨. 사용자에게 명시적으로 마커가 박혔음을 알리고 `--resume`으로 해결하도록 안내.
+- 본 스킬은 target 프로젝트의 SPEC.md만 작성한다.
+- 자유 텍스트 질문 종결구 금지. 모든 선택은 `AskUserQuestion`.
+- 한 주제씩 묻고, 한 호출의 관련 소문항은 최대 4개.
+- `[NEEDS CLARIFICATION` 마커가 있으면 loop start가 차단된다. 사용자에게 `--resume` 해결을 안내한다.
