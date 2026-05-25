@@ -1,6 +1,6 @@
 ---
 name: prd
-description: "autopilot:dispatch 입력으로 받는 PRD(Product Requirements Document)를 대화형 9-step으로 작성. 한 질문씩 명확화·섹션별 승인·자유 산문 PRD·[NEEDS CLARIFICATION] 마커로 dispatch가 도중 질문 없이 분해 가능한 자기완결적 PRD를 만듭니다. 탐색 규율(접근법 비교 기본 ON·milestone 단위 적정성 검사·YAGNI 강제 통과·brownfield 동행 개선 질문·visual companion offer)을 흡수해 별도 brainstorming 호출 없이도 milestone 의도를 충분히 추궁합니다. 호출 'Skill(skill=\"prd\", args=\"<milestone-id>\")' 또는 '<milestone-id> --resume' 또는 '<milestone-id> --import <path>'."
+description: "autopilot:dispatch 입력으로 받는 PRD(Product Requirements Document)를 대화형으로 작성. dispatch가 도중 질문 없이 분해 가능한, milestone 단위 자기완결적 PRD를 만듭니다. 호출 'Skill(skill=\"prd\", args=\"<milestone-id>\")' 또는 '<milestone-id> --resume' 또는 '<milestone-id> --import <path>'."
 ---
 
 # prd

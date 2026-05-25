@@ -1,6 +1,6 @@
 ---
 name: dispatch
-description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave) 단위로 loop을 병렬 실행하는 오케스트레이션 인터페이스. start/status/stop/list/cleanup/logs/resume 서브커맨드로 milestone lifecycle ops도 책임. PRD 입력 검증·게이트 3종(분해 plan·최종 확인·spec 위임)·sentinel watch + fail-fast 포함."
+description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave) 단위로 loop을 병렬 실행하는 오케스트레이션 인터페이스. PRD가 준비된 milestone을 여러 task로 자율 병렬 수행하려 할 때 사용. start/status/stop/list/cleanup/logs/resume 서브커맨드로 milestone lifecycle을 관리."
 ---
 
 # dispatch

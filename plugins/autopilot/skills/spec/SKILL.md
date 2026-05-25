@@ -1,6 +1,6 @@
 ---
 name: spec
-description: "기능 추가·동작 수정·지침 작성·새로 만들 등 새 코드 변경을 정의하는 자연어 신호에 대응. autopilot loop이 입력으로 받는 SPEC.md를 대화형으로 생성. 한 질문씩 명확화·섹션별 승인·EARS 포맷·[NEEDS CLARIFICATION] 마커로 자율 loop이 도중 질문 없이 완수 가능한 자기완결적 SPEC을 만듭니다. 이 레포 표준 워크플로우는 자기완결적 SPEC.md 작성 → feat 브랜치 분기·SPEC commit → autopilot loop 실행 → PR. SPEC.md 작성 후 결정적 슬러그화 규칙(ASCII 영숫자·하이픈만)으로 `feat/<task-id>-<slug>` 브랜치를 main에서 분기·SPEC.md를 commit해 loop·PR 흐름이 단일 feature 브랜치로 통합되게 합니다. 호출 'Skill(skill=\"spec\", args=\"<task-id> [--milestone <m>] [--resume]\")'. milestone 미지정 시 `regular`(catch-all)을 default로 적용."
+description: "기능 추가·동작 수정·지침 작성·새로 만들기 등 새 코드 변경을 정의하는 자연어 신호에 대응. autopilot loop이 입력으로 받는, 도중 질문 없이 완수 가능한 자기완결적 SPEC.md를 대화형으로 작성하고 `feat/<task-id>-<slug>` 브랜치로 commit합니다. 호출 'Skill(skill=\"spec\", args=\"<task-id> [--milestone <m>] [--resume]\")'. milestone 미지정 시 `regular` default."
 allowed-tools:
   - AskUserQuestion
   - Read
