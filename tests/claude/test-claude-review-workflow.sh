@@ -25,7 +25,9 @@ grep -q 'CLAUDE_CODE_OAUTH_TOKEN secret is required' "$WORKFLOW" \
 if grep -q 'ANTHROPIC_API_KEY' "$WORKFLOW"; then
   fail "ANTHROPIC_API_KEY 기반 인증이 남아 있음"
 fi
-ok "check 1: claude_code_oauth_token secret을 명시적으로 요구"
+grep -qE '^[[:space:]]*id-token:[[:space:]]*write' "$WORKFLOW" \
+  || fail "claude-code-action OIDC 토큰 교환에 필요한 id-token: write 권한 부재"
+ok "check 1: claude_code_oauth_token secret + id-token: write 권한을 명시적으로 요구"
 
 echo ""
 echo "=== check 2: Claude review uses pinned claude-code-action with shared context ==="
