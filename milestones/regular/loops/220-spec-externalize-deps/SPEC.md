@@ -28,7 +28,7 @@ spec 스킬을 "명확화 인터뷰 → SPEC 문서 작성 → 구현 스킬 추
 4. task 상태 정합, Issue body sync, 브랜치/slug/파일명 규칙은 각각 rules/ 아래 카테고리 지침 문서로 존재해야 하며, spec SKILL.md는 이 절차들을 직접 기술하지 않아야 한다.
 5. If spec SKILL.md 또는 그 references가 제거·이전된 문서를 가리키는 참조를 남기면, 그 dangling 참조는 존재하지 않아야 한다.
 6. plugins/ 변경을 동반하므로 plugin.json 버전이 0.5.6에서 SemVer 규약에 따라 상향되어야 한다.
-7. Where --resume 기능이 유지되는 경우, spec는 대상 SPEC 문서의 `[NEEDS CLARIFICATION]` 마커만 다시 물어 해소해야 한다.
+7. Where --resume 기능이 유지되는 경우, spec는 대상 SPEC 문서에 남은 미해결 명확화 마커(구체 질문 표시)만 다시 물어 해소해야 한다.
 
 ## 범위
 포함:
