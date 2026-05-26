@@ -67,10 +67,13 @@ jobs:
             core.setOutput('head_sha', pr.head.sha);
             core.setOutput('title', pr.title || '');
 
-      - name: Check out pull request
+      - name: Check out trusted base
+        # Privileged job: check out the base ref so the helper script, prompt,
+        # and schema all come from trusted code. PR-controlled content is only
+        # consumed as untrusted data (diff/metadata) fetched via gh/git below.
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: refs/pull/${{ steps.pr.outputs.number }}/merge
+          ref: ${{ steps.pr.outputs.base_ref }}
           fetch-depth: 0
 
       - name: Fetch review base

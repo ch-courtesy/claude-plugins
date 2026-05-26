@@ -154,4 +154,13 @@ grep -q 'submit_pr_review' "$PROMPT" \
 ok "check 8: prompt 핵심 정책 존재"
 
 echo ""
+echo "=== check 9: privileged job checks out trusted base, not PR-controlled code ==="
+if grep -qE 'ref:[[:space:]]*refs/pull/.*/(merge|head)' "$WORKFLOW"; then
+  fail "권한 있는 리뷰 job이 PR merge/head ref 를 checkout → PR 이 바꾼 스크립트·prompt 가 실행될 수 있음"
+fi
+grep -qF 'ref: ${{ steps.pr.outputs.base_ref }}' "$WORKFLOW" \
+  || fail "리뷰 job 이 trusted base ref 를 checkout 하지 않음"
+ok "check 9: trusted base checkout (PR-controlled 코드 미실행)"
+
+echo ""
 echo "ALL CHECKS PASSED"
