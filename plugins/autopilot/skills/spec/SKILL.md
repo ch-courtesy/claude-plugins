@@ -109,7 +109,7 @@ allowed-tools:
 
 ### 5. 명확화 라운드
 
-한 번에 한 질문(`AskUserQuestion`)으로 목적, 성공 기준, 제약, 위험을 수집한다. `--resume`에서는 마커 섹션만 묻는다.
+목적·성공기준·제약·위험을 결정 트리 기반 적응적 인터뷰로 수집한다. 인터뷰 방법(집요함·결정 트리·추천 답·코드 우선 네 원칙, "충분" 종결 조건, step 3과의 역할 경계)은 `references/clarification.md`가 단일 출처다. 전달 매체는 `AskUserQuestion`(한 번에 한 질문, 추천 답을 첫 선택지로) — 자유 텍스트 질문 금지. `--resume`에서는 마커 섹션만 묻는다.
 
 #### 5.1 test 코드 변경 sweep
 
@@ -171,6 +171,7 @@ dispatch 위임 모드는 질문 없이 loop start까지 자동 연계한다. �
 | `self-review.md` | 자체 검토 5항목 |
 | `decomposition-gate.md` | 다중 서브시스템 감지 |
 | `agent-prompts.md` | step 3·9 subagent dispatch 양식 (헌법 §11.6) |
+| `clarification.md` | 명확화 인터뷰 방법론(집요함·결정 트리·추천 답·코드 우선) 단일 출처 |
 | `pre-clarification.md` | 검증 실패 라우팅·사전 명확화 |
 | `task-state-alignment.md` | task 상태 정합 4갈래 분기 |
 | `feat-branch-commit.md` | feat 브랜치·commit·slug 단일 출처 |
