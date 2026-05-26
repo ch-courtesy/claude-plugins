@@ -39,6 +39,8 @@ grep -q 'REVIEW_SCHEMA="\.github/prompts/codex-pr-review\.schema\.json"' "$WORKF
   || fail "공통 structured review schema 파일 참조 부재"
 grep -q '\.github/scripts/pr-review-context\.sh' "$WORKFLOW" \
   || fail "shared review context helper 호출 부재"
+grep -qF 'PR_BASE_SHA="$PR_BASE_SHA"' "$WORKFLOW" \
+  || fail "helper 호출에 PR_BASE_SHA 미전달 — thread/incremental diff base 가 HEAD~1 로 추락함"
 grep -q 'source \.review-context/context-mode\.env' "$WORKFLOW" \
   || fail "review context mode env 로드 부재"
 grep -q 'REVIEW_CONTEXT_MODE' "$WORKFLOW" \
