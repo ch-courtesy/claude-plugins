@@ -47,5 +47,3 @@
 If the model returns `needs_context`, the workflow fetches up to 5 requested files from the PR head and runs one follow-up pass.
 
 Claude authentication uses `CLAUDE_CODE_OAUTH_TOKEN`. The workflow uses pinned `anthropics/claude-code-action` with `claude_code_oauth_token`. If direct `claude -p` is used later, the workflow must not pass `--bare` because that path requires API key authentication.
-
-Triggered check refresh at 2026-05-26T12:10Z.
