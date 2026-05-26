@@ -187,10 +187,10 @@ jobs:
           mkdir -p .review-extra-context
 
           requested_files="$(
-            jq -r '
+            jq -r --argjson max "$MAX_CONTEXT_REQUEST_FILES" '
               [.context_requests[]?.files[]?]
               | unique
-              | .[:env.MAX_CONTEXT_REQUEST_FILES|tonumber]
+              | .[:$max]
               | .[]
             ' "$result"
           )"

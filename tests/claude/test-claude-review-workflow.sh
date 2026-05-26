@@ -73,6 +73,11 @@ grep -q 'review-extra-context' "$WORKFLOW" \
   || fail "추가 context 디렉터리 부재"
 grep -q 'MAX_CONTEXT_REQUEST_FILES=5' "$WORKFLOW" \
   || fail "context request file limit 부재"
+if grep -q 'env\.MAX_CONTEXT_REQUEST_FILES' "$WORKFLOW"; then
+  fail "jq env.MAX_CONTEXT_REQUEST_FILES 사용 — shell 변수가 export 되지 않아 null|tonumber 런타임 오류 (jq --argjson 으로 전달해야 함)"
+fi
+grep -qF -- '--argjson max "$MAX_CONTEXT_REQUEST_FILES"' "$WORKFLOW" \
+  || fail "context request file limit 을 jq --argjson 으로 전달하지 않음"
 ok "check 2b: targeted context follow-up 처리 존재"
 
 echo ""
