@@ -9,9 +9,11 @@
 # AC4 — catch-all 패턴 (`Bash(*)`·`*` 단독) 부재.
 # AC5 — `gh pr` prefix 외 모든 `gh ` prefix 패턴 부재.
 # AC6 — 중복 항목 부재.
-# AC7 — references/feat-branch-commit.md §9.5.1 H1 추출 코드가
+# AC7 — rules/engineering/branch-and-slug.md "slug 규칙" H1 추출 코드가
 #        macOS BSD sed·GNU sed 모두에서 syntax error 없이 실행 가능 (awk 기반).
 #        정적 검사(기존 sed 패턴 부재) + 행위 동등성 검사(샘플 SPEC.md 입력).
+#        (SPEC 220 에서 단일 출처가 references/feat-branch-commit.md →
+#         rules/engineering/branch-and-slug.md 로 이동했으나 awk 추출 코드는 동일.)
 #
 # 의존성:
 #   - yq (mikefarah Go 구현) — frontmatter YAML parse용.
@@ -22,7 +24,8 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SPEC_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/spec/SKILL.md"
-FEAT_BRANCH_MD="$REPO_ROOT/plugins/autopilot/skills/spec/references/feat-branch-commit.md"
+# SPEC 220: slug·브랜치 단일 출처가 spec 스킬 references → rules/engineering 로 외부화됨.
+FEAT_BRANCH_MD="$REPO_ROOT/rules/engineering/branch-and-slug.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -154,7 +157,7 @@ ok "AC6: 중복 항목 부재"
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== AC7: §9.5.1 H1 추출 — BSD/GNU 호환 (awk 기반) ==="
+echo "=== AC7: \"slug 규칙\" H1 추출 — BSD/GNU 호환 (awk 기반) ==="
 
 # 1) 정적 검사 (negative) — 슬러그 도출 코드 (line starting with `title=$(`) 에
 #    BSD-incompatible sed 호출 (`title=$(sed`) 가 잔존하지 않음.
@@ -162,11 +165,11 @@ echo "=== AC7: §9.5.1 H1 추출 — BSD/GNU 호환 (awk 기반) ==="
 #    BSD sed 에서 "extra characters at the end of } command" 로 실패.
 #    (단순 문자열 검사가 아닌 코드 라인 prefix 검사 — 본문 prose 의 historical 참조는 허용.)
 if grep -qE '^title=\$\(sed' "$FEAT_BRANCH_MD"; then
-  fail "AC7-static-negative: 슬러그 도출 코드 (title=\$(sed ...) 가 §9.5.1 본문에 잔존"
+  fail "AC7-static-negative: 슬러그 도출 코드 (title=\$(sed ...) 가 branch-and-slug.md 본문에 잔존"
 fi
 ok "AC7-static-negative: 슬러그 도출 코드에 sed 호출 부재"
 
-# 2) 정적 검사 (positive) — awk 기반 슬러그 도출 코드 (`title=$(awk`) 가 §9.5.1 본문에 존재
+# 2) 정적 검사 (positive) — awk 기반 슬러그 도출 코드 (`title=$(awk`) 가 본문에 존재
 if ! grep -qE '^title=\$\(awk' "$FEAT_BRANCH_MD"; then
   fail "AC7-static-positive: 슬러그 도출 코드 (title=\$(awk ...) 부재"
 fi
