@@ -125,18 +125,37 @@ grep -q 'issues.createComment' "$WORKFLOW" \
 ok "check 6: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
-echo "=== check 7: verdict is submitted through GitHub review API ==="
-grep -q 'gh pr review "\$PR_NUMBER".*--approve' "$WORKFLOW" \
-  || fail "approve review 제출 경로 부재"
-grep -q 'gh pr review "\$PR_NUMBER".*--request-changes' "$WORKFLOW" \
+echo "=== check 7: verdict submission with graceful degradation ==="
+grep -q 'findings_count=' "$WORKFLOW" \
+  || fail "findings count 계산 부재"
+grep -q 'No review output to post' "$WORKFLOW" \
+  || fail "eligibility != reviewed 시 skip 경로 부재"
+grep -q 'approve_without_body=' "$WORKFLOW" \
+  || fail "finding 없는 approve 의 무본문 처리 부재"
+grep -q 'state == "APPROVED"' "$WORKFLOW" \
+  || fail "동일 head approve 중복 방지 부재"
+grep -Fq 'user.login == "github-actions[bot]"' "$WORKFLOW" \
+  || fail "approve 중복 체크가 봇 자신 리뷰로 제한되지 않음"
+grep -q 'touch \.claude-review/approval-failed' "$WORKFLOW" \
+  || fail "approve 실패 시 managed comment fallback marker 부재"
+grep -A3 'touch \.claude-review/approval-failed' "$WORKFLOW" | grep -q 'exit 0' \
+  || fail "approve 실패 후 정상 종료(다음 step 진행) 부재"
+if grep -q 'submit_review --approve' "$WORKFLOW"; then
+  fail "finding 없는 approve 는 body 없는 전용 경로만 사용해야 함"
+fi
+grep -q 'submit_review --request-changes' "$WORKFLOW" \
   || fail "request changes review 제출 경로 부재"
-grep -q 'gh pr review "\$PR_NUMBER".*--comment' "$WORKFLOW" \
+grep -q 'submit_review --comment' "$WORKFLOW" \
   || fail "comment review 제출 경로 부재"
+grep -q 'gh pr review "\$PR_NUMBER".*--body-file "\$body"' "$WORKFLOW" \
+  || fail "submit_review 의 gh pr review 호출 부재 (graceful degradation)"
+grep -q 'No managed Claude review comment to post' "$WORKFLOW" \
+  || fail "managed comment 게이트(미reviewed/무findings 생략) 부재"
 grep -q 'automation_safety\.may_approve' "$WORKFLOW" \
   || fail "approve safety gate 부재"
 grep -q 'confidence_score >= 80' "$WORKFLOW" \
   || fail "confidence threshold gate 부재"
-ok "check 7: verdict 기반 GitHub review 제출 경로 존재"
+ok "check 7: verdict 제출 + graceful degradation + managed comment 게이트"
 
 echo ""
 echo "=== check 7b: formal review submission is idempotent per (head_sha, verdict) ==="
@@ -168,6 +187,16 @@ fi
 grep -qF 'ref: ${{ steps.pr.outputs.base_ref }}' "$WORKFLOW" \
   || fail "리뷰 job 이 trusted base ref 를 checkout 하지 않음"
 ok "check 9: trusted base checkout (PR-controlled 코드 미실행)"
+
+echo ""
+echo "=== check 10: checkout credentials cleared before model action ==="
+unset_extraheader_line="$(awk 'index($0, "git config --local --unset-all http.https://github.com/.extraheader") { print NR; exit }' "$WORKFLOW")"
+model_action_line="$(awk '/uses: anthropics\/claude-code-action@/ { print NR; exit }' "$WORKFLOW")"
+[[ -n "$unset_extraheader_line" ]] \
+  || fail "모델 action 전 checkout credential extraheader 제거 부재"
+(( unset_extraheader_line < model_action_line )) \
+  || fail "extraheader 제거가 첫 claude-code-action 이후에 위치함"
+ok "check 10: 모델 action 전 checkout credential extraheader 제거"
 
 echo ""
 echo "ALL CHECKS PASSED"
