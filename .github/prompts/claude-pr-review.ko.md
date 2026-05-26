@@ -9,8 +9,8 @@
 - 이 프롬프트는 특정 병렬 실행 방식을 가정하지 않습니다.
 - 입력으로 제공된 diff/context 범위 안에서 판단합니다.
 - context가 부족하면 추측하지 말고 `needs_context` 또는 `unavailable` verdict를 반환합니다.
-- 최종 응답은 반드시 `submit_pr_review` tool call 하나로만 제출합니다.
-- `submit_pr_review` input은 제공된 JSON schema를 그대로 만족해야 합니다.
+- 최종 응답은 반드시 제공된 JSON schema를 만족하는 구조화 출력(structured output) 하나로만 제출합니다.
+- 구조화 출력은 schema의 모든 required 필드를 채우고 enum·타입을 그대로 따릅니다. 별도 custom tool 이름(예: submit_pr_review)을 가정하지 말고, `--json-schema`가 제공하는 structured-output 메커니즘으로만 제출합니다.
 
 입력:
 - Pull Request metadata
@@ -139,4 +139,4 @@ Evidence requirement:
 
 출력 규칙:
 마크다운 설명, 코드블록, 추가 문장은 출력하지 않습니다.
-반드시 `submit_pr_review` tool call의 input으로만 결과를 제출합니다.
+반드시 제공된 JSON schema를 만족하는 구조화 출력(structured output)으로만 결과를 제출합니다.
