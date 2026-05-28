@@ -87,9 +87,9 @@ on_signal_exit() {
 #   SPEC_DIR         스펙 디렉토리 절대 경로
 #   KEY              spec_key(SPEC_PATH)
 #   WT               작업 공간 (<SPEC_DIR>/.worktree 또는 보조 worktree cwd)
-#   LOOP_DIR         <WT>/.loop (노트·신호·메타)
+#   LOOP_DIR         <WT>/.loop (노트·신호·메타·lock)
 #   BRANCH           loop/<KEY> (워크트리 임시 브랜치)
-#   LOCK_FILE        <SPEC_DIR>/.loop.lock (실행 중에만 존재; 스펙 디렉토리에 colocate)
+#   LOCK_FILE        <LOOP_DIR>/.lock (실행 중에만 존재; 워크스페이스 .loop 안에 colocate)
 compute_paths() {
   local input="$1"
   [[ -n "$input" ]] || die "스펙 파일 경로가 필요합니다."
@@ -117,7 +117,7 @@ compute_paths() {
 
   WT="$SPEC_DIR/.worktree"
   LOOP_DIR="$WT/.loop"
-  LOCK_FILE="$SPEC_DIR/.loop.lock"   # 스펙 디렉토리에 colocate (워크트리 생성 전 획득)
+  LOCK_FILE="$LOOP_DIR/.lock"   # 워크스페이스 .loop 안에 colocate (워크트리 생성 후 획득)
   BRANCH="loop/$KEY"
 }
 
@@ -133,6 +133,7 @@ is_secondary_worktree() {
 
 # ----- 동시성 락 -----
 acquire_lock() {
+  # stale lock 정리 (PID 비활성 시)
   if [[ -f "$LOCK_FILE" ]]; then
     local old_pid
     old_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
@@ -142,7 +143,9 @@ acquire_lock() {
     echo "[$(now_iso)] WARN: stale lock 정리 (PID ${old_pid:-?} 비활성)" >&2
     rm -f "$LOCK_FILE"
   fi
-  echo "$$" > "$LOCK_FILE"
+  # 원자적 획득 (noclobber): 두 start 동시 진입 시 한 쪽만 성공.
+  ( set -C; echo "$$" > "$LOCK_FILE" ) 2>/dev/null \
+    || die "lock 획득 실패 (race): $LOCK_FILE"
   # EXIT trap으로 lock 해제. 작업 공간(.worktree/)은 cleanup까지 유지.
   trap 'rm -f "$LOCK_FILE"' EXIT
   trap on_signal_exit INT TERM
@@ -448,11 +451,11 @@ cmd_start() {
   local is_secondary=0
   is_secondary_worktree && is_secondary=1
 
-  acquire_lock
-
+  # 1) 워크스페이스 준비 (lock 은 LOOP_DIR 안에 두므로 디렉토리가 먼저 존재해야 함).
   if (( is_secondary == 1 )); then
     WT="$(git rev-parse --show-toplevel)"
     LOOP_DIR="$WT/.loop"
+    LOCK_FILE="$LOOP_DIR/.lock"
     echo "[$(now_iso)] 보조 worktree 감지 — nested 생성 생략. 작업 공간: $WT"
     mkdir -p "$LOOP_DIR/iterations"
     [[ -f "$LOOP_DIR/BASE_SHA" ]] || git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" 2>/dev/null || true
@@ -468,10 +471,13 @@ cmd_start() {
     mkdir -p "$LOOP_DIR/iterations"
   fi
 
-  # 스펙 경로 기록 — list 스캔이 작업 공간에서 정체성을 복원하는 데 사용.
+  # 2) lock 획득 (LOOP_DIR 안, noclobber 원자성).
+  acquire_lock
+
+  # 3) 스펙 경로 기록 — list 스캔이 작업 공간에서 정체성을 복원하는 데 사용.
   printf '%s\n' "$SPEC_PATH" > "$LOOP_DIR/SPEC_PATH"
 
-  # 헌법을 워크트리 CLAUDE.md로 복사 + 게이트 false-positive 방지(추적 분리·exclude).
+  # 4) 헌법을 워크트리 CLAUDE.md로 복사 + 게이트 false-positive 방지(추적 분리·exclude).
   cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
     || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
   if git -C "$WT" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
@@ -480,7 +486,9 @@ cmd_start() {
   local gcd; gcd="$(git -C "$WT" rev-parse --git-common-dir)"
   [[ "$gcd" != /* ]] && gcd="$WT/$gcd"
   mkdir -p "$gcd/info"; touch "$gcd/info/exclude"
-  for pat in "CLAUDE.md" ".loop/" ".worktree/" ".loop.lock"; do
+  # .worktree/ 가 제외되면 그 안의 .loop/(노트·신호·lock·BASE_SHA·SPEC_PATH·iterations)
+  # 도 자동으로 제외된다. .loop/ 는 안전망 중복 패턴.
+  for pat in "CLAUDE.md" ".worktree/" ".loop/"; do
     grep -qxF "$pat" "$gcd/info/exclude" 2>/dev/null || echo "$pat" >> "$gcd/info/exclude"
   done
 
@@ -521,12 +529,12 @@ cmd_start() {
 }
 
 # ----- status 한 줄 출력 헬퍼 -----
-# 인자: 스펙 디렉토리(.worktree·.loop.lock 이 위치하는 곳). 상태는 그 안의
+# 인자: 스펙 디렉토리(.worktree 가 위치하는 곳). 상태는 워크스페이스 안
 # 로컬 파일에서만 도출한다(중앙 registry 없음).
 print_run_status() {
   local spec_dir="$1"
   local wt="$spec_dir/.worktree"
-  local lock="$spec_dir/.loop.lock"
+  local lock="$wt/.loop/.lock"
   local spec key state iters last ref epoch
   spec="$(cat "$wt/.loop/SPEC_PATH" 2>/dev/null || echo "$spec_dir/?")"
   key="$(spec_key "$spec")"
@@ -553,20 +561,20 @@ cmd_status() {
   local input="${1:-}"
   if [[ -n "$input" ]]; then
     compute_paths "$input"
-    [[ -d "$WT" || -f "$LOCK_FILE" ]] || { echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"; return 0; }
+    [[ -d "$WT" ]] || { echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"; return 0; }
     printf "%-14s %-9s %-6s %-20s %s\n" "KEY" "STATE" "ITERS" "LAST-UPDATE" "SPEC"
     print_run_status "$SPEC_DIR"
     return 0
   fi
-  # 전체: repo 작업트리를 스캔해 .loop.lock·.worktree/.loop 을 가진 스펙 디렉토리를
-  # 모은다(중앙 registry 없음 — 축소된 best-effort 열거). .git 하위는 prune.
+  # 전체: repo 작업트리를 스캔해 .worktree/.loop 을 가진 스펙 디렉토리를 모은다
+  # (중앙 registry 없음 — 축소된 best-effort 열거). .git 하위는 prune.
   local top; top="$(git rev-parse --show-toplevel 2>/dev/null)" \
     || die "git 저장소 안에서 실행해야 합니다."
   local dirs
-  dirs="$( {
-      find "$top" -type d -name .git -prune -o -type f -name '.loop.lock' -print 2>/dev/null | sed 's#/.loop.lock$##'
-      find "$top" -type d -name .git -prune -o -type d -path '*/.worktree/.loop' -print 2>/dev/null | sed 's#/.worktree/.loop$##'
-    } | sort -u | grep -v '^$' || true )"
+  dirs="$(
+      find "$top" -type d -name .git -prune -o -type d -path '*/.worktree/.loop' -print 2>/dev/null \
+        | sed 's#/.worktree/.loop$##' | sort -u | grep -v '^$' || true
+  )"
   if [[ -z "$dirs" ]]; then
     echo "실행 기록이 없습니다. 새 실행: $0 start <spec-path>"
     return 0
