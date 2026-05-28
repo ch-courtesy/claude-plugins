@@ -1,64 +1,70 @@
 ---
 name: dispatch
-description: "milestone 단위 PRD를 child SPEC들로 자동 분해해 DAG(wave) 단위로 loop을 병렬 실행하는 오케스트레이션 인터페이스. PRD가 준비된 milestone을 여러 task로 자율 병렬 수행하려 할 때 사용. start/status/stop/list/cleanup/logs/resume 서브커맨드로 milestone lifecycle을 관리."
+description: "1 개 이상의 임의 SPEC 파일 경로를 받아 frontmatter depends_on 으로 DAG 를 추론하고, wave 단위로 자율 실행기에 병렬 위임한 뒤 결과를 취합하는 spec-list-driven orchestrator. start/list/status/stop/watch 서브커맨드로 run lifecycle 을 관리."
 ---
 
 # dispatch
 
-`autopilot:prd`가 만든 `milestones/<m>/prd/PRD.md`를 child SPEC으로 분해하고 DAG wave 단위로 `autopilot:loop`을 실행한다. milestone-level ops도 본 스킬이 맡는다.
+`dispatch` 는 SPEC 파일 묶음을 받아 의존성을 풀고 wave 단위로 자율 실행기(`autopilot:loop`)에 병렬 위임하는 오케스트레이터다. SPEC 작성 도구·작성 형식에 비결합 — **파일로 존재하고 읽을 수 있는 SPEC 이면** 무엇이든 입력으로 받는다.
 
 ## 호출
 
 `Skill(skill: "dispatch", args: "<subcommand> [<args>]")`
 
-## start 흐름
+## 모델
 
-1. `dispatch start <m>` 입력 검증: PRD 존재, `[NEEDS CLARIFICATION` 마커 0개. 미충족 시 abort + `prd <m> --resume` 안내. `regular`는 PRD 없는 catch-all이므로 거부.
-2. `references/decomposition-algorithm.md`로 단위 후보를 뽑고 3조건(단일 컨텍스트 윈도우 fit, 테스트 폐쇄성, 격리성)과 hard cap(1차 <= 8, 깊이 <= 2, 최종 <= 20)을 검사한다. 초과·cycle은 abort.
-3. 게이트 1: wave별 분해 plan을 보여주고 `(a) 승인`, `(b) 분해 수정`, `(c) 취소`를 묻는다. 승인 시 `references/dag-template.md`로 `milestones/<m>/dispatch/DAG.md` 작성.
-4. 게이트 2: DAG 레벨 wave·child·예상 verify·의존성 표를 재제시하고 `(a) 실행 시작`, `(b) 취소`를 묻는다.
-5. 게이트 3: wave 단위로 순차 진행한다. 각 wave의 child마다 `Skill(skill: "spec", args: "--milestone <m> <자연어 task 설명>")`을 호출한다. child task-id는 spec이 생성하므로 dispatch는 보유하지 않는다.
-6. spec 위임 전후 `milestones/<m>/loops/` 스냅샷 차이로 새 `milestones/<m>/loops/<c>-<slug>/SPEC.md`만 식별한다. spec의 dispatch 위임 모드가 auto-loop-start를 수행하므로 dispatch가 별도 `loop start`를 중복 호출하지 않는다.
-7. `Bash(dispatch.sh watch_wave <m> child...)`로 wave 완료를 감시한다. 성공한 wave 뒤에만 다음 wave의 spec 위임을 시작한다.
-
-## watch_wave
-
-watch는 child issue의 완료 라벨(`LOOP_DONE_LABEL`)과 worktree `.loop/ESCALATION.md`만 본다. loop의 worktree·lock·iteration·헌법 준수는 `loop.sh` 책임이다.
-
-| exit | 의미 | 후속 |
-|---|---|---|
-| `100` | wave 내 모든 child 완료 라벨 | DISPATCH_LOG 기록 후 다음 wave |
-| `101` | 누군가 ESCALATION | watch_wave가 나머지 stop, 로그·보고, 다음 wave 차단 |
-| `102` | timeout(`WATCH_TIMEOUT_SECONDS`, 기본 7200s) | 진행 중 child stop, partial 결과 보고, 다음 wave 차단 |
-
-그 외 exit은 dispatch 결함으로 보고 stderr·exit code를 그대로 알린다.
+- 입력: 1 개 이상의 SPEC 파일 경로 (가변 인자).
+- DAG: 각 SPEC frontmatter 의 `depends_on:` (sibling slug 또는 경로) 항목으로 위상정렬해 wave 를 자동 구성한다. 외부 DAG 명세 파일을 요구하지 않는다.
+- cycle 이 발견되면 cycle 구성 요소를 보고하고 실행을 시작하지 않는다.
+- wave 안 SPEC 들은 자율 실행기에 병렬 위임한다. 기본 동시 시작 상한은 없으며 `--max-parallel N` 으로 줄 수 있다.
+- 각 child 의 종료·차단 여부는 자율 실행기의 공개 인터페이스만으로 판단한다. 자율 실행기 내부 신호 파일 포맷·외부 task 저장소 라벨·issue 상태에 직접 결합하지 않는다.
+- 한 wave 에서 어떤 child 라도 실패·차단으로 끝나면 다음 wave 진입을 차단한다. 같은 wave 에서 이미 시작된 다른 child 의 진행은 계속한다.
+- 호출마다 결정성 있는 `run-id`(타임스탬프 + 입력 SPEC 집합 sha7)를 만들고 진행 상태를 `<project_root>/.dispatch/runs/<run-id>/` 아래에 보관한다.
+- 기존 `run-id` 로 재호출되면 보관된 상태를 읽어 이미 done 인 child 는 재실행하지 않고 미완 wave 부터 이어 수행한다.
 
 ## Subcommands
 
-- `start <m>` 또는 `dispatch <m>`: 분해+실행.
-- `status <m>`: `dispatch.sh status <m>`. PRD/DAG/wave와 child loop state 출력. `regular`는 child 상태만.
-- `stop <m>`: 진행 중 모든 child loop stop + DISPATCH_LOG 기록.
-- `list`: 모든 milestone(regular 포함) 상태.
-- `cleanup [<m>]`: 완료된 worktree·child loop 상태 제거. PRD/DAG 보존.
-- `logs <m>`: `DISPATCH_LOG.md` 출력.
-- `resume <m>`: 분해 미완이면 게이트 1, wave 중단이면 다음 wave부터 재개.
-- 인자 없음: 사용법과 subcommand 목록 출력.
+### dispatch start `<spec...>` [--max-parallel N] [--resume `<run-id>`]
+
+1 개 이상의 SPEC 파일 경로를 받아 새 run 을 시작한다.
+
+- 입력 검증: 각 경로가 파일로 존재하고 읽을 수 있어야 한다. 하나라도 누락이면 보고 후 즉시 abort.
+- DAG 구성: 각 SPEC frontmatter 의 `depends_on` 을 읽어 위상정렬. cycle 이면 abort.
+- `<project_root>/.dispatch/runs/<run-id>/MANIFEST.txt` · `WAVES.txt` · `state.<slug>` · `LOG.md` 생성.
+- wave 순서대로 자율 실행기에 위임 호출하며 각 wave 의 모든 child 종료를 기다린 뒤 다음 wave 로 진입.
+- `--resume <run-id>` 이면 보관된 manifest 로 재개. done 인 child 는 재호출하지 않는다.
+- exit code: `0`=전부 done, `1`=child 실패로 wave 차단, `2`=timeout.
+
+### dispatch list
+
+`<project_root>/.dispatch/runs/` 아래의 모든 run-id 와 요약을 표시한다.
+
+### dispatch status `<run-id>`
+
+run-id 단위로 per-SPEC wave 와 현재 state(`pending`/`running`/`done`/`failed`) 를 표로 출력한다. loop driver 의 라이브 state 도 함께 보인다.
+
+### dispatch stop `<run-id>`
+
+run-id 안에서 진행 중(`running`)인 child 들에 대해 자율 실행기에 stop 을 위임한다.
+
+### dispatch watch `<run-id>`
+
+per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal 에 도달하면 exit code 로 결과를 대표한다. `0`=전부 done, `1`=하나라도 failed, `2`=timeout.
 
 ## references
 
 | 파일 | 역할 |
 |---|---|
-| `dispatch.sh` | status/stop/list/cleanup/logs/watch_wave/log_event driver |
-| `dag-template.md` | DAG.md 템플릿 |
-| `decomposition-algorithm.md` | 3조건, hard cap, 토포 정렬, cycle 감지 |
+| `dispatch.sh` | run-id 디렉토리 관리·DAG 구성·wave 위임·child 종료 판정 driver |
 
 ## 의존성
 
-`git`, `bash` 3.2+(macOS), `claude` CLI, `spec` 스킬, `loop` 스킬.
+`git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `autopilot:loop` 스킬. `yq` 가 있으면 depends_on 파싱이 더 견고하다(없으면 awk 폴백).
 
 ## 규칙
 
-- 직접 작성 범위는 `milestones/<m>/dispatch/`의 `DAG.md`와 `DISPATCH_LOG.md`.
-- spec 위임은 항상 `--milestone <m> <자연어 task 설명>` 형식. task-id는 spec이 결정한다.
-- loop 실행 식별은 스냅샷 차이로 찾은 SPEC 경로를 기준으로 한다.
-- 모든 결정·승인은 `AskUserQuestion`.
+- 자체 작성·갱신하는 영역은 `<project_root>/.dispatch/runs/<run-id>/` 디렉토리 안의 파일들과 본 스킬의 정의 파일뿐이다. 이 외 경로를 만들지 않는다.
+- 자율 실행기 인터페이스(`loop.sh start|status|stop`) 외 child 워크트리·신호 파일을 직접 들여다보지 않는다.
+- 분해(여러 SPEC 작성) 책임은 SPEC 작성 도구(`autopilot:spec` 등)에 있고, dispatch 는 이미 만들어진 SPEC 들만 받는다.
+- child 의 종료 의도(완료/차단)는 자율 실행기가 신호로 표현하고, dispatch 는 그 공개 인터페이스(`loop.sh status` 의 STATE·FILES 컬럼)로만 읽는다.
+- run 디렉토리는 git 추적에서 제외한다(`.gitignore` 처리 권장).

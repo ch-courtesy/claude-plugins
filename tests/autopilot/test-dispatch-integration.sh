@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# autopilot:dispatch 통합 시나리오 테스트
-# dispatch.sh의 sentinel watch + ops 흐름을 fixture 기반으로 검증.
-# 모델 측 대화 흐름(분해·게이트·spec 위임)은 본 테스트 범위 밖.
+# autopilot:dispatch 통합 시나리오 — spec-list-driven 재설계 (v0.8+)
+#
+# SPEC frontmatter 로부터 DAG 를 추론하고, wave 단위로 mock loop 실행기에 위임하며,
+# run-id 디렉토리에 상태를 보관하고, list/status/watch/stop/--resume 가 작동하는지 검증.
+# 실제 loop.sh 는 호출하지 않는다: LOOP_CMD 환경변수로 mock 셸로 치환.
 
 set -euo pipefail
 
@@ -13,8 +15,7 @@ WORK_DIR="$(mktemp -d)"
 # shellcheck disable=SC2064
 trap "rm -rf $WORK_DIR" EXIT
 
-# 가짜 프로젝트 git init
-PROJECT="$WORK_DIR/myproject"
+PROJECT="$WORK_DIR/proj"
 mkdir -p "$PROJECT"
 cd "$PROJECT"
 git init -q
@@ -22,235 +23,290 @@ git config user.email "test@example.com"
 git config user.name "Test"
 git commit --allow-empty -m "initial" -q
 
-# 새 nested 정책: worktree와 lock 모두 milestones/<m>/loops/<c>/ 안에.
-# LOOP_WORKTREE_BASE는 더 이상 사용되지 않음 (계산 시 PROJECT_ROOT/milestones/.../worktree 사용)
+# ---- mock loop ---------------------------------------------------------------
+# 호출자: dispatch.sh 가 'bash $LOOP_CMD <sub> <spec> [...]' 형태로 호출.
+# 동작:
+#   start <spec>   : <spec>.ctl 에 'terminal|<files>' 기록. files 기본 'DONE',
+#                    파일 sidecar '<spec>.outcome' 가 있으면 그 값 사용.
+#   status <spec>  : <spec>.ctl 을 읽어 loop.sh status 라인 형식으로 출력.
+#                    .ctl 없으면 state=idle, files=-.
+#   stop <spec>    : <spec>.stopped 마커 생성, .ctl 정리.
+#   list           : 빈 헤더만.
+MOCK_LOOP="$WORK_DIR/mock-loop.sh"
+cat > "$MOCK_LOOP" <<'MOCK'
+#!/usr/bin/env bash
+set -euo pipefail
+sub="${1:-}"; shift || true
+spec="${1:-}"
+ctl="${spec}.ctl"
+outcome_file="${spec}.outcome"
+header_fmt='%-14s %-9s %-20s %-6s %-20s %s\n'
+data_fmt='%-14s %-9s %-20s %-6s %-20s %s\n'
+case "$sub" in
+  start)
+    [[ -z "$spec" ]] && { echo "mock: start needs spec" >&2; exit 2; }
+    files="DONE"
+    [[ -f "$outcome_file" ]] && files="$(cat "$outcome_file")"
+    printf 'terminal|%s\n' "$files" > "$ctl"
+    touch "${spec}.started"
+    ;;
+  status)
+    [[ -z "$spec" ]] && { echo "mock: status needs spec" >&2; exit 2; }
+    state="idle"; files="-"
+    if [[ -f "$ctl" ]]; then
+      IFS='|' read -r state files < "$ctl"
+    fi
+    key="mock$(printf '%s' "$spec" | shasum 2>/dev/null | cut -c1-7 || echo "abc1234")"
+    # shellcheck disable=SC2059
+    printf "$header_fmt" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
+    # shellcheck disable=SC2059
+    printf "$data_fmt" "$key" "$state" "$files" "0" "-" "$spec"
+    ;;
+  stop)
+    [[ -z "$spec" ]] && { echo "mock: stop needs spec" >&2; exit 2; }
+    touch "${spec}.stopped"
+    rm -f "$ctl"
+    ;;
+  list)
+    printf "$header_fmt" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
+    ;;
+  *)
+    echo "mock: unknown sub: $sub" >&2; exit 2 ;;
+esac
+MOCK
+chmod +x "$MOCK_LOOP"
+export LOOP_CMD="bash $MOCK_LOOP"
+# 빠른 폴링·낮은 wave timeout 으로 테스트 즉시 진행.
+export DISPATCH_POLL_SECONDS=0
+export DISPATCH_WAVE_TIMEOUT_SECONDS=10
 
 dispatch() {
   bash "$DISPATCH_SH" "$@"
 }
 
-# nested worktree·lock 경로 헬퍼
-nested_wt() {
-  local m="$1"; local c="$2"
-  echo "$PROJECT/milestones/$m/loops/$c/.worktree"
-}
-
-nested_lock() {
-  local m="$1"; local c="$2"
-  echo "$PROJECT/milestones/$m/loops/$c/.lock"
-}
-
-# fixture helpers
-seed_prd() {
-  local m="$1"; local content="${2:-}"
-  mkdir -p "$PROJECT/milestones/$m/prd"
-  if [[ -n "$content" ]]; then
-    printf '%s' "$content" > "$PROJECT/milestones/$m/prd/PRD.md"
+# 픽스처: SPEC 파일 생성 (frontmatter 만 있으면 OK)
+seed_spec() {
+  local path="$1"; shift
+  local depends="${1:-}"
+  mkdir -p "$(dirname "$path")"
+  if [[ -n "$depends" ]]; then
+    cat > "$path" <<EOF
+---
+depends_on: $depends
+---
+# stub
+EOF
   else
-    cat > "$PROJECT/milestones/$m/prd/PRD.md" <<'EOF'
-# Sample PRD
-모든 마커 해결됨.
+    cat > "$path" <<EOF
+---
+---
+# stub
 EOF
   fi
 }
 
-seed_dag() {
-  local m="$1"; shift
-  mkdir -p "$PROJECT/milestones/$m/dispatch"
-  local dag="$PROJECT/milestones/$m/dispatch/DAG.md"
-  cat > "$dag" <<EOF
-# DAG — $m
-
-## 단위 목록
-EOF
-  local c
-  for c in "$@"; do
-    echo "- $c: 테스트 단위" >> "$dag"
-  done
-}
-
-seed_worktree() {
-  # 가짜 워크트리 + 메모리 파일 시드 (nested 경로)
-  local m="$1"; local c="$2"
-  local wt="$(nested_wt "$m" "$c")"
-  mkdir -p "$wt/.loop"
-  echo "# stub" > "$wt/CLAUDE.md"
-}
-
-mark_done() {
-  local m="$1"; local c="$2"
-  local wt="$(nested_wt "$m" "$c")"
-  mkdir -p "$wt"
-  touch "$wt/DONE"
-}
-
-mark_escalated() {
-  local m="$1"; local c="$2"
-  local wt="$(nested_wt "$m" "$c")"
-  mkdir -p "$wt/.loop"
-  cat > "$wt/.loop/ESCALATION.md" <<'EOF'
-## 에스컬레이션 보고
-**카테고리**: spec-gap
-EOF
-}
+# 결정성 있는 spec slug 디렉토리
+SPEC_DIR="$PROJECT/docs/specs"
+mkdir -p "$SPEC_DIR"
 
 # ==============================================================================
 
-echo "=== TEST 1: list 명령 — milestone 없음 ==="
-output=$(dispatch list 2>&1)
-echo "$output" | grep -qE 'milestones/ 디렉터리 없음|MILESTONE' \
-  || { echo "FAIL: list 출력 형식 이상. got: $output"; exit 1; }
-echo "OK"
-
-echo ""
-echo "=== TEST 2: list 명령 — 한 milestone 보임 ==="
-seed_prd auth-overhaul
-seed_dag auth-overhaul child-a child-b
-output=$(dispatch list 2>&1)
-echo "$output" | grep -q 'auth-overhaul' \
-  || { echo "FAIL: list가 auth-overhaul을 보여주지 않음. got: $output"; exit 1; }
-echo "$output" | grep -q 'MILESTONE' \
-  || { echo "FAIL: list 출력에 헤더 없음. got: $output"; exit 1; }
-echo "OK"
-
-echo ""
-echo "=== TEST 3: status 명령 — PRD/DAG 존재, child 상태 ==="
-seed_worktree auth-overhaul child-a
-seed_worktree auth-overhaul child-b
-output=$(dispatch status auth-overhaul 2>&1)
-echo "$output" | grep -q 'PRD' || { echo "FAIL: status에 PRD 라인 없음. got: $output"; exit 1; }
-echo "$output" | grep -q 'DAG' || { echo "FAIL: status에 DAG 라인 없음. got: $output"; exit 1; }
-echo "$output" | grep -q 'child-a' || { echo "FAIL: status에 child-a 없음. got: $output"; exit 1; }
-echo "$output" | grep -q 'child-b' || { echo "FAIL: status에 child-b 없음. got: $output"; exit 1; }
-echo "$output" | grep -qE 'idle|done|escalated|running' \
-  || { echo "FAIL: status에 state 값 없음. got: $output"; exit 1; }
-echo "OK"
-
-echo ""
-echo "=== TEST 4: status 명령 — regular milestone catch-all ==="
-mkdir -p "$(nested_wt regular ad-hoc-task)"
-output=$(dispatch status regular 2>&1)
-echo "$output" | grep -q 'regular' || { echo "FAIL: status regular 출력 없음. got: $output"; exit 1; }
-echo "$output" | grep -qE 'catch-all|PRD/DAG 없음' \
-  || { echo "FAIL: regular catch-all 안내 없음. got: $output"; exit 1; }
-echo "OK"
-
-echo ""
-echo "=== TEST 5: status — PRD 마커 잔존 감지 ==="
-seed_prd marker-test '# Marker test
-[NEEDS CLARIFICATION: 어떤 인증 방식?]
-'
-output=$(dispatch status marker-test 2>&1)
-echo "$output" | grep -qiE 'markers.*[1-9]|resume' \
-  || { echo "FAIL: 마커 잔존 안내 없음. got: $output"; exit 1; }
-echo "OK"
-
-echo ""
-echo "=== TEST 6: validate_milestone 거부 — '..' 포함 ==="
+echo "=== TEST 1: 인자 없으면 usage + non-zero ==="
 set +e
-output=$(dispatch status '../escape' 2>&1)
-result=$?
+out=$(dispatch 2>&1); rc=$?
 set -e
-[[ $result -ne 0 ]] || { echo "FAIL: '..' 포함 milestone-id가 거부되지 않음"; exit 1; }
-echo "$output" | grep -q "'\\.\\.'" || { echo "FAIL: '..' 거부 메시지 없음. got: $output"; exit 1; }
+[[ $rc -ne 0 ]] || { echo "FAIL: 인자 없을 때 0 exit. got: $out"; exit 1; }
+echo "$out" | grep -qiE 'usage|사용' || { echo "FAIL: usage 메시지 없음. got: $out"; exit 1; }
 echo "OK"
 
 echo ""
-echo "=== TEST 7: log_event + logs 라운드트립 ==="
-dispatch log_event auth-overhaul "wave 1 start — children=[child-a, child-b]"
-output=$(dispatch logs auth-overhaul 2>&1)
-echo "$output" | grep -q 'wave 1 start' \
-  || { echo "FAIL: log_event 기록이 logs에 안 나타남. got: $output"; exit 1; }
-echo "OK"
-
-echo ""
-echo "=== TEST 8: watch_wave happy path — 모두 DONE ==="
-# 두 child가 모두 DONE이면 exit 100
-seed_dag happy-path child-1 child-2
-seed_worktree happy-path child-1
-seed_worktree happy-path child-2
-mark_done happy-path child-1
-mark_done happy-path child-2
+echo "=== TEST 2: start — SPEC 파일 부재 시 거부, run 생성 안 함 ==="
 set +e
-WATCH_POLL_SECONDS=1 WATCH_TIMEOUT_SECONDS=10 \
-  dispatch watch_wave happy-path child-1 child-2 > /dev/null 2>&1
-result=$?
+out=$(dispatch start "$SPEC_DIR/missing.md" 2>&1); rc=$?
 set -e
-[[ $result -eq 100 ]] || { echo "FAIL: 모두 DONE인데 exit 100이 아님 (got: $result)"; exit 1; }
-# 로그 확인
-output=$(dispatch logs happy-path 2>&1)
-echo "$output" | grep -q 'ALL DONE' \
-  || { echo "FAIL: DISPATCH_LOG.md에 ALL DONE 기록 없음. got: $output"; exit 1; }
+[[ $rc -ne 0 ]] || { echo "FAIL: 없는 SPEC 0 exit. got: $out"; exit 1; }
+echo "$out" | grep -qE 'missing\.md|없' || { echo "FAIL: 없는 파일 보고 없음. got: $out"; exit 1; }
+[[ ! -d "$PROJECT/.dispatch/runs" ]] || ls "$PROJECT/.dispatch/runs" 2>/dev/null | grep -q . \
+  && [[ -d "$PROJECT/.dispatch/runs" ]] && {
+    # 디렉토리는 있어도 run 항목은 없어야 함
+    [[ -z "$(ls "$PROJECT/.dispatch/runs" 2>/dev/null)" ]] \
+      || { echo "FAIL: 부재 입력으로 run 디렉토리 생성됨"; exit 1; }
+  }
 echo "OK"
 
 echo ""
-echo "=== TEST 9: watch_wave fail-fast — ESCALATION 감지 ==="
-# 한 명이 ESCALATION이면 exit 101
-seed_dag fail-fast child-x child-y
-seed_worktree fail-fast child-x
-seed_worktree fail-fast child-y
-mark_escalated fail-fast child-x
+echo "=== TEST 3: start — depends_on cycle 감지 시 거부 ==="
+seed_spec "$SPEC_DIR/2026-05-29-a.md" '["b"]'
+seed_spec "$SPEC_DIR/2026-05-29-b.md" '["a"]'
 set +e
-WATCH_POLL_SECONDS=1 WATCH_TIMEOUT_SECONDS=10 \
-  dispatch watch_wave fail-fast child-x child-y > /dev/null 2>&1
-result=$?
+out=$(dispatch start "$SPEC_DIR/2026-05-29-a.md" "$SPEC_DIR/2026-05-29-b.md" 2>&1); rc=$?
 set -e
-[[ $result -eq 101 ]] || { echo "FAIL: ESCALATION 감지인데 exit 101이 아님 (got: $result)"; exit 1; }
-output=$(dispatch logs fail-fast 2>&1)
-echo "$output" | grep -q 'ESCALATION' \
-  || { echo "FAIL: DISPATCH_LOG.md에 ESCALATION 기록 없음. got: $output"; exit 1; }
+[[ $rc -ne 0 ]] || { echo "FAIL: cycle 입력 0 exit. got: $out"; exit 1; }
+echo "$out" | grep -qiE 'cycle|순환' || { echo "FAIL: cycle 보고 없음. got: $out"; exit 1; }
+echo "OK"
+rm -f "$SPEC_DIR"/2026-05-29-a.md "$SPEC_DIR"/2026-05-29-b.md
+
+echo ""
+echo "=== TEST 4: list — 아직 run 없음 ==="
+out=$(dispatch list 2>&1)
+echo "$out" | grep -qiE '없|no run|RUN' || { echo "FAIL: list 출력 비정상. got: $out"; exit 1; }
 echo "OK"
 
 echo ""
-echo "=== TEST 10: watch_wave timeout ==="
-# 어느 child도 sentinel을 만들지 않으면 timeout (exit 102)
-seed_dag timeout-test child-z
-seed_worktree timeout-test child-z
-# DONE / ESCALATION 둘 다 없음
+echo "=== TEST 5: start — 2 독립 SPEC, 단일 wave 모두 DONE, run-id 생성·STDOUT ==="
+seed_spec "$SPEC_DIR/2026-05-29-foo.md"
+seed_spec "$SPEC_DIR/2026-05-29-bar.md"
+out=$(dispatch start "$SPEC_DIR/2026-05-29-foo.md" "$SPEC_DIR/2026-05-29-bar.md" 2>&1)
+echo "$out" | grep -qE 'run-id[: ]' || { echo "FAIL: run-id 미출력. got: $out"; exit 1; }
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+[[ -n "$run_id" ]] || { echo "FAIL: run-id 파싱 실패. got: $out"; exit 1; }
+[[ -d "$PROJECT/.dispatch/runs/$run_id" ]] \
+  || { echo "FAIL: run dir 미생성: $PROJECT/.dispatch/runs/$run_id"; exit 1; }
+# 두 mock 모두 start 호출됨
+[[ -f "$SPEC_DIR/2026-05-29-foo.md.started" ]] \
+  || { echo "FAIL: foo start 미호출"; exit 1; }
+[[ -f "$SPEC_DIR/2026-05-29-bar.md.started" ]] \
+  || { echo "FAIL: bar start 미호출"; exit 1; }
+echo "run-id: $run_id"
+echo "OK"
+
+echo ""
+echo "=== TEST 6: list — run-id 노출 ==="
+out=$(dispatch list 2>&1)
+echo "$out" | grep -q "$run_id" \
+  || { echo "FAIL: list 에 run-id 없음. got: $out"; exit 1; }
+echo "OK"
+
+echo ""
+echo "=== TEST 7: status <run-id> — per-spec wave + state ==="
+out=$(dispatch status "$run_id" 2>&1)
+echo "$out" | grep -q '2026-05-29-foo.md' \
+  || { echo "FAIL: status 에 foo spec 없음. got: $out"; exit 1; }
+echo "$out" | grep -q '2026-05-29-bar.md' \
+  || { echo "FAIL: status 에 bar spec 없음. got: $out"; exit 1; }
+# wave 표시 (wave=1 또는 1 또는 W1)
+echo "$out" | grep -qE 'wave[[:space:]=]+1|W1|^\s*1\s' \
+  || { echo "FAIL: status 에 wave 정보 없음. got: $out"; exit 1; }
+# terminal 또는 done 상태
+echo "$out" | grep -qE 'terminal|done' \
+  || { echo "FAIL: status 에 종료 상태 없음. got: $out"; exit 1; }
+echo "OK"
+
+echo ""
+echo "=== TEST 8: depends_on 으로 wave 분리 (b depends on a → wave 1=a, wave 2=b) ==="
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-alpha.md"
+seed_spec "$SPEC_DIR/2026-05-29-beta.md" '["alpha"]'
+out=$(dispatch start "$SPEC_DIR/2026-05-29-alpha.md" "$SPEC_DIR/2026-05-29-beta.md" 2>&1)
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+[[ -n "$run_id" ]] || { echo "FAIL: run-id 파싱 실패"; exit 1; }
+status_out=$(dispatch status "$run_id" 2>&1)
+# alpha 는 wave 1, beta 는 wave 2
+echo "$status_out" | grep -E '2026-05-29-alpha.md' | grep -qE 'wave[[:space:]=]+1|W1' \
+  || { echo "FAIL: alpha 가 wave 1 이 아님. got: $status_out"; exit 1; }
+echo "$status_out" | grep -E '2026-05-29-beta.md' | grep -qE 'wave[[:space:]=]+2|W2' \
+  || { echo "FAIL: beta 가 wave 2 가 아님. got: $status_out"; exit 1; }
+echo "OK"
+
+echo ""
+echo "=== TEST 9: 한 wave child 실패 시 다음 wave 진입 차단 ==="
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-gate.md"
+seed_spec "$SPEC_DIR/2026-05-29-after.md" '["gate"]'
+# gate 가 BLOCKED 신호로 종료
+echo "BLOCKED" > "$SPEC_DIR/2026-05-29-gate.md.outcome"
 set +e
-WATCH_POLL_SECONDS=1 WATCH_TIMEOUT_SECONDS=2 \
-  dispatch watch_wave timeout-test child-z > /dev/null 2>&1
-result=$?
+out=$(dispatch start "$SPEC_DIR/2026-05-29-gate.md" "$SPEC_DIR/2026-05-29-after.md" 2>&1)
+rc=$?
 set -e
-[[ $result -eq 102 ]] || { echo "FAIL: timeout exit 102이 아님 (got: $result)"; exit 1; }
+[[ $rc -ne 0 ]] || { echo "FAIL: 실패 wave 인데 dispatch start 0 exit. got: $out"; exit 1; }
+[[ -f "$SPEC_DIR/2026-05-29-gate.md.started" ]] \
+  || { echo "FAIL: gate start 미호출"; exit 1; }
+[[ ! -f "$SPEC_DIR/2026-05-29-after.md.started" ]] \
+  || { echo "FAIL: 실패 후에도 after wave 진입함"; exit 1; }
 echo "OK"
 
 echo ""
-echo "=== TEST 11: cleanup — DONE 신호 있는 child만 정리 ==="
-seed_dag cleanup-test child-clean child-leave
-seed_worktree cleanup-test child-clean
-seed_worktree cleanup-test child-leave
-mark_done cleanup-test child-clean
-# child-leave는 DONE 없음
-
-dispatch cleanup cleanup-test > /dev/null 2>&1 || true
-[[ ! -d "$(nested_wt cleanup-test child-clean)" ]] \
-  || { echo "FAIL: DONE 있는 child-clean이 정리 안 됨"; exit 1; }
-[[ -d "$(nested_wt cleanup-test child-leave)" ]] \
-  || { echo "FAIL: DONE 없는 child-leave가 정리됨 (정리되면 안 됨)"; exit 1; }
-# PRD/DAG는 보존
-[[ -f "$PROJECT/milestones/cleanup-test/dispatch/DAG.md" ]] \
-  || { echo "FAIL: cleanup이 DAG.md를 삭제함 (보존해야 함)"; exit 1; }
+echo "=== TEST 10: stop <run-id> — running child 가 있으면 loop stop 위임 ==="
+# 새 run, mock 이 'terminal' 로 즉시 끝나는 대신 'running' 으로 유지되도록 ctl 사전 시드.
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-longrun.md"
+# outcome 을 sentinel 없이 두지만 mock 은 start 시 terminal 로 마킹하므로,
+# 여기서는 stop 의 행위만 검증: 시작 후 곧바로 stop 호출.
+out=$(dispatch start "$SPEC_DIR/2026-05-29-longrun.md" 2>&1)
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+# 강제로 running 상태로 가정하기 위해 ctl 덮어쓰기
+printf 'running|-\n' > "$SPEC_DIR/2026-05-29-longrun.md.ctl"
+dispatch stop "$run_id" >/dev/null 2>&1 || true
+[[ -f "$SPEC_DIR/2026-05-29-longrun.md.stopped" ]] \
+  || { echo "FAIL: stop 이 mock loop stop 호출 안 함"; exit 1; }
 echo "OK"
 
 echo ""
-echo "=== TEST 12: stop — 활성 child 없으면 안내 ==="
-seed_dag idle-test child-q
-seed_worktree idle-test child-q
-output=$(dispatch stop idle-test 2>&1)
-echo "$output" | grep -qE '없음|모두 이미' \
-  || { echo "FAIL: 활성 child 없음 안내가 없음. got: $output"; exit 1; }
-echo "OK"
-
-echo ""
-echo "=== TEST 13: logs — 파일 없으면 명확한 에러 ==="
+echo "=== TEST 11: watch <run-id> — 모두 종료 시 exit 0 ==="
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-wfoo.md"
+out=$(dispatch start "$SPEC_DIR/2026-05-29-wfoo.md" 2>&1)
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
 set +e
-output=$(dispatch logs nonexistent-milestone 2>&1)
-result=$?
+out=$(dispatch watch "$run_id" 2>&1); rc=$?
 set -e
-[[ $result -ne 0 ]] || { echo "FAIL: 없는 milestone logs가 0 exit"; exit 1; }
-echo "$output" | grep -q 'DISPATCH_LOG.md 없음' \
-  || { echo "FAIL: 명확한 에러 메시지 없음. got: $output"; exit 1; }
+[[ $rc -eq 0 ]] || { echo "FAIL: 모두 DONE 인데 watch exit $rc. got: $out"; exit 1; }
+echo "OK"
+
+echo ""
+echo "=== TEST 12: watch <run-id> — 실패 있으면 non-zero exit ==="
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-wfail.md"
+echo "BLOCKED" > "$SPEC_DIR/2026-05-29-wfail.md.outcome"
+set +e
+out=$(dispatch start "$SPEC_DIR/2026-05-29-wfail.md" 2>&1); rc=$?
+set -e
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+[[ -n "$run_id" ]] || { echo "FAIL: run-id 파싱 실패. got: $out"; exit 1; }
+set +e
+wout=$(dispatch watch "$run_id" 2>&1); wrc=$?
+set -e
+[[ $wrc -ne 0 ]] || { echo "FAIL: BLOCKED 인데 watch exit 0. got: $wout"; exit 1; }
+echo "OK"
+
+echo ""
+echo "=== TEST 13: --resume — 이미 done 인 child 는 재실행 안 함 ==="
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-r1.md"
+seed_spec "$SPEC_DIR/2026-05-29-r2.md" '["r1"]'
+out=$(dispatch start "$SPEC_DIR/2026-05-29-r1.md" "$SPEC_DIR/2026-05-29-r2.md" 2>&1)
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+# 모두 done 상태일 것. start 마커 시점 캡처.
+r1_started_time=$(stat -f %m "$SPEC_DIR/2026-05-29-r1.md.started" 2>/dev/null \
+                  || stat -c %Y "$SPEC_DIR/2026-05-29-r1.md.started" 2>/dev/null)
+r2_started_time=$(stat -f %m "$SPEC_DIR/2026-05-29-r2.md.started" 2>/dev/null \
+                  || stat -c %Y "$SPEC_DIR/2026-05-29-r2.md.started" 2>/dev/null)
+sleep 1
+dispatch start --resume "$run_id" >/dev/null 2>&1 || true
+r1_new=$(stat -f %m "$SPEC_DIR/2026-05-29-r1.md.started" 2>/dev/null \
+         || stat -c %Y "$SPEC_DIR/2026-05-29-r1.md.started" 2>/dev/null)
+r2_new=$(stat -f %m "$SPEC_DIR/2026-05-29-r2.md.started" 2>/dev/null \
+         || stat -c %Y "$SPEC_DIR/2026-05-29-r2.md.started" 2>/dev/null)
+[[ "$r1_started_time" == "$r1_new" ]] \
+  || { echo "FAIL: --resume 인데 done r1 이 재시작됨"; exit 1; }
+[[ "$r2_started_time" == "$r2_new" ]] \
+  || { echo "FAIL: --resume 인데 done r2 가 재시작됨"; exit 1; }
+echo "OK"
+
+echo ""
+echo "=== TEST 14: state 디렉토리 위치 — <project>/.dispatch/runs/<run-id>/ ==="
+[[ -d "$PROJECT/.dispatch/runs" ]] \
+  || { echo "FAIL: .dispatch/runs/ 디렉토리 없음"; exit 1; }
+# 적어도 하나의 run-id 디렉토리
+n=$(ls "$PROJECT/.dispatch/runs" 2>/dev/null | wc -l | tr -d ' ')
+[[ "$n" -ge 1 ]] || { echo "FAIL: run dir 없음"; exit 1; }
 echo "OK"
 
 echo ""

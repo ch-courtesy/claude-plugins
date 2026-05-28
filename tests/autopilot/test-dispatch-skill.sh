@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# autopilot:dispatch 스킬 패키지 구조 검증 테스트
+# autopilot:dispatch 스킬 패키지 구조 검증 — spec-list-driven 재설계 (v0.8+)
+#
+# 본 테스트는 SKILL.md·dispatch.sh·plugin.json 의 정적 계약을 검사한다.
+# 행위 계약은 test-dispatch-integration.sh.
 
 set -euo pipefail
 
@@ -7,110 +10,101 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/dispatch"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 DISPATCH_SH="$SKILL_DIR/references/dispatch.sh"
+PLUGIN_JSON="$REPO_ROOT/plugins/autopilot/.claude-plugin/plugin.json"
 
-echo "=== TEST 1: dispatch 스킬 디렉토리 구조 ==="
-for f in SKILL.md \
-         references/dispatch.sh \
-         references/dag-template.md \
-         references/decomposition-algorithm.md; do
+echo "=== TEST 1: 필수 파일 존재 ==="
+for f in SKILL.md references/dispatch.sh; do
   [[ -f "$SKILL_DIR/$f" ]] || { echo "FAIL: dispatch/$f 부재"; exit 1; }
   echo "OK: dispatch/$f"
 done
 
 echo ""
-echo "=== TEST 2: SKILL.md frontmatter (name: dispatch) ==="
-grep -q '^name: dispatch$' "$SKILL_MD" \
-  || { echo "FAIL: SKILL.md frontmatter에 'name: dispatch' 없음"; exit 1; }
-echo "OK: name: dispatch"
+echo "=== TEST 2: 폐기된 reference 파일 부재 ==="
+for f in references/dag-template.md \
+         references/decomposition-algorithm.md \
+         references/task-storage.sh; do
+  if [[ -e "$SKILL_DIR/$f" ]]; then
+    echo "FAIL: 폐기 파일 잔존: dispatch/$f"; exit 1
+  fi
+  echo "OK: 폐기 파일 부재 — dispatch/$f"
+done
 
 echo ""
-echo "=== TEST 3: SKILL.md description에 핵심 키워드 ==="
+echo "=== TEST 3: SKILL.md frontmatter name: dispatch ==="
+grep -q '^name: dispatch$' "$SKILL_MD" \
+  || { echo "FAIL: SKILL.md frontmatter 에 'name: dispatch' 없음"; exit 1; }
+echo "OK"
+
+echo ""
+echo "=== TEST 4: SKILL.md description 키워드 (SPEC·DAG·wave) ==="
 DESC_LINE=$(grep -m1 '^description:' "$SKILL_MD" || true)
 [[ -n "$DESC_LINE" ]] || { echo "FAIL: description 라인 없음"; exit 1; }
-for kw in 'PRD|prd' 'dispatch|분해' 'wave|병렬' 'milestone'; do
+for kw in 'SPEC|spec' 'DAG|wave' 'orchestrat|위임|병렬'; do
   echo "$DESC_LINE" | grep -qE "$kw" \
-    || { echo "FAIL: description에 '$kw' 키워드 없음. got: $DESC_LINE"; exit 1; }
+    || { echo "FAIL: description 에 '$kw' 키워드 없음. got: $DESC_LINE"; exit 1; }
 done
-echo "OK: 키워드 마커"
+echo "OK"
 
 echo ""
-echo "=== TEST 4: SKILL.md에 ops 서브커맨드 7종 명시 ==="
-for sub in 'start' 'status' 'stop' 'list' 'cleanup' 'logs' 'resume'; do
-  grep -qE "dispatch ${sub}|### ${sub}" "$SKILL_MD" \
-    || { echo "FAIL: SKILL.md에 '${sub}' 서브커맨드 안내 없음"; exit 1; }
+echo "=== TEST 5: SKILL.md 5 subcommand (start/list/status/stop/watch) ==="
+for sub in start list status stop watch; do
+  grep -qE "dispatch ${sub}\b|^### ${sub}\b|^## ${sub}\b" "$SKILL_MD" \
+    || { echo "FAIL: SKILL.md 에 '${sub}' subcommand 안내 없음"; exit 1; }
 done
-echo "OK: 서브커맨드 7종"
+echo "OK"
 
 echo ""
-echo "=== TEST 5: SKILL.md에 3 게이트 명시 ==="
-# 게이트 1: 분해 plan 승인, 2: spec 위임, 3: 최종 확인
-GATE_COUNT=$(grep -ciE '게이트|gate' "$SKILL_MD")
-[[ "$GATE_COUNT" -ge 3 ]] || { echo "FAIL: 게이트 언급 3회 미만 (got: $GATE_COUNT)"; exit 1; }
-echo "OK: 게이트 3종"
+echo "=== TEST 6: SKILL.md 에 .dispatch/runs/ 경로 명시 ==="
+grep -q '\.dispatch/runs/' "$SKILL_MD" \
+  || { echo "FAIL: SKILL.md 에 '.dispatch/runs/' 경로 명시 없음"; exit 1; }
+echo "OK"
 
 echo ""
-echo "=== TEST 6: SKILL.md에 sentinel watch 명시 ==="
-grep -qE 'sentinel|DONE|ESCALATION' "$SKILL_MD" \
-  || { echo "FAIL: SKILL.md에 sentinel watch (DONE/ESCALATION) 명시 없음"; exit 1; }
-echo "OK: sentinel watch"
+echo "=== TEST 7: SKILL.md 에 depends_on 명시 ==="
+grep -q 'depends_on' "$SKILL_MD" \
+  || { echo "FAIL: SKILL.md 에 'depends_on' 명시 없음"; exit 1; }
+echo "OK"
 
 echo ""
-echo "=== TEST 7: SKILL.md에 fail-fast 동작 명시 ==="
-grep -qE 'fail-fast|fail fast|loop stop' "$SKILL_MD" \
-  || { echo "FAIL: SKILL.md에 fail-fast/stop 동작 명시 없음"; exit 1; }
-echo "OK: fail-fast"
+echo "=== TEST 8: SKILL.md 에 PRD/milestones 단어 부재 ==="
+# PRD 는 단어 경계 내에서만 검사. "PRD-foo" 같은 합성은 잡힘. milestones/ 는 경로 패턴.
+if grep -Eq '(^|[^a-zA-Z])PRD([^a-zA-Z]|$)' "$SKILL_MD"; then
+  echo "FAIL: SKILL.md 에 PRD 단어 잔존"; exit 1
+fi
+if grep -q 'milestones/' "$SKILL_MD"; then
+  echo "FAIL: SKILL.md 에 milestones/ 경로 잔존"; exit 1
+fi
+echo "OK"
 
 echo ""
-echo "=== TEST 8: SKILL.md에 분해 하드 캡 명시 ==="
-grep -qE '≤ 8|≤ 20|하드 캡|hard cap' "$SKILL_MD" \
-  || { echo "FAIL: SKILL.md에 분해 하드 캡 명시 없음"; exit 1; }
-echo "OK: 하드 캡"
-
-echo ""
-echo "=== TEST 9: SKILL.md에 마커 거부자 역할 명시 ==="
-grep -q 'NEEDS CLARIFICATION' "$SKILL_MD" \
-  || { echo "FAIL: SKILL.md에 [NEEDS CLARIFICATION] 처리 명시 없음"; exit 1; }
-echo "OK: 마커 거부"
-
-echo ""
-echo "=== TEST 10: dispatch.sh 실행 권한 ==="
+echo "=== TEST 9: dispatch.sh 실행 권한 + bash syntax ==="
 [[ -x "$DISPATCH_SH" ]] || { echo "FAIL: dispatch.sh 실행 권한 없음"; exit 1; }
-echo "OK: 실행 권한"
-
-echo ""
-echo "=== TEST 11: dispatch.sh bash syntax 검사 ==="
 bash -n "$DISPATCH_SH" || { echo "FAIL: dispatch.sh syntax 오류"; exit 1; }
-echo "OK: syntax"
+echo "OK"
 
 echo ""
-echo "=== TEST 12: dispatch.sh subcommand 디스패처 ==="
-for sub in 'status' 'stop' 'list' 'cleanup' 'logs'; do
+echo "=== TEST 10: dispatch.sh subcommand 디스패처 (start/list/status/stop/watch) ==="
+for sub in start list status stop watch; do
   grep -qE "^[[:space:]]*${sub}\)" "$DISPATCH_SH" \
-    || { echo "FAIL: dispatch.sh에 subcommand 분기 '${sub})' 없음"; exit 1; }
+    || { echo "FAIL: dispatch.sh 에 '${sub})' 분기 없음"; exit 1; }
 done
-echo "OK: subcommand 디스패치"
+echo "OK"
 
 echo ""
-echo "=== TEST 13: dispatch.sh에 milestones/<m> 경로 처리 ==="
-grep -q 'milestones/' "$DISPATCH_SH" \
-  || { echo "FAIL: dispatch.sh에 milestones/ 경로 처리 없음"; exit 1; }
-echo "OK: milestones 경로"
+echo "=== TEST 11: dispatch.sh 금지 키워드 부재 ==="
+# 코어는 milestone·PRD·issue·label·task-storage·ESCALATION.md 와 결합하지 않는다.
+for pat in 'task-storage' 'gh pr' 'gh issue' 'LOOP_DONE_LABEL' 'ESCALATION\.md' 'milestones/'; do
+  if grep -Eq "$pat" "$DISPATCH_SH"; then
+    echo "FAIL: dispatch.sh 에 금지 키워드 잔존: $pat"; exit 1
+  fi
+  echo "OK: 금지 키워드 부재 — $pat"
+done
 
 echo ""
-echo "=== TEST 14: dag-template.md placeholder ==="
-DAG_TEMPLATE="$SKILL_DIR/references/dag-template.md"
-grep -qE '\{\{[a-z_]+\}\}' "$DAG_TEMPLATE" \
-  || { echo "FAIL: dag-template.md에 placeholder 없음"; exit 1; }
-echo "OK: dag-template placeholder"
+echo "=== TEST 12: plugin.json version >= 0.8.0 ==="
+grep -Eq '"version":[[:space:]]*"0\.(8|9|[1-9][0-9])\.' "$PLUGIN_JSON" \
+  || { echo "FAIL: plugin.json version 0.8.0+ 아님. got: $(grep version "$PLUGIN_JSON")"; exit 1; }
+echo "OK"
 
 echo ""
-echo "=== TEST 15: decomposition-algorithm.md에 3 조건 + 하드 캡 명시 ==="
-DECOMP_ALG="$SKILL_DIR/references/decomposition-algorithm.md"
-grep -qE '8|20' "$DECOMP_ALG" \
-  || { echo "FAIL: decomposition-algorithm.md에 하드 캡(8/20) 없음"; exit 1; }
-grep -qE 'fit|폐쇄성|격리|컨텍스트' "$DECOMP_ALG" \
-  || { echo "FAIL: decomposition-algorithm.md에 3 조건 신호 없음"; exit 1; }
-echo "OK: 분해 알고리즘"
-
-echo ""
-echo "=== 모든 dispatch 스킬 테스트 통과 ==="
+echo "=== 모든 dispatch 스킬 구조 테스트 통과 ==="
