@@ -315,6 +315,40 @@ jobs:
             exit 0
           fi
 
+          # Nested-shape + enum/type validation for every field the Submit and
+          # Post-comment steps downstream actually read. Top-level presence
+          # alone would let malformed payloads through and break the Submit
+          # step's jq string concatenations (codex finding on PR #231).
+          if ! jq -e '
+            (.eligibility | type == "object")
+            and (.eligibility.status | IN("reviewed","skipped","unavailable"))
+            and (.verdict | IN("approve","request_changes","comment","needs_context","unavailable"))
+            and (.summary | type == "string")
+            and (.confidence | IN("high","medium","low"))
+            and (.automation_safety | type == "object")
+            and (.automation_safety.may_approve | type == "boolean")
+            and (.automation_safety.may_request_changes | type == "boolean")
+            and (.reviewed_context | type == "object")
+            and (.reviewed_context.diff_truncated | type == "boolean")
+            and (.reviewed_context.base_sha | type == "string")
+            and (.reviewed_context.head_sha | type == "string")
+            and (.findings | type == "array")
+            and ([.findings[]? |
+                  (.severity | IN("blocking","non_blocking","question"))
+                  and (.confidence_score | type == "number")
+                  and (.file | type == "string")
+                  and (.title | type == "string")
+                  and (.body | type == "string")
+                  and (.suggestion | type == "string")
+                ] | all)
+            and (.context_requests | type == "array")
+            and ([.context_requests[]? | (.files | type == "array")] | all)
+          ' "$result.candidate" > /dev/null 2>&1; then
+            echo "Claude review output failed nested-shape validation." >&2
+            write_fallback "nested_shape_validation_error"
+            exit 0
+          fi
+
           mv "$result.candidate" "$result"
           jq empty "$result"
 
