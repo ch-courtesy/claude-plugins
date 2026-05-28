@@ -1,27 +1,18 @@
 # status 출력 형식
 
-`status [<task-id>]` 호출 시 다음 형식으로 출력.
-
-## 단일 task
+`status [<spec-path>]` 호출 시 다음 형식으로 출력. 인자가 있으면 해당 스펙 한 줄, 없으면 registry의 전체 실행.
 
 ```
-TASK-ID: <task-id>
-STATE: <prepared|running|idle|escalated|done|archived>
-WORKTREE: <path or N/A>
-LOCK PID: <pid or none>
-ITERATIONS: <count>
-LAST UPDATE: <ISO timestamp>
-NOTES: <한 줄 상태 요약>
+KEY            STATE     ITERS  LAST-UPDATE          SPEC
+9e02e26a1655   running   12     2026-05-27T14:22Z    docs/specs/2026-05-27-foo.md
+3f1461d10812   done      8      2026-05-26T10:15Z    docs/specs/2026-05-26-bar.md
+a1b2c3d4e5f6   blocked   5      2026-05-27T11:33Z    /abs/path/other-spec.md
 ```
 
-## 전체 (인자 없음)
+- `KEY`: 스펙 절대 경로 sha256 앞 12자 (실행 단위 고유 식별자).
+- `STATE`: `running`(lock PID 활성) · `stale`(lock 있으나 PID 비활성) · `done`(`.loop/DONE` 존재) · `blocked`(`.loop/BLOCKED` 존재) · `idle`(그 외).
+- `ITERS`: `.loop/iterations/`의 로그 수.
+- `LAST-UPDATE`: 최신 이터 로그 mtime (UTC).
+- `SPEC`: 스펙 파일 경로.
 
-```
-TASK-ID                STATE       ITERS  LAST-UPDATE
-my-task                running     12     2026-05-09T14:22Z
-another-task           prepared    -      -
-done-task              archived    8      2026-05-08T10:15Z
-escalated-task         escalated   5      2026-05-09T11:33Z (config-gap)
-```
-
-상태별 색상은 미적용 (text-only). ESCALATION 카테고리는 괄호 표시.
+상태별 색상은 미적용 (text-only).
