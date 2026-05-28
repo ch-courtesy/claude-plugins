@@ -10,6 +10,9 @@ allowed-tools:
   - Bash(bash * loop.sh list)
   - Bash(bash * loop.sh cleanup:*)
   - Bash(bash * loop.sh logs:*)
+  - Bash(bash * loop.sh env)
+  - Bash(bash * loop.sh gates)
+  - Bash(bash * loop.sh paths:*)
   - Bash(git -C * status:*)
   - Bash(git -C * log:*)
   - Bash(git -C * diff:*)
@@ -54,6 +57,10 @@ driver 동작: 스펙 파일 존재 검증, lock 획득, 작업 공간 준비(�
 ### status / stop / list / cleanup / logs
 
 각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. lock은 `<spec_dir>/.loop-lock`(워크트리 생성 전 획득해 race 보호), 노트·신호·이터 로그는 `<spec_dir>/.worktree/.loop/` 안에 둔다. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 DONE 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
+
+### env / gates / paths
+
+driver 인터페이스의 self-emit 단일 출처: `loop.sh env`(환경 변수+기본값) · `loop.sh gates`(객관 게이트 목록) · `loop.sh paths <spec>`(해당 스펙의 계산된 경로). 지침은 본문에 중복 열거하지 않고 이 subcommand를 가리킨다.
 
 ## references
 

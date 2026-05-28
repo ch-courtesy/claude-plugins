@@ -19,7 +19,7 @@
 ```text
 <spec_dir>/
 ├── <spec>.md            # 스펙 파일 (정체성)
-├── .loop-lock           # 실행 중에만 (PID, noclobber 원자 획득; 워크트리 생성 전 획득)
+├── .loop-lock           # 실행 중에만 (PID; 워크트리 생성 전 획득)
 └── .worktree/           # 작업 공간 (git worktree, info/exclude)
     ├── CLAUDE.md        # 헌법 복사본
     └── .loop/
@@ -48,30 +48,20 @@ loop.sh logs    <spec-path> [--iter N]
 
 ## 운영
 
-- `stop`은 SIGTERM 후 lock 해제. 작업 공간은 유지된다.
-- `cleanup`은 DONE 확인 후(또는 `--force`) 워크트리를 제거한다(워크트리가 detached HEAD라 별도 브랜치 삭제는 없음). 실행 중이면 `--force`가 SIGTERM 후 SIGKILL 가능.
+- `stop`은 실행을 정지한다(작업 공간 유지).
+- `cleanup`은 DONE 확인 후 워크트리를 제거한다(detached HEAD라 브랜치 삭제는 없음). 실행 중이거나 DONE이 없으면 `--force`로 강제 정리.
 - **플랜 게이트**: 1회차 계획 단계에서 플랜 형성 불가면 워커가 BLOCKED(`category: spec-gap`)를 쓰고, driver는 "스펙 강화 필요" 에러(exit 3)로 종료한다. 스펙을 보강한 뒤 재시작한다.
 - **차단 해제**: BLOCKED 신호를 읽고 원인 보정 후 BLOCKED 파일을 삭제한 뒤 재시작한다.
-- `list`는 작업트리를 스캔해 실행을 열거한다(중앙 registry 없음).
+- stale `.loop-lock`(PID 비활성)은 다음 `start`/`stop`에서 자동 정리된다.
 
 ## 환경 변수
 
-| 변수 | 플래그 | 기본 | 의미 |
-|---|---|---|---|
-| `MAX_ITERATIONS` | `--max-iterations` | 30 | 이터 상한 |
-| `WALL_CLOCK_MINUTES` | `--wall-clock-minutes` | 120 | 시간 상한 |
-| `CLAUDE_FAIL_STREAK_LIMIT` | - | 3 | claude 비정상 exit 연속 허용 |
+설정 가능한 환경 변수와 기본값은 `loop.sh env` 로 확인.
 
 ## 객관 게이트
 
-driver는 이터 후 다음 위반을 halt + BLOCKED(`category: gate-violation`) 처리한다: 이터/시간 상한, 테스트 약화, 의존성 manifest 변경, scope 위반, suppressor 추가, secrets(gitleaks 설치 시), `fix:symptom` streak, 변경 파일 진동.
-
-`test_paths`는 테스트 경로 override, `test_sweep_paths`는 합법적 테스트 rename/cleanup/delete sweep 예외. sweep 밖 기존 테스트 변경은 계속 보호한다.
+게이트 목록·SPEC frontmatter override(`test_paths`·`test_sweep_paths`) 는 `loop.sh gates` 로 확인. 위반 시 halt + BLOCKED(`category: gate-violation`).
 
 ## 의존성
 
 `bash` 4+, `git`, `yq`(mikefarah), `claude`, `sha256sum` 또는 `shasum`, 선택 `gitleaks`.
-
-## 락
-
-SIGTERM/SIGINT는 자식 프로세스 종료 후 lock 해제. SIGKILL은 orphan 가능성이 있으므로 피한다. stale lock(PID 비활성)은 다음 start/stop에서 자동 정리한다.

@@ -686,19 +686,70 @@ cmd_logs() {
   done
 }
 
+# ----- subcommand: env (환경 변수 + 기본값을 단일 출처로 노출) -----
+cmd_env() {
+  cat <<'EOF'
+start 동작을 조정하는 환경 변수:
+
+  MAX_ITERATIONS             기본 30      이터 상한 (--max-iterations 로 override)
+  WALL_CLOCK_MINUTES         기본 120     시간 상한 (--wall-clock-minutes 로 override)
+  CLAUDE_FAIL_STREAK_LIMIT   기본 3       claude 비정상 exit 연속 허용 횟수
+EOF
+}
+
+# ----- subcommand: gates (객관 게이트 목록을 단일 출처로 노출) -----
+cmd_gates() {
+  cat <<'EOF'
+이터 후 driver 가 검사하는 객관 게이트 (위반 시 halt + BLOCKED 신호 생성):
+
+  - 이터 상한 도달               (MAX_ITERATIONS)
+  - 시간 상한 도달               (WALL_CLOCK_MINUTES)
+  - claude 비정상 exit 연속      (CLAUDE_FAIL_STREAK_LIMIT)
+  - 테스트 약화                  (기존 테스트 파일 변경 감지)
+  - 의존성 manifest 변경
+  - SPEC scope 위반              (scope.include 밖 변경)
+  - Suppressor 신규 추가         (noqa·@ts-ignore·eslint-disable·#pragma warning disable)
+  - secrets 의심                 (gitleaks 설치 시)
+  - fix:symptom streak           (2회 연속)
+  - 변경 파일 진동               (최근 4 커밋이 두 상태로 토글)
+
+SPEC frontmatter override:
+  test_paths        기본 테스트 경로 휴리스틱 대체
+  test_sweep_paths  합법적 테스트 rename/cleanup/delete sweep 화이트리스트
+EOF
+}
+
+# ----- subcommand: paths (스펙의 계산된 경로를 단일 출처로 노출) -----
+cmd_paths() {
+  local input="$1"
+  [[ -z "$input" ]] && die "사용: $0 paths <spec-path>"
+  [[ -f "$input" ]] || die "스펙 파일을 찾을 수 없음: $input"
+  compute_paths "$input"
+  cat <<EOF
+SPEC_PATH   $SPEC_PATH
+SPEC_DIR    $SPEC_DIR
+WT          $WT
+LOOP_DIR    $LOOP_DIR
+LOCK_FILE   $LOCK_FILE
+EOF
+}
+
 # ----- 사용법 -----
 usage() {
   cat >&2 <<'EOF'
 autopilot loop 드라이버 (스펙 파일 기반 로컬 자율 실행기)
 
 Subcommands:
-  start  <spec-path>   검증·플랜 게이트 후 워크트리·락 생성 + 루프 시작
-                       [--max-iterations N] [--wall-clock-minutes N]
-  status [<spec-path>] 상태 조회 (인자 없으면 전체)
-  stop   <spec-path>   실행 중 정지
-  list                 전체 실행 상태
-  cleanup <spec-path>  완료(.loop/DONE) 후 워크트리·브랜치 정리 [--force]
-  logs   <spec-path>   노트·이터 로그 조회 [--iter N]
+  start   <spec-path>   검증·플랜 게이트 후 워크트리·락 생성 + 루프 시작
+                        [--max-iterations N] [--wall-clock-minutes N]
+  status  [<spec-path>] 상태 조회 (인자 없으면 전체)
+  stop    <spec-path>   실행 중 정지
+  list                  전체 실행 상태
+  cleanup <spec-path>   완료(.loop/DONE) 후 워크트리·브랜치 정리 [--force]
+  logs    <spec-path>   노트·이터 로그 조회 [--iter N]
+  env                   환경 변수 + 기본값
+  gates                 객관 게이트 목록 (halt 트리거)
+  paths   <spec-path>   해당 스펙의 계산된 경로 (진단·문서 교차 검증용)
 
 자세한 내용: references/operational-guide.md
 EOF
@@ -716,6 +767,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     list)    cmd_list ;;
     cleanup) cmd_cleanup "$@" ;;
     logs)    cmd_logs "$@" ;;
+    env)     cmd_env ;;
+    gates)   cmd_gates ;;
+    paths)   cmd_paths "${1:-}" ;;
     *) echo "알 수 없는 subcommand: $SUBCOMMAND" >&2; usage ;;
   esac
 fi
