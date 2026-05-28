@@ -109,7 +109,17 @@ for k in eligibility verdict summary confidence reviewed_context automation_safe
 done
 grep -q 'missing required fields' "$WORKFLOW" \
   || fail "필수 필드 누락 진단 메시지 부재"
-ok "check 2b: .result 파싱 + required 필드 검증 + 실패 시 합성 fallback"
+grep -qF 'nested_shape_validation_error' "$WORKFLOW" \
+  || fail "nested-shape validation 실패 fallback reason 부재 — top-level keys만 검증 시 Submit 단계가 깨질 수 있음"
+grep -qF 'automation_safety.may_approve | type == "boolean"' "$WORKFLOW" \
+  || fail "automation_safety.may_approve boolean 타입 검증 부재 (Submit 단계가 boolean 비교에 의존)"
+grep -qF 'reviewed_context.diff_truncated | type == "boolean"' "$WORKFLOW" \
+  || fail "reviewed_context.diff_truncated boolean 타입 검증 부재"
+grep -qF 'IN("blocking","non_blocking","question")' "$WORKFLOW" \
+  || fail "findings[].severity enum 검증 부재 (Submit 단계가 severity 매칭에 의존)"
+grep -qF 'IN("approve","request_changes","comment","needs_context","unavailable")' "$WORKFLOW" \
+  || fail "verdict enum 검증 부재"
+ok "check 2b: .result 파싱 + top-level + nested-shape 검증 + 실패 시 합성 fallback"
 
 echo ""
 echo "=== check 2c: targeted context follow-up ==="
