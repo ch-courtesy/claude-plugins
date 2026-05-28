@@ -127,6 +127,17 @@ is_secondary_worktree() {
   grep -q 'gitdir:.*/\.git/worktrees/' "$dotgit" 2>/dev/null
 }
 
+# 보조 worktree 모드에서 WT·LOOP_DIR 를 현재 worktree top-level 로 재정의.
+# compute_paths 의 기본값(<SPEC_DIR>/.worktree)을 덮어쓴다. cmd_start·cmd_paths
+# 등 보조 worktree 분기를 동일하게 처리해야 하는 곳에서 호출.
+# 반환: 0 = 보조 worktree(재정의 함), 1 = 주 작업트리(변경 없음).
+apply_secondary_override() {
+  is_secondary_worktree || return 1
+  WT="$(git rev-parse --show-toplevel)"
+  LOOP_DIR="$WT/.loop"
+  return 0
+}
+
 # ----- 동시성 락 -----
 acquire_lock() {
   # stale lock 정리 (PID 비활성 시)
@@ -443,18 +454,12 @@ cmd_start() {
   MAX_ITERATIONS="${max_iterations_override:-${MAX_ITERATIONS:-30}}"
   WALL_CLOCK_MINUTES="${wall_clock_minutes_override:-${WALL_CLOCK_MINUTES:-120}}"
 
-  # 보조 worktree 안에서 호출 시 nested 생성 생략, 현재 cwd 사용.
-  local is_secondary=0
-  is_secondary_worktree && is_secondary=1
-
   # 1) lock 먼저 획득 — 워크트리 생성 race 보호. LOCK_FILE 은 SPEC_DIR/.loop-lock 이라
   #    워크트리 존재와 무관하게 잡을 수 있다(noclobber 원자성).
   acquire_lock
 
-  # 2) 워크스페이스 준비
-  if (( is_secondary == 1 )); then
-    WT="$(git rev-parse --show-toplevel)"
-    LOOP_DIR="$WT/.loop"
+  # 2) 워크스페이스 준비. 보조 worktree 안에서 호출 시 nested 생성 생략, 현재 cwd 사용.
+  if apply_secondary_override; then
     echo "[$(now_iso)] 보조 worktree 감지 — nested 생성 생략. 작업 공간: $WT"
     mkdir -p "$LOOP_DIR/iterations"
     [[ -f "$LOOP_DIR/BASE_SHA" ]] || git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" 2>/dev/null || true
@@ -770,12 +775,16 @@ cmd_paths() {
   [[ -z "$input" ]] && die "사용: $0 paths <spec-path>"
   [[ -f "$input" ]] || die "스펙 파일을 찾을 수 없음: $input"
   compute_paths "$input"
+  # cmd_start 와 동일하게 보조 worktree override 적용 — 실제 start 가 쓸 경로 표시.
+  local secondary="no"
+  apply_secondary_override && secondary="yes"
   cat <<EOF
 SPEC_PATH   $SPEC_PATH
 SPEC_DIR    $SPEC_DIR
 WT          $WT
 LOOP_DIR    $LOOP_DIR
 LOCK_FILE   $LOCK_FILE
+SECONDARY   $secondary
 EOF
 }
 
