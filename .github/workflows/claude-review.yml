@@ -314,6 +314,8 @@ jobs:
                     and (.body | type == "string")
                     and (.suggestion | type == "string")
                     and (.duplicate_of | (type == "string" or . == null))
+                    and (.line | (type == "number" or . == null))
+                    and (.start_line | (type == "number" or . == null))
                     and (if .comment_type == "inline" then ((.line | type == "number") or (.start_line | type == "number")) else true end)
                   ] | all)
               and (.context_requests | type == "array")
