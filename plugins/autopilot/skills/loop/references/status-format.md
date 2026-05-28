@@ -1,6 +1,6 @@
 # status 출력 형식
 
-`status [<spec-path>]` 호출 시 다음 형식으로 출력. 인자가 있으면 해당 스펙 한 줄, 없으면 registry의 전체 실행.
+`status [<spec-path>]` 호출 시 다음 형식으로 출력. 인자가 있으면 해당 스펙 한 줄, 없으면 작업트리를 스캔해 전체 실행을 열거.
 
 ```
 KEY            STATE     ITERS  LAST-UPDATE          SPEC

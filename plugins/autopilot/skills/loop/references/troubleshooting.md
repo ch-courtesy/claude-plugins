@@ -10,7 +10,7 @@
 
 ### spec-gap
 
-모호한 수용 기준·verify 부적합·scope 미흡, 또는 1회차 플랜 형성 불가("스펙 강화 필요"). 필요한 결정 확인 → 스펙 보정(`Skill(skill: "spec", args: "<task>")` 또는 스펙 파일 직접 수정) → `.loop/BLOCKED` 삭제 → 재시작.
+모호한 수용 기준·verify 부적합·scope 미흡, 또는 1회차 플랜 형성 불가("스펙 강화 필요"). 필요한 결정 확인 → 스펙 보정 → BLOCKED 신호 파일 삭제 → 재시작.
 
 ### architecture-gap
 
@@ -22,7 +22,7 @@ API rate limit·네트워크·외부 서비스 장애. 일시 문제면 대기 �
 
 ### gate-violation
 
-driver의 객관 게이트 위반 자동 정지. `.loop/iterations/` 최근 로그로 원인 파악 후 스펙(scope·verify) 조정 또는 `.loop/memory.md`에 메모.
+driver의 객관 게이트 위반 자동 정지. 최근 이터 로그로 원인 파악 후 스펙(scope·verify) 조정 또는 노트에 메모.
 
 ### other
 

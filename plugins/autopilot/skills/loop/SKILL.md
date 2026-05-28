@@ -1,6 +1,6 @@
 ---
 name: loop
-description: 스펙 파일 기반 로컬 자율 수행 루프(랄프 루프) 운영 인터페이스. 임의의 스펙 파일 경로를 받아 격리 작업 공간에서 자율 구현하고 DONE/BLOCKED 파일로 신호한다. start/status/stop/list/cleanup/logs 서브커맨드로 lifecycle을 관리한다. SPEC 작성은 별도 'autopilot:spec' 스킬을 사용. forge/PR·task 연동은 외부 지침(rules/orchestration/forge-integration.md)과 호출 레이어 책임.
+description: 스펙 파일 기반 로컬 자율 수행 루프(랄프 루프) 운영 인터페이스. 스펙 파일 경로를 받아 격리 작업 공간에서 자율 구현하고 DONE/BLOCKED 파일로 신호한다. start/status/stop/list/cleanup/logs 서브커맨드로 lifecycle을 관리한다.
 allowed-tools:
   - Monitor
   - Read
@@ -20,7 +20,7 @@ allowed-tools:
 
 # loop
 
-스펙 파일 하나를 받아 로컬에서 자율 구현하는 최소 실행기다. 정체성은 **스펙 파일의 절대 경로**이며, task-id·task 저장소·feat 브랜치·milestones 트리 개념이 없다. 작업 공간은 스펙 파일 디렉토리 아래 `.worktree`(이미 보조 worktree 안이면 현재 cwd), 이터 간 기억은 `<WT>/.loop/memory.md`, 완료·차단 신호는 `<WT>/.loop/DONE`·`BLOCKED` 파일이다. forge/PR·task·orchestration 연동은 코어에 없다 — `rules/orchestration/forge-integration.md`와 호출 레이어가 담당한다.
+스펙 파일 하나를 받아 로컬에서 자율 구현하는 최소 실행기다. 정체성은 **스펙 파일의 절대 경로**다. 작업 공간은 스펙 파일 디렉토리 아래 `.worktree`(이미 보조 worktree 안이면 현재 cwd), 이터 간 노트는 작업 공간 안에, 완료·차단은 **DONE·BLOCKED 신호 파일**로 표현한다.
 
 워커 헌법은 `references/constitution.md`, 셸 드라이버는 `references/loop.sh`가 단일 출처다.
 
@@ -28,7 +28,7 @@ allowed-tools:
 
 `Skill(skill: "loop", args: "<subcommand> [<args>]")`
 
-SPEC 작성은 `autopilot:spec`에서 한다: `Skill(skill: "spec", args: "<자연어 task 설명>")`. loop은 spec 스킬 산출물뿐 아니라 **임의의 스펙 파일**(예: 다른 스킬이 만든 스펙)을 경로로 받는다.
+loop은 어떤 도구가 만든 스펙이든 **임의의 스펙 파일 경로**를 받는다.
 
 ## Subcommands
 
@@ -36,11 +36,11 @@ SPEC 작성은 `autopilot:spec`에서 한다: `Skill(skill: "spec", args: "<자�
 
 반드시 `Bash(bash $SKILL_DIR/references/loop.sh start <spec-path> [...flags], run_in_background: true)`로 실행한다. 동기 실행은 Monitor 가설을 막으므로 금지.
 
-driver 동작: 스펙 파일 존재 검증, 미해결 마커(`[NEEDS CLARIFICATION]`)·placeholder 부재 검사, lock 획득, 작업 공간 준비(주 작업트리면 `<spec_dir>/.worktree` git worktree 생성 + 헌법을 CLAUDE.md로 복사; 보조 worktree 안이면 현재 cwd 사용), 이터레이션 루프. 매 이터는 새 `claude --print` 프로세스이며 스펙을 stdin으로 받는다.
+driver 동작: 스펙 파일 존재 검증, lock 획득, 작업 공간 준비(주 작업트리면 `<spec_dir>/.worktree` git worktree 생성 + 헌법을 CLAUDE.md로 복사; 보조 worktree 안이면 현재 cwd 사용), 이터레이션 루프. 매 이터는 새 `claude --print` 프로세스다.
 
 #### 플랜 게이트 (스펙 강화 필요)
 
-이터 계획 단계에서 스펙으로부터 실행 계획을 형성할 수 없다고 판단하면, 워커는 `.loop/BLOCKED`에 `category: spec-gap`과 사유를 적고 정지한다. driver는 **1회차의 spec-gap BLOCKED**를 "스펙 강화 필요" 에러(exit 3)로 표면화한다. 해결: `autopilot:spec`으로 스펙을 보강한 뒤 재시작.
+이터 계획 단계에서 스펙으로부터 실행 계획을 형성할 수 없다고 판단하면, 워커는 BLOCKED 신호에 `category: spec-gap`과 사유를 적고 정지한다. driver는 **1회차의 spec-gap BLOCKED**를 "스펙 강화 필요" 에러(exit 3)로 표면화한다. 스펙을 보강한 뒤 재시작한다.
 
 #### Monitor
 
@@ -48,12 +48,12 @@ driver 동작: 스펙 파일 존재 검증, 미해결 마커(`[NEEDS CLARIFICATI
 
 ### 완료·차단 신호
 
-- **DONE**: 이터가 완료를 판정하면 워커가 `<WT>/.loop/DONE`을 남긴다. driver는 정상 종료하며 작업 공간을 보존한다. 후속 통합(PR 등)은 코어가 수행하지 않는다 — `rules/orchestration/forge-integration.md`와 호출 레이어 책임.
-- **BLOCKED**: 이터가 차단을 판정하면 워커가 `<WT>/.loop/BLOCKED`(첫 줄 `category:`, 본문에 사유)를 남긴다. driver는 내용을 출력하고 정지한다. 객관 게이트 위반 시 driver가 직접 `category: gate-violation` BLOCKED를 쓴다.
+- **DONE**: 이터가 완료를 판정하면 워커가 DONE 신호 파일을 남긴다. driver는 정상 종료하며 작업 공간을 보존한다.
+- **BLOCKED**: 이터가 차단을 판정하면 워커가 BLOCKED 신호 파일(첫 줄 `category:`, 본문에 사유)을 남긴다. driver는 내용을 출력하고 정지한다. 객관 게이트 위반 시 driver가 직접 `category: gate-violation` BLOCKED를 쓴다.
 
 ### status / stop / list / cleanup / logs
 
-각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. 실행 registry는 `<git-common-dir>/autopilot-loops/`에 둔다(start~cleanup 사이 `<key>.run`, 실행 중 `<key>.lock`). `cleanup`은 `.loop/DONE` 확인 후(또는 `--force`) 워크트리·임시 브랜치를 제거한다.
+각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. 상태·lock은 스펙 디렉토리에 둔다(실행 중 `<spec_dir>/.loop.lock`, 작업 공간 `<spec_dir>/.worktree`). `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 DONE 확인 후(또는 `--force`) 워크트리·임시 브랜치를 제거한다.
 
 ## references
 
@@ -73,7 +73,6 @@ driver 동작: 스펙 파일 존재 검증, 미해결 마커(`[NEEDS CLARIFICATI
 ## 규칙
 
 - 명시된 subcommand만 실행한다. 다른 subcommand를 자동 추론하지 않는다.
-- 작업 공간(`<spec_dir>/.worktree`)·registry·신호 파일 외 파일은 만들지 않는다.
+- 작업 공간(`<spec_dir>/.worktree`)·lock·신호 파일 외 파일은 만들지 않는다.
 - subcommand exit code를 그대로 던지지 말고 사용자에게 요약한다.
-- forge/PR·task·orchestration 연동은 코어에 없다. 그 책임은 `rules/orchestration/forge-integration.md`와 호출 레이어에 있다.
 - 프로젝트별 constitution override는 아직 미지원이다.
