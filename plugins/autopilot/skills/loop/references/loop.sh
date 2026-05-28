@@ -9,10 +9,9 @@
 #   bash .../loop/references/loop.sh cleanup <spec-path> [--force]
 #   bash .../loop/references/loop.sh logs   <spec-path> [--iter N]
 #
-# 정체성: 스펙 파일의 절대 경로. task-id·task 저장소·feat 브랜치·milestones 트리 개념 없음.
+# 정체성: 스펙 파일의 절대 경로.
 # 작업 공간: <spec 디렉토리>/.worktree (보조 worktree 안에서 호출되면 현재 cwd 사용).
-# 이터 간 기억: <WT>/.loop/memory.md. 완료·차단 신호: <WT>/.loop/DONE·BLOCKED 파일.
-# forge/PR·task·orchestration 연동은 코어에 없음 — rules/orchestration/forge-integration.md 참조.
+# 이터 간 노트: <WT>/.loop/notes.md. 완료·차단 신호: <WT>/.loop/DONE·BLOCKED 파일.
 #
 # 환경 변수:
 #   MAX_ITERATIONS         이터 상한 (기본: 30)
@@ -26,8 +25,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ----- 워커 claude 세션 도구 권한 -----
 # 무인 이터 워커는 `--dangerously-skip-permissions`로 실행되므로 별도 allow-list를
-# 코어에서 강제하지 않는다. forge/PR 같은 외부 연동 도구는 코어 워커가 사용하지 않으며,
-# 그 연동은 외부 지침(rules/orchestration/forge-integration.md)과 호출 레이어 책임이다.
+# 코어에서 강제하지 않는다.
 
 # ----- 헬퍼 -----
 die() {
@@ -89,11 +87,9 @@ on_signal_exit() {
 #   SPEC_DIR         스펙 디렉토리 절대 경로
 #   KEY              spec_key(SPEC_PATH)
 #   WT               작업 공간 (<SPEC_DIR>/.worktree 또는 보조 worktree cwd)
-#   LOOP_DIR         <WT>/.loop (메모리·신호·메타)
+#   LOOP_DIR         <WT>/.loop (노트·신호·메타)
 #   BRANCH           loop/<KEY> (워크트리 임시 브랜치)
-#   STATE_ROOT       <git-common-dir>/autopilot-loops (registry 루트)
-#   RUN_FILE         <STATE_ROOT>/<KEY>.run (start~cleanup 사이 존재)
-#   LOCK_FILE        <STATE_ROOT>/<KEY>.lock (실행 중에만 존재)
+#   LOCK_FILE        <SPEC_DIR>/.loop.lock (실행 중에만 존재; 스펙 디렉토리에 colocate)
 compute_paths() {
   local input="$1"
   [[ -n "$input" ]] || die "스펙 파일 경로가 필요합니다."
@@ -115,17 +111,13 @@ compute_paths() {
   SPEC_DIR="$(dirname "$SPEC_PATH")"
   KEY="$(spec_key "$SPEC_PATH")"
 
-  # git-common-dir 기준 registry. 스펙 디렉토리가 git 저장소 안이어야 함.
-  local gcd
-  gcd="$(git -C "$SPEC_DIR" rev-parse --git-common-dir 2>/dev/null)" \
+  # 스펙 디렉토리가 git 저장소 안이어야 함 (워크트리 생성·게이트에 필요).
+  git -C "$SPEC_DIR" rev-parse --git-common-dir >/dev/null 2>&1 \
     || die "스펙 파일이 git 저장소 안에 있어야 합니다: $SPEC_PATH"
-  [[ "$gcd" != /* ]] && gcd="$(cd "$SPEC_DIR" && cd "$gcd" && pwd)"
-  STATE_ROOT="$gcd/autopilot-loops"
-  RUN_FILE="$STATE_ROOT/$KEY.run"
-  LOCK_FILE="$STATE_ROOT/$KEY.lock"
 
   WT="$SPEC_DIR/.worktree"
   LOOP_DIR="$WT/.loop"
+  LOCK_FILE="$SPEC_DIR/.loop.lock"   # 스펙 디렉토리에 colocate (워크트리 생성 전 획득)
   BRANCH="loop/$KEY"
 }
 
@@ -141,7 +133,6 @@ is_secondary_worktree() {
 
 # ----- 동시성 락 -----
 acquire_lock() {
-  mkdir -p "$STATE_ROOT"
   if [[ -f "$LOCK_FILE" ]]; then
     local old_pid
     old_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
@@ -152,9 +143,7 @@ acquire_lock() {
     rm -f "$LOCK_FILE"
   fi
   echo "$$" > "$LOCK_FILE"
-  # registry run 엔트리 (start~cleanup 사이 유지)
-  printf '%s\n%s\n' "$SPEC_PATH" "$WT" > "$RUN_FILE"
-  # EXIT trap으로 lock 해제 (run 엔트리는 cleanup까지 유지)
+  # EXIT trap으로 lock 해제. 작업 공간(.worktree/)은 cleanup까지 유지.
   trap 'rm -f "$LOCK_FILE"' EXIT
   trap on_signal_exit INT TERM
 }
@@ -344,7 +333,7 @@ category: gate-violation
 트리거: 객관 게이트 위반 — $reason
 
 드라이버가 매 이터 후 게이트를 검사한 결과 위반이 감지되어 자동 정지함.
-처리: 가설 점검 후 스펙(scope·verify) 조정, 또는 .loop/memory.md에 후속 메모 누적 후
+처리: 가설 점검 후 스펙(scope·verify) 조정, 또는 .loop/notes.md에 후속 노트 누적 후
 BLOCKED 파일 삭제하고 재시작. 최근 이터 로그: $LOOP_DIR/iterations/
 EOF
   exit 1
@@ -448,13 +437,9 @@ cmd_start() {
 
   compute_paths "$input"
 
-  # 스펙 미해결 마커·placeholder 검증 (락 전).
-  local spec_content; spec_content=$(cat "$SPEC_PATH")
-  if grep -q '\[NEEDS CLARIFICATION' <<< "$spec_content"; then
-    die "스펙에 미해결 [NEEDS CLARIFICATION] 마커가 있습니다 — 스펙 강화 필요: $SPEC_PATH"
-  fi
-  local placeholders; placeholders=$(grep -oE '\{\{[^}]+\}\}' <<< "$spec_content" 2>/dev/null || true)
-  [[ -n "$placeholders" ]] && die "채워지지 않은 placeholder가 있습니다: $(echo "$placeholders" | tr '\n' ' ')"
+  # 스펙 내용 검증은 하지 않는다 — 특정 스펙 작성 도구의 규약(마커·placeholder)에
+  # 비결합. 스펙으로 실행 계획을 형성할 수 있는지는 이터 계획 단계의 플랜 게이트가
+  # 판정한다(불가 시 1회차 spec-gap BLOCKED → "스펙 강화 필요").
 
   MAX_ITERATIONS="${max_iterations_override:-${MAX_ITERATIONS:-30}}"
   WALL_CLOCK_MINUTES="${wall_clock_minutes_override:-${WALL_CLOCK_MINUTES:-120}}"
@@ -483,6 +468,9 @@ cmd_start() {
     mkdir -p "$LOOP_DIR/iterations"
   fi
 
+  # 스펙 경로 기록 — list 스캔이 작업 공간에서 정체성을 복원하는 데 사용.
+  printf '%s\n' "$SPEC_PATH" > "$LOOP_DIR/SPEC_PATH"
+
   # 헌법을 워크트리 CLAUDE.md로 복사 + 게이트 false-positive 방지(추적 분리·exclude).
   cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
     || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
@@ -492,7 +480,7 @@ cmd_start() {
   local gcd; gcd="$(git -C "$WT" rev-parse --git-common-dir)"
   [[ "$gcd" != /* ]] && gcd="$WT/$gcd"
   mkdir -p "$gcd/info"; touch "$gcd/info/exclude"
-  for pat in "CLAUDE.md" ".loop/"; do
+  for pat in "CLAUDE.md" ".loop/" ".worktree/" ".loop.lock"; do
     grep -qxF "$pat" "$gcd/info/exclude" 2>/dev/null || echo "$pat" >> "$gcd/info/exclude"
   done
 
@@ -507,7 +495,7 @@ cmd_start() {
     if [[ $iter_status -eq 100 ]]; then
       echo "[$(now_iso)] 완료 신호(DONE) 감지. 정상 종료."
       echo "작업 공간 보존: $WT"
-      echo "후속(통합·PR)은 호출 레이어 책임 — rules/orchestration/forge-integration.md 참조."
+      echo "후속(통합·PR 등)은 코어가 수행하지 않는다 — 호출 레이어 책임."
       echo "정리: $0 cleanup $SPEC_PATH"
       exit 0
     fi
@@ -533,13 +521,15 @@ cmd_start() {
 }
 
 # ----- status 한 줄 출력 헬퍼 -----
+# 인자: 스펙 디렉토리(.worktree·.loop.lock 이 위치하는 곳). 상태는 그 안의
+# 로컬 파일에서만 도출한다(중앙 registry 없음).
 print_run_status() {
-  local run_file="$1"
-  local spec wt key state iters last
-  spec=$(sed -n '1p' "$run_file" 2>/dev/null)
-  wt=$(sed -n '2p' "$run_file" 2>/dev/null)
-  key=$(basename "$run_file" .run)
-  local lock="$STATE_ROOT/$key.lock"
+  local spec_dir="$1"
+  local wt="$spec_dir/.worktree"
+  local lock="$spec_dir/.loop.lock"
+  local spec key state iters last ref epoch
+  spec="$(cat "$wt/.loop/SPEC_PATH" 2>/dev/null || echo "$spec_dir/?")"
+  key="$(spec_key "$spec")"
   state="idle"
   if [[ -f "$lock" ]]; then
     local pid; pid=$(cat "$lock" 2>/dev/null || echo "")
@@ -548,13 +538,11 @@ print_run_status() {
   elif [[ -f "$wt/.loop/BLOCKED" ]]; then state="blocked"
   fi
   iters="-"
-  if [[ -d "$wt/.loop/iterations" ]]; then
-    iters=$(find "$wt/.loop/iterations" -name "*.log" -type f 2>/dev/null | wc -l | tr -d ' ')
-  fi
+  [[ -d "$wt/.loop/iterations" ]] && iters=$(find "$wt/.loop/iterations" -name "*.log" -type f 2>/dev/null | wc -l | tr -d ' ')
   last="-"
-  local ref; ref=$(find "$wt/.loop/iterations" -name "*.log" -type f 2>/dev/null | sort | tail -1)
+  ref=$(find "$wt/.loop/iterations" -name "*.log" -type f 2>/dev/null | sort | tail -1)
   if [[ -n "$ref" && -f "$ref" ]]; then
-    local epoch; epoch=$(stat -f %m "$ref" 2>/dev/null || stat -c %Y "$ref" 2>/dev/null || echo "")
+    epoch=$(stat -f %m "$ref" 2>/dev/null || stat -c %Y "$ref" 2>/dev/null || echo "")
     [[ -n "$epoch" ]] && last=$(date -u -r "$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null || date -u -d "@$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null || echo "-")
   fi
   printf "%-14s %-9s %-6s %-20s %s\n" "$key" "$state" "$iters" "$last" "$spec"
@@ -565,23 +553,27 @@ cmd_status() {
   local input="${1:-}"
   if [[ -n "$input" ]]; then
     compute_paths "$input"
-    [[ -f "$RUN_FILE" ]] || { echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"; return 0; }
+    [[ -d "$WT" || -f "$LOCK_FILE" ]] || { echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"; return 0; }
     printf "%-14s %-9s %-6s %-20s %s\n" "KEY" "STATE" "ITERS" "LAST-UPDATE" "SPEC"
-    print_run_status "$RUN_FILE"
+    print_run_status "$SPEC_DIR"
     return 0
   fi
-  # 전체: registry 스캔. SPEC_DIR이 없으니 cwd 기준 git-common-dir.
-  local gcd
-  gcd="$(git rev-parse --git-common-dir 2>/dev/null)" || die "git 저장소 안에서 실행해야 합니다."
-  [[ "$gcd" != /* ]] && gcd="$(cd "$gcd" && pwd)"
-  STATE_ROOT="$gcd/autopilot-loops"
-  if [[ ! -d "$STATE_ROOT" ]] || ! ls "$STATE_ROOT"/*.run >/dev/null 2>&1; then
+  # 전체: repo 작업트리를 스캔해 .loop.lock·.worktree/.loop 을 가진 스펙 디렉토리를
+  # 모은다(중앙 registry 없음 — 축소된 best-effort 열거). .git 하위는 prune.
+  local top; top="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || die "git 저장소 안에서 실행해야 합니다."
+  local dirs
+  dirs="$( {
+      find "$top" -type d -name .git -prune -o -type f -name '.loop.lock' -print 2>/dev/null | sed 's#/.loop.lock$##'
+      find "$top" -type d -name .git -prune -o -type d -path '*/.worktree/.loop' -print 2>/dev/null | sed 's#/.worktree/.loop$##'
+    } | sort -u | grep -v '^$' || true )"
+  if [[ -z "$dirs" ]]; then
     echo "실행 기록이 없습니다. 새 실행: $0 start <spec-path>"
     return 0
   fi
   printf "%-14s %-9s %-6s %-20s %s\n" "KEY" "STATE" "ITERS" "LAST-UPDATE" "SPEC"
-  local rf
-  for rf in "$STATE_ROOT"/*.run; do print_run_status "$rf"; done
+  local d
+  while IFS= read -r d; do [[ -n "$d" ]] && print_run_status "$d"; done <<< "$dirs"
 }
 
 cmd_list() { cmd_status ""; }
@@ -656,7 +648,7 @@ cmd_cleanup() {
     # 임시 브랜치 삭제 (loop/<key>).
     git -C "$SPEC_DIR" branch -D "$BRANCH" >/dev/null 2>&1 || true
   fi
-  rm -f "$RUN_FILE"
+  rm -f "$LOCK_FILE"
   echo "정리 완료: $SPEC_PATH"
 }
 
@@ -677,9 +669,9 @@ cmd_logs() {
     [[ -f "$log" ]] || die "이터 로그 없음: $log"
     cat "$log"; return 0
   fi
-  # 인자 없으면 메모리 + 최근 이터 로그 목록.
-  echo "===== memory ($LOOP_DIR/memory.md) ====="
-  [[ -f "$LOOP_DIR/memory.md" ]] && cat "$LOOP_DIR/memory.md" || echo "(없음)"
+  # 인자 없으면 노트 + 최근 이터 로그 목록.
+  echo "===== notes ($LOOP_DIR/notes.md) ====="
+  [[ -f "$LOOP_DIR/notes.md" ]] && cat "$LOOP_DIR/notes.md" || echo "(없음)"
   echo
   echo "===== iterations ====="
   find "$LOOP_DIR/iterations" -name "*.log" -type f 2>/dev/null | sort \
@@ -701,7 +693,7 @@ Subcommands:
   stop   <spec-path>   실행 중 정지
   list                 전체 실행 상태
   cleanup <spec-path>  완료(.loop/DONE) 후 워크트리·브랜치 정리 [--force]
-  logs   <spec-path>   메모리·이터 로그 조회 [--iter N]
+  logs   <spec-path>   노트·이터 로그 조회 [--iter N]
 
 자세한 내용: references/operational-guide.md
 EOF

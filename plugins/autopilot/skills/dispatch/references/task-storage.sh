@@ -1,4 +1,5 @@
 # source-only — do not execute directly
+# shellcheck shell=bash
 # task-storage.sh — task 저장소(GitHub Issue) 라벨 검출 헬퍼.
 #
 # dispatch.sh 가 source 하는 헬퍼. loop v0.7.0 spec-path 재설계로 loop 코어에서
