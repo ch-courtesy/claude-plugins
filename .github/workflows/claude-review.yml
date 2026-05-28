@@ -454,10 +454,13 @@ jobs:
                           marker].join('\n');
 
             // Inline review comments — path/line/body (start_line for multi-line range).
+            // The hidden marker lets us later identify self-owned threads so we
+            // can resolve them when the corresponding source has been fixed.
+            const inlineMarker = '<!-- claude-review-inline -->';
             const inlineComments = inlineFindings.map((f) => {
               const c = {
                 path: f.file,
-                body: `**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}`,
+                body: `**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}\n\n${inlineMarker}`,
                 side: 'RIGHT',
                 line: f.line,
               };
@@ -537,6 +540,51 @@ jobs:
                 } catch (e) {
                   core.warning(`Failed to dismiss prior review #${old.id}: ${e.status || ''} ${e.message}`);
                 }
+              }
+
+              // Resolve inline review threads whose source has been fixed.
+              // Condition: GitHub flagged the thread as outdated (the source
+              // line moved/changed) AND the latest verdict is approve (we
+              // consider the issue resolved). We only touch self-owned threads
+              // — identified by the hidden inline marker we embed above.
+              try {
+                const threadResp = await github.graphql(`
+                  query($owner:String!, $repo:String!, $pr:Int!) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $pr) {
+                        reviewThreads(first: 100) {
+                          nodes {
+                            id
+                            isResolved
+                            isOutdated
+                            comments(first: 1) {
+                              nodes { author { login } body }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }`, { owner, repo, pr: pull_number });
+                const threads = threadResp.repository?.pullRequest?.reviewThreads?.nodes || [];
+                const myInlineThreads = threads.filter((t) =>
+                  t.isOutdated && !t.isResolved &&
+                  t.comments?.nodes?.[0]?.author?.login === botLogin &&
+                  (t.comments.nodes[0].body || '').includes(inlineMarker));
+                for (const t of myInlineThreads) {
+                  try {
+                    await github.graphql(`
+                      mutation($id:ID!) {
+                        resolveReviewThread(input: {threadId: $id}) {
+                          thread { id isResolved }
+                        }
+                      }`, { id: t.id });
+                    core.info(`Resolved outdated self inline thread ${t.id}.`);
+                  } catch (e) {
+                    core.warning(`Failed to resolve thread ${t.id}: ${e.message}`);
+                  }
+                }
+              } catch (e) {
+                core.warning(`Failed to fetch review threads for resolve: ${e.message}`);
               }
             }
 

@@ -249,6 +249,17 @@ grep -qF 'Superseded by later review' "$WORKFLOW" \
   || fail "verdict!=approve 일 때 옛 approve managed comment supersede 분기 부재 (stale approve 가 PR 대화에 남음)"
 grep -qF 'Superseded stale managed comment' "$WORKFLOW" \
   || fail "supersede core.info log 부재"
+# auto-resolve outdated self inline threads on verdict=approve
+grep -qF "<!-- claude-review-inline -->" "$WORKFLOW" \
+  || fail "inline comment 의 self-identification marker (claude-review-inline) 부재"
+grep -qF 'resolveReviewThread' "$WORKFLOW" \
+  || fail "GraphQL resolveReviewThread mutation 호출 부재 — outdated inline thread 자동 resolve 안 됨"
+grep -qF 'isOutdated' "$WORKFLOW" \
+  || fail "isOutdated 조건 검사 부재 (소스가 변경된 thread 만 resolve 해야 함)"
+grep -qF 'isResolved' "$WORKFLOW" \
+  || fail "isResolved 조건 검사 부재 (이미 resolved thread skip)"
+grep -qF 'reviewThreads(first: 100)' "$WORKFLOW" \
+  || fail "GraphQL reviewThreads 쿼리 부재"
 ok "check 7: createReview + inline comments + safety gates + COMMENT fallback"
 
 echo ""
