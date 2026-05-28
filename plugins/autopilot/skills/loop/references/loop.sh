@@ -145,7 +145,9 @@ apply_secondary_override() {
 resolve_actual_wt() {
   local wtfile="$SPEC_DIR/.loop-wt"
   [[ -f "$wtfile" ]] || return 1
-  local actual; actual=$(tr -d '[:space:]' < "$wtfile" 2>/dev/null)
+  # 끝 개행만 제거 — 경로 내부 공백·탭은 보존(spec/worktree 경로에 공백 가능).
+  local actual=""
+  IFS= read -r actual < "$wtfile" 2>/dev/null || actual=""
   [[ -n "$actual" ]] || return 1
   WT="$actual"
   LOOP_DIR="$WT/.loop"
@@ -534,7 +536,8 @@ print_run_status() {
   local spec_dir="$1"
   local wt=""
   if [[ -f "$spec_dir/.loop-wt" ]]; then
-    wt=$(tr -d '[:space:]' < "$spec_dir/.loop-wt" 2>/dev/null)
+    # 끝 개행만 제거 — 경로 내부 공백 보존(공백 있는 worktree 경로 호환).
+    IFS= read -r wt < "$spec_dir/.loop-wt" 2>/dev/null || wt=""
   fi
   [[ -z "$wt" ]] && wt="$spec_dir/.worktree"
   local lock="$spec_dir/.loop-lock"
