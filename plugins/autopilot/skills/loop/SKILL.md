@@ -1,6 +1,6 @@
 ---
 name: loop
-description: 스펙 파일 기반 로컬 자율 수행 루프(랄프 루프) 운영 인터페이스. 스펙 파일 경로를 받아 격리 작업 공간에서 자율 구현하고 DONE/BLOCKED 파일로 신호한다. start/status/stop/list/cleanup/logs 서브커맨드로 lifecycle을 관리한다.
+description: 스펙 파일 기반 로컬 자율 수행 루프(랄프 루프) 운영 인터페이스. 스펙 파일 경로를 받아 격리 작업 공간에서 자율 구현하고 .loop/signals/ 디렉토리의 파일로 terminal 상태를 표현한다. start/status/stop/list/cleanup/logs 서브커맨드로 lifecycle을 관리한다.
 allowed-tools:
   - Monitor
   - Read
@@ -14,7 +14,6 @@ allowed-tools:
   - Bash(bash * loop.sh gates)
   - Bash(bash * loop.sh paths:*)
   - Bash(bash * loop.sh deps)
-  - Bash(bash * loop.sh signals)
   - Bash(git -C * status:*)
   - Bash(git -C * log:*)
   - Bash(git -C * diff:*)
@@ -25,7 +24,7 @@ allowed-tools:
 
 # loop
 
-스펙 파일 하나를 받아 로컬에서 자율 구현하는 최소 실행기다. 정체성은 **스펙 파일의 절대 경로**다. 작업 공간은 스펙 파일 디렉토리 아래 `.worktree`(이미 보조 worktree 안이면 현재 cwd), 이터 간 노트는 작업 공간 안에, 완료·차단은 **DONE·BLOCKED 신호 파일**로 표현한다.
+스펙 파일 하나를 받아 로컬에서 자율 구현하는 최소 실행기다. 정체성은 **스펙 파일의 절대 경로**다. 작업 공간은 스펙 파일 디렉토리 아래 `.worktree`(이미 보조 worktree 안이면 현재 cwd), 이터 간 노트는 작업 공간 안에, **terminal 의도는 `.loop/signals/` 디렉토리**에 워커가 파일을 만들어 표현한다. driver 는 `signals/` 비어있는지만 본다.
 
 워커 헌법은 `references/constitution.md`, 셸 드라이버는 `references/loop.sh`가 단일 출처다.
 
@@ -45,19 +44,19 @@ driver 동작: 스펙 파일 존재 검증, lock 획득, 작업 공간 준비(�
 
 #### Monitor
 
-기본 ON. `--no-monitor`가 없으면 start 직후 `Monitor`를 붙인다. 기본 필터는 빈 줄과 단독 dot만 제외하고 stdout raw 라인을 통과시킨다. `--events-only`는 SKILL.md 차원 옵션이며 `loop.sh`로 전달하지 않는다 — 핵심 이벤트(`이터 #`, HALT, WARN, FAIL, ERROR, rate limit, claude 비정상, DONE/BLOCKED 신호)만 알림한다. `--no-monitor`가 함께 있으면 `--no-monitor`가 우선한다.
+기본 ON. `--no-monitor`가 없으면 start 직후 `Monitor`를 붙인다. 기본 필터는 빈 줄과 단독 dot만 제외하고 stdout raw 라인을 통과시킨다. `--events-only`는 SKILL.md 차원 옵션이며 `loop.sh`로 전달하지 않는다 — 핵심 이벤트(`이터 #`, HALT, WARN, FAIL, ERROR, rate limit, claude 비정상, terminal 신호 감지)만 알림한다. `--no-monitor`가 함께 있으면 `--no-monitor`가 우선한다.
 
 ### 신호 계약
 
-워커 신호(DONE/BLOCKED) 경로·category 분류·driver 반응(예: 1회차 `spec-gap` BLOCKED → exit 3 "스펙 강화 필요")의 단일 출처: `loop.sh signals`. 동일 텍스트가 start 시 워커의 CLAUDE.md 끝에 append 된다.
+워커 계약(노트·`.loop/signals/` 디렉토리 규칙·권장 컨벤션 DONE/BLOCKED + category 값)의 SoT 는 `references/constitution.md §작업 매체`. driver 는 `signals/` 가 비어있는지만 보고 내용을 파싱하지 않는다. 호출자는 종료 후 `signals/` 내용을 직접 검사한다.
 
 ### status / stop / list / cleanup / logs
 
-각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. lock은 `<spec_dir>/.loop-lock`(워크트리 생성 전 획득해 race 보호), 노트·신호·이터 로그는 `<spec_dir>/.worktree/.loop/` 안에 둔다. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 DONE 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
+각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. lock은 `<spec_dir>/.loop-lock`(워크트리 생성 전 획득해 race 보호), 노트·signals·이터 로그는 `<spec_dir>/.worktree/.loop/` 안에 둔다. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 `signals/` 비어있지 않음 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
 
-### env / gates / paths / deps / signals
+### env / gates / paths / deps
 
-driver 인터페이스의 self-emit 단일 출처: `loop.sh env`(환경 변수) · `loop.sh gates`(객관 게이트) · `loop.sh paths <spec>`(계산된 경로) · `loop.sh deps`(의존성 + 설치 상태) · `loop.sh signals`(워커 신호·driver 반응 계약). 지침은 본문에 중복 열거하지 않고 이 subcommand 를 가리킨다.
+driver 인터페이스의 self-emit 단일 출처: `loop.sh env`(환경 변수) · `loop.sh gates`(객관 게이트) · `loop.sh paths <spec>`(계산된 경로) · `loop.sh deps`(의존성 + 설치 상태). 지침은 본문에 중복 열거하지 않고 이 subcommand 를 가리킨다.
 
 ## references
 

@@ -11,7 +11,7 @@
 #
 # 정체성: 스펙 파일의 절대 경로.
 # 작업 공간: <spec 디렉토리>/.worktree (보조 worktree 안에서 호출되면 현재 cwd 사용).
-# 이터 간 노트: <WT>/.loop/notes.md. 완료·차단 신호: <WT>/.loop/DONE·BLOCKED 파일.
+# 이터 간 노트: <WT>/.loop/notes.md. 워커 terminal 신호: <WT>/.loop/signals/ 디렉토리.
 #
 # 환경 변수:
 #   MAX_ITERATIONS         이터 상한 (기본: 30)
@@ -322,7 +322,9 @@ elapsed_minutes() {
   echo $(( ( $(date +%s) - START_TIME ) / 60 ))
 }
 
-# ----- halt (게이트 위반 시 자동 BLOCKED 신호) -----
+# ----- halt (게이트 위반 시 driver 자체 정지) -----
+# driver 는 워커 신호 파일을 만들지 않는다. stash + stderr + exit 1 만 한다.
+# 워커 컨벤션(signals/)에 영향을 주지 않음 → SoT 가 constitution 에 머무름.
 halt() {
   local reason="$1"
   echo "[$(now_iso)] HALT: $reason" >&2
@@ -335,22 +337,13 @@ halt() {
   if [[ $stash_after -gt $stash_before ]]; then
     echo "[$(now_iso)] WARN: 미커밋 변경이 stash에 보관됨 — 복구: cd $WT && git stash pop" >&2
   fi
-
-  mkdir -p "$LOOP_DIR"
-  cat > "$LOOP_DIR/BLOCKED" <<EOF
-category: gate-violation
-스펙: $SPEC_PATH
-트리거: 객관 게이트 위반 — $reason
-
-드라이버가 매 이터 후 게이트를 검사한 결과 위반이 감지되어 자동 정지함.
-처리: 가설 점검 후 스펙(scope·verify) 조정, 또는 .loop/notes.md에 후속 노트 누적 후
-BLOCKED 파일 삭제하고 재시작. 최근 이터 로그: $LOOP_DIR/iterations/
-EOF
+  echo "[$(now_iso)] 진단: $LOOP_DIR/iterations/ 최근 로그 참조" >&2
   exit 1
 }
 
 # ----- 이터레이션 호출 -----
-# 반환: 100=DONE, 101=BLOCKED, 0=계속. 게이트 위반 시 halt(exit 1).
+# 반환: 100 = signals/ 에 파일 있음(워커 terminal), 0 = 계속. 게이트 위반 시 halt(exit 1).
+# driver 는 signals/ 파일 이름·내용을 보지 않는다(워커 컨벤션은 constitution SoT).
 iterate() {
   local n
   n=$(($(find "$LOOP_DIR/iterations" -name "*.log" -type f 2>/dev/null | wc -l | tr -d ' ') + 1))
@@ -391,9 +384,8 @@ iterate() {
     CLAUDE_FAIL_STREAK=0
   fi
 
-  # 종료·차단 신호: 워크트리 .loop/ 파일.
-  [[ -f "$LOOP_DIR/DONE" ]] && return 100
-  [[ -f "$LOOP_DIR/BLOCKED" ]] && return 101
+  # 워커 terminal: signals/ 디렉토리가 비어있지 않으면 정지(파일 이름·내용 미파싱).
+  [[ -n "$(ls "$LOOP_DIR/signals" 2>/dev/null)" ]] && return 100
 
   # 객관 게이트
   if [[ "$start_hash_tests" != "no-files" ]] \
@@ -448,8 +440,8 @@ cmd_start() {
   compute_paths "$input"
 
   # 스펙 내용 검증은 하지 않는다 — 특정 스펙 작성 도구의 규약(마커·placeholder)에
-  # 비결합. 스펙으로 실행 계획을 형성할 수 있는지는 이터 계획 단계의 플랜 게이트가
-  # 판정한다(불가 시 1회차 spec-gap BLOCKED → "스펙 강화 필요").
+  # 비결합. 스펙 강화 필요 여부는 워커가 signals/ 에 차단 신호로 표현하고, 호출자가
+  # 그 본문을 보고 판단한다(driver 는 signals/ 내용 미파싱).
 
   MAX_ITERATIONS="${max_iterations_override:-${MAX_ITERATIONS:-30}}"
   WALL_CLOCK_MINUTES="${wall_clock_minutes_override:-${WALL_CLOCK_MINUTES:-120}}"
@@ -461,29 +453,27 @@ cmd_start() {
   # 2) 워크스페이스 준비. 보조 worktree 안에서 호출 시 nested 생성 생략, 현재 cwd 사용.
   if apply_secondary_override; then
     echo "[$(now_iso)] 보조 worktree 감지 — nested 생성 생략. 작업 공간: $WT"
-    mkdir -p "$LOOP_DIR/iterations"
+    mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
     [[ -f "$LOOP_DIR/BASE_SHA" ]] || git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" 2>/dev/null || true
   elif [[ ! -d "$WT" ]]; then
     echo "[$(now_iso)] 워크트리 생성: $WT (detached HEAD)"
     git -C "$SPEC_DIR" worktree add --detach "$WT" HEAD \
       || die "git worktree add 실패: $WT"
-    mkdir -p "$LOOP_DIR/iterations"
+    mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
     git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" \
       || die "BASE SHA 캡처 실패: $LOOP_DIR/BASE_SHA"
   else
     echo "[$(now_iso)] 기존 워크트리 사용: $WT"
-    mkdir -p "$LOOP_DIR/iterations"
+    mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
   fi
 
   # 3) 스펙 경로 기록 — list 스캔이 작업 공간에서 정체성을 복원하는 데 사용.
   printf '%s\n' "$SPEC_PATH" > "$LOOP_DIR/SPEC_PATH"
 
-  # 4) 헌법을 워크트리 CLAUDE.md로 복사 + 신호 계약(SoT)을 append.
-  #    constitution 은 워커 방법론, cmd_signals 출력은 신호·driver 반응 계약.
-  #    워커는 CLAUDE.md 하나에 둘 다 받는다.
+  # 4) 헌법을 워크트리 CLAUDE.md로 복사. 워커 계약(노트·signals/ 컨벤션 등)의 SoT 는
+  #    constitution.md 이므로 별도 append 없이 cp 만으로 충분하다.
   cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
     || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
-  { printf '\n\n'; cmd_signals; } >> "$WT/CLAUDE.md"
   if git -C "$WT" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
     git -C "$WT" update-index --skip-worktree CLAUDE.md || true
   fi
@@ -505,25 +495,13 @@ cmd_start() {
     set +e; iterate; local iter_status=$?; set -e
 
     if [[ $iter_status -eq 100 ]]; then
-      echo "[$(now_iso)] 완료 신호(DONE) 감지. 정상 종료."
+      echo "[$(now_iso)] terminal 신호 감지 (signals/ 비어있지 않음). 정상 종료."
       echo "작업 공간 보존: $WT"
+      echo "signals/ 내용 ($LOOP_DIR/signals):"
+      ls -1 "$LOOP_DIR/signals" 2>/dev/null | sed 's/^/  /'
       echo "후속(통합·PR 등)은 코어가 수행하지 않는다 — 호출 레이어 책임."
       echo "정리: $0 cleanup $SPEC_PATH"
       exit 0
-    fi
-    if [[ $iter_status -eq 101 ]]; then
-      local category=""
-      category=$(sed -n 's/^category:[[:space:]]*//p' "$LOOP_DIR/BLOCKED" 2>/dev/null | head -1)
-      # 플랜 게이트: 1회차 spec-gap BLOCKED는 "스펙 강화 필요"로 표면화.
-      if [[ $n -eq 1 && "$category" == "spec-gap" ]]; then
-        echo "[$(now_iso)] 스펙 강화 필요 — 1회차 계획 단계에서 플랜 형성 불가 (spec-gap)." >&2
-        echo "----- BLOCKED -----" >&2
-        cat "$LOOP_DIR/BLOCKED" >&2
-        exit 3
-      fi
-      echo "[$(now_iso)] 차단 신호(BLOCKED) 감지. 사람 처리 대기." >&2
-      cat "$LOOP_DIR/BLOCKED" >&2
-      exit 1
     fi
     if [[ $iter_status -ne 0 ]]; then exit "$iter_status"; fi
 
@@ -542,12 +520,19 @@ print_run_status() {
   local spec key state iters last ref epoch
   spec="$(cat "$wt/.loop/SPEC_PATH" 2>/dev/null || echo "$spec_dir/?")"
   key="$(spec_key "$spec")"
+  # signals/ 내용물(ls 그대로) — driver 는 의미 파싱 안 함, 표시만.
+  local files="-"
+  if [[ -d "$wt/.loop/signals" ]]; then
+    local ls_out
+    ls_out=$(ls -1 "$wt/.loop/signals" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+    [[ -n "$ls_out" ]] && files="$ls_out"
+  fi
   state="idle"
   if [[ -f "$lock" ]]; then
     local pid; pid=$(cat "$lock" 2>/dev/null || echo "")
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then state="running"; else state="stale"; fi
-  elif [[ -f "$wt/.loop/DONE" ]]; then state="done"
-  elif [[ -f "$wt/.loop/BLOCKED" ]]; then state="blocked"
+  elif [[ "$files" != "-" ]]; then
+    state="terminal"
   fi
   iters="-"
   last="-"
@@ -559,7 +544,7 @@ print_run_status() {
       [[ -n "$epoch" ]] && last=$(date -u -r "$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null || date -u -d "@$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null || echo "-")
     fi
   fi
-  printf "%-14s %-9s %-6s %-20s %s\n" "$key" "$state" "$iters" "$last" "$spec"
+  printf "%-14s %-9s %-20s %-6s %-20s %s\n" "$key" "$state" "$files" "$iters" "$last" "$spec"
 }
 
 # ----- subcommand: status -----
@@ -568,7 +553,7 @@ cmd_status() {
   if [[ -n "$input" ]]; then
     compute_paths "$input"
     [[ -d "$WT" || -f "$LOCK_FILE" ]] || { echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"; return 0; }
-    printf "%-14s %-9s %-6s %-20s %s\n" "KEY" "STATE" "ITERS" "LAST-UPDATE" "SPEC"
+    printf "%-14s %-9s %-20s %-6s %-20s %s\n" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
     print_run_status "$SPEC_DIR"
     return 0
   fi
@@ -644,9 +629,9 @@ cmd_cleanup() {
     rm -f "$LOCK_FILE"
   fi
 
-  # 완료 확인 — DONE 파일.
-  if [[ ! -f "$WT/.loop/DONE" && $force -eq 0 ]]; then
-    die "완료 신호(.loop/DONE)가 없습니다. --force로 강제 정리 가능: $0 cleanup $SPEC_PATH --force"
+  # terminal 확인 — signals/ 디렉토리에 파일이 하나라도 있어야 함(이름·내용 미파싱).
+  if [[ -z "$(ls "$WT/.loop/signals" 2>/dev/null)" && $force -eq 0 ]]; then
+    die "terminal 신호가 없습니다 (signals/ 비어 있음). --force 로 강제 정리 가능: $0 cleanup $SPEC_PATH --force"
   fi
 
   # path guard
@@ -682,16 +667,20 @@ cmd_logs() {
     [[ -f "$log" ]] || die "이터 로그 없음: $log"
     cat "$log"; return 0
   fi
-  # 인자 없으면 노트 + 최근 이터 로그 목록.
+  # 인자 없으면 노트 + 이터 로그 목록 + signals/ 내 파일 본문.
   echo "===== notes ($LOOP_DIR/notes.md) ====="
   [[ -f "$LOOP_DIR/notes.md" ]] && cat "$LOOP_DIR/notes.md" || echo "(없음)"
   echo
   echo "===== iterations ====="
   find "$LOOP_DIR/iterations" -name "*.log" -type f 2>/dev/null | sort \
     || echo "(없음)"
-  for sig in DONE BLOCKED; do
-    [[ -f "$LOOP_DIR/$sig" ]] && { echo; echo "===== $sig ====="; cat "$LOOP_DIR/$sig"; }
-  done
+  # signals/ 안 파일들 — 이름·개수는 워커 컨벤션이므로 driver 는 그대로 dump.
+  if [[ -d "$LOOP_DIR/signals" ]]; then
+    local sig
+    while IFS= read -r sig; do
+      [[ -n "$sig" ]] && { echo; echo "===== signals/$(basename "$sig") ====="; cat "$sig"; }
+    done < <(find "$LOOP_DIR/signals" -maxdepth 1 -type f 2>/dev/null | sort)
+  fi
 }
 
 # ----- subcommand: env (환경 변수 + 기본값을 단일 출처로 노출) -----
@@ -708,7 +697,7 @@ EOF
 # ----- subcommand: gates (객관 게이트 목록을 단일 출처로 노출) -----
 cmd_gates() {
   cat <<'EOF'
-이터 후 driver 가 검사하는 객관 게이트 (위반 시 halt + BLOCKED 신호 생성):
+이터 후 driver 가 검사하는 객관 게이트 (위반 시 halt → stash + stderr + exit 1):
 
   - 이터 상한 도달               (MAX_ITERATIONS)
   - 시간 상한 도달               (WALL_CLOCK_MINUTES)
@@ -724,27 +713,6 @@ cmd_gates() {
 SPEC frontmatter override:
   test_paths        기본 테스트 경로 휴리스틱 대체
   test_sweep_paths  합법적 테스트 rename/cleanup/delete sweep 화이트리스트
-EOF
-}
-
-# ----- subcommand: signals (워커 신호 계약 + driver 반응을 단일 출처로 노출) -----
-# 출력은 cmd_start 가 CLAUDE.md 끝에 append 해서 워커도 동일 텍스트를 받는다.
-cmd_signals() {
-  cat <<'EOF'
-## 신호 계약 (driver SoT)
-
-신호 파일 (`.worktree/.loop/` 안):
-- `notes.md` — 이터 간 노트. 매 콜드 스타트에 읽고 끝에 갱신.
-- `DONE` — 완료 판정 시 워커가 생성. 본문 = 완료 요약.
-- `BLOCKED` — 차단 판정 시 워커가 생성. 첫 줄 `category: <c>`, 이어서 사유·시도·필요 결정.
-
-BLOCKED `category` 값: `config-gap` | `spec-gap` | `architecture-gap` | `environment-gap` | `gate-violation` | `other`.
-
-driver 반응:
-- DONE 감지 → 정상 종료, 작업 공간 보존(cleanup 이 정리).
-- BLOCKED 감지 → 내용 출력 후 정지.
-- 1회차 `spec-gap` BLOCKED → "스펙 강화 필요" 에러로 표면화, exit 3.
-- 객관 게이트 위반 → driver 가 직접 BLOCKED(`category: gate-violation`) 생성.
 EOF
 }
 
@@ -799,17 +767,26 @@ Subcommands:
   status  [<spec-path>] 상태 조회 (인자 없으면 전체)
   stop    <spec-path>   실행 중 정지
   list                  전체 실행 상태
-  cleanup <spec-path>   완료(.loop/DONE) 후 워크트리·브랜치 정리 [--force]
+  cleanup <spec-path>   terminal(signals/ non-empty) 후 워크트리 정리 [--force]
   logs    <spec-path>   노트·이터 로그 조회 [--iter N]
   env                   환경 변수 + 기본값
   gates                 객관 게이트 목록 (halt 트리거)
   paths   <spec-path>   해당 스펙의 계산된 경로 (진단·문서 교차 검증용)
   deps                  필수·선택 의존성 + 설치 상태
-  signals               워커 신호 계약 + driver 반응 (start 시 CLAUDE.md 에 append)
+
+Exit codes (driver 자체):
+  0     정상 종료 (signals/ 가 비어있지 않음 — 워커 terminal 의도)
+  1     halt (객관 게이트 위반, claude 비정상 streak, 환경/락 에러 등)
+  2     사용법 에러 (잘못된 인자)
+  130   SIGTERM/SIGINT
+
+signals/ 내 파일의 의미(DONE/BLOCKED/category 등)는 워커 컨벤션 — 호출자가
+종료 후 .loop/signals/ 를 검사해 outcome 을 판별한다. driver 는 파싱하지 않는다.
+워커 컨벤션 SoT: references/constitution.md §작업 매체.
 
 자세한 내용: references/operational-guide.md
 EOF
-  exit 1
+  exit 2
 }
 
 # ----- 디스패처 (실행 모드일 때만; source 시 함수만 노출) -----
@@ -827,7 +804,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     gates)   cmd_gates ;;
     paths)   cmd_paths "${1:-}" ;;
     deps)    cmd_deps ;;
-    signals) cmd_signals ;;
     *) echo "알 수 없는 subcommand: $SUBCOMMAND" >&2; usage ;;
   esac
 fi

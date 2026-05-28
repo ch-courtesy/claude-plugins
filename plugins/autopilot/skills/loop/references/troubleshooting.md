@@ -1,16 +1,16 @@
 # ESCALATION troubleshooting (optimized)
 
-차단은 `.loop/BLOCKED` 파일(첫 줄 `category:`)로 신호된다. 차단 해제의 정식 절차는 원인 보정 후 `.loop/BLOCKED` 파일을 삭제하고 재시작하는 것이다.
+차단은 `.loop/signals/BLOCKED` 파일(첫 줄 `category:`)로 신호된다. 차단 해제의 정식 절차는 원인 보정 후 `.loop/signals/BLOCKED` 파일을 삭제하고 재시작하는 것이다.
 
 ## category 별 처리
 
 ### config-gap
 
-도구 미설치·자격증명·env var 누락. missing item 확인 → 환경 조정 → `.loop/BLOCKED` 삭제 → 재시작.
+도구 미설치·자격증명·env var 누락. missing item 확인 → 환경 조정 → `.loop/signals/BLOCKED` 삭제 → 재시작.
 
 ### spec-gap
 
-모호한 수용 기준·verify 부적합·scope 미흡, 또는 1회차 플랜 형성 불가("스펙 강화 필요"). 필요한 결정 확인 → 스펙 보정 → BLOCKED 신호 파일 삭제 → 재시작.
+모호한 수용 기준·verify 부적합·scope 미흡, 또는 1회차 플랜 형성 불가("스펙 강화 필요"). 필요한 결정 확인 → 스펙 보정 → `.loop/signals/BLOCKED` 삭제 → 재시작.
 
 ### architecture-gap
 
