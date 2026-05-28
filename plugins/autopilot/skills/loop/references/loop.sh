@@ -146,8 +146,10 @@ resolve_actual_wt() {
   local wtfile="$SPEC_DIR/.loop-wt"
   [[ -f "$wtfile" ]] || return 1
   # 끝 개행만 제거 — 경로 내부 공백·탭은 보존(spec/worktree 경로에 공백 가능).
+  # read 는 trailing newline 없는 마지막 줄에서 non-zero 를 반환하지만 변수에는
+  # 값이 채워져 있다 → '|| true' 로 exit code 만 무시하고 값은 보존.
   local actual=""
-  IFS= read -r actual < "$wtfile" 2>/dev/null || actual=""
+  IFS= read -r actual < "$wtfile" 2>/dev/null || true
   [[ -n "$actual" ]] || return 1
   WT="$actual"
   LOOP_DIR="$WT/.loop"
@@ -536,8 +538,9 @@ print_run_status() {
   local spec_dir="$1"
   local wt=""
   if [[ -f "$spec_dir/.loop-wt" ]]; then
-    # 끝 개행만 제거 — 경로 내부 공백 보존(공백 있는 worktree 경로 호환).
-    IFS= read -r wt < "$spec_dir/.loop-wt" 2>/dev/null || wt=""
+    # 끝 개행만 제거(값 보존: read 는 EOF-without-newline 시 non-zero 라도 변수
+    # 는 채워져 있으므로 '|| true' 로 exit code 만 무시).
+    IFS= read -r wt < "$spec_dir/.loop-wt" 2>/dev/null || true
   fi
   [[ -z "$wt" ]] && wt="$spec_dir/.worktree"
   local lock="$spec_dir/.loop-lock"
