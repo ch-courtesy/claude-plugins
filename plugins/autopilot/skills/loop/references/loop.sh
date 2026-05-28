@@ -64,9 +64,10 @@ spec_key() {
 }
 
 # ----- 의존성 검사 -----
+# git은 모든 subcommand가 쓴다(compute_paths). yq·claude는 start의 게이트·이터에서만
+# 필요하므로 cmd_start에서 늦게 검사한다 — status/list/stop/cleanup/logs와 테스트의
+# 함수 source가 claude·yq 부재에도 동작하도록.
 require_tool git
-require_tool yq
-require_tool claude
 
 # ----- 시그널 처리: SIGTERM/SIGINT 시 자식 트리 정리 (orphan 방지) -----
 kill_descendants() {
@@ -432,6 +433,9 @@ cmd_start() {
   local input="$1"; shift || true
   [[ -z "$input" ]] && die "사용: $0 start <spec-path> [--max-iterations N] [--wall-clock-minutes N]"
   [[ -f "$input" ]] || die "스펙 파일을 찾을 수 없음: $input"
+  # 게이트(yq)·이터(claude)는 start에서만 필요 — 여기서 검사.
+  require_tool yq
+  require_tool claude
 
   local max_iterations_override="" wall_clock_minutes_override=""
   while [[ $# -gt 0 ]]; do
