@@ -119,7 +119,17 @@ grep -qF 'IN("blocking","non_blocking","question")' "$WORKFLOW" \
   || fail "findings[].severity enum 검증 부재 (Submit 단계가 severity 매칭에 의존)"
 grep -qF 'IN("approve","request_changes","comment","needs_context","unavailable")' "$WORKFLOW" \
   || fail "verdict enum 검증 부재"
-ok "check 2b: .result 파싱 + top-level + nested-shape 검증 + 실패 시 합성 fallback"
+grep -qF 'IN("guideline","bug","history","previous_pr","code_comment","cross_file")' "$WORKFLOW" \
+  || fail "findings[].review_perspective enum 검증 부재 (schema required)"
+grep -qF 'IN("inline","issue")' "$WORKFLOW" \
+  || fail "findings[].comment_type enum 검증 부재 (schema required, 라우팅에 사용)"
+grep -qF '.fingerprint | type == "string"' "$WORKFLOW" \
+  || fail "findings[].fingerprint 검증 부재 (schema required, dedup 에 사용)"
+grep -qF '.duplicate_of | (type == "string" or . == null)' "$WORKFLOW" \
+  || fail "findings[].duplicate_of nullable 검증 부재"
+grep -qF 'if .comment_type == "inline"' "$WORKFLOW" \
+  || fail "inline comment_type 의 line/start_line 조건부 검증 부재 (inline 위치 정보 없으면 GitHub API 400)"
+ok "check 2b: .result 파싱 + top-level + nested-shape + schema-required findings 필드 검증 + 실패 시 합성 fallback"
 
 echo ""
 echo "=== check 2c: targeted context follow-up ==="
