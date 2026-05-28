@@ -1,8 +1,10 @@
 # source-only — do not execute directly
-# task-storage.sh — task 저장소(GitHub Issue) 라벨 검출 공통 헬퍼.
+# shellcheck shell=bash
+# task-storage.sh — task 저장소(GitHub Issue) 라벨 검출 헬퍼.
 #
-# loop.sh·dispatch.sh 가 함께 source 하는 헬퍼. 완료 검출의 단일 출처는
-# task 식별자에 부속된 LOOP_DONE_LABEL 라벨이다(헌법 §12).
+# dispatch.sh 가 source 하는 헬퍼. loop v0.7.0 spec-path 재설계로 loop 코어에서
+# 분리되어 dispatch 전용이 됨(이전 위치: loop/references/). 완료 검출의 단일
+# 출처는 task 식별자에 부속된 LOOP_DONE_LABEL 라벨이다.
 # 본 파일은 source 전용이며 단독 실행하지 않는다.
 #
 # 매체: GitHub Issue + label. 환경: gh CLI 인증을 전제.
