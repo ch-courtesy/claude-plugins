@@ -129,10 +129,10 @@ grep -qF '.duplicate_of | (type == "string" or . == null)' "$WORKFLOW" \
   || fail "findings[].duplicate_of nullable 검증 부재"
 grep -qF 'if .comment_type == "inline"' "$WORKFLOW" \
   || fail "inline comment_type 의 line/start_line 조건부 검증 부재 (inline 위치 정보 없으면 GitHub API 400)"
-grep -qF '.line | (type == "number" or . == null)' "$WORKFLOW" \
-  || fail "findings[].line 존재·nullable 검증 부재 (스키마는 모든 finding 에 required + nullable)"
-grep -qF '.start_line | (type == "number" or . == null)' "$WORKFLOW" \
-  || fail "findings[].start_line 존재·nullable 검증 부재"
+grep -qF '.line | (. == null or (type == "number" and . == floor and . >= 1))' "$WORKFLOW" \
+  || fail "findings[].line 검증이 스키마 contract(integer ≥1 또는 null)를 강제하지 않음"
+grep -qF '.start_line | (. == null or (type == "number" and . == floor and . >= 1))' "$WORKFLOW" \
+  || fail "findings[].start_line 검증이 스키마 contract(integer ≥1 또는 null)를 강제하지 않음"
 ok "check 2b: .result 파싱 + top-level + nested-shape + schema-required findings 필드 검증 + 실패 시 합성 fallback"
 
 echo ""
