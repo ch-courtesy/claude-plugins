@@ -238,10 +238,12 @@ grep -qF 'confidence_score' "$WORKFLOW" \
   || fail "confidence_score gate 부재"
 grep -qF '>= 80' "$WORKFLOW" \
   || fail "confidence_score >= 80 threshold 부재"
-grep -qF 'Managed Claude review comment is only posted on verdict=approve' "$WORKFLOW" \
-  || fail "managed comment 게이트가 verdict=approve 한정이 아님 (request_changes/comment 시 review 와 중복 noise)"
-grep -qF "result.verdict !== 'approve'" "$WORKFLOW" \
-  || fail "Post step 의 early-return 이 verdict=approve 조건을 검사하지 않음"
+grep -qF 'Managed Claude review comment is only posted on verdict=approve or inline-fallback' "$WORKFLOW" \
+  || fail "managed comment 게이트가 verdict=approve OR inline-fallback 가 아님 (inline finding 유실 위험)"
+grep -qF "result.verdict === 'approve' || inlineFallback" "$WORKFLOW" \
+  || fail "showFullBody 결정이 verdict=approve OR inlineFallback 가 아님"
+grep -qF '!showFullBody' "$WORKFLOW" \
+  || fail "early-return 조건이 showFullBody 변수를 사용하지 않음"
 # supersede stale approve managed comment when latest verdict is non-approve
 grep -qF 'Superseded by later review' "$WORKFLOW" \
   || fail "verdict!=approve 일 때 옛 approve managed comment supersede 분기 부재 (stale approve 가 PR 대화에 남음)"

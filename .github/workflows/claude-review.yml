@@ -557,6 +557,11 @@ jobs:
             const inlineFindings = findings.filter(isInline);
             const issueFindings = findings.filter((f) => !isInline(f));
             const approvalFailed = fs.existsSync('.claude-review/approval-failed');
+            // Did the formal review (createReview) fail to post inline findings?
+            // If so we MUST surface findings in the managed comment regardless of
+            // verdict — otherwise inline finding detail is lost entirely. This
+            // overrides the verdict=approve gate (codex blocking finding on #232).
+            const inlineFallback = fs.existsSync('.claude-review/inline-fallback-needed');
 
             // Find any prior managed comment from this workflow up-front; we may
             // need to supersede it even when the current verdict is non-approve.
@@ -572,12 +577,15 @@ jobs:
               c.body?.includes(marker)
             );
 
-            // Verdict gate: only verdict=approve gets a full managed comment.
+            // Verdict gate: only verdict=approve gets a full managed comment,
+            // UNLESS the formal review failed to post (inlineFallback) — then
+            // we always need to surface findings somewhere.
             // If a prior commit posted an approve managed comment and the current
-            // verdict is non-approve, replace it with a supersede notice so PR
-            // conversation accurately reflects the latest verdict (otherwise the
-            // stale approve would falsely advertise the PR).
-            if (result.eligibility?.status !== 'reviewed' || result.verdict !== 'approve') {
+            // verdict is non-approve (and no inlineFallback), replace it with a
+            // supersede notice so PR conversation accurately reflects the latest
+            // verdict (otherwise the stale approve would falsely advertise the PR).
+            const showFullBody = result.verdict === 'approve' || inlineFallback;
+            if (result.eligibility?.status !== 'reviewed' || !showFullBody) {
               if (previous) {
                 const supersede = [
                   marker,
@@ -593,12 +601,12 @@ jobs:
                 });
                 core.info(`Superseded stale managed comment (new verdict=${result.verdict || 'none'}).`);
               } else {
-                core.info(`Managed Claude review comment is only posted on verdict=approve (current: ${result.verdict || 'none'}); no prior comment to supersede; skipping.`);
+                core.info(`Managed Claude review comment is only posted on verdict=approve or inline-fallback (current verdict: ${result.verdict || 'none'}, inlineFallback=false); no prior comment to supersede; skipping.`);
               }
               return;
             }
 
-            // verdict=approve path: build full body.
+            // Full body path (verdict=approve OR inline-fallback).
             const renderIssue = (f, i) => [
                   `${i + 1}. [${f.severity}/${f.confidence_score}] ${f.title}`,
                   `${f.file}${(typeof f.line === 'number' && f.line > 0) ? `:${f.line}` : ''}`,
@@ -608,9 +616,7 @@ jobs:
             const issueText = issueFindings.length > 0
               ? `### Issue-level findings\n\n${issueFindings.map(renderIssue).join('\n\n')}`
               : '';
-            // If Submit step failed to post inline comments on the diff,
-            // fall back to including their full detail in this managed comment.
-            const inlineFallback = fs.existsSync('.claude-review/inline-fallback-needed');
+            // inlineFallback defined above (controls verdict-gate).
             const inlineDetailText = (inlineFallback && inlineFindings.length > 0)
               ? `### Inline findings (review submission failed; included here for visibility)\n\n${inlineFindings.map(renderIssue).join('\n\n')}`
               : '';
