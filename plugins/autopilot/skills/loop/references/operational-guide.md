@@ -4,11 +4,11 @@
 
 ## 핵심
 
-- 매 이터는 새 `claude --print` 프로세스. 기억은 코드·git history·작업 공간 파일에 있다.
+- 매 이터는 새 프로세스. 기억은 코드·git history·작업 공간 파일에 있다.
 - 정체성은 스펙 파일의 절대 경로다.
 - 작업 위치는 `<spec_dir>/.worktree/`. 이미 보조 worktree 안에서 호출되면 새로 만들지 않고 현재 cwd를 쓴다.
 - 이터 간 기록은 작업 공간의 **노트**, 완료·차단은 **DONE·BLOCKED 신호**다.
-- 작업 공간(`CLAUDE.md` 헌법 복사본·`.loop/`)과 spec_dir의 `.loop-lock`은 git-common-dir의 info/exclude로 추적에서 분리된다.
+- 작업 공간(`CLAUDE.md` 헌법 복사본·`.loop/`)과 spec_dir의 `.loop-lock`은 git 추적에서 분리된다.
 
 ## 보안
 
@@ -35,16 +35,7 @@
 
 ## 명령
 
-```bash
-loop.sh start   <spec-path> [--max-iterations N] [--wall-clock-minutes N]
-loop.sh status  [<spec-path>]
-loop.sh stop    <spec-path>
-loop.sh list
-loop.sh cleanup <spec-path> [--force]
-loop.sh logs    <spec-path> [--iter N]
-```
-
-스펙 파일을 준비한 뒤 `loop.sh start <spec-path>`로 실행한다.
+사용 가능한 subcommand 전체 목록·시그니처: `loop.sh`(인자 없이 실행). 스펙 파일을 준비한 뒤 `loop.sh start <spec-path>`로 시작한다.
 
 ## 운영
 
@@ -64,4 +55,4 @@ loop.sh logs    <spec-path> [--iter N]
 
 ## 의존성
 
-`bash` 4+, `git`, `yq`(mikefarah), `claude`, `sha256sum` 또는 `shasum`, 선택 `gitleaks`.
+필수·선택 의존성과 현재 설치 상태: `loop.sh deps`.

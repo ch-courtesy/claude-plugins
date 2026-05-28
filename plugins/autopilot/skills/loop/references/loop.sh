@@ -719,6 +719,27 @@ SPEC frontmatter override:
 EOF
 }
 
+# ----- subcommand: deps (필수·선택 의존성과 설치 상태를 단일 출처로 노출) -----
+cmd_deps() {
+  echo "필수:"
+  echo "  ✓ bash $BASH_VERSION"
+  echo "  $(command -v git    >/dev/null 2>&1 && echo "✓" || echo "✗") git"
+  echo "  $(command -v yq     >/dev/null 2>&1 && echo "✓" || echo "✗") yq (mikefarah)"
+  echo "  $(command -v claude >/dev/null 2>&1 && echo "✓" || echo "✗") claude"
+  if [[ -n "$HASH_BIN" ]]; then
+    echo "  ✓ $HASH_BIN (해시 유틸)"
+  else
+    echo "  ✗ sha256sum 또는 shasum (해시 유틸)"
+  fi
+  echo
+  echo "선택:"
+  if command -v gitleaks >/dev/null 2>&1; then
+    echo "  ✓ gitleaks (secret 스캔 게이트 활성화)"
+  else
+    echo "  - gitleaks (미설치 — secret 스캔 게이트 비활성화)"
+  fi
+}
+
 # ----- subcommand: paths (스펙의 계산된 경로를 단일 출처로 노출) -----
 cmd_paths() {
   local input="$1"
@@ -750,6 +771,7 @@ Subcommands:
   env                   환경 변수 + 기본값
   gates                 객관 게이트 목록 (halt 트리거)
   paths   <spec-path>   해당 스펙의 계산된 경로 (진단·문서 교차 검증용)
+  deps                  필수·선택 의존성 + 설치 상태
 
 자세한 내용: references/operational-guide.md
 EOF
@@ -770,6 +792,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     env)     cmd_env ;;
     gates)   cmd_gates ;;
     paths)   cmd_paths "${1:-}" ;;
+    deps)    cmd_deps ;;
     *) echo "알 수 없는 subcommand: $SUBCOMMAND" >&2; usage ;;
   esac
 fi
