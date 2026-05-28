@@ -188,8 +188,10 @@ grep -qF 'confidence_score' "$WORKFLOW" \
   || fail "confidence_score gate 부재"
 grep -qF '>= 80' "$WORKFLOW" \
   || fail "confidence_score >= 80 threshold 부재"
-grep -qF 'No managed Codex review comment to post' "$WORKFLOW" \
-  || fail "managed comment 게이트(미reviewed/무findings 생략) 부재"
+grep -qF 'Managed Codex review comment is only posted on verdict=approve' "$WORKFLOW" \
+  || fail "managed comment 게이트가 verdict=approve 한정이 아님 (request_changes/comment 시 review 와 중복 noise)"
+grep -qF "result.verdict !== 'approve'" "$WORKFLOW" \
+  || fail "Post step 의 early-return 이 verdict=approve 조건을 검사하지 않음"
 ok "check 10: createReview + inline comments + safety gates + COMMENT fallback"
 
 echo ""

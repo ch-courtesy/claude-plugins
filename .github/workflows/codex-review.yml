@@ -389,8 +389,13 @@ jobs:
             const inlineFindings = findings.filter(isInline);
             const issueFindings = findings.filter((f) => !isInline(f));
             const approvalFailed = fs.existsSync('.codex-review/approval-failed');
-            if (result.eligibility?.status !== 'reviewed' || (findings.length === 0 && !approvalFailed)) {
-              core.info('No managed Codex review comment to post.');
+            // Issue-level managed comment is only posted when verdict=approve.
+            // Other verdicts (request_changes/comment/needs_context) are fully
+            // represented by the formal review (inline comments on the diff +
+            // issue-level findings in the review body), so an extra managed
+            // comment would duplicate content and add PR conversation noise.
+            if (result.eligibility?.status !== 'reviewed' || result.verdict !== 'approve') {
+              core.info(`Managed Codex review comment is only posted on verdict=approve (current: ${result.verdict || 'none'}); skipping.`);
               return;
             }
             const renderIssue = (f, i) => [
