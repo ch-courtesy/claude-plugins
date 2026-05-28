@@ -146,10 +146,10 @@ jobs:
             printf '응답은 아래 JSON 스키마를 정확히 만족하는 단일 객체여야 합니다. 모든 required 필드를 채우고, enum 값은 명시된 값만 사용합니다.\n\n'
             printf '<schema>\n%s\n</schema>\n' "$schema_json"
             printf '\n## 응답 형식 규칙 (절대 위반 금지)\n'
-            printf '- 응답 전체는 위 스키마를 만족하는 raw JSON 단일 객체입니다.\n'
-            printf '- 첫 글자는 `{`, 마지막 글자는 `}` 여야 합니다.\n'
-            printf '- 마크다운 펜스(```), 백틱, 코드 블록, 설명 문장, prose, prefix·suffix를 일체 출력하지 않습니다.\n'
-            printf '- 스키마에 없는 필드를 추가하지 않습니다(additionalProperties:false).\n'
+            printf -- '- 응답 전체는 위 스키마를 만족하는 raw JSON 단일 객체입니다.\n'
+            printf -- '- 첫 글자는 `{`, 마지막 글자는 `}` 여야 합니다.\n'
+            printf -- '- 마크다운 펜스(```), 백틱, 코드 블록, 설명 문장, prose, prefix·suffix를 일체 출력하지 않습니다.\n'
+            printf -- '- 스키마에 없는 필드를 추가하지 않습니다(additionalProperties:false).\n'
           } >> "$initial_prompt"
           {
             printf '\n\n---\n\n'
