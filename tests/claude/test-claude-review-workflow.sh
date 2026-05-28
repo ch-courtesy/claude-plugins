@@ -211,47 +211,60 @@ grep -q 'issues.createComment' "$WORKFLOW" \
 ok "check 6: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
-echo "=== check 7: verdict submission with graceful degradation ==="
-grep -q 'findings_count=' "$WORKFLOW" \
-  || fail "findings count 계산 부재"
-grep -q 'No review output to post' "$WORKFLOW" \
-  || fail "eligibility != reviewed 시 skip 경로 부재"
-grep -q 'approve_without_body=' "$WORKFLOW" \
-  || fail "finding 없는 approve 의 무본문 처리 부재"
-grep -q 'state == "APPROVED"' "$WORKFLOW" \
-  || fail "동일 head approve 중복 방지 부재"
-grep -Fq 'user.login == "github-actions[bot]"' "$WORKFLOW" \
-  || fail "approve 중복 체크가 봇 자신 리뷰로 제한되지 않음"
-grep -q 'touch \.claude-review/approval-failed' "$WORKFLOW" \
-  || fail "approve 실패 시 managed comment fallback marker 부재"
-grep -A3 'touch \.claude-review/approval-failed' "$WORKFLOW" | grep -q 'exit 0' \
-  || fail "approve 실패 후 정상 종료(다음 step 진행) 부재"
-if grep -q 'submit_review --approve' "$WORKFLOW"; then
-  fail "finding 없는 approve 는 body 없는 전용 경로만 사용해야 함"
-fi
-grep -q 'submit_review --request-changes' "$WORKFLOW" \
-  || fail "request changes review 제출 경로 부재"
-grep -q 'submit_review --comment' "$WORKFLOW" \
-  || fail "comment review 제출 경로 부재"
-grep -q 'gh pr review "\$PR_NUMBER".*--body-file "\$body"' "$WORKFLOW" \
-  || fail "submit_review 의 gh pr review 호출 부재 (graceful degradation)"
-grep -q 'No managed Claude review comment to post' "$WORKFLOW" \
+echo "=== check 7: verdict submission via Pulls REST API with inline comments + auto-dismiss ==="
+# Submit step is now a github-script step that calls pulls.createReview directly
+# so it can post inline review comments AND auto-dismiss stale CHANGES_REQUESTED.
+grep -qF 'github.rest.pulls.createReview' "$WORKFLOW" \
+  || fail "Pulls REST createReview 호출 부재 — inline comments 게시 불가 (gh pr review 로는 inline 미지원)"
+grep -qF 'comments: inlineComments' "$WORKFLOW" \
+  || fail "createReview 의 comments[] 배열에 inline findings 전달 부재"
+grep -qF "comment_type === 'inline'" "$WORKFLOW" \
+  || fail "inline/issue findings 분기 처리 부재 (comment_type 사용 안 함)"
+grep -qF "side: 'RIGHT'" "$WORKFLOW" \
+  || fail "inline comment 의 side='RIGHT' 지정 부재"
+grep -qF 'start_line' "$WORKFLOW" \
+  || fail "multi-line inline comment 의 start_line 처리 부재"
+grep -qF "event === 'APPROVE'" "$WORKFLOW" \
+  || fail "APPROVE event 분기 부재"
+grep -qF "'REQUEST_CHANGES'" "$WORKFLOW" \
+  || fail "REQUEST_CHANGES event 분기 부재"
+grep -qF "fs.writeFileSync('.claude-review/approval-failed'" "$WORKFLOW" \
+  || fail "APPROVE 실패 시 approval-failed marker 부재"
+grep -qF "'github-actions[bot]'" "$WORKFLOW" \
+  || fail "self-review 식별 (github-actions[bot]) 부재"
+grep -qF 'automation_safety' "$WORKFLOW" \
+  || fail "automation_safety gate 부재"
+grep -qF 'confidence_score' "$WORKFLOW" \
+  || fail "confidence_score gate 부재"
+grep -qF '>= 80' "$WORKFLOW" \
+  || fail "confidence_score >= 80 threshold 부재"
+grep -qF 'No managed Claude review comment to post' "$WORKFLOW" \
   || fail "managed comment 게이트(미reviewed/무findings 생략) 부재"
-grep -q 'automation_safety\.may_approve' "$WORKFLOW" \
-  || fail "approve safety gate 부재"
-grep -q 'confidence_score >= 80' "$WORKFLOW" \
-  || fail "confidence threshold gate 부재"
-ok "check 7: verdict 제출 + graceful degradation + managed comment 게이트"
+ok "check 7: createReview + inline comments + safety gates + COMMENT fallback"
 
 echo ""
-echo "=== check 7b: formal review submission is idempotent per (head_sha, verdict) ==="
-grep -q 'marker="claude-formal-review head_sha=\$PR_HEAD_SHA verdict=\$verdict"' "$WORKFLOW" \
-  || fail "formal review 중복 방지 marker 부재"
-grep -q 'gh api "repos/\$GITHUB_REPOSITORY/pulls/\$PR_NUMBER/reviews"' "$WORKFLOW" \
-  || fail "기존 review marker 조회 부재"
-grep -q 'skipping duplicate' "$WORKFLOW" \
-  || fail "중복 review 제출 skip 경로 부재"
-ok "check 7b: formal review 제출이 (head_sha, verdict) 기준 멱등"
+echo "=== check 7b: formal review idempotent per (head_sha, verdict) ==="
+grep -qF '<!-- ${prefix} head_sha=${head_sha} verdict=${verdict} -->' "$WORKFLOW" \
+  || fail "formal review 중복 방지 marker template 부재"
+grep -qF 'github.rest.pulls.listReviews' "$WORKFLOW" \
+  || fail "기존 review 조회 (pulls.listReviews) 부재"
+grep -qF "r.state === 'APPROVED' && r.commit_id === head_sha" "$WORKFLOW" \
+  || fail "동일 head_sha approve 중복 방지 부재"
+grep -qF 'already exists; skipping duplicate' "$WORKFLOW" \
+  || fail "marker 기반 중복 review skip 메시지 부재"
+ok "check 7b: marker + APPROVED state + head_sha 기준 멱등"
+
+echo ""
+echo "=== check 7c: auto-dismiss prior CHANGES_REQUESTED when verdict=approve ==="
+grep -qF 'github.rest.pulls.dismissReview' "$WORKFLOW" \
+  || fail "옛 CHANGES_REQUESTED reviews 자동 dismiss 호출 부재 (verdict=approve 인데 옛 review 가 CHANGES_REQUESTED 로 stuck)"
+grep -qF "r.state === 'CHANGES_REQUESTED'" "$WORKFLOW" \
+  || fail "dismiss 대상 식별이 state=CHANGES_REQUESTED 로 제한되지 않음"
+grep -qF "verdict === 'approve'" "$WORKFLOW" \
+  || fail "dismiss 게이트가 verdict=approve 조건 부재"
+grep -qF 'Superseded by later review' "$WORKFLOW" \
+  || fail "dismiss message 부재"
+ok "check 7c: verdict=approve 시 옛 자기 CHANGES_REQUESTED reviews 자동 dismiss"
 
 echo ""
 echo "=== check 8: prompt captures token and confidence policies ==="
