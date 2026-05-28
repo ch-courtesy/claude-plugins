@@ -171,8 +171,8 @@ jobs:
             fi
             printf '\n\nUnified diff:\n'
             cat .review-context/diff.patch
-            printf '\n\n## 마지막 재강조\n'
-            printf '응답은 위 <schema>를 만족하는 raw JSON 객체 하나. 마크다운 펜스 없이.\n'
+            printf '\n\n## 마지막 재강조 (절대 위반 금지)\n'
+            printf '응답은 위 <schema>를 만족하는 raw JSON 객체 하나. 마크다운 펜스 없이. 자연어 필드(summary, 각 finding의 title·body·suggestion)는 모두 %s 로 작성합니다. 영어 등 다른 언어로 작성하면 안 됩니다.\n' "$CLAUDE_REVIEW_LANG"
           } >> "$initial_prompt"
 
           # Drop the checkout credential before the review model runs so it
@@ -480,19 +480,28 @@ jobs:
             });
 
             let actualEvent = event;
+            let submitOk = false;
             try {
               await submit(event);
+              submitOk = true;
               core.info(`Submitted ${event} review (${inlineComments.length} inline + ${issueFindings.length} issue findings).`);
             } catch (e) {
               if (event === 'APPROVE') {
                 core.warning(`APPROVE failed (${e.status || ''} ${e.message}); falling back to COMMENT.`);
                 fs.writeFileSync('.claude-review/approval-failed', '');
                 actualEvent = 'COMMENT';
-                try { await submit('COMMENT'); }
+                try { await submit('COMMENT'); submitOk = true; }
                 catch (e2) { core.warning(`Fallback COMMENT also failed (${e2.status || ''} ${e2.message}); continuing.`); }
               } else {
                 core.warning(`Review submission failed (${e.status || ''} ${e.message}); continuing.`);
               }
+            }
+
+            // If review submission failed but we have inline findings, surface
+            // them in the managed PR comment so review content isn't lost.
+            if (!submitOk && inlineFindings.length > 0) {
+              fs.writeFileSync('.claude-review/inline-fallback-needed', '');
+              core.warning(`createReview failed; ${inlineFindings.length} inline finding(s) will appear in managed PR comment instead of inline.`);
             }
 
             // Auto-dismiss prior self CHANGES_REQUESTED reviews when this verdict is approve.
@@ -547,7 +556,13 @@ jobs:
             const issueText = issueFindings.length > 0
               ? `### Issue-level findings\n\n${issueFindings.map(renderIssue).join('\n\n')}`
               : '';
-            const inlineNote = inlineFindings.length > 0
+            // If Submit step failed to post inline comments on the diff,
+            // fall back to including their full detail in this managed comment.
+            const inlineFallback = fs.existsSync('.claude-review/inline-fallback-needed');
+            const inlineDetailText = (inlineFallback && inlineFindings.length > 0)
+              ? `### Inline findings (review submission failed; included here for visibility)\n\n${inlineFindings.map(renderIssue).join('\n\n')}`
+              : '';
+            const inlineNote = (inlineFindings.length > 0 && !inlineFallback)
               ? `_${inlineFindings.length} inline finding${inlineFindings.length === 1 ? '' : 's'} posted on the diff._`
               : '';
             const counts = `Findings: ${findings.length} total (${inlineFindings.length} inline · ${issueFindings.length} issue)`;
@@ -564,6 +579,7 @@ jobs:
               '',
               summaryText,
               issueText ? `\n${issueText}` : '',
+              inlineDetailText ? `\n${inlineDetailText}` : '',
               inlineNote ? `\n${inlineNote}` : '',
             ].filter((line, i, arr) => !(line === '' && arr[i-1] === '')).join('\n');
 

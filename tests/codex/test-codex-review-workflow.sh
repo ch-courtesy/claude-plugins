@@ -217,6 +217,28 @@ grep -qF 'Superseded by later review' "$WORKFLOW" \
 ok "check 10c: verdict=approve 시 옛 자기 CHANGES_REQUESTED reviews 자동 dismiss"
 
 echo ""
+echo "=== check 10d: inline-fallback in managed comment when createReview fails ==="
+grep -qF "fs.writeFileSync('.codex-review/inline-fallback-needed'" "$WORKFLOW" \
+  || fail "createReview 실패 시 inline-fallback-needed marker 생성 부재 — inline findings 유실 위험"
+grep -qF "fs.existsSync('.codex-review/inline-fallback-needed')" "$WORKFLOW" \
+  || fail "Post step 에서 inline-fallback marker 확인 부재"
+grep -qF 'inlineDetailText' "$WORKFLOW" \
+  || fail "inline-fallback 시 inline findings 상세를 managed comment 본문에 포함하지 않음"
+grep -qF 'review submission failed; included here for visibility' "$WORKFLOW" \
+  || fail "inline-fallback 본문 헤더 부재"
+ok "check 10d: createReview 실패 시 inline findings managed comment 폴백"
+
+echo ""
+echo "=== check 11b: 출력 언어 untrusted block 끝에 재강조 (영어 응답 예방) ==="
+grep -qF '## 마지막 재강조 (절대 위반 금지)' "$WORKFLOW" \
+  || fail "마지막 재강조 섹션 부재 — 모델이 untrusted PR diff 뒤에서 출력 언어 지시 흘릴 수 있음"
+grep -qF '영어 등 다른 언어로 작성하면 안 됩니다' "$WORKFLOW" \
+  || fail "출력 언어 명시적 강제 라인 부재"
+grep -qF '"$CODEX_REVIEW_LANG"' "$WORKFLOW" \
+  || fail "재강조 라인이 CODEX_REVIEW_LANG 변수를 사용하지 않음"
+ok "check 11b: untrusted block 끝에 출력 언어 재강조"
+
+echo ""
 echo "=== check 11: prompt captures token and confidence policies ==="
 grep -q '토큰 최적화 정책' "$PROMPT" \
   || fail "prompt 토큰 최적화 정책 부재"
