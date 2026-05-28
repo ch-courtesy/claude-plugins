@@ -1,6 +1,6 @@
 # 자율 루프 운영 가이드 (optimized)
 
-`loop.sh`와 헌법은 `references/`에 있다. runtime 상태는 스펙 파일 디렉토리 아래(`.worktree/`·`.loop.lock`)에 둔다.
+`loop.sh`와 헌법은 `references/`에 있다. runtime 상태는 스펙 파일 디렉토리 아래 `.worktree/`에 둔다(lock 포함).
 
 ## 핵심
 
@@ -8,7 +8,7 @@
 - 정체성은 스펙 파일의 절대 경로다.
 - 작업 위치는 `<spec_dir>/.worktree/`. 이미 보조 worktree 안에서 호출되면 새로 만들지 않고 현재 cwd를 쓴다.
 - 이터 간 기록은 작업 공간의 **노트**, 완료·차단은 **DONE·BLOCKED 신호**다.
-- 작업 공간(`CLAUDE.md` 헌법 복사본·`.loop/`)과 lock(`.loop.lock`)은 git-common-dir의 info/exclude로 추적에서 분리된다.
+- 작업 공간(`CLAUDE.md` 헌법 복사본·`.loop/`)은 git-common-dir의 info/exclude로 추적에서 분리된다(lock 포함, `.loop/` 안).
 
 ## 보안
 
@@ -19,10 +19,10 @@
 ```text
 <spec_dir>/
 ├── <spec>.md            # 스펙 파일 (정체성)
-├── .loop.lock           # 실행 중에만 (PID)
 └── .worktree/           # 작업 공간 (git worktree, info/exclude)
     ├── CLAUDE.md        # 헌법 복사본
     └── .loop/
+        ├── .lock        # 실행 중에만 (PID, noclobber 원자 획득)
         ├── BASE_SHA
         ├── SPEC_PATH    # 스펙 경로 (list 스캔이 정체성 복원에 사용)
         ├── notes.md     # 이터 간 노트
@@ -31,7 +31,7 @@
         └── BLOCKED      # 차단 신호 (생성 시, 첫 줄 category:)
 ```
 
-`<key>`(임시 브랜치 `loop/<key>`·status 표시용)는 스펙 절대 경로의 sha256 앞 12자다.
+`<key>`(status 표시용 12자)는 스펙 절대 경로의 sha256 앞 12자다. start 시 임시 브랜치 `loop/<key>`를 만들고 작업 공간을 그 위에 올리며, cleanup이 워크트리와 함께 이 임시 브랜치를 제거한다.
 
 ## 명령
 

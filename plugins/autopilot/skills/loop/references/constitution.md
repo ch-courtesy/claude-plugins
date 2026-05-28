@@ -12,9 +12,9 @@
 
 매 이터는 새 프로세스다. 기억은 코드, git history, 그리고 작업 공간 내 파일뿐이다. 작업은 현재 작업 공간에서만 한다. 다음 세 영구 매체를 쓴다 — 이후 본문은 경로 대신 이 용어로 가리킨다:
 
-- **노트**: 매 이터 콜드 스타트에 읽고 끝에 갱신하는 기록 영역(`.loop/notes.md`). 계획·DoD·교훈·인계·차단·완료 누적을 한곳에 큐레이션한다.
-- **완료 신호 (DONE)**: 완료 판정 시 생성. 본문에 완료 요약.
-- **차단 신호 (BLOCKED)**: 진행 불가 시 생성. 첫 줄 `category: <config-gap|spec-gap|architecture-gap|environment-gap|other>`, 이어서 사유·시도·필요 결정.
+- **노트** (`.loop/notes.md`): 매 이터 콜드 스타트에 읽고 끝에 갱신하는 기록 영역. 계획·DoD·교훈·인계·차단·완료 누적을 한곳에 큐레이션한다.
+- **완료 신호 DONE** (`.loop/DONE`): 완료 판정 시 생성. 본문에 완료 요약.
+- **차단 신호 BLOCKED** (`.loop/BLOCKED`): 진행 불가 시 생성. 첫 줄 `category: <config-gap|spec-gap|architecture-gap|environment-gap|other>`, 이어서 사유·시도·필요 결정.
 
 이 매체 외 별도 채널은 없다.
 
