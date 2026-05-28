@@ -192,6 +192,11 @@ grep -qF 'Managed Codex review comment is only posted on verdict=approve' "$WORK
   || fail "managed comment 게이트가 verdict=approve 한정이 아님 (request_changes/comment 시 review 와 중복 noise)"
 grep -qF "result.verdict !== 'approve'" "$WORKFLOW" \
   || fail "Post step 의 early-return 이 verdict=approve 조건을 검사하지 않음"
+# supersede stale approve managed comment when latest verdict is non-approve
+grep -qF 'Superseded by later review' "$WORKFLOW" \
+  || fail "verdict!=approve 일 때 옛 approve managed comment supersede 분기 부재 (stale approve 가 PR 대화에 남음)"
+grep -qF 'Superseded stale managed comment' "$WORKFLOW" \
+  || fail "supersede core.info log 부재"
 ok "check 10: createReview + inline comments + safety gates + COMMENT fallback"
 
 echo ""

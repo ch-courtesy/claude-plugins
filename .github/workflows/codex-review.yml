@@ -389,15 +389,48 @@ jobs:
             const inlineFindings = findings.filter(isInline);
             const issueFindings = findings.filter((f) => !isInline(f));
             const approvalFailed = fs.existsSync('.codex-review/approval-failed');
-            // Issue-level managed comment is only posted when verdict=approve.
-            // Other verdicts (request_changes/comment/needs_context) are fully
-            // represented by the formal review (inline comments on the diff +
-            // issue-level findings in the review body), so an extra managed
-            // comment would duplicate content and add PR conversation noise.
+
+            // Find any prior managed comment from this workflow up-front; we may
+            // need to supersede it even when the current verdict is non-approve.
+            const issue_number = Number(process.env.PR_NUMBER);
+            const existingComments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+            const previous = existingComments.find((c) =>
+              c.user?.login === 'github-actions[bot]' &&
+              c.body?.includes(marker)
+            );
+
+            // Verdict gate: only verdict=approve gets a full managed comment.
+            // If a prior commit posted an approve managed comment and the current
+            // verdict is non-approve, replace it with a supersede notice so PR
+            // conversation accurately reflects the latest verdict (otherwise the
+            // stale approve would falsely advertise the PR).
             if (result.eligibility?.status !== 'reviewed' || result.verdict !== 'approve') {
-              core.info(`Managed Codex review comment is only posted on verdict=approve (current: ${result.verdict || 'none'}); skipping.`);
+              if (previous) {
+                const supersede = [
+                  marker,
+                  '## Codex PR Review',
+                  '',
+                  `_Superseded by later review (current verdict: \`${result.verdict || 'unavailable'}\`). See the formal review for details._`,
+                ].join('\n');
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: previous.id,
+                  body: supersede,
+                });
+                core.info(`Superseded stale managed comment (new verdict=${result.verdict || 'none'}).`);
+              } else {
+                core.info(`Managed Codex review comment is only posted on verdict=approve (current: ${result.verdict || 'none'}); no prior comment to supersede; skipping.`);
+              }
               return;
             }
+
+            // verdict=approve path: build full body.
             const renderIssue = (f, i) => [
                   `${i + 1}. [${f.severity}/${f.confidence_score}] ${f.title}`,
                   `${f.file}${(typeof f.line === 'number' && f.line > 0) ? `:${f.line}` : ''}`,
@@ -434,19 +467,7 @@ jobs:
               inlineNote ? `\n${inlineNote}` : '',
             ].filter((line, i, arr) => !(line === '' && arr[i-1] === '')).join('\n');
 
-            const issue_number = Number(process.env.PR_NUMBER);
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number,
-              per_page: 100,
-            });
-
-            const previous = comments.find((comment) =>
-              comment.user?.login === 'github-actions[bot]' &&
-              comment.body?.includes(marker)
-            );
-
+            // Reuse the pre-fetched `previous` comment for update/create decision.
             if (previous) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
