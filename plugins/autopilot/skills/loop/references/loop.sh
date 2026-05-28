@@ -128,12 +128,26 @@ is_secondary_worktree() {
 }
 
 # 보조 worktree 모드에서 WT·LOOP_DIR 를 현재 worktree top-level 로 재정의.
-# compute_paths 의 기본값(<SPEC_DIR>/.worktree)을 덮어쓴다. cmd_start·cmd_paths
-# 등 보조 worktree 분기를 동일하게 처리해야 하는 곳에서 호출.
+# compute_paths 의 기본값(<SPEC_DIR>/.worktree)을 덮어쓴다. cmd_start 가 호출해
+# 작업 공간을 정한다(이후 cmd_start 가 영구 메타 <SPEC_DIR>/.loop-wt 에 기록).
 # 반환: 0 = 보조 worktree(재정의 함), 1 = 주 작업트리(변경 없음).
 apply_secondary_override() {
   is_secondary_worktree || return 1
   WT="$(git rev-parse --show-toplevel)"
+  LOOP_DIR="$WT/.loop"
+  return 0
+}
+
+# 실제 WT 영구 메타 읽기 — start 가 작성한 <SPEC_DIR>/.loop-wt 가 있으면 그 값으로
+# WT·LOOP_DIR 를 재설정한다. 어느 cwd 에서 follow-up 명령이 와도 동일한 작업 공간을
+# 가리키게 만드는 핵심. cmd_status·logs·cleanup·paths 등 compute_paths 다음에 호출.
+# 반환: 0 = 메타 적용함, 1 = 메타 없음(기본값 유지).
+resolve_actual_wt() {
+  local wtfile="$SPEC_DIR/.loop-wt"
+  [[ -f "$wtfile" ]] || return 1
+  local actual; actual=$(tr -d '[:space:]' < "$wtfile" 2>/dev/null)
+  [[ -n "$actual" ]] || return 1
+  WT="$actual"
   LOOP_DIR="$WT/.loop"
   return 0
 }
@@ -469,6 +483,9 @@ cmd_start() {
 
   # 3) 스펙 경로 기록 — list 스캔이 작업 공간에서 정체성을 복원하는 데 사용.
   printf '%s\n' "$SPEC_PATH" > "$LOOP_DIR/SPEC_PATH"
+  # 실제 WT 경로를 spec_dir 메타에 영구 기록 — follow-up 명령(status·logs·cleanup·paths)이
+  # 어느 cwd 에서 호출되든 같은 작업 공간을 본다(보조 worktree 모드 정합).
+  printf '%s\n' "$WT" > "$SPEC_DIR/.loop-wt"
 
   # 4) 헌법을 워크트리 CLAUDE.md로 복사. 워커 계약(노트·signals/ 컨벤션 등)의 SoT 는
   #    constitution.md 이므로 별도 append 없이 cp 만으로 충분하다.
@@ -482,7 +499,7 @@ cmd_start() {
   mkdir -p "$gcd/info"; touch "$gcd/info/exclude"
   # .worktree/ 가 제외되면 그 안의 .loop/(노트·신호·BASE_SHA·SPEC_PATH·iterations)도
   # 자동 제외. .loop-lock 은 SPEC_DIR 레벨이라 별도 패턴 필요. .loop/ 는 안전망 중복.
-  for pat in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock"; do
+  for pat in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt"; do
     grep -qxF "$pat" "$gcd/info/exclude" 2>/dev/null || echo "$pat" >> "$gcd/info/exclude"
   done
 
@@ -511,11 +528,15 @@ cmd_start() {
 }
 
 # ----- status 한 줄 출력 헬퍼 -----
-# 인자: 스펙 디렉토리(.worktree·.loop-lock 이 위치하는 곳). 상태는 spec_dir 내
-# 로컬 파일에서만 도출한다(중앙 registry 없음).
+# 인자: <spec_dir>. WT 는 <spec_dir>/.loop-wt 메타에서 자동 해석(없으면
+# <spec_dir>/.worktree 기본값). 상태는 spec_dir 내 로컬 파일에서만 도출.
 print_run_status() {
   local spec_dir="$1"
-  local wt="${2:-$spec_dir/.worktree}"   # 보조 worktree 모드는 호출자가 실제 WT 를 전달
+  local wt=""
+  if [[ -f "$spec_dir/.loop-wt" ]]; then
+    wt=$(tr -d '[:space:]' < "$spec_dir/.loop-wt" 2>/dev/null)
+  fi
+  [[ -z "$wt" ]] && wt="$spec_dir/.worktree"
   local lock="$spec_dir/.loop-lock"
   local spec key state iters last ref epoch
   spec="$(cat "$wt/.loop/SPEC_PATH" 2>/dev/null || echo "$spec_dir/?")"
@@ -552,12 +573,11 @@ cmd_status() {
   local input="${1:-}"
   if [[ -n "$input" ]]; then
     compute_paths "$input"
-    # cmd_start 와 동일한 보조 worktree override 적용 — 같은 cwd 의 follow-up 명령이
-    # start 가 쓴 작업 공간(.worktree top-level)을 정확히 본다.
-    apply_secondary_override >/dev/null 2>&1 || true
-    [[ -d "$WT" || -f "$LOCK_FILE" ]] || { echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"; return 0; }
+    # 영구 메타 (<SPEC_DIR>/.loop-wt) 가 있거나 lock 이 있으면 기록 존재.
+    [[ -f "$SPEC_DIR/.loop-wt" || -f "$LOCK_FILE" || -d "$WT" ]] \
+      || { echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"; return 0; }
     printf "%-14s %-9s %-20s %-6s %-20s %s\n" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
-    print_run_status "$SPEC_DIR" "$WT"
+    print_run_status "$SPEC_DIR"
     return 0
   fi
   # 전체: repo 작업트리를 스캔해 .loop-lock(실행 중) 또는 .worktree/.loop(이후 상태)을
@@ -568,6 +588,7 @@ cmd_status() {
   local dirs
   dirs="$( {
       find "$top" -type d -name .git -prune -o -type f -name '.loop-lock' -print 2>/dev/null | sed 's#/.loop-lock$##'
+      find "$top" -type d -name .git -prune -o -type f -name '.loop-wt'   -print 2>/dev/null | sed 's#/.loop-wt$##'
       find "$top" -type d -name .git -prune -o -type d -path '*/.worktree/.loop' -print 2>/dev/null | sed 's#/.worktree/.loop$##'
     } | sort -u | grep -v '^$' || true )"
   if [[ -z "$dirs" ]]; then
@@ -617,10 +638,15 @@ cmd_cleanup() {
     esac
   done
   compute_paths "$input"
-  # cmd_start 와 동일한 override 적용. start 가 보조 worktree 였으면 cleanup 도 같은
-  # 작업 공간(.worktree top-level)을 본다.
+  # 영구 메타(<SPEC_DIR>/.loop-wt)에서 start 가 쓴 실제 WT 를 해석. 어느 cwd 에서
+  # 호출돼도 같은 작업 공간을 본다. fallback: 같은 cwd 가 보조 worktree 면 그쪽.
   local secondary=0
-  apply_secondary_override && secondary=1
+  if resolve_actual_wt; then
+    # 보조 모드 여부는 WT 가 기본값과 다른지로 판정.
+    [[ "$WT" != "$SPEC_DIR/.worktree" ]] && secondary=1
+  else
+    apply_secondary_override && secondary=1
+  fi
 
   if [[ -f "$LOCK_FILE" ]]; then
     local pid; pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
@@ -644,9 +670,9 @@ cmd_cleanup() {
   [[ -n "$WT" ]] || die "WT 비어 있음 (cleanup 거부)"
 
   if (( secondary == 1 )); then
-    # 보조 worktree: 사용자가 만든 워크트리를 우리가 지우지 않는다. .loop/ 만 제거.
+    # 보조 worktree: 사용자가 만든 워크트리를 우리가 지우지 않는다. .loop/·메타만 제거.
     [[ -d "$WT/.loop" ]] && rm -rf "$WT/.loop"
-    rm -f "$LOCK_FILE"
+    rm -f "$LOCK_FILE" "$SPEC_DIR/.loop-wt"
     echo "보조 worktree 정리: .loop/ 제거 (워크트리는 보존): $SPEC_PATH"
     return 0
   fi
@@ -661,7 +687,7 @@ cmd_cleanup() {
     git -C "$SPEC_DIR" worktree remove $flags "$WT" \
       || die "git worktree remove 실패. 수동: git worktree remove --force $WT"
   fi
-  rm -f "$LOCK_FILE"
+  rm -f "$LOCK_FILE" "$SPEC_DIR/.loop-wt"
   echo "정리 완료: $SPEC_PATH"
 }
 
@@ -677,8 +703,8 @@ cmd_logs() {
     esac
   done
   compute_paths "$input"
-  # 보조 worktree 에서 start 된 실행이면 LOOP_DIR 도 그쪽으로 override.
-  apply_secondary_override >/dev/null 2>&1 || true
+  # 영구 메타에서 실제 WT/LOOP_DIR 해석. 어느 cwd 에서 호출돼도 일관.
+  resolve_actual_wt || apply_secondary_override >/dev/null 2>&1 || true
   if [[ -n "$iter_n" ]]; then
     local log="$LOOP_DIR/iterations/$iter_n.log"
     [[ -f "$log" ]] || die "이터 로그 없음: $log"
@@ -760,16 +786,23 @@ cmd_paths() {
   [[ -z "$input" ]] && die "사용: $0 paths <spec-path>"
   [[ -f "$input" ]] || die "스펙 파일을 찾을 수 없음: $input"
   compute_paths "$input"
-  # cmd_start 와 동일하게 보조 worktree override 적용 — 실제 start 가 쓸 경로 표시.
+  # 메타(<SPEC_DIR>/.loop-wt)가 있으면 그 값을 사용(실제 start 가 쓴 경로).
+  # 없으면 현재 cwd 의 보조 worktree 여부로 예측한다.
+  local source="default"
+  if resolve_actual_wt; then
+    source="meta"
+  elif apply_secondary_override; then
+    source="cwd"
+  fi
   local secondary="no"
-  apply_secondary_override && secondary="yes"
+  [[ "$WT" != "$SPEC_DIR/.worktree" ]] && secondary="yes"
   cat <<EOF
 SPEC_PATH   $SPEC_PATH
 SPEC_DIR    $SPEC_DIR
 WT          $WT
 LOOP_DIR    $LOOP_DIR
 LOCK_FILE   $LOCK_FILE
-SECONDARY   $secondary
+SECONDARY   $secondary  (source: $source)
 EOF
 }
 
