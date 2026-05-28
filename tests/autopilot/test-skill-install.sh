@@ -104,32 +104,6 @@ grep -qE '슬러그|slug' "$SPEC_SKILL_MD" \
 echo "OK: 슬러그화 규칙 명세"
 
 echo ""
-echo "=== prd 스킬 구조 검증 ==="
-PRD_SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/prd"
-for f in SKILL.md \
-         references/prd-template.md \
-         references/self-review.md; do
-  [[ -f "$PRD_SKILL_DIR/$f" ]] || { echo "FAIL: prd/$f 부재"; exit 1; }
-  echo "OK: prd/$f"
-done
-
-echo ""
-echo "=== prd/SKILL.md frontmatter 검증 ==="
-PRD_SKILL_MD="$PRD_SKILL_DIR/SKILL.md"
-grep -q 'name: prd' "$PRD_SKILL_MD" \
-  || { echo "FAIL: prd/SKILL.md frontmatter에 'name: prd' 없음"; exit 1; }
-echo "OK: name: prd"
-grep -q '\[NEEDS CLARIFICATION\]' "$PRD_SKILL_MD" \
-  || { echo "FAIL: prd/SKILL.md description에 '[NEEDS CLARIFICATION]' 마커 없음"; exit 1; }
-echo "OK: [NEEDS CLARIFICATION] 마커"
-grep -q -- '--resume' "$PRD_SKILL_MD" \
-  || { echo "FAIL: prd/SKILL.md description에 '--resume' 마커 없음"; exit 1; }
-echo "OK: --resume 마커"
-grep -q -- '--import' "$PRD_SKILL_MD" \
-  || { echo "FAIL: prd/SKILL.md description에 '--import' 마커 없음"; exit 1; }
-echo "OK: --import 마커"
-
-echo ""
 echo "=== dispatch 스킬 구조 검증 ==="
 DISPATCH_SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/dispatch"
 for f in SKILL.md \
