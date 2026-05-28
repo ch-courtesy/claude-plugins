@@ -237,6 +237,9 @@ jobs:
             local prompt_file="$1"
             local scratch
             scratch="$(mktemp -d)"
+            local cli_rc=0
+            # Capture stderr separately so non-zero CLI exit (auth fail, rate
+            # limit, timeout) surfaces in the workflow log instead of being lost.
             (
               cd "$scratch"
               claude -p \
@@ -246,10 +249,21 @@ jobs:
                 --strict-mcp-config \
                 --setting-sources "" \
                 --no-session-persistence
-            ) < "$prompt_file" > "$envelope"
+            ) < "$prompt_file" > "$envelope" 2> "$envelope.err" || cli_rc=$?
             rm -rf "$scratch"
 
-            if [[ "$(jq -r '.is_error' "$envelope")" == "true" ]]; then
+            if [ "$cli_rc" -ne 0 ]; then
+              echo "Claude CLI exited rc=$cli_rc. stderr (first 800 chars):" >&2
+              head -c 800 "$envelope.err" >&2 || true
+              echo "" >&2
+              echo "envelope (first 400 chars, may be partial):" >&2
+              head -c 400 "$envelope" >&2 || true
+              echo "" >&2
+              write_fallback "claude_cli_exit_$cli_rc"
+              return 0
+            fi
+
+            if [[ "$(jq -r '.is_error // false' "$envelope")" == "true" ]]; then
               echo "Claude CLI reported is_error=true." >&2
               jq -r '.result // empty' "$envelope" >&2 || true
               write_fallback "claude_cli_is_error"
