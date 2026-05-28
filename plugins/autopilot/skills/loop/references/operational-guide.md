@@ -31,7 +31,7 @@
         └── BLOCKED      # 차단 신호 (생성 시, 첫 줄 category:)
 ```
 
-`<key>`(status 표시용 12자)는 스펙 절대 경로의 sha256 앞 12자다. start 시 임시 브랜치 `loop/<key>`를 만들고 작업 공간을 그 위에 올리며, cleanup이 워크트리와 함께 이 임시 브랜치를 제거한다.
+`<key>`(status 표시용 12자)는 스펙 절대 경로의 sha256 앞 12자다. 작업 공간은 detached HEAD 워크트리 위에 올라가므로 별도 브랜치 ref를 만들지 않는다 — cleanup 시 워크트리 제거만으로 정리된다(미커밋·미통합 작업은 reflog에 남아 git GC 정책을 따른다).
 
 ## 명령
 
@@ -49,7 +49,7 @@ loop.sh logs    <spec-path> [--iter N]
 ## 운영
 
 - `stop`은 SIGTERM 후 lock 해제. 작업 공간은 유지된다.
-- `cleanup`은 DONE 확인 후(또는 `--force`) 워크트리·임시 브랜치(`loop/<key>`)·lock을 제거한다. 실행 중이면 `--force`가 SIGTERM 후 SIGKILL 가능.
+- `cleanup`은 DONE 확인 후(또는 `--force`) 워크트리를 제거한다(워크트리가 detached HEAD라 별도 브랜치 삭제는 없음). 실행 중이면 `--force`가 SIGTERM 후 SIGKILL 가능.
 - **플랜 게이트**: 1회차 계획 단계에서 플랜 형성 불가면 워커가 BLOCKED(`category: spec-gap`)를 쓰고, driver는 "스펙 강화 필요" 에러(exit 3)로 종료한다. 스펙을 보강한 뒤 재시작한다.
 - **차단 해제**: BLOCKED 신호를 읽고 원인 보정 후 BLOCKED 파일을 삭제한 뒤 재시작한다.
 - `list`는 작업트리를 스캔해 실행을 열거한다(중앙 registry 없음).

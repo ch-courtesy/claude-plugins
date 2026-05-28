@@ -85,10 +85,8 @@ on_signal_exit() {
 # 입력: 스펙 파일 경로. 출력 전역:
 #   SPEC_PATH        스펙 절대 경로 (정체성)
 #   SPEC_DIR         스펙 디렉토리 절대 경로
-#   KEY              spec_key(SPEC_PATH)
 #   WT               작업 공간 (<SPEC_DIR>/.worktree 또는 보조 worktree cwd)
 #   LOOP_DIR         <WT>/.loop (노트·신호·메타·lock)
-#   BRANCH           loop/<KEY> (워크트리 임시 브랜치)
 #   LOCK_FILE        <LOOP_DIR>/.lock (실행 중에만 존재; 워크스페이스 .loop 안에 colocate)
 compute_paths() {
   local input="$1"
@@ -109,7 +107,6 @@ compute_paths() {
   fi
 
   SPEC_DIR="$(dirname "$SPEC_PATH")"
-  KEY="$(spec_key "$SPEC_PATH")"
 
   # 스펙 디렉토리가 git 저장소 안이어야 함 (워크트리 생성·게이트에 필요).
   git -C "$SPEC_DIR" rev-parse --git-common-dir >/dev/null 2>&1 \
@@ -118,7 +115,6 @@ compute_paths() {
   WT="$SPEC_DIR/.worktree"
   LOOP_DIR="$WT/.loop"
   LOCK_FILE="$LOOP_DIR/.lock"   # 워크스페이스 .loop 안에 colocate (워크트리 생성 후 획득)
-  BRANCH="loop/$KEY"
 }
 
 # 호출 cwd가 git 저장소의 *보조 worktree* 인지 판정 (주 작업트리면 false).
@@ -460,8 +456,8 @@ cmd_start() {
     mkdir -p "$LOOP_DIR/iterations"
     [[ -f "$LOOP_DIR/BASE_SHA" ]] || git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" 2>/dev/null || true
   elif [[ ! -d "$WT" ]]; then
-    echo "[$(now_iso)] 워크트리 생성: $WT (브랜치 $BRANCH)"
-    git -C "$SPEC_DIR" worktree add -b "$BRANCH" "$WT" HEAD \
+    echo "[$(now_iso)] 워크트리 생성: $WT (detached HEAD)"
+    git -C "$SPEC_DIR" worktree add --detach "$WT" HEAD \
       || die "git worktree add 실패: $WT"
     mkdir -p "$LOOP_DIR/iterations"
     git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" \
@@ -653,8 +649,6 @@ cmd_cleanup() {
     local flags=""; [[ $force -eq 1 ]] && flags="--force"
     git -C "$SPEC_DIR" worktree remove $flags "$WT" \
       || die "git worktree remove 실패. 수동: git worktree remove --force $WT"
-    # 임시 브랜치 삭제 (loop/<key>).
-    git -C "$SPEC_DIR" branch -D "$BRANCH" >/dev/null 2>&1 || true
   fi
   rm -f "$LOCK_FILE"
   echo "정리 완료: $SPEC_PATH"
