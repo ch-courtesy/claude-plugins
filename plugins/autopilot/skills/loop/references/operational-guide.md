@@ -1,14 +1,14 @@
 # 자율 루프 운영 가이드 (optimized)
 
-`loop.sh`와 헌법은 `references/`에 있다. runtime 상태는 스펙 파일 디렉토리 아래에 둔다 — lock은 `.loop-lock`(spec_dir 직속, 워크트리 생성 전 획득해 race 보호), 노트·signals·이터 로그는 `.worktree/.loop/`.
+`loop.sh`와 헌법은 `references/`에 있다. runtime 상태는 스펙 파일 디렉토리 아래에 둔다 — lock 은 spec 디렉토리에(워크트리 생성 전 획득해 race 보호), 노트·signals·이터 로그는 작업 공간 안. 정확한 경로는 `loop.sh paths <spec>`.
 
 ## 핵심
 
 - 매 이터는 새 프로세스. 기억은 코드·git history·작업 공간 파일에 있다.
 - 정체성은 스펙 파일의 절대 경로다.
-- 작업 위치는 `<spec_dir>/.worktree/`. 이미 보조 worktree 안에서 호출되면 새로 만들지 않고 현재 cwd를 쓴다.
+- 작업 위치는 스펙 디렉토리 아래(보조 worktree 안에서 호출되면 새로 만들지 않고 현재 cwd 사용). 정확한 경로는 `loop.sh paths <spec>`.
 - 이터 간 기록은 작업 공간의 **노트**, terminal 의도는 `.loop/signals/` 디렉토리에 워커가 만드는 파일로 표현한다(driver 는 비었는지만 본다).
-- 작업 공간(`CLAUDE.md` 헌법 복사본·`.loop/`)과 spec_dir의 `.loop-lock`은 git 추적에서 분리된다.
+- 작업 공간(헌법 복사본·`.loop/`)과 spec 디렉토리의 lock 은 git 추적에서 분리된다.
 
 ## 보안
 
@@ -45,7 +45,7 @@
 - `cleanup`은 `signals/` 비어있지 않음 확인 후 워크트리를 제거한다(detached HEAD라 브랜치 삭제는 없음). 실행 중이거나 signals 비어 있으면 `--force`로 강제 정리.
 - **신호 계약**(노트·signals/ 규칙·권장 컨벤션·category 값): `references/constitution.md §작업 매체`.
 - **차단 해제**: `signals/` 내 파일 본문을 읽고 원인 보정 후 그 파일을 삭제한 뒤 재시작.
-- stale `.loop-lock`(PID 비활성)은 다음 `start`/`stop`에서 자동 정리된다.
+- stale lock(PID 비활성)은 다음 `start`/`stop`에서 자동 정리된다.
 
 ## 환경 변수
 

@@ -24,7 +24,7 @@ allowed-tools:
 
 # loop
 
-스펙 파일 하나를 받아 로컬에서 자율 구현하는 최소 실행기다. 정체성은 **스펙 파일의 절대 경로**다. 작업 공간은 스펙 파일 디렉토리 아래 `.worktree`(이미 보조 worktree 안이면 현재 cwd), 이터 간 노트는 작업 공간 안에, **terminal 의도는 `.loop/signals/` 디렉토리**에 워커가 파일을 만들어 표현한다. driver 는 `signals/` 비어있는지만 본다.
+스펙 파일 하나를 받아 로컬에서 자율 구현하는 최소 실행기다. 정체성은 **스펙 파일의 절대 경로**다. 작업 공간은 스펙 디렉토리 아래(보조 worktree 안이면 현재 cwd) — 정확한 경로는 `loop.sh paths <spec>`. **terminal 의도는 `.loop/signals/` 디렉토리**에 워커가 파일을 만들어 표현하고, driver 는 `signals/` 비어있는지만 본다.
 
 워커 헌법은 `references/constitution.md`, 셸 드라이버는 `references/loop.sh`가 단일 출처다.
 
@@ -40,7 +40,7 @@ loop은 어떤 도구가 만든 스펙이든 **임의의 스펙 파일 경로**�
 
 반드시 `Bash(bash $SKILL_DIR/references/loop.sh start <spec-path> [...flags], run_in_background: true)`로 실행한다. 동기 실행은 Monitor 가설을 막으므로 금지.
 
-driver 동작: 스펙 파일 존재 검증, lock 획득, 작업 공간 준비(주 작업트리면 `<spec_dir>/.worktree` git worktree 생성 + 헌법을 CLAUDE.md로 복사; 보조 worktree 안이면 현재 cwd 사용), 이터레이션 루프. 매 이터는 새 `claude --print` 프로세스다.
+driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `CLAUDE.md`로 복사) → 이터레이션 루프. 매 이터는 새 `claude --print` 프로세스. 계산된 경로는 `loop.sh paths <spec>`.
 
 #### Monitor
 
@@ -52,7 +52,7 @@ driver 동작: 스펙 파일 존재 검증, lock 획득, 작업 공간 준비(�
 
 ### status / stop / list / cleanup / logs
 
-각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. lock은 `<spec_dir>/.loop-lock`(워크트리 생성 전 획득해 race 보호), 노트·signals·이터 로그는 `<spec_dir>/.worktree/.loop/` 안에 둔다. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 `signals/` 비어있지 않음 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
+각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. lock은 워크트리 생성 전에 획득해 race 보호. 경로 상세는 `loop.sh paths <spec>`. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 `signals/` 비어있지 않음 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
 
 ### env / gates / paths / deps
 
@@ -76,6 +76,6 @@ driver 인터페이스의 self-emit 단일 출처: `loop.sh env`(환경 변수) 
 ## 규칙
 
 - 명시된 subcommand만 실행한다. 다른 subcommand를 자동 추론하지 않는다.
-- 작업 공간(`<spec_dir>/.worktree`)·lock·신호 파일 외 파일은 만들지 않는다.
+- 작업 공간·lock·신호 파일 외 파일은 만들지 않는다(경로는 `loop.sh paths`).
 - subcommand exit code를 그대로 던지지 말고 사용자에게 요약한다.
 - 프로젝트별 constitution override는 아직 미지원이다.

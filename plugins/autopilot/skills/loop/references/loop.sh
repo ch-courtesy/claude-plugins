@@ -762,7 +762,7 @@ usage() {
 autopilot loop 드라이버 (스펙 파일 기반 로컬 자율 실행기)
 
 Subcommands:
-  start   <spec-path>   검증·플랜 게이트 후 워크트리·락 생성 + 루프 시작
+  start   <spec-path>   검증 후 lock 획득 + 워크트리 생성 + 이터 루프
                         [--max-iterations N] [--wall-clock-minutes N]
   status  [<spec-path>] 상태 조회 (인자 없으면 전체)
   stop    <spec-path>   실행 중 정지
