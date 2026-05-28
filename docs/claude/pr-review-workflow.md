@@ -1,5 +1,7 @@
 # Claude PR Review Workflow
 
+> **이 브랜치(`feat/claude-review-action-embedded`)는 spike**: 직접 CLI 브랜치(`feat/claude-review-direct-cli`)의 피봇 설계(임베드 스키마 + `.result` 파싱 + 합성 fallback)를 `anthropics/claude-code-action` 으로도 동작하는지 평행 검증하기 위한 실험. 둘을 CI 에 동시 돌려 비교.
+
 이 문서는 기존 `anthropics/claude-code-action` 기반 자유 형식 리뷰 대신 pinned Claude Code Action의 JSON schema 출력으로 PR 리뷰를 structured JSON으로 자동화하는 경계를 정의한다.
 
 ## 목표
