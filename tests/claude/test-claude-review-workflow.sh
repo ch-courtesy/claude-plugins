@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Claude PR review workflow contract.
 #
-# Static checks only: do not call GitHub or Anthropic.
+# Static checks only: do not call GitHub, npm, or Anthropic.
 
 set -euo pipefail
 
@@ -17,20 +17,26 @@ ok()   { echo "OK: $*"; }
 [[ -f "$PROMPT" ]] || fail "$PROMPT 부재"
 [[ -f "$SCHEMA" ]] || fail "$SCHEMA 부재"
 
-echo "=== check 1: Claude Code OAuth token is required for Claude review ==="
-grep -q 'claude_code_oauth_token:.*secrets\.CLAUDE_CODE_OAUTH_TOKEN' "$WORKFLOW" \
-  || fail "claude_code_oauth_token secret 매핑 부재"
+echo "=== check 1: Claude Code OAuth token env (direct CLI), no API key, no claude-code-action ==="
+grep -qE '^[[:space:]]*CLAUDE_CODE_OAUTH_TOKEN:[[:space:]]*\$\{\{[[:space:]]*secrets\.CLAUDE_CODE_OAUTH_TOKEN' "$WORKFLOW" \
+  || fail "CLAUDE_CODE_OAUTH_TOKEN env secret 매핑 부재 (직접 CLI는 env 로 전달해야 함)"
 grep -q 'CLAUDE_CODE_OAUTH_TOKEN secret is required' "$WORKFLOW" \
   || fail "CLAUDE_CODE_OAUTH_TOKEN 누락 시 실패 메시지 부재"
 if grep -q 'ANTHROPIC_API_KEY' "$WORKFLOW"; then
   fail "ANTHROPIC_API_KEY 기반 인증이 남아 있음"
 fi
-grep -qE '^[[:space:]]*id-token:[[:space:]]*write' "$WORKFLOW" \
-  || fail "claude-code-action OIDC 토큰 교환에 필요한 id-token: write 권한 부재"
-ok "check 1: claude_code_oauth_token secret + id-token: write 권한을 명시적으로 요구"
+if grep -q 'anthropics/claude-code-action' "$WORKFLOW"; then
+  fail "claude-code-action 잔존 — 직접 CLI 로 전환 미완"
+fi
+if grep -qE '^[[:space:]]*id-token:[[:space:]]*write' "$WORKFLOW"; then
+  fail "id-token: write 잔존 — 직접 CLI 에서는 OIDC 불필요(권한 최소화 위반)"
+fi
+ok "check 1: CLAUDE_CODE_OAUTH_TOKEN env + no API key + no claude-code-action + no id-token"
 
 echo ""
-echo "=== check 2: Claude review uses pinned claude-code-action with shared context ==="
+echo "=== check 2: Claude CLI is pinned and run directly with shared context ==="
+grep -qE 'npm install -g @anthropic-ai/claude-code@[0-9]+\.[0-9]+\.[0-9]+' "$WORKFLOW" \
+  || fail "@anthropic-ai/claude-code 버전 고정 부재"
 grep -q 'REVIEW_BASE="$(git merge-base "origin/\$PR_BASE_REF" "refs/remotes/pull/\$PR_NUMBER/head")"' "$WORKFLOW" \
   || fail "PR head 와 base branch 의 merge-base 계산 부재"
 grep -q 'REVIEW_PROMPT="\.github/prompts/claude-pr-review\.ko\.md"' "$WORKFLOW" \
@@ -45,30 +51,68 @@ grep -q 'source \.review-context/context-mode\.env' "$WORKFLOW" \
   || fail "review context mode env 로드 부재"
 grep -q 'REVIEW_CONTEXT_MODE' "$WORKFLOW" \
   || fail "prompt 에 review context mode 주입 부재"
-grep -qE 'uses: anthropics/claude-code-action@[0-9a-f]{40}' "$WORKFLOW" \
-  || fail "anthropics/claude-code-action SHA 고정 부재"
-grep -q 'claude_code_oauth_token:.*secrets\.CLAUDE_CODE_OAUTH_TOKEN' "$WORKFLOW" \
-  || fail "claude_code_oauth_token input 매핑 부재"
+grep -qE 'claude -p( *\\| *$)' "$WORKFLOW" \
+  || fail "claude -p 직접 호출 부재"
+grep -q -- '--output-format json' "$WORKFLOW" \
+  || fail "claude CLI --output-format json 지정 부재"
 grep -q -- '--json-schema' "$WORKFLOW" \
-  || fail "Claude action json schema 지정 부재"
-grep -q 'steps\.prepare-claude-review\.outputs\.schema' "$WORKFLOW" \
-  || fail "Claude action schema output 연결 부재"
-grep -q 'steps\.claude-review\.outputs\.structured_output' "$WORKFLOW" \
-  || fail "Claude structured_output 저장 부재"
+  || fail "claude CLI --json-schema(클라이언트 hint) 지정 부재"
+grep -q -- '--strict-mcp-config' "$WORKFLOW" \
+  || fail "claude CLI --strict-mcp-config(MCP 격리) 지정 부재"
+grep -qF -- '--setting-sources ""' "$WORKFLOW" \
+  || fail "claude CLI --setting-sources \"\"(project/local/user 설정 차단) 지정 부재"
+grep -q -- '--no-session-persistence' "$WORKFLOW" \
+  || fail "claude CLI --no-session-persistence 지정 부재"
+grep -qF -- '< "$prompt_file" > "$envelope"' "$WORKFLOW" \
+  || fail "stdin으로 prompt 주입 / envelope 캡처 부재"
+grep -q 'unset GH_TOKEN' "$WORKFLOW" \
+  || fail "claude CLI 실행 전 GH_TOKEN env 제거 부재"
+grep -qF 'mktemp -d' "$WORKFLOW" \
+  || fail "scratch cwd(mktemp -d) 격리 부재 — 레포 CLAUDE.md/skills/MCP auto-discovery 위험"
 if grep -q -- '--bare' "$WORKFLOW"; then
   fail "--bare 는 OAuth token 대신 API key 를 요구하므로 사용하면 안 됨"
 fi
 if grep -q 'https://api\.anthropic\.com/v1/messages' "$WORKFLOW"; then
   fail "Claude API 직접 호출이 남아 있음"
 fi
-grep -q '\.claude-review/result\.json' "$WORKFLOW" \
-  || fail "Claude 최종 JSON 출력 파일 지정 부재"
-grep -q 'jq empty \.claude-review/result\.json' "$WORKFLOW" \
-  || fail "Claude 최종 JSON jq 검증 부재"
-ok "check 2: pinned claude-code-action + schema + shared context 로 structured review 실행"
+ok "check 2: pinned CLI + 직접 claude -p + 격리 플래그 + shared context"
 
 echo ""
-echo "=== check 2b: claude workflow supports targeted context follow-up ==="
+echo "=== check 2a: model receives the schema (embedded in prompt) + raw-output rules ==="
+grep -qF '<schema>' "$WORKFLOW" \
+  || fail "프롬프트에 <schema> 임베드 블록 부재 (claude-code의 --json-schema 는 client-side 만이라 모델이 스키마를 봐야 함)"
+grep -qF 'schema_json="$(jq -c . "$REVIEW_SCHEMA")"' "$WORKFLOW" \
+  || fail "schema_json 인라인 생성(jq -c) 부재"
+grep -q '## 출력 스키마' "$WORKFLOW" \
+  || fail "출력 스키마 섹션 헤더 부재"
+grep -q '## 응답 형식 규칙' "$WORKFLOW" \
+  || fail "응답 형식 규칙(raw JSON, 펜스 금지) 섹션 부재"
+grep -qF 'additionalProperties:false' "$WORKFLOW" \
+  || fail "프롬프트에 additionalProperties:false 강조 부재"
+ok "check 2a: 모델이 스키마와 raw-only 규칙을 직접 본다"
+
+echo ""
+echo "=== check 2b: workflow parses .result and validates required fields with fallback ==="
+grep -qF 'jq -r ' "$WORKFLOW" \
+  || fail "jq -r 으로 .result 추출 부재"
+grep -qF 'extract_json_object' "$WORKFLOW" \
+  || fail "extract_json_object 헬퍼(첫 { ~ 마지막 } 추출) 부재"
+grep -qF 'write_fallback' "$WORKFLOW" \
+  || fail "write_fallback 헬퍼(파싱 실패 → 합성 result.json) 부재"
+grep -qE 'eligibility.*reviewed.*reason.*fallback' "$WORKFLOW" \
+  || fail "fallback 합성 result 가 eligibility=reviewed + fallback reason 으로 구성되지 않음(submit 스텝이 게시하지 못함)"
+grep -q 'verdict.*comment' "$WORKFLOW" \
+  || fail "fallback verdict=comment 부재 — submit 스텝이 managed comment 게시를 위해 필요"
+for k in eligibility verdict summary confidence reviewed_context automation_safety findings resolved_threads unresolved_threads skipped_duplicates context_requests; do
+  grep -q "\"$k\"" "$WORKFLOW" \
+    || fail "required 필드 키워드 \"$k\" 가 워크플로 검증/합성에 없음"
+done
+grep -q 'missing required fields' "$WORKFLOW" \
+  || fail "필수 필드 누락 진단 메시지 부재"
+ok "check 2b: .result 파싱 + required 필드 검증 + 실패 시 합성 fallback"
+
+echo ""
+echo "=== check 2c: targeted context follow-up ==="
 grep -q 'context_requests' "$WORKFLOW" \
   || fail "context_requests follow-up 처리 부재"
 grep -q 'review-extra-context' "$WORKFLOW" \
@@ -80,7 +124,25 @@ if grep -q 'env\.MAX_CONTEXT_REQUEST_FILES' "$WORKFLOW"; then
 fi
 grep -qF -- '--argjson max "$MAX_CONTEXT_REQUEST_FILES"' "$WORKFLOW" \
   || fail "context request file limit 을 jq --argjson 으로 전달하지 않음"
-ok "check 2b: targeted context follow-up 처리 존재"
+grep -qF 'find .review-extra-context -type f -print -quit' "$WORKFLOW" \
+  || fail "추가 context 존재 판정이 find -print -quit 패턴이 아님(파일 누수/잘못된 판정 위험)"
+grep -q 'truncated at 400 lines' "$WORKFLOW" \
+  || fail "추가 context 파일 절단 표시(400줄) 부재"
+ok "check 2c: targeted context follow-up + find -print -quit + 400줄 절단 마커"
+
+echo ""
+echo "=== check 2d: configurable output language and model ==="
+grep -qE 'CLAUDE_REVIEW_LANG:[[:space:]]*\$\{\{[[:space:]]*vars\.CLAUDE_REVIEW_LANG' "$WORKFLOW" \
+  || fail "CLAUDE_REVIEW_LANG vars 매핑 부재"
+grep -q '## 출력 언어' "$WORKFLOW" \
+  || fail "출력 언어 섹션 부재"
+grep -qE 'CLAUDE_REVIEW_MODEL:[[:space:]]*\$\{\{[[:space:]]*vars\.CLAUDE_REVIEW_MODEL' "$WORKFLOW" \
+  || fail "CLAUDE_REVIEW_MODEL vars 매핑 부재"
+grep -qF -- '--model "$CLAUDE_REVIEW_MODEL"' "$WORKFLOW" \
+  || fail "claude CLI --model 에 CLAUDE_REVIEW_MODEL 전달 부재"
+grep -qE '\[\[[[:space:]]*-n[[:space:]]+"\$REVIEW_INCREMENTAL_BASE"[[:space:]]*\]\][[:space:]]*&&[[:space:]]*printf' "$WORKFLOW" \
+  || fail "incremental base SHA 출력이 조건부가 아님(빈 값에서 비어 있는 라인 노출)"
+ok "check 2d: CLAUDE_REVIEW_LANG·CLAUDE_REVIEW_MODEL 설정 가능 + 조건부 incremental base"
 
 echo ""
 echo "=== check 3: @claude mention triggers require trusted author association ==="
@@ -175,8 +237,8 @@ grep -q 'Confidence scoring' "$PROMPT" \
   || fail "prompt confidence scoring 정책 부재"
 grep -q 'confidence_score < 80' "$PROMPT" \
   || fail "prompt confidence threshold 정책 부재"
-grep -q 'submit_pr_review' "$PROMPT" \
-  || fail "prompt structured tool output 규칙 부재"
+grep -q 'structured output' "$PROMPT" \
+  || fail "prompt structured output 규칙 부재"
 ok "check 8: prompt 핵심 정책 존재"
 
 echo ""
@@ -189,14 +251,16 @@ grep -qF 'ref: ${{ steps.pr.outputs.base_ref }}' "$WORKFLOW" \
 ok "check 9: trusted base checkout (PR-controlled 코드 미실행)"
 
 echo ""
-echo "=== check 10: checkout credentials cleared before model action ==="
+echo "=== check 10: checkout credentials cleared before claude CLI execution ==="
 unset_extraheader_line="$(awk 'index($0, "git config --local --unset-all http.https://github.com/.extraheader") { print NR; exit }' "$WORKFLOW")"
-model_action_line="$(awk '/uses: anthropics\/claude-code-action@/ { print NR; exit }' "$WORKFLOW")"
+claude_cli_line="$(awk '/claude -p \\/ { print NR; exit }' "$WORKFLOW")"
 [[ -n "$unset_extraheader_line" ]] \
-  || fail "모델 action 전 checkout credential extraheader 제거 부재"
-(( unset_extraheader_line < model_action_line )) \
-  || fail "extraheader 제거가 첫 claude-code-action 이후에 위치함"
-ok "check 10: 모델 action 전 checkout credential extraheader 제거"
+  || fail "claude CLI 실행 전 checkout credential extraheader 제거 부재"
+[[ -n "$claude_cli_line" ]] \
+  || fail "claude -p 호출 라인 위치 미식별"
+(( unset_extraheader_line < claude_cli_line )) \
+  || fail "extraheader 제거가 claude -p 이후에 위치함"
+ok "check 10: claude CLI 실행 전 checkout credential extraheader 제거"
 
 echo ""
 echo "ALL CHECKS PASSED"
