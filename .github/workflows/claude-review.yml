@@ -360,105 +360,149 @@ jobs:
           jq empty "$result"
 
       - name: Submit Claude review verdict
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         env:
-          GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
-        run: |
-          set -euo pipefail
+          CLAUDE_FORMAL_PREFIX: claude-formal-review
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const result = JSON.parse(fs.readFileSync('.claude-review/result.json', 'utf8'));
+            const { owner, repo } = context.repo;
+            const pull_number = Number(process.env.PR_NUMBER);
+            const head_sha = process.env.PR_HEAD_SHA;
+            const prefix = process.env.CLAUDE_FORMAL_PREFIX;
+            const botLogin = 'github-actions[bot]';
 
-          result=".claude-review/result.json"
-          body=".claude-review/review-body.md"
+            if (result.eligibility?.status !== 'reviewed') {
+              core.info('No review output to post.');
+              return;
+            }
 
-          verdict="$(jq -r '.verdict' "$result")"
-          may_approve="$(jq -r '.automation_safety.may_approve' "$result")"
-          may_request_changes="$(jq -r '.automation_safety.may_request_changes' "$result")"
-          eligibility="$(jq -r '.eligibility.status' "$result")"
-          diff_truncated="$(jq -r '.reviewed_context.diff_truncated' "$result")"
-          findings_count="$(jq '.findings | length' "$result")"
-          blocking_count="$(jq '[.findings[] | select(.severity == "blocking" and .confidence_score >= 80)] | length' "$result")"
-          approve_without_body=false
+            const findings = result.findings || [];
+            // inline candidate: comment_type=inline AND line is a positive integer on the diff
+            const isInline = (f) => f.comment_type === 'inline'
+              && typeof f.line === 'number' && f.line > 0;
+            const inlineFindings = findings.filter(isInline);
+            const issueFindings = findings.filter((f) => !isInline(f));
 
-          if [[ "$eligibility" != "reviewed" ]]; then
-            echo "No review output to post."
-            exit 0
-          fi
+            const verdict = result.verdict;
+            const mayApprove = !!result.automation_safety?.may_approve;
+            const mayRequest = !!result.automation_safety?.may_request_changes;
+            const diffTruncated = !!result.reviewed_context?.diff_truncated;
+            const blockingHi = findings.filter((f) =>
+              f.severity === 'blocking' && (f.confidence_score ?? 0) >= 80).length;
 
-          review_mode="comment"
-          if [[ "$findings_count" == "0" && "$verdict" == "approve" && "$may_approve" == "true" && "$diff_truncated" == "false" ]]; then
-            review_mode="approve"
-            approve_without_body=true
-          elif [[ "$findings_count" == "0" && ( "$verdict" == "comment" || "$verdict" == "needs_context" ) ]]; then
-            review_mode="comment"
-          elif [[ "$findings_count" == "0" ]]; then
-            review_mode="comment"
-          elif [[ "$diff_truncated" != "false" ]]; then
-            review_mode="comment"
-          elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
-            review_mode="request-changes"
-          fi
+            // Event decision — same gating as before, generalized for inline+issue.
+            let event;
+            if (findings.length === 0 && verdict === 'approve' && mayApprove && !diffTruncated) {
+              event = 'APPROVE';
+            } else if (!diffTruncated && verdict === 'request_changes' && mayRequest && blockingHi > 0) {
+              event = 'REQUEST_CHANGES';
+            } else {
+              event = 'COMMENT';
+            }
 
-          if [[ "$approve_without_body" == "true" ]]; then
-            if gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
-              | jq -e --arg head "$PR_HEAD_SHA" 'any(.[]; .user.login == "github-actions[bot]" and .state == "APPROVED" and .commit_id == $head)' >/dev/null; then
-              echo "Formal Claude approval already exists for $PR_HEAD_SHA; skipping duplicate."
-              exit 0
-            fi
-            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve; then
-              echo "Formal Claude approval failed; continuing with managed PR comment."
-              touch .claude-review/approval-failed
-              exit 0
-            else
-              exit 0
-            fi
-          fi
+            // Review body — summary + issue-level findings.
+            // Inline findings are posted per-line; not duplicated in body.
+            const renderIssue = (f, i) => {
+              const loc = f.file + ((typeof f.line === 'number' && f.line > 0) ? `:${f.line}` : '');
+              return `${i + 1}. [${f.severity}/${f.confidence_score}] ${f.title}\n   ${loc}\n   ${f.body}\n   Suggestion: ${f.suggestion}`;
+            };
+            const issueBlock = issueFindings.length === 0
+              ? '_No issue-level findings._'
+              : `### Issue-level findings\n\n${issueFindings.map(renderIssue).join('\n\n')}`;
+            const inlineNote = inlineFindings.length > 0
+              ? `\n\n_${inlineFindings.length} inline finding${inlineFindings.length === 1 ? '' : 's'} posted on the diff._`
+              : '';
+            const marker = `<!-- ${prefix} head_sha=${head_sha} verdict=${verdict} -->`;
+            const body = ['## Claude PR Review',
+                          '',
+                          (result.summary || ''),
+                          '',
+                          issueBlock + inlineNote,
+                          '',
+                          marker].join('\n');
 
-          {
-            printf '## Claude PR Review\n\n'
-            jq -r '.summary' "$result"
-            printf '\n\n'
-            jq -r '
-              if (.findings | length) == 0 then
-                "No findings."
-              else
-                "Findings:\n" + (
-                  [.findings[] |
-                    "- [" + .severity + "/" + (.confidence_score|tostring) + "] " +
-                    .title + " (" + .file + ":" + (if .line == null or .line == 0 then "N/A" else (.line|tostring) end) + ")\n  " +
-                    .body + "\n  Suggestion: " + .suggestion
-                  ] | join("\n")
-                )
-              end
-            ' "$result"
-          } > "$body"
+            // Inline review comments — path/line/body (start_line for multi-line range).
+            const inlineComments = inlineFindings.map((f) => {
+              const c = {
+                path: f.file,
+                body: `**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}`,
+                side: 'RIGHT',
+                line: f.line,
+              };
+              if (typeof f.start_line === 'number'
+                  && f.start_line >= 1 && f.start_line < f.line) {
+                c.start_line = f.start_line;
+                c.start_side = 'RIGHT';
+              }
+              return c;
+            });
 
-          marker="claude-formal-review head_sha=$PR_HEAD_SHA verdict=$verdict"
-          printf '\n\n<!-- %s -->\n' "$marker" >> "$body"
+            // Idempotency.
+            const existingReviews = await github.paginate(
+              github.rest.pulls.listReviews,
+              { owner, repo, pull_number, per_page: 100 });
+            if (existingReviews.some((r) =>
+                r.user?.login === botLogin && (r.body || '').includes(marker))) {
+              core.info(`Formal Claude review for ${head_sha} verdict=${verdict} already exists; skipping duplicate.`);
+              return;
+            }
+            if (event === 'APPROVE' && existingReviews.some((r) =>
+                r.user?.login === botLogin && r.state === 'APPROVED' && r.commit_id === head_sha)) {
+              core.info(`Formal Claude approval already exists for ${head_sha}; skipping duplicate.`);
+              return;
+            }
 
-          if gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
-            | jq -e --arg marker "$marker" 'any(.[]; (.body // "") | contains($marker))' >/dev/null; then
-            echo "Formal Claude review already exists for $PR_HEAD_SHA / $verdict; skipping duplicate."
-            exit 0
-          fi
+            // Submit. Workflow token cannot self-approve — fall back to COMMENT if APPROVE 403/422s.
+            const submit = (ev) => github.rest.pulls.createReview({
+              owner, repo, pull_number,
+              commit_id: head_sha,
+              event: ev,
+              body,
+              comments: inlineComments,
+            });
 
-          submit_review() {
-            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" "$@" --body-file "$body"; then
-              echo "Formal Claude review submission failed; continuing with managed PR comment."
-            fi
-          }
+            let actualEvent = event;
+            try {
+              await submit(event);
+              core.info(`Submitted ${event} review (${inlineComments.length} inline + ${issueFindings.length} issue findings).`);
+            } catch (e) {
+              if (event === 'APPROVE') {
+                core.warning(`APPROVE failed (${e.status || ''} ${e.message}); falling back to COMMENT.`);
+                fs.writeFileSync('.claude-review/approval-failed', '');
+                actualEvent = 'COMMENT';
+                try { await submit('COMMENT'); }
+                catch (e2) { core.warning(`Fallback COMMENT also failed (${e2.status || ''} ${e2.message}); continuing.`); }
+              } else {
+                core.warning(`Review submission failed (${e.status || ''} ${e.message}); continuing.`);
+              }
+            }
 
-          case "$review_mode" in
-            request-changes)
-              submit_review --request-changes
-              ;;
-            comment)
-              submit_review --comment
-              ;;
-            *)
-              echo "unknown review mode: $review_mode" >&2
-              exit 1
-              ;;
-          esac
+            // Auto-dismiss prior self CHANGES_REQUESTED reviews when this verdict is approve.
+            // Resolves the "old issue raised but latest verdict=approve" state mismatch users see.
+            const verdictIsApprove = verdict === 'approve'
+              && (actualEvent === 'APPROVE' || fs.existsSync('.claude-review/approval-failed'));
+            if (verdictIsApprove) {
+              const oldChanges = existingReviews.filter((r) =>
+                r.user?.login === botLogin &&
+                r.state === 'CHANGES_REQUESTED' &&
+                (r.body || '').includes(prefix));
+              for (const old of oldChanges) {
+                try {
+                  await github.rest.pulls.dismissReview({
+                    owner, repo, pull_number, review_id: old.id,
+                    message: `Superseded by later review on ${head_sha} (verdict=approve)`,
+                  });
+                  core.info(`Dismissed prior self review #${old.id} (${(old.commit_id || '').slice(0,7)} CHANGES_REQUESTED).`);
+                } catch (e) {
+                  core.warning(`Failed to dismiss prior review #${old.id}: ${e.status || ''} ${e.message}`);
+                }
+              }
+            }
 
       - name: Post Claude review comment
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
@@ -472,29 +516,43 @@ jobs:
             const result = JSON.parse(fs.readFileSync('.claude-review/result.json', 'utf8'));
             const marker = process.env.CLAUDE_REVIEW_MARKER;
             const findings = result.findings || [];
+            const isInline = (f) => f.comment_type === 'inline'
+              && typeof f.line === 'number' && f.line > 0;
+            const inlineFindings = findings.filter(isInline);
+            const issueFindings = findings.filter((f) => !isInline(f));
             const approvalFailed = fs.existsSync('.claude-review/approval-failed');
             if (result.eligibility?.status !== 'reviewed' || (findings.length === 0 && !approvalFailed)) {
               core.info('No managed Claude review comment to post.');
               return;
             }
-            const findingText = findings.map((finding, index) => [
-                  `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
-                  `${finding.file}:${finding.line == null || finding.line === 0 ? 'N/A' : finding.line}`,
-                  finding.body,
-                  `Suggestion: ${finding.suggestion}`,
-                ].join('\n')).join('\n\n');
+            const renderIssue = (f, i) => [
+                  `${i + 1}. [${f.severity}/${f.confidence_score}] ${f.title}`,
+                  `${f.file}${(typeof f.line === 'number' && f.line > 0) ? `:${f.line}` : ''}`,
+                  f.body,
+                  `Suggestion: ${f.suggestion}`,
+                ].join('\n');
+            const issueText = issueFindings.length > 0
+              ? `### Issue-level findings\n\n${issueFindings.map(renderIssue).join('\n\n')}`
+              : '';
+            const inlineNote = inlineFindings.length > 0
+              ? `_${inlineFindings.length} inline finding${inlineFindings.length === 1 ? '' : 's'} posted on the diff._`
+              : '';
+            const counts = `Findings: ${findings.length} total (${inlineFindings.length} inline · ${issueFindings.length} issue)`;
+            const summaryText = approvalFailed
+              ? 'Claude review found no findings, but formal approval could not be submitted by this workflow token.'
+              : (result.summary || 'No findings. (summary unavailable)');
             const body = [
               marker,
               '## Claude PR Review',
               '',
               `Verdict: \`${result.verdict}\``,
               '',
-              approvalFailed
-                ? 'Claude review found no findings, but formal approval could not be submitted by this workflow token.'
-                : (result.summary || 'No findings. (summary unavailable)'),
+              counts,
               '',
-              approvalFailed ? 'No findings.' : findingText,
-            ].join('\n');
+              summaryText,
+              issueText ? `\n${issueText}` : '',
+              inlineNote ? `\n${inlineNote}` : '',
+            ].filter((line, i, arr) => !(line === '' && arr[i-1] === '')).join('\n');
 
             const issue_number = Number(process.env.PR_NUMBER);
             const comments = await github.paginate(github.rest.issues.listComments, {
