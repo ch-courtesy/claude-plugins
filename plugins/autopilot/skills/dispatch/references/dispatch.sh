@@ -32,11 +32,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# task 저장소 라벨 헬퍼 공유 — loop.sh 와 동일한
-# task_status_is_done·task_label_present·LOOP_DONE_LABEL 단일 출처를 source.
-# 위치: plugins/autopilot/skills/loop/references/task-storage.sh.
-# shellcheck source=../../loop/references/task-storage.sh
-source "$SCRIPT_DIR/../../loop/references/task-storage.sh"
+# task 저장소 라벨 헬퍼 — task_status_is_done·task_label_present·LOOP_DONE_LABEL.
+# loop v0.7.0 spec-path 재설계로 loop 코어에서 분리되어 dispatch 전용이 됨.
+# 위치: plugins/autopilot/skills/dispatch/references/task-storage.sh.
+# shellcheck source=./task-storage.sh
+source "$SCRIPT_DIR/task-storage.sh"
 
 # ----- 헬퍼 -----
 
