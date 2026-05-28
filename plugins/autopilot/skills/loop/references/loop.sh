@@ -515,7 +515,7 @@ cmd_start() {
 # 로컬 파일에서만 도출한다(중앙 registry 없음).
 print_run_status() {
   local spec_dir="$1"
-  local wt="$spec_dir/.worktree"
+  local wt="${2:-$spec_dir/.worktree}"   # 보조 worktree 모드는 호출자가 실제 WT 를 전달
   local lock="$spec_dir/.loop-lock"
   local spec key state iters last ref epoch
   spec="$(cat "$wt/.loop/SPEC_PATH" 2>/dev/null || echo "$spec_dir/?")"
@@ -552,9 +552,12 @@ cmd_status() {
   local input="${1:-}"
   if [[ -n "$input" ]]; then
     compute_paths "$input"
+    # cmd_start 와 동일한 보조 worktree override 적용 — 같은 cwd 의 follow-up 명령이
+    # start 가 쓴 작업 공간(.worktree top-level)을 정확히 본다.
+    apply_secondary_override >/dev/null 2>&1 || true
     [[ -d "$WT" || -f "$LOCK_FILE" ]] || { echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"; return 0; }
     printf "%-14s %-9s %-20s %-6s %-20s %s\n" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
-    print_run_status "$SPEC_DIR"
+    print_run_status "$SPEC_DIR" "$WT"
     return 0
   fi
   # 전체: repo 작업트리를 스캔해 .loop-lock(실행 중) 또는 .worktree/.loop(이후 상태)을
@@ -571,7 +574,7 @@ cmd_status() {
     echo "실행 기록이 없습니다. 새 실행: $0 start <spec-path>"
     return 0
   fi
-  printf "%-14s %-9s %-6s %-20s %s\n" "KEY" "STATE" "ITERS" "LAST-UPDATE" "SPEC"
+  printf "%-14s %-9s %-20s %-6s %-20s %s\n" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
   local d
   while IFS= read -r d; do [[ -n "$d" ]] && print_run_status "$d"; done <<< "$dirs"
 }
@@ -614,6 +617,10 @@ cmd_cleanup() {
     esac
   done
   compute_paths "$input"
+  # cmd_start 와 동일한 override 적용. start 가 보조 worktree 였으면 cleanup 도 같은
+  # 작업 공간(.worktree top-level)을 본다.
+  local secondary=0
+  apply_secondary_override && secondary=1
 
   if [[ -f "$LOCK_FILE" ]]; then
     local pid; pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
@@ -634,13 +641,21 @@ cmd_cleanup() {
     die "terminal 신호가 없습니다 (signals/ 비어 있음). --force 로 강제 정리 가능: $0 cleanup $SPEC_PATH --force"
   fi
 
-  # path guard
   [[ -n "$WT" ]] || die "WT 비어 있음 (cleanup 거부)"
+
+  if (( secondary == 1 )); then
+    # 보조 worktree: 사용자가 만든 워크트리를 우리가 지우지 않는다. .loop/ 만 제거.
+    [[ -d "$WT/.loop" ]] && rm -rf "$WT/.loop"
+    rm -f "$LOCK_FILE"
+    echo "보조 worktree 정리: .loop/ 제거 (워크트리는 보존): $SPEC_PATH"
+    return 0
+  fi
+
+  # 주 작업트리: <spec_dir>/.worktree 형식 보장 + 워크트리 자체 제거.
   case "$WT" in
     */.worktree) ;;
     *) die "워크트리 경로 형식 부적절 (기대: */.worktree): $WT" ;;
   esac
-
   if [[ -d "$WT" ]]; then
     local flags=""; [[ $force -eq 1 ]] && flags="--force"
     git -C "$SPEC_DIR" worktree remove $flags "$WT" \
@@ -662,6 +677,8 @@ cmd_logs() {
     esac
   done
   compute_paths "$input"
+  # 보조 worktree 에서 start 된 실행이면 LOOP_DIR 도 그쪽으로 override.
+  apply_secondary_override >/dev/null 2>&1 || true
   if [[ -n "$iter_n" ]]; then
     local log="$LOOP_DIR/iterations/$iter_n.log"
     [[ -f "$log" ]] || die "이터 로그 없음: $log"
