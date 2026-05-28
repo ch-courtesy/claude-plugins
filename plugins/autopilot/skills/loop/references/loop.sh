@@ -473,9 +473,12 @@ cmd_start() {
   # 3) 스펙 경로 기록 — list 스캔이 작업 공간에서 정체성을 복원하는 데 사용.
   printf '%s\n' "$SPEC_PATH" > "$LOOP_DIR/SPEC_PATH"
 
-  # 4) 헌법을 워크트리 CLAUDE.md로 복사 + 게이트 false-positive 방지(추적 분리·exclude).
+  # 4) 헌법을 워크트리 CLAUDE.md로 복사 + 신호 계약(SoT)을 append.
+  #    constitution 은 워커 방법론, cmd_signals 출력은 신호·driver 반응 계약.
+  #    워커는 CLAUDE.md 하나에 둘 다 받는다.
   cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
     || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
+  { printf '\n\n'; cmd_signals; } >> "$WT/CLAUDE.md"
   if git -C "$WT" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
     git -C "$WT" update-index --skip-worktree CLAUDE.md || true
   fi
@@ -719,6 +722,27 @@ SPEC frontmatter override:
 EOF
 }
 
+# ----- subcommand: signals (워커 신호 계약 + driver 반응을 단일 출처로 노출) -----
+# 출력은 cmd_start 가 CLAUDE.md 끝에 append 해서 워커도 동일 텍스트를 받는다.
+cmd_signals() {
+  cat <<'EOF'
+## 신호 계약 (driver SoT)
+
+신호 파일 (`.worktree/.loop/` 안):
+- `notes.md` — 이터 간 노트. 매 콜드 스타트에 읽고 끝에 갱신.
+- `DONE` — 완료 판정 시 워커가 생성. 본문 = 완료 요약.
+- `BLOCKED` — 차단 판정 시 워커가 생성. 첫 줄 `category: <c>`, 이어서 사유·시도·필요 결정.
+
+BLOCKED `category` 값: `config-gap` | `spec-gap` | `architecture-gap` | `environment-gap` | `gate-violation` | `other`.
+
+driver 반응:
+- DONE 감지 → 정상 종료, 작업 공간 보존(cleanup 이 정리).
+- BLOCKED 감지 → 내용 출력 후 정지.
+- 1회차 `spec-gap` BLOCKED → "스펙 강화 필요" 에러로 표면화, exit 3.
+- 객관 게이트 위반 → driver 가 직접 BLOCKED(`category: gate-violation`) 생성.
+EOF
+}
+
 # ----- subcommand: deps (필수·선택 의존성과 설치 상태를 단일 출처로 노출) -----
 cmd_deps() {
   echo "필수:"
@@ -772,6 +796,7 @@ Subcommands:
   gates                 객관 게이트 목록 (halt 트리거)
   paths   <spec-path>   해당 스펙의 계산된 경로 (진단·문서 교차 검증용)
   deps                  필수·선택 의존성 + 설치 상태
+  signals               워커 신호 계약 + driver 반응 (start 시 CLAUDE.md 에 append)
 
 자세한 내용: references/operational-guide.md
 EOF
@@ -793,6 +818,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     gates)   cmd_gates ;;
     paths)   cmd_paths "${1:-}" ;;
     deps)    cmd_deps ;;
+    signals) cmd_signals ;;
     *) echo "알 수 없는 subcommand: $SUBCOMMAND" >&2; usage ;;
   esac
 fi

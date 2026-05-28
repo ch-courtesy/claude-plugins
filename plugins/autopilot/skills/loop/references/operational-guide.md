@@ -41,8 +41,8 @@
 
 - `stop`은 실행을 정지한다(작업 공간 유지).
 - `cleanup`은 DONE 확인 후 워크트리를 제거한다(detached HEAD라 브랜치 삭제는 없음). 실행 중이거나 DONE이 없으면 `--force`로 강제 정리.
-- **플랜 게이트**: 1회차 계획 단계에서 플랜 형성 불가면 워커가 BLOCKED(`category: spec-gap`)를 쓰고, driver는 "스펙 강화 필요" 에러(exit 3)로 종료한다. 스펙을 보강한 뒤 재시작한다.
-- **차단 해제**: BLOCKED 신호를 읽고 원인 보정 후 BLOCKED 파일을 삭제한 뒤 재시작한다.
+- **신호 계약**(워커 신호 파일·category 분류·driver 반응): `loop.sh signals`.
+- **차단 해제**: BLOCKED 신호 본문을 읽고 원인 보정 후 BLOCKED 파일을 삭제한 뒤 재시작.
 - stale `.loop-lock`(PID 비활성)은 다음 `start`/`stop`에서 자동 정리된다.
 
 ## 환경 변수

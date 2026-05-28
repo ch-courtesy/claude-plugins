@@ -14,6 +14,7 @@ allowed-tools:
   - Bash(bash * loop.sh gates)
   - Bash(bash * loop.sh paths:*)
   - Bash(bash * loop.sh deps)
+  - Bash(bash * loop.sh signals)
   - Bash(git -C * status:*)
   - Bash(git -C * log:*)
   - Bash(git -C * diff:*)
@@ -42,26 +43,21 @@ loop은 어떤 도구가 만든 스펙이든 **임의의 스펙 파일 경로**�
 
 driver 동작: 스펙 파일 존재 검증, lock 획득, 작업 공간 준비(주 작업트리면 `<spec_dir>/.worktree` git worktree 생성 + 헌법을 CLAUDE.md로 복사; 보조 worktree 안이면 현재 cwd 사용), 이터레이션 루프. 매 이터는 새 `claude --print` 프로세스다.
 
-#### 플랜 게이트 (스펙 강화 필요)
-
-이터 계획 단계에서 스펙으로부터 실행 계획을 형성할 수 없다고 판단하면, 워커는 BLOCKED 신호에 `category: spec-gap`과 사유를 적고 정지한다. driver는 **1회차의 spec-gap BLOCKED**를 "스펙 강화 필요" 에러(exit 3)로 표면화한다. 스펙을 보강한 뒤 재시작한다.
-
 #### Monitor
 
 기본 ON. `--no-monitor`가 없으면 start 직후 `Monitor`를 붙인다. 기본 필터는 빈 줄과 단독 dot만 제외하고 stdout raw 라인을 통과시킨다. `--events-only`는 SKILL.md 차원 옵션이며 `loop.sh`로 전달하지 않는다 — 핵심 이벤트(`이터 #`, HALT, WARN, FAIL, ERROR, rate limit, claude 비정상, DONE/BLOCKED 신호)만 알림한다. `--no-monitor`가 함께 있으면 `--no-monitor`가 우선한다.
 
-### 완료·차단 신호
+### 신호 계약
 
-- **DONE**: 이터가 완료를 판정하면 워커가 DONE 신호 파일을 남긴다. driver는 정상 종료하며 작업 공간을 보존한다.
-- **BLOCKED**: 이터가 차단을 판정하면 워커가 BLOCKED 신호 파일(첫 줄 `category:`, 본문에 사유)을 남긴다. driver는 내용을 출력하고 정지한다. 객관 게이트 위반 시 driver가 직접 `category: gate-violation` BLOCKED를 쓴다.
+워커 신호(DONE/BLOCKED) 경로·category 분류·driver 반응(예: 1회차 `spec-gap` BLOCKED → exit 3 "스펙 강화 필요")의 단일 출처: `loop.sh signals`. 동일 텍스트가 start 시 워커의 CLAUDE.md 끝에 append 된다.
 
 ### status / stop / list / cleanup / logs
 
 각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. lock은 `<spec_dir>/.loop-lock`(워크트리 생성 전 획득해 race 보호), 노트·신호·이터 로그는 `<spec_dir>/.worktree/.loop/` 안에 둔다. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 DONE 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
 
-### env / gates / paths / deps
+### env / gates / paths / deps / signals
 
-driver 인터페이스의 self-emit 단일 출처: `loop.sh env`(환경 변수+기본값) · `loop.sh gates`(객관 게이트 목록) · `loop.sh paths <spec>`(해당 스펙의 계산된 경로) · `loop.sh deps`(필수·선택 의존성 + 설치 상태). 지침은 본문에 중복 열거하지 않고 이 subcommand를 가리킨다.
+driver 인터페이스의 self-emit 단일 출처: `loop.sh env`(환경 변수) · `loop.sh gates`(객관 게이트) · `loop.sh paths <spec>`(계산된 경로) · `loop.sh deps`(의존성 + 설치 상태) · `loop.sh signals`(워커 신호·driver 반응 계약). 지침은 본문에 중복 열거하지 않고 이 subcommand 를 가리킨다.
 
 ## references
 
