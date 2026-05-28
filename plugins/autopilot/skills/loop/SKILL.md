@@ -53,7 +53,7 @@ driver 동작: 스펙 파일 존재 검증, lock 획득, 작업 공간 준비(�
 
 ### status / stop / list / cleanup / logs
 
-각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. 상태·lock·신호는 모두 작업 공간 `<spec_dir>/.worktree/.loop/` 안에 둔다. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 DONE 확인 후(또는 `--force`) 워크트리를 제거한다.
+각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. lock은 `<spec_dir>/.loop-lock`(워크트리 생성 전 획득해 race 보호), 노트·신호·이터 로그는 `<spec_dir>/.worktree/.loop/` 안에 둔다. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 DONE 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
 
 ## references
 
