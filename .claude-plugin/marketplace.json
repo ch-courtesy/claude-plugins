@@ -21,7 +21,7 @@
       "name": "autopilot",
       "source": "./plugins/autopilot",
       "description": "자율 수행 루프(랄프 루프) 운영 인터페이스. spec/loop(single-task) + dispatch(multi-task) 3-skill family로 자율 task lifecycle 관리",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "category": "automation",
       "tags": ["autonomous", "ralph-loop", "agent-runtime", "self-directed"]
     }
