@@ -453,21 +453,28 @@ cmd_start() {
     fi
 
     # 결과 판정 — 자율 실행기 공개 인터페이스로 child 별 종료 상태 확인.
-    # timeout 으로 정리된 wave 는 미완 child 를 failed 처리하고 overall_rc=2.
+    # timeout 으로 정리된 wave 라도 timeout 전에 이미 done 인 child 는 done 보존.
+    # 미종료(pending/running/unknown) 만 timeout-failed 로 마킹.
     local wave_failed=0
     for sp in "${started_specs[@]}"; do
-      if (( wave_timed_out == 1 )); then
-        set_state "$rd" "$sp" "failed"; wave_failed=1
-        log_event "$rd" "wave=$current_wave timeout-failed $(spec_slug "$sp")"
-        continue
-      fi
       local term; term="$(child_terminal_state "$sp")"
       case "$term" in
-        done)   set_state "$rd" "$sp" "done"   ; log_event "$rd" "wave=$current_wave done $(spec_slug "$sp")" ;;
-        failed) set_state "$rd" "$sp" "failed" ; wave_failed=1
-                log_event "$rd" "wave=$current_wave failed $(spec_slug "$sp")" ;;
-        *)      set_state "$rd" "$sp" "failed" ; wave_failed=1
-                log_event "$rd" "wave=$current_wave unknown-terminal $(spec_slug "$sp") state=$term" ;;
+        done)
+          set_state "$rd" "$sp" "done"
+          log_event "$rd" "wave=$current_wave done $(spec_slug "$sp")"
+          ;;
+        failed)
+          set_state "$rd" "$sp" "failed"; wave_failed=1
+          log_event "$rd" "wave=$current_wave failed $(spec_slug "$sp")"
+          ;;
+        *)
+          set_state "$rd" "$sp" "failed"; wave_failed=1
+          if (( wave_timed_out == 1 )); then
+            log_event "$rd" "wave=$current_wave timeout-failed $(spec_slug "$sp") state=$term"
+          else
+            log_event "$rd" "wave=$current_wave unknown-terminal $(spec_slug "$sp") state=$term"
+          fi
+          ;;
       esac
     done
 

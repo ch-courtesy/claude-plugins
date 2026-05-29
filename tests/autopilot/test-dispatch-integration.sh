@@ -392,4 +392,77 @@ all_done_lines=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.collide-* 2>/dev/nu
 echo "OK"
 
 echo ""
+echo "=== TEST 17: timeout 시 이미 done 인 child 는 done 보존 ==="
+# mixed mock: basename 에 hung 포함이면 sleep 30, 아니면 즉시 terminal/DONE.
+MIXED_MOCK="$WORK_DIR/mixed-mock-loop.sh"
+cat > "$MIXED_MOCK" <<'MIXED'
+#!/usr/bin/env bash
+set -euo pipefail
+sub="${1:-}"; shift || true
+spec="${1:-}"
+case "$sub" in
+  start)
+    [[ -z "$spec" ]] && exit 2
+    touch "${spec}.started"
+    base="$(basename "$spec" .md)"
+    if [[ "$base" == *hung* ]]; then
+      sleep 30
+    else
+      printf 'terminal|DONE\n' > "${spec}.ctl"
+    fi
+    ;;
+  status)
+    [[ -z "$spec" ]] && exit 2
+    printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC
+    state="idle"; files="-"
+    if [[ -f "${spec}.ctl" ]]; then
+      IFS='|' read -r state files < "${spec}.ctl"
+    elif [[ -f "${spec}.started" ]]; then
+      state="running"
+    fi
+    printf '%-14s %-9s %-20s %-6s %-20s %s\n' k "$state" "$files" 0 - "$spec"
+    ;;
+  stop) touch "${spec}.stopped" ;;
+  list) printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC ;;
+  *) exit 2 ;;
+esac
+MIXED
+chmod +x "$MIXED_MOCK"
+
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-fast.md"
+seed_spec "$SPEC_DIR/2026-05-29-hung2.md"
+
+t0=$(date +%s)
+set +e
+out=$(LOOP_CMD="bash $MIXED_MOCK" DISPATCH_WAVE_TIMEOUT_SECONDS=2 \
+  dispatch start "$SPEC_DIR/2026-05-29-fast.md" "$SPEC_DIR/2026-05-29-hung2.md" 2>&1)
+rc=$?
+set -e
+t1=$(date +%s); elapsed=$((t1 - t0))
+
+[[ $rc -eq 2 ]] || { echo "FAIL: rc 2 기대, got $rc. out: $out"; exit 1; }
+(( elapsed < 15 )) || { echo "FAIL: 15s 내 종료 기대, ${elapsed}s"; exit 1; }
+
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+[[ -n "$run_id" ]] || { echo "FAIL: run-id 파싱 실패. got: $out"; exit 1; }
+
+# fast 의 state 가 done, hung 의 state 가 failed 이어야 한다 (SKILL.md 계약).
+fast_state=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.fast-* 2>/dev/null)
+hung_state=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.hung2-* 2>/dev/null)
+[[ "$fast_state" == "done" ]] \
+  || { echo "FAIL: timeout 시 fast 기대 done, got '$fast_state' (계약 위반: 정상 완료 child 를 failed 처리)"; exit 1; }
+[[ "$hung_state" == "failed" ]] \
+  || { echo "FAIL: hung 기대 failed, got '$hung_state'"; exit 1; }
+
+# sleep 30 자식이 정리되었는지 확인.
+sleep 1
+set +o pipefail
+stragglers=$(pgrep -f "sleep 30" 2>/dev/null | wc -l | tr -d ' ')
+set -o pipefail
+[[ "$stragglers" == "0" ]] || { echo "FAIL: sleep 30 자식 $stragglers 잔존"; exit 1; }
+echo "OK (rc=$rc elapsed=${elapsed}s, fast=done 보존, hung=failed)"
+
+echo ""
 echo "=== 모든 dispatch 통합 테스트 통과 ==="
