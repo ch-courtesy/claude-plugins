@@ -69,24 +69,24 @@ spec_items="$(printf '%s\n' "$SPEC_FM" | yq eval '.allowed-tools[]' -)"
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== AC1: 9개 항목 포함 (신규 추가 + trailing 형식 정규화) ==="
-# 참고: `Bash(awk:*)` 는 기존 `Bash(awk *)` 의 trailing 형식 정규화 결과로
-# 실질 신규 권한이 아니다. 그러나 SPEC 108 의 AC1 은 "최종 frontmatter 가 9개
-# 항목을 포함" 으로 정의돼 있으므로 awk 도 본 배열에 포함시켜 통합 검증한다.
-# sed/tr 도 동일한 정규화 대상이지만 본 배열에 명시되지 않은 이유는 SPEC 108
-# AC1 의 9개 enumerate 가 awk·printf·pwd·mktemp + ToolSearch·EnterWorktree·
-# ExitWorktree·TaskCreate·TaskUpdate 로 고정돼 있기 때문 (trailing 형식 정규화
-# 자체는 AC2 가 sed/tr 포함 전수로 검증).
+echo "=== AC1: 현 경량 spec 계약 핵심 항목 포함 ==="
+# 정합 갱신: 경량 redesign 으로 spec 스킬은 외부 상태(task·worktree)를 만들지
+# 않으므로 과거 stale 항목(mktemp·EnterWorktree·ExitWorktree·TaskCreate·
+# TaskUpdate — 제거된 task/worktree 기능)을 검증에서 제거한다. 본 배열은 현
+# 경량 계약의 frontmatter allowed-tools 에 실제 존재해야 하는 핵심 항목만
+# enumerate 한다 (trailing 형식 정규화 자체는 AC2 가 sed/tr 포함 전수로 검증).
 REQUIRED_ITEMS=(
+  'AskUserQuestion'
+  'Read'
+  'Write'
+  'Skill'
+  'Agent'
+  'Bash(git log:*)'
   'Bash(awk:*)'
   'Bash(printf:*)'
   'Bash(pwd:*)'
-  'Bash(mktemp:*)'
+  'Bash(mkdir -p docs/specs/**)'
   'ToolSearch'
-  'EnterWorktree'
-  'ExitWorktree'
-  'TaskCreate'
-  'TaskUpdate'
 )
 missing=0
 for req in "${REQUIRED_ITEMS[@]}"; do
@@ -96,7 +96,7 @@ for req in "${REQUIRED_ITEMS[@]}"; do
   fi
 done
 (( missing == 0 )) || fail "AC1: 누락 항목 존재 (위 MISSING 참조)"
-ok "AC1: 9개 항목 모두 포함"
+ok "AC1: 현 경량 계약 핵심 항목 모두 포함"
 
 # ---------------------------------------------------------------------------
 echo ""

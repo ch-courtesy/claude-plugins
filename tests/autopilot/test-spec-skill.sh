@@ -1,324 +1,238 @@
 #!/usr/bin/env bash
-# autopilot:spec 스킬 검증 실패 라우팅 검증 테스트
+# autopilot:spec 스킬 계약 검증 테스트 (경량 redesign + persona/clarity 가산)
 #
-# SPEC.md (#65 작업) 수용 기준 1·2·4·5·6·7·8·9·10에 대응하는 assertion 집합.
-# 본 테스트는 SKILL.md가 검증 실패 분기 라우팅을 명시적으로 기술하는지를 정적
-# 검사로 확인한다. 실제 사용자 인터랙션·외부 도구 호출은 e2e 범위 밖.
+# 정합 갱신: 과거 본 테스트는 제거된 기능(검증실패 라우팅 a/b/c·자연어 트리거·
+# 사전 명확화 라운드·마일스톤/PRD 라우팅·단일 task 생성·test_sweep_paths·
+# 10단계 워크플로)을 검증하는 stale assert 를 담고 있었다. 경량 spec 스킬은
+# 외부 상태(task·이슈·브랜치·원격)를 만들지 않고 SPEC 문서만 작성하는 8단계
+# 워크플로다. 본 테스트는 stale assert 를 현 경량 계약으로 정정한 뒤, 신규
+# persona 적대 리뷰 + clarity 점수 기능 검증 assert 를 가산한다.
+#
+# 정적(grep) 검사. 실제 사용자 인터랙션·외부 도구 호출은 e2e 범위 밖.
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/spec"
 SKILL_MD="$SKILL_DIR/SKILL.md"
+SELF_REVIEW_MD="$SKILL_DIR/references/self-review.md"
+CLARIFICATION_MD="$SKILL_DIR/references/clarification.md"
+AGENT_PROMPTS="$SKILL_DIR/references/agent-prompts.md"
+PERSONAS_MD="$SKILL_DIR/references/personas.md"
+CLARITY_MD="$SKILL_DIR/references/clarity-score.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
 
 [[ -f "$SKILL_MD" ]] || fail "SKILL.md 부재: $SKILL_MD"
 
-# ---------------------------------------------------------------------------
-echo "=== TEST 1: 검증 실패 라우팅 섹션 존재 ==="
-# 수용 기준 1·9: 라우팅 옵션 (a)/(b)/(c)를 모두 명시
-grep -qE '검증 실패.*(라우팅|분기|routing)' "$SKILL_MD" \
-  || fail "SKILL.md에 '검증 실패 라우팅/분기' 섹션 명시 없음"
-ok "검증 실패 라우팅/분기 섹션 헤더 존재"
+# ===========================================================================
+# PART A — 현 경량 계약 정합 검증
+# ===========================================================================
 
-# 라우팅 옵션 (a)/(b)/(c) 모두 명시 — 본문 흐름에서 (a) … (b) … (c) 패턴
-for opt_label in '(a)' '(b)' '(c)'; do
-  grep -qF "$opt_label" "$SKILL_MD" \
-    || fail "SKILL.md에 라우팅 옵션 $opt_label 표기 없음"
+echo "=== TEST A1: 외부 상태 미생성 경량 계약 ==="
+# 경량 redesign: 산출물은 SPEC 문서뿐. task·이슈·브랜치·원격 미생성.
+grep -qE '외부 상태.*(만들지 않|미생성|않는다)' "$SKILL_MD" \
+  || fail "SKILL.md에 '외부 상태 미생성' 계약 명시 없음"
+ok "외부 상태 미생성 계약 명시"
+# stale 기능 잔존 금지 (negative): 검증 실패 라우팅·PRD·milestone-id·test_sweep_paths
+for stale in '검증 실패 라우팅' 'milestone-id' 'test_sweep_paths' '마일스톤 규모'; do
+  if grep -qF "$stale" "$SKILL_MD"; then
+    fail "SKILL.md에 제거된 기능 어구 '$stale' 잔존 (경량 계약 위반)"
+  fi
 done
-ok "라우팅 옵션 (a)/(b)/(c) 모두 명시"
+ok "제거된 기능 어구(라우팅·milestone-id·test_sweep_paths 등) 잔존 없음"
 
-# 각 옵션 의미가 본문에 보이는지 키워드 검사 (수용 기준 1)
-grep -qE '재입력|다시 입력|재시도' "$SKILL_MD" \
-  || fail "옵션 (a) 의미(재입력·재시도) 명시 없음"
-ok "옵션 (a) 의미(task-id 재입력·재시도) 명시"
-
-grep -qE '사전 명확화 라운드' "$SKILL_MD" \
-  || fail "옵션 (b) '사전 명확화 라운드' 키워드 없음"
-ok "옵션 (b) '사전 명확화 라운드' 명시"
-
-grep -qE '종료|abort|중단' "$SKILL_MD" \
-  || fail "옵션 (c) 종료·abort 의미 명시 없음"
-ok "옵션 (c) 종료 의미 명시"
-
-# ---------------------------------------------------------------------------
 echo ""
-echo "=== TEST 2: 자연어 입력 감지 트리거 ==="
-# 수용 기준 2: 자연어 문장으로 보이는 입력 = 검증 실패 트리거
-grep -qE '자연어|natural language|문장으로 보이' "$SKILL_MD" \
-  || fail "SKILL.md에 '자연어 입력' 검증 실패 트리거 명시 없음"
-ok "자연어 입력 트리거 명시"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 3: 사전 명확화 라운드 = step 4 메커니즘 앞당김 ==="
-# 수용 기준 4·제약: 별도 phase 신설 없이 기존 step 4 메커니즘 재사용
-grep -qE 'step 4|단계 4|명확화 라운드.*앞당김|앞당겨' "$SKILL_MD" \
-  || fail "SKILL.md에 step 4 앞당김 명시 없음"
-ok "step 4 메커니즘 앞당김 명시"
-
-# 한 번에 한 AskUserQuestion 규칙 재사용 — 본문에 명시되어야 함
-grep -qE '한 번에 한 (질문|AskUserQuestion)' "$SKILL_MD" \
-  || fail "SKILL.md에 '한 번에 한 질문/AskUserQuestion' 규칙 명시 없음"
-ok "'한 번에 한 질문' 규칙 명시"
-
-# 수집할 정보: 문제·목표·범위·제약 (수용 기준 4)
-for token in '문제' '목표' '범위' '제약'; do
-  grep -q "$token" "$SKILL_MD" \
-    || fail "사전 명확화 수집 항목 '$token' 명시 없음"
+echo "=== TEST A2: 8단계 워크플로 + 핵심 step 보존 ==="
+for step_kw in '컨텍스트 탐색' '범위 분해 게이트' '명확화 라운드' '접근법 비교' '섹션별 SPEC' 'SPEC 문서 작성' '자체 검토' '구현 스킬 추천'; do
+  grep -qF "$step_kw" "$SKILL_MD" \
+    || fail "8단계 step 키워드 '$step_kw' 보존 실패"
 done
-ok "수집 항목 (문제·목표·범위·제약) 명시"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 4: 단일 task 경로 — 프로젝트 태스크 관련 지침 ==="
-# 수용 기준 5: 단일 task 수렴 시 프로젝트의 태스크 관련 지침에 따라 task 생성
-grep -qE '단일 task|단일 규모|단일로 수렴' "$SKILL_MD" \
-  || fail "SKILL.md에 '단일 task 수렴' 분기 명시 없음"
-ok "단일 task 수렴 분기 명시"
-
-grep -qE '프로젝트의? 태스크 관련 지침|태스크 관련 지침' "$SKILL_MD" \
-  || fail "SKILL.md에 '프로젝트 태스크 관련 지침' 참조 없음"
-ok "프로젝트 태스크 관련 지침 참조 명시"
-
-# 수용 기준 5: task 생성 후 step 2 (컨텍스트 탐색)부터 재개
-grep -qE 'step 2|단계 2|컨텍스트 탐색.*재개|재개.*(step|단계) ?2' "$SKILL_MD" \
-  || fail "SKILL.md에 'step 2부터 재개' 흐름 명시 없음"
-ok "task-id 확보 후 step 2 재개 명시"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 5: 마일스톤 경로 — PRD 스킬 라우팅 ==="
-# 수용 기준 6: 마일스톤 규모 수렴 시 PRD invoke 여부를 AskUserQuestion으로
-grep -qE '마일스톤 규모|마일스톤으로 수렴|마일스톤 분해' "$SKILL_MD" \
-  || fail "SKILL.md에 '마일스톤 규모 수렴' 분기 명시 없음"
-ok "마일스톤 규모 분기 명시"
-
-grep -qE '(PRD|prd) ?(스킬|skill)' "$SKILL_MD" \
-  || fail "SKILL.md에 PRD 스킬 라우팅 명시 없음"
-ok "PRD 스킬 라우팅 명시"
-
-# 수용 기준 6·8: PRD 호출은 AskUserQuestion 명시적 승인 후
-grep -qE '명시적 승인|승인.*invoke|AskUserQuestion.*PRD|PRD.*AskUserQuestion' "$SKILL_MD" \
-  || fail "SKILL.md에 PRD invoke 전 AskUserQuestion 승인 흐름 명시 없음"
-ok "PRD invoke 전 AskUserQuestion 승인 명시"
-
-# 위험: PRD 스킬은 milestone-id 인자 필요 — spec이 받아 넘김
-grep -qE 'milestone-id|milestone ?id' "$SKILL_MD" \
-  || fail "SKILL.md에 PRD 호출 시 milestone-id 인자 전달 명시 없음"
-ok "milestone-id 인자 전달 명시"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 6: 산출물 안전성 (취소·종료 시) ==="
-# 수용 기준 7·10: 종료·취소 시 SPEC.md/task 어느 것도 남기지 않음
-grep -qE '취소|cancel' "$SKILL_MD" \
-  || fail "SKILL.md에 '취소' 시나리오 명시 없음"
-ok "사전 명확화 라운드 취소 시나리오 명시"
-
-grep -qE '산출물.*(없이|않고|남기지)|어떠한 산출물도|작성하지 않' "$SKILL_MD" \
-  || fail "SKILL.md에 '산출물 미작성/미생성' 안전 종료 명시 없음"
-ok "취소·종료 시 산출물 미생성 안전 종료 명시"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 7: AskUserQuestion 기반 스킬 체인 규칙 ==="
-# 수용 기준 8: "다음 단계: Skill(...)" 자유 텍스트 안내 대신 AskUserQuestion 확인
-grep -qE 'AskUserQuestion' "$SKILL_MD" \
-  || fail "SKILL.md에 AskUserQuestion 도구 참조 없음"
-ok "AskUserQuestion 도구 참조 존재"
-
-# 후속 스킬 호출은 항상 AskUserQuestion 확인 후 invoke 규칙
-grep -qE '후속 스킬 호출.*AskUserQuestion|AskUserQuestion.*invoke|AskUserQuestion.*확인 후' "$SKILL_MD" \
-  || fail "SKILL.md에 '후속 스킬 호출 = AskUserQuestion 확인 후' 규칙 명시 없음"
-ok "AskUserQuestion 기반 스킬 체인 규칙 명시"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 8: 기존 워크플로 보존 ==="
-# 검증 실패 분기 외 기존 10단계 흐름은 그대로 유지되어야 함 (SPEC scope.exclude)
-grep -qE '10[- ]?(단계|step) 워크플로' "$SKILL_MD" \
-  || fail "SKILL.md에 10단계 워크플로 헤더 보존 없음"
-ok "10단계 워크플로 헤더 보존"
-
-for step_kw in '컨텍스트 탐색' '범위 분해 게이트' '명확화 라운드' '섹션별 SPEC' '자체 검토' '사용자 최종 검토'; do
-  grep -q "$step_kw" "$SKILL_MD" \
-    || fail "기존 step 키워드 '$step_kw' 보존 실패"
-done
-ok "기존 step 키워드 보존"
-
-# WHAT/HOW 방어선 보존
-grep -q 'WHAT/HOW' "$SKILL_MD" \
-  || fail "WHAT/HOW 방어선 명시 보존 실패"
+ok "8단계 step 키워드 모두 존재"
+grep -qF 'WHAT/HOW' "$SKILL_MD" || fail "WHAT/HOW 방어선 명시 보존 실패"
 ok "WHAT/HOW 방어선 보존"
 
-# ---------------------------------------------------------------------------
 echo ""
-echo "=== TEST 9: agent-prompts.md 양식 파일 (subagent 역할 2종) ==="
-# 이슈 #72 수용 기준 1·2: references/agent-prompts.md 존재 + 두 역할 헤더 + 각 양식 3섹션
-AGENT_PROMPTS="$SKILL_DIR/references/agent-prompts.md"
-[[ -f "$AGENT_PROMPTS" ]] \
-  || fail "agent-prompts.md 부재: $AGENT_PROMPTS"
-ok "references/agent-prompts.md 존재"
+echo "=== TEST A3: AskUserQuestion 기반 결정 + dispatch 추천 ==="
+grep -qF 'AskUserQuestion' "$SKILL_MD" || fail "AskUserQuestion 도구 참조 없음"
+ok "AskUserQuestion 참조 존재"
+grep -qF 'autopilot:dispatch' "$SKILL_MD" || fail "구현 스킬 추천(autopilot:dispatch) 명시 없음"
+ok "dispatch 추천 명시"
 
+echo ""
+echo "=== TEST A4: agent-prompts.md 양식 + 역할 2종 ==="
+[[ -f "$AGENT_PROMPTS" ]] || fail "agent-prompts.md 부재: $AGENT_PROMPTS"
 for role in 'spec-context-explorer' 'spec-self-reviewer'; do
-  grep -qF "$role" "$AGENT_PROMPTS" \
-    || fail "agent-prompts.md에 역할 헤더 '$role' 부재"
+  grep -qF "$role" "$AGENT_PROMPTS" || fail "agent-prompts.md에 역할 헤더 '$role' 부재"
+  grep -qF "$role" "$SKILL_MD"      || fail "SKILL.md 본문에 역할명 '$role' 부재"
 done
-ok "두 역할 헤더(spec-context-explorer·spec-self-reviewer) 존재"
-
-# 각 양식의 세 섹션 (언제·임무·응답) 키워드
-for section_kw in '언제' '임무' '응답'; do
-  cnt="$(grep -c "$section_kw" "$AGENT_PROMPTS" || true)"
-  [[ "$cnt" -ge 2 ]] \
-    || fail "양식 섹션 '$section_kw' 가 2회 이상(두 역할 각각) 등장하지 않음 (현재: $cnt)"
-done
-ok "각 양식의 세 섹션(언제·임무·응답) 양 역할 모두 존재"
-
-# context-explorer 응답 5섹션: 관련 룰·관련 기존 SPEC·관련 코드 영역·컨벤션·권고
-for resp_kw in '관련 룰' '관련 기존 SPEC' '관련 코드 영역' '컨벤션' '권고'; do
-  grep -qF "$resp_kw" "$AGENT_PROMPTS" \
-    || fail "context-explorer 응답 키워드 '$resp_kw' 부재"
-done
-ok "context-explorer 응답 5섹션 키워드 존재"
-
-# self-reviewer 응답 3섹션: 5축 검토 결과·Critical·Important·Minor·판정
-for resp_kw in '5축' 'Critical' 'Important' 'Minor' '판정'; do
-  grep -qF "$resp_kw" "$AGENT_PROMPTS" \
-    || fail "self-reviewer 응답 키워드 '$resp_kw' 부재"
-done
-ok "self-reviewer 응답 3섹션 키워드 존재"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 10: SKILL.md frontmatter allowed-tools에 Agent 포함 ==="
-# 수용 기준 5: subagent dispatch 도구 허가.
-# allowed-tools는 YAML inline (한 줄) 또는 block list (다음 줄 들여쓰기 `- Agent`) 두 형태 모두
-# valid. frontmatter 안에서 두 형식 중 하나로 Agent 토큰이 나타나면 통과.
-#   - block list 형식:  `^[[:space:]]+-[[:space:]]+Agent[[:space:]]*$`
-#   - inline list 형식: `^allowed-tools:.*[[ ,]Agent([],[:space:]]|$)`
-#     ('Agent' 앞은 공백·`[`·`,` 중 하나, 뒤는 `]`·`,`·공백·줄끝 중 하나.)
-awk '/^---$/{c++; next} c==1' "$SKILL_MD" | \
-  grep -qE '^[[:space:]]+-[[:space:]]+Agent[[:space:]]*$|^allowed-tools:.*[[ ,]Agent([],[:space:]]|$)' \
-  || fail "SKILL.md frontmatter allowed-tools에 Agent 미포함"
-ok "frontmatter allowed-tools에 Agent 포함"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== TEST 11: step 3·step 9 본문에 양식 참조·도입 휴리스틱 ==="
-# 수용 기준 3·4: step 3(컨텍스트 탐색)·step 9(자체 검토) 본문이 양식 파일을 참조
+ok "두 역할(spec-context-explorer·spec-self-reviewer) agent-prompts·SKILL 본문 등장"
 ref_count=$(grep -cE 'references/agent-prompts\.md' "$SKILL_MD")
-[[ "$ref_count" -ge 2 ]] \
-  || fail "SKILL.md에 references/agent-prompts.md 참조가 2회 미만 (step 3·step 9 각각 필요)"
-ok "agent-prompts.md 참조 2회 이상 (step 3·step 9 본문)"
+[[ "$ref_count" -ge 2 ]] || fail "SKILL.md에 references/agent-prompts.md 참조 2회 미만"
+ok "agent-prompts.md 참조 2회 이상"
 
-# 역할명이 SKILL.md 본문에도 등장 (스킬 본문이 역할명을 적시)
-for role in 'spec-context-explorer' 'spec-self-reviewer'; do
-  grep -qF "$role" "$SKILL_MD" \
-    || fail "SKILL.md 본문에 역할명 '$role' 부재"
-done
-ok "두 역할명 SKILL.md 본문 등장"
-
-# 권장 도입 휴리스틱 — 본문에 '권장'·'휴리스틱' 또는 '트리거' 어구
-grep -qE '권장 도입|도입 휴리스틱|권장 트리거|도입 트리거' "$SKILL_MD" \
-  || fail "SKILL.md에 권장 도입 휴리스틱/트리거 어구 부재"
-ok "권장 도입 휴리스틱 어구 존재"
-
-# ---------------------------------------------------------------------------
 echo ""
-echo "=== TEST 12: 모듈 구성 표·헌법 §11.6 인용·결정/합성 메인 책임 ==="
-# 수용 기준 6: 모듈 구성 표에 agent-prompts.md 행 (테이블 라인 안에 파일명)
-grep -qE '^\|.*agent-prompts\.md.*\|' "$SKILL_MD" \
-  || fail "모듈 구성 표에 agent-prompts.md 행 부재"
-ok "모듈 구성 표에 agent-prompts.md 행 존재"
+echo "=== TEST A5: agent-prompts.md 단계 번호 오기 정정 (실제 8단계와 일치) ==="
+# 경량 스킬은 8단계다. 과거 양식의 '10-step'·context=step3·self-review=step9 오기를 정정.
+if grep -qE '10[- ]?step|10단계' "$AGENT_PROMPTS"; then
+  fail "agent-prompts.md에 stale '10-step/10단계' 잔존 (실제 8단계)"
+fi
+ok "agent-prompts.md에 stale 10-step 잔존 없음"
+grep -qE '8[- ]?step|8단계' "$AGENT_PROMPTS" \
+  || fail "agent-prompts.md에 정정된 '8-step/8단계' 표기 부재"
+ok "8-step 표기 존재"
+# context-explorer 는 step 1, self-reviewer 는 step 7 을 가리켜야 한다.
+grep -qE 'step 1 컨텍스트 탐색|step 1 .*컨텍스트' "$AGENT_PROMPTS" \
+  || fail "context-explorer 언제 절이 step 1(컨텍스트 탐색)을 가리키지 않음"
+ok "context-explorer → step 1"
+grep -qE 'step 7 자체 검토|step 7 .*자체 검토' "$AGENT_PROMPTS" \
+  || fail "self-reviewer 언제 절이 step 7(자체 검토)을 가리키지 않음"
+ok "self-reviewer → step 7"
 
-# 수용 기준 7: 헌법 §11.6 또는 "이터 내 서브 도구 위임" 인용
+echo ""
+echo "=== TEST A6: 모듈 구성 표 + 헌법 §11.6 + 결정·합성 메인 책임 ==="
 grep -qE '§11\.6|이터 내 서브 도구 위임' "$SKILL_MD" \
-  || fail "SKILL.md에 헌법 §11.6 또는 '이터 내 서브 도구 위임' 인용 부재"
-ok "헌법 §11.6 / '이터 내 서브 도구 위임' 인용 존재"
-
-# 수용 기준 7: 결정·합성 메인 책임 유지 문구
-grep -qE '결정·합성.*메인|메인.*결정·합성|결정과 합성.*메인' "$SKILL_MD" \
+  || fail "SKILL.md에 헌법 §11.6 / '이터 내 서브 도구 위임' 인용 부재"
+ok "§11.6 인용 존재"
+grep -qE '결정·합성.*메인|메인.*결정·합성|결정과 합성.*메인|결정.*합성은 메인' "$SKILL_MD" \
   || fail "SKILL.md에 '결정·합성은 메인 책임' 문구 부재"
-ok "'결정·합성 메인 책임' 문구 존재"
+ok "결정·합성 메인 책임 문구 존재"
 
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# PART B — persona 적대 리뷰 (신규 가산)
+# ===========================================================================
+
 echo ""
-echo "=== TEST 13: SKILL.md step 5 — test 코드 변경 자동 판단 절차 명시 ==="
-# AC1·AC2: 명확화 라운드 마지막에 task scope가 test 코드 변경(rename·cleanup·삭제·내용 수정 등)을
-# 포함하는지 자동 판단하고, 포함 시 sweep 화이트리스트 후보 경로를 단발 yes/no로 확인.
-TEMPLATE_MD="$SKILL_DIR/references/spec-template.md"
-SELF_REVIEW_MD="$SKILL_DIR/references/self-review.md"
+echo "=== TEST B1: 페르소나 카탈로그 단일 출처 문서 존재 ==="
+[[ -f "$PERSONAS_MD" ]] || fail "페르소나 카탈로그 references/personas.md 부재"
+ok "references/personas.md 존재"
+grep -qF '단일 출처' "$PERSONAS_MD" || fail "personas.md에 '단일 출처' 명시 없음"
+ok "단일 출처 명시"
+# 다른 스킬은 복제 없이 참조
+grep -qE '복제(하지|없)' "$PERSONAS_MD" \
+  || fail "personas.md에 '복제 없이 참조' 의미 어구 없음"
+ok "복제 없이 참조 명시"
 
-[[ -f "$TEMPLATE_MD" ]] || fail "spec-template.md 부재: $TEMPLATE_MD"
-[[ -f "$SELF_REVIEW_MD" ]] || fail "self-review.md 부재: $SELF_REVIEW_MD"
-
-# step 5 본문에 'test 코드 변경' (rename·cleanup·삭제·내용 수정 등) 자동 판단 어구
-grep -qE 'test 코드 변경|테스트 코드 변경|test code change' "$SKILL_MD" \
-  || fail "SKILL.md에 'test 코드 변경' 자동 판단 어구 없음"
-ok "test 코드 변경 자동 판단 어구 존재"
-
-# 단발 yes/no 확인 — AC2
-grep -qE '단발 yes/no|단발 예/no|단일 yes/no|단발 확인' "$SKILL_MD" \
-  || fail "SKILL.md에 'test 변경 sweep 단발 yes/no 확인' 절차 없음"
-ok "단발 yes/no 확인 절차 존재"
-
-# 화이트리스트 후보 경로 추출 — AC2
-grep -qE '화이트리스트 후보|sweep 화이트리스트|sweep 후보 경로|화이트리스트 경로 후보' "$SKILL_MD" \
-  || fail "SKILL.md에 'sweep 화이트리스트 후보 경로 추출' 어구 없음"
-ok "sweep 후보 경로 추출 어구 존재"
-
-# ---------------------------------------------------------------------------
 echo ""
-echo "=== TEST 14: SKILL.md step 8 — test_sweep_paths frontmatter 치환 룰 ==="
-# AC3·AC4: yes 응답 시 frontmatter test_sweep_paths에 기록, no/판단 미발동 시 키 부재
-grep -qE '\{\{test_sweep_paths\}\}|test_sweep_paths.*frontmatter|frontmatter.*test_sweep_paths' "$SKILL_MD" \
-  || fail "SKILL.md step 8 치환 룰에 test_sweep_paths frontmatter 처리 명세 없음"
-ok "step 8 치환 룰에 test_sweep_paths 명세 존재"
+echo "=== TEST B2: 세 적대 렌즈 정의 (반대가정·최소해법·구속제약) ==="
+grep -qF '반대 가정' "$PERSONAS_MD" || fail "personas.md에 '반대 가정' 렌즈 없음"
+grep -qF '최소 해법' "$PERSONAS_MD" || fail "personas.md에 '최소 해법' 렌즈 없음"
+grep -qF '구속력 있는 제약' "$PERSONAS_MD" || fail "personas.md에 '구속력 있는 제약' 렌즈 없음"
+ok "세 적대 렌즈 어구 모두 존재"
+# 렌즈는 발견만 보고 (편집·마커 삽입 금지)
+grep -qF '발견만' "$PERSONAS_MD" || fail "personas.md에 '발견만 보고' 제약 없음"
+ok "발견만 보고 제약 명시"
 
-# AC4: test 변경 없을 때 키 부재 — SKILL.md에 명시
-grep -qE 'test_sweep_paths.*(키|key).*(부재|생략|미추가|추가하지|없음)|키 부재|키 추가하지|키를 추가하지' "$SKILL_MD" \
-  || fail "SKILL.md에 test 변경 없을 때 'test_sweep_paths 키 부재' 룰 명시 없음"
-ok "test 변경 없을 때 frontmatter 키 부재 룰 명시"
-
-# ---------------------------------------------------------------------------
 echo ""
-echo "=== TEST 15: spec-template.md — test_sweep_paths placeholder ==="
-# AC3·AC4 지원: active frontmatter 영역에 placeholder 정의. 기존 commented 예시는 보존.
-# active placeholder는 {{test_sweep_paths}} 형식 — step 8 치환 대상.
-grep -qE '\{\{test_sweep_paths\}\}' "$TEMPLATE_MD" \
-  || fail "spec-template.md active 영역에 {{test_sweep_paths}} placeholder 부재"
-ok "spec-template.md에 {{test_sweep_paths}} active placeholder 존재"
+echo "=== TEST B3: self-review.md 적대 렌즈 절 (규모 임계 발동) ==="
+[[ -f "$SELF_REVIEW_MD" ]] || fail "self-review.md 부재"
+grep -qE '적대 렌즈|페르소나' "$SELF_REVIEW_MD" \
+  || fail "self-review.md에 적대 렌즈/페르소나 절 없음"
+ok "self-review.md 적대 렌즈 절 존재"
+grep -qF 'personas.md' "$SELF_REVIEW_MD" \
+  || fail "self-review.md가 personas.md 단일 출처를 참조하지 않음"
+ok "self-review.md → personas.md 참조"
+# 기존 규모 임계로만 발동: 100줄·마커 2개
+grep -qE '100줄' "$SELF_REVIEW_MD" || fail "self-review.md에 규모 임계 '100줄' 부재"
+grep -qE '마커 2개|2개 이상' "$SELF_REVIEW_MD" || fail "self-review.md에 규모 임계 '마커 2개' 부재"
+ok "규모 임계(100줄·마커 2개) 발동 명시"
+# 기존 5축 자체 검토 보존 (가산성: 약화하지 않음)
+grep -qE '5 ?checks|5축|5 개 체크' "$SELF_REVIEW_MD" \
+  || fail "self-review.md 기존 5축 자체 검토 보존 실패 (적대 렌즈는 가산이어야 함)"
+ok "기존 5축 자체 검토 보존 (적대 렌즈 가산)"
 
-# 기존 commented 예시 블록 보존 — # test_sweep_paths: 라인
-grep -qE '^# test_sweep_paths:' "$TEMPLATE_MD" \
-  || fail "spec-template.md commented '# test_sweep_paths:' 예시 블록 보존 실패"
-ok "commented '# test_sweep_paths:' 예시 블록 보존"
-
-# 기존 commented '# test_paths:' 예시 블록도 보존
-grep -qE '^# test_paths:' "$TEMPLATE_MD" \
-  || fail "spec-template.md commented '# test_paths:' 예시 블록 보존 실패"
-ok "commented '# test_paths:' 예시 블록 보존"
-
-# ---------------------------------------------------------------------------
 echo ""
-echo "=== TEST 16: self-review.md — 5축 검사 항목에 test_sweep_paths 검사 추가 ==="
-# AC5: scope에 test 코드 변경 포함 시 test_sweep_paths가 비어 있지 않다 검사
-grep -qE 'test_sweep_paths' "$SELF_REVIEW_MD" \
-  || fail "self-review.md에 'test_sweep_paths' 검사 항목 없음"
-ok "self-review.md에 test_sweep_paths 검사 항목 존재"
+echo "=== TEST B4: SKILL.md step 7 적대 렌즈 + 메인 반영 ==="
+grep -qF 'references/personas.md' "$SKILL_MD" \
+  || fail "SKILL.md가 references/personas.md를 참조하지 않음"
+ok "SKILL.md → personas.md 참조"
+grep -qE '적대 렌즈' "$SKILL_MD" || fail "SKILL.md에 '적대 렌즈' 어구 없음"
+ok "SKILL.md 적대 렌즈 어구 존재"
 
-# 검사 의미: scope에 test 코드 변경 포함 시 → 필드가 비어 있지 않다
-grep -qE 'test 코드 변경|테스트 코드 변경' "$SELF_REVIEW_MD" \
-  || fail "self-review.md에 'test 코드 변경' 트리거 어구 없음"
-ok "self-review.md에 test 코드 변경 트리거 어구 존재"
-
-grep -qE '비어 있지 않|채워|값이 있' "$SELF_REVIEW_MD" \
-  || fail "self-review.md에 'test_sweep_paths 필드가 비어 있지 않다' 의미 어구 없음"
-ok "self-review.md에 필드 비어 있지 않음 의미 명시"
-
-# ---------------------------------------------------------------------------
 echo ""
-echo "=== 모든 spec 검증 실패 라우팅 테스트 통과 ==="
+echo "=== TEST B5: agent-prompts self-reviewer 양식에 적대 렌즈 질문 (발견만) ==="
+grep -qF 'personas.md' "$AGENT_PROMPTS" \
+  || fail "agent-prompts.md self-reviewer 양식이 personas.md를 참조하지 않음"
+ok "agent-prompts.md → personas.md 참조"
+grep -qE '적대 렌즈|반대 가정' "$AGENT_PROMPTS" \
+  || fail "agent-prompts.md에 적대 렌즈 질문 어구 없음"
+ok "agent-prompts.md 적대 렌즈 질문 존재"
+# 위임 보조자는 발견만 보고, 편집·마커 삽입 금지
+grep -qE '수정·마커 삽입 금지|마커 삽입 금지|발견만' "$AGENT_PROMPTS" \
+  || fail "agent-prompts.md에 '발견만 보고, 마커 삽입 금지' 제약 없음"
+ok "보조자 발견만 보고·마커 삽입 금지 제약 명시"
+
+# ===========================================================================
+# PART C — clarity 점수 (신규 가산)
+# ===========================================================================
+
+echo ""
+echo "=== TEST C1: clarity 점수 단일 출처 문서 존재 ==="
+[[ -f "$CLARITY_MD" ]] || fail "clarity 점수 references/clarity-score.md 부재"
+ok "references/clarity-score.md 존재"
+for dim in '목적' '제약' '성공기준'; do
+  grep -qF "$dim" "$CLARITY_MD" || fail "clarity-score.md에 차원 '$dim' 없음"
+done
+ok "차원(목적·제약·성공기준) 정의"
+grep -qF '차원' "$CLARITY_MD" || fail "clarity-score.md에 '차원' 개념 없음"
+grep -qE '척도|스케일' "$CLARITY_MD" || fail "clarity-score.md에 '척도' 없음"
+ok "차원·척도 정의"
+
+echo ""
+echo "=== TEST C2: 메인 추론 산정 + 무인프라 ==="
+grep -qE '메인.*추론|추론.*산정' "$CLARITY_MD" \
+  || fail "clarity-score.md에 '메인 에이전트 추론 산정' 명시 없음"
+ok "메인 추론 산정 명시"
+grep -qE '새 (런타임|엔진|의존성)|런타임·엔진·의존성|엔진·의존성' "$CLARITY_MD" \
+  || fail "clarity-score.md에 '새 런타임·엔진·의존성 불요' 명시 없음"
+ok "무인프라(새 런타임·엔진·의존성 불요) 명시"
+
+echo ""
+echo "=== TEST C3: 소프트 권고 + 미해결 마커 보완(대체 아님) ==="
+grep -qE '소프트 권고|소프트' "$CLARITY_MD" || fail "clarity-score.md에 '소프트 권고' 없음"
+ok "소프트 권고 명시"
+grep -qE '차단하지 않|자동 게이트.*않|게이트로 동작하지 않' "$CLARITY_MD" \
+  || fail "clarity-score.md에 'SPEC 작성을 차단/게이트하지 않음' 명시 없음"
+ok "비차단·비게이트 명시"
+grep -qF '미해결 마커' "$CLARITY_MD" || fail "clarity-score.md에 '미해결 마커' 보완 규칙 없음"
+grep -qE '대체하지 않|대체가 아|보완' "$CLARITY_MD" \
+  || fail "clarity-score.md에 '미해결 마커 보완(대체 아님)' 규칙 없음"
+ok "미해결 마커 보완(대체 아님) 규칙 명시"
+grep -qE '임계' "$CLARITY_MD" || fail "clarity-score.md에 '권장 임계' 없음"
+ok "권장 임계 명시"
+
+echo ""
+echo "=== TEST C4: clarification.md 잠정 종결 시 clarity 리드아웃 + 소프트 권고 ==="
+[[ -f "$CLARIFICATION_MD" ]] || fail "clarification.md 부재"
+grep -qiF 'clarity' "$CLARIFICATION_MD" \
+  || fail "clarification.md에 clarity 점수 절 없음"
+ok "clarification.md clarity 절 존재"
+grep -qF 'clarity-score.md' "$CLARIFICATION_MD" \
+  || fail "clarification.md가 clarity-score.md 단일 출처를 참조하지 않음"
+ok "clarification.md → clarity-score.md 참조"
+# 추가 명확화 권고는 구조화 선택지(AskUserQuestion)로, 자유 텍스트 금지
+grep -qF 'AskUserQuestion' "$CLARIFICATION_MD" \
+  || fail "clarification.md clarity 권고가 AskUserQuestion(구조화 선택지) 매체를 명시하지 않음"
+ok "구조화 선택지(AskUserQuestion) 권고 매체 명시"
+
+echo ""
+echo "=== TEST C5: SKILL.md step 3 명확화 종결에 clarity 리드아웃·소프트 권고 ==="
+grep -qiF 'clarity' "$SKILL_MD" || fail "SKILL.md에 clarity 점수 언급 없음"
+ok "SKILL.md clarity 언급 존재"
+grep -qF 'references/clarity-score.md' "$SKILL_MD" \
+  || fail "SKILL.md가 references/clarity-score.md를 참조하지 않음"
+ok "SKILL.md → clarity-score.md 참조"
+
+echo ""
+echo "=== TEST C6: SKILL.md 모듈 구성 표에 personas.md·clarity-score.md 행 ==="
+grep -qE '^\|.*personas\.md.*\|' "$SKILL_MD" \
+  || fail "모듈 구성 표에 personas.md 행 부재"
+ok "모듈 표 personas.md 행 존재"
+grep -qE '^\|.*clarity-score\.md.*\|' "$SKILL_MD" \
+  || fail "모듈 구성 표에 clarity-score.md 행 부재"
+ok "모듈 표 clarity-score.md 행 존재"
+
+# ===========================================================================
+echo ""
+echo "=== 모든 spec 계약 + persona/clarity 테스트 통과 ==="
