@@ -1,73 +1,60 @@
 # 자율 루프 운영 가이드 (optimized)
 
-`loop.sh`와 헌법·템플릿은 `references/`에 있고, target runtime 상태는 `milestones/<m>/loops/<c>/`에 생성된다.
+`loop.sh`와 헌법은 `references/`에 있다. runtime 상태는 스펙 파일 디렉토리 아래에 둔다 — lock 은 spec 디렉토리에(워크트리 생성 전 획득해 race 보호), 노트·signals·이터 로그는 작업 공간 안. 정확한 경로는 `loop.sh paths <spec>`.
 
 ## 핵심
 
-- 매 이터는 새 `claude --print` 프로세스. 기억은 파일·task 메모리·신호에 있다.
-- 작업 위치는 `milestones/<m>/loops/<c>/.worktree/`.
-- `.worktree/`와 `.lock`은 `.gitignore` 대상.
-- 워크트리 `CLAUDE.md`는 로컬 exclude로 main에 새지 않는다. 사용자 레벨 CLAUDE/settings는 차단 불가이므로 시작 전 확인 권장.
+- 매 이터는 새 프로세스. 기억은 코드·git history·작업 공간 파일에 있다.
+- 정체성은 스펙 파일의 절대 경로다.
+- 작업 위치는 스펙 디렉토리 아래(보조 worktree 안에서 호출되면 새로 만들지 않고 현재 cwd 사용). 정확한 경로는 `loop.sh paths <spec>`.
+- 이터 간 기록은 작업 공간의 **노트**, terminal 의도는 `.loop/signals/` 디렉토리에 워커가 만드는 파일로 표현한다(driver 는 비었는지만 본다).
+- 작업 공간(헌법 복사본·`.loop/`)과 spec 디렉토리의 lock 은 git 추적에서 분리된다.
 
 ## 보안
 
-루프는 무인 동작을 위해 `claude --dangerously-skip-permissions`로 실행된다. 워크트리에 secrets, `.env`, credentials, SSH key를 두지 말고 SPEC에 secrets를 쓰지 않는다. 신뢰 못 한 외부 SPEC은 받지 않는다.
+루프는 무인 동작을 위해 `claude --dangerously-skip-permissions`로 실행된다. 작업 공간에 secrets·`.env`·credentials·SSH key를 두지 말고 스펙에 secrets를 쓰지 않는다. 신뢰 못 한 외부 스펙은 받지 않는다.
 
 ## 구조
 
 ```text
-milestones/<m>/loops/<c>/
-├── SPEC.md
-├── .lock
-└── .worktree/
-    ├── CLAUDE.md
-    ├── .iterations/<n>.log
-    └── milestones/<m>/loops/<c>/SPEC.md
+<spec_dir>/
+├── <spec>.md            # 스펙 파일 (정체성)
+├── .loop-lock           # 실행 중에만 (PID; 워크트리 생성 전 획득)
+└── .worktree/           # 작업 공간 (git worktree, info/exclude)
+    ├── CLAUDE.md        # 헌법 복사본 (워커 계약 SoT)
+    └── .loop/
+        ├── BASE_SHA
+        ├── SPEC_PATH    # 스펙 경로 (list 스캔이 정체성 복원에 사용)
+        ├── notes.md     # 이터 간 노트
+        ├── iterations/<n>.log
+        └── signals/     # terminal 의도 디렉토리 (워커가 파일 생성;
+                         #  비었으면 다음 이터, 하나라도 있으면 driver 정상 종료)
 ```
 
-단일 task는 `regular/<task-id>`로 정규화한다. 완료는 task 저장소의 `LOOP_DONE_LABEL`에 의존한다.
+워커 컨벤션(권장 파일명 `DONE`/`BLOCKED`, category 값)은 `references/constitution.md §작업 매체`가 SoT.
+
+`<key>`(status 표시용 12자)는 스펙 절대 경로의 sha256 앞 12자다. 작업 공간은 detached HEAD 워크트리 위에 올라가므로 별도 브랜치 ref를 만들지 않는다 — cleanup 시 워크트리 제거만으로 정리된다(미커밋·미통합 작업은 reflog에 남아 git GC 정책을 따른다).
 
 ## 명령
 
-```bash
-loop.sh start   <task-id> [--spec path] [--max-iterations N] [--wall-clock-minutes N] [--watch]
-loop.sh status  [<task-id>]
-loop.sh stop    <task-id>
-loop.sh list
-loop.sh cleanup <task-id> [--force]
-loop.sh logs    <task-id> [--tail | --iter N]
-```
-
-새 task는 `Skill(skill: "spec", args: "<task-id>")`로 SPEC을 만든 뒤 `loop.sh start <task-id>`를 실행한다.
+사용 가능한 subcommand 전체 목록·시그니처: `loop.sh`(인자 없이 실행). 스펙 파일을 준비한 뒤 `loop.sh start <spec-path>`로 시작한다.
 
 ## 운영
 
-- `--spec <path>`는 외부 SPEC을 canonical 경로로 복사한 뒤 start한다.
-- `stop`은 SIGTERM 후 lock 해제.
-- `cleanup --force`는 실행 중이면 SIGTERM 후 SIGKILL 가능. 정상은 `stop` 후 cleanup.
-- DONE_WITH_CONCERNS는 완료 대신 `[handoff]`의 `## 의심점`에 기록하고 다음 이터가 처리한다.
-- ESCALATION은 troubleshooting 참조 후 SPEC/task 메모리 보정, notes/unblocked/resume 신호 발행, 재시작 순서.
+- `stop`은 실행을 정지한다(작업 공간 유지).
+- `cleanup`은 `signals/` 비어있지 않음 확인 후 워크트리를 제거한다(detached HEAD라 브랜치 삭제는 없음). 실행 중이거나 signals 비어 있으면 `--force`로 강제 정리.
+- **신호 계약**(노트·signals/ 규칙·권장 컨벤션·category 값): `references/constitution.md §작업 매체`.
+- **차단 해제**: `signals/` 내 파일 본문을 읽고 원인 보정 후 그 파일을 삭제한 뒤 재시작.
+- stale lock(PID 비활성)은 다음 `start`/`stop`에서 자동 정리된다.
 
 ## 환경 변수
 
-| 변수 | 플래그 | 기본 | 의미 |
-|---|---|---|---|
-| `MAX_CONCURRENT` | - | 3 | 동시 task |
-| `MAX_ITERATIONS` | `--max-iterations` | 30 | 이터 상한 |
-| `WALL_CLOCK_MINUTES` | `--wall-clock-minutes` | 120 | 시간 상한 |
-| - | `--watch` | off | blocked 해제 신호까지 polling |
-| `WATCH_TIMEOUT_HOURS` | - | 24 | watch timeout |
+설정 가능한 환경 변수와 기본값은 `loop.sh env` 로 확인.
 
 ## 객관 게이트
 
-driver는 이터 후 다음 위반을 halt + blocked 처리한다: 이터/시간 상한, 테스트 약화, 의존성 manifest 변경, scope 위반, suppressor 추가, secrets(gitleaks 설치 시), `fix:symptom` streak, 변경 파일 진동.
-
-`test_paths`는 테스트 경로 override, `test_sweep_paths`는 합법적 테스트 rename/cleanup/delete sweep 예외. sweep 밖 기존 테스트 변경은 계속 보호한다.
+게이트 목록·SPEC frontmatter override(`test_paths`·`test_sweep_paths`) 는 `loop.sh gates` 로 확인. 위반 시 halt → stash + stderr + exit 1 (driver 는 signals/ 에 쓰지 않음).
 
 ## 의존성
 
-`bash` 4+, `git`, `yq`(mikefarah), `claude`, `sha256sum` 또는 `shasum`, 선택 `gitleaks`.
-
-## 락
-
-SIGTERM/SIGINT는 자식 프로세스 종료 후 lock 해제. SIGKILL은 orphan 가능성이 있으므로 피한다. stale lock은 다음 start/stop에서 PID 유효성 검사로 자동 정리한다.
+필수·선택 의존성과 현재 설치 상태: `loop.sh deps`.

@@ -40,7 +40,7 @@ Prompt:
 - [Runtime] ...
 ```
 
-후속: 통과하면 Self-Review, 실패하면 notes 기록 후 fix·재검토.
+후속: 통과하면 Self-Review, 실패하면 노트에 기록 후 fix·재검토.
 
 ## code-quality-reviewer
 
@@ -55,7 +55,7 @@ Prompt:
 [무엇을 왜]
 
 ## 기준
-SPEC.md와 CLAUDE.md §3.5 Self-Review.
+SPEC와 CLAUDE.md Self-Review.
 
 ## Git 범위
 Base: <sha 또는 HEAD~1>
@@ -83,7 +83,7 @@ Minor=style/name/polish
 근거: ...
 ```
 
-후속: 예면 통과, 수정 후 진행이면 Critical/Important fix, 아니오면 `handoff` 의심점.
+후속: 예면 통과, 수정 후 진행이면 Critical/Important fix, 아니오면 노트 의심점.
 
 ## parallel-hypothesis-tester
 

@@ -1,552 +1,645 @@
 #!/usr/bin/env bash
-# dispatch.sh — autopilot:dispatch 외부 셸 드라이버
+# dispatch.sh — autopilot:dispatch driver (spec-list-driven, v0.8+)
 #
 # 책임:
-#   - milestone-level ops (status/stop/list/cleanup/logs)
-#   - sentinel watch (wave 내 child loop 들의 완료 라벨·.loop/ESCALATION.md 폴링)
-#   - DISPATCH_LOG.md 기록
+#   - 1 개 이상의 SPEC 파일 경로를 받아 frontmatter depends_on 으로 DAG 를 구성하고
+#     wave 단위로 자율 실행기(loop.sh)에 위임 호출.
+#   - run-id 단위로 진행 상태를 <project_root>/.dispatch/runs/<run-id>/ 에 보관.
+#   - list / status / stop / watch / --resume 운영 인터페이스 제공.
 #
 # **하지 않는 일**:
-#   - PRD 분해 (모델이 dispatch SKILL.md 흐름에서 수행)
-#   - 게이트 3종 대화 (모델 + AskUserQuestion)
-#   - wave 병렬 실행 자체 (모델이 Bash(loop start ...) 호출)
+#   - 입력 SPEC 의 frontmatter 형식·내용 검증 (자율 실행기 책임).
+#   - forge(PR/issue/label)·task 저장소 연동 (호출 레이어 책임).
+#   - 자율 실행기 내부 신호 파일 포맷·iteration·worktree 결정 (loop.sh 책임).
 #
 # 사용:
-#   bash dispatch.sh status   <milestone>
-#   bash dispatch.sh stop     <milestone>
+#   bash dispatch.sh start <spec...> [--max-parallel N] [--resume <run-id>]
 #   bash dispatch.sh list
-#   bash dispatch.sh cleanup  [<milestone>]
-#   bash dispatch.sh logs     <milestone>
-#   bash dispatch.sh watch_wave <milestone> <child1> [<child2> ...]
-#   bash dispatch.sh log_event  <milestone> <event-line>
+#   bash dispatch.sh status <run-id>
+#   bash dispatch.sh stop <run-id>
+#   bash dispatch.sh watch <run-id>
 #
 # 환경 변수:
-#   WATCH_POLL_SECONDS   sentinel 폴링 간격 (기본: 2)
-#   WATCH_TIMEOUT_SECONDS  watch_wave 최대 대기 (기본: 7200 = 2시간)
+#   LOOP_CMD                     loop driver 호출 명령 (기본: 형제 loop.sh).
+#                                테스트에서 mock 으로 치환 가능.
+#   DISPATCH_POLL_SECONDS        wave 진행 폴링 간격 (기본 2)
+#   DISPATCH_WAVE_TIMEOUT_SECONDS  wave 당 최대 대기 (기본 7200 = 2 시간)
 #
-# 워크트리·lock 위치: 메인 레포 내부 milestones/<m>/loops/<c>/ 단일 트리 (v0.2 cutover).
-#   - 워크트리:  milestones/<m>/loops/<c>/.worktree/
-#   - lock 파일: milestones/<m>/loops/<c>/.lock
+# bash 3.2 호환 (assoc array 사용 안 함).
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOOP_CMD_DEFAULT="bash $SCRIPT_DIR/../../loop/references/loop.sh"
+LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
+POLL_SECONDS="${DISPATCH_POLL_SECONDS:-2}"
+WAVE_TIMEOUT_SECONDS="${DISPATCH_WAVE_TIMEOUT_SECONDS:-7200}"
 
-# task 저장소 라벨 헬퍼 공유 — loop.sh 와 동일한
-# task_status_is_done·task_label_present·LOOP_DONE_LABEL 단일 출처를 source.
-# 위치: plugins/autopilot/skills/loop/references/task-storage.sh.
-# shellcheck source=../../loop/references/task-storage.sh
-source "$SCRIPT_DIR/../../loop/references/task-storage.sh"
+# ----- helpers -----
 
-# ----- 헬퍼 -----
+die() { echo "ERROR: $*" >&2; exit 1; }
 
-die() {
-  echo "ERROR: $*" >&2
-  exit 1
+now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+
+require_git_root() {
+  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
+    || die "git 저장소 안에서 실행해야 합니다."
+  RUNS_DIR="$PROJECT_ROOT/.dispatch/runs"
 }
 
-now_iso() {
-  date -u +%Y-%m-%dT%H:%M:%SZ
+abspath() {
+  local p="$1"
+  if [[ "$p" = /* ]]; then
+    echo "$p"
+  else
+    (cd "$(dirname "$p")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$p")")
+  fi
 }
 
-validate_milestone() {
-  local m="$1"
-  [[ -z "$m" ]] && die "milestone-id가 비어 있음"
-  [[ "$m" == *..* ]] && die "milestone-id에 '..' 사용 불가"
-  case "$m" in
-    .|./*|*/.|*/./*) die "milestone-id에 '.' 단독 컴포넌트 사용 불가" ;;
+# spec_slug — 파일명에서 .md 와 YYYY-MM-DD- prefix 제거.
+spec_slug() {
+  local b
+  b="$(basename "$1" .md)"
+  echo "$b" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//'
+}
+
+# hash7 — sort 된 인자들의 sha256 첫 7 자.
+hash7() {
+  local hasher=""
+  if command -v sha256sum >/dev/null 2>&1; then
+    hasher="sha256sum"
+  elif command -v shasum >/dev/null 2>&1; then
+    hasher="shasum -a 256"
+  else
+    die "sha256sum 또는 shasum 필요"
+  fi
+  printf '%s\n' "$@" | sort -u | $hasher | cut -c1-7
+}
+
+# extract_depends_on <spec_path> — depends_on 항목을 한 줄에 하나씩 출력.
+# yq 가 있으면 yq, 없으면 awk 폴백 (인라인 [a,b] 및 블록 - a 형식 모두 지원).
+extract_depends_on() {
+  local spec="$1"
+  if command -v yq >/dev/null 2>&1; then
+    local out
+    out=$(yq -r '.depends_on[]?' "$spec" 2>/dev/null \
+          | grep -vE '^(null)?$' || true)
+    if [[ -n "$out" ]]; then echo "$out"; return; fi
+  fi
+  awk '
+    BEGIN { fm=0; block=0 }
+    /^---[[:space:]]*$/ { fm++; if (fm==2) exit; next }
+    fm==1 && /^depends_on:/ {
+      line=$0; sub(/^depends_on:[[:space:]]*/,"",line)
+      if (line ~ /^\[/) {
+        gsub(/[][" ]/, "", line)
+        n=split(line, arr, ",")
+        for (i=1;i<=n;i++) if (arr[i] != "") print arr[i]
+        next
+      }
+      block=1; next
+    }
+    fm==1 && block==1 && /^[[:space:]]+-/ {
+      v=$0; sub(/^[[:space:]]*-[[:space:]]*/,"",v); gsub(/[" ]/,"",v); print v; next
+    }
+    fm==1 && block==1 && /^[^[:space:]-]/ { block=0 }
+  ' "$spec"
+}
+
+# resolve_dep <from_spec_abspath> <dep_string> — 절대 경로 또는 ""(미해결).
+# 해석 순서:
+#   1) 절대 경로
+#   2) project-root 상대 경로
+#   3) from_spec 디렉토리 상대 경로
+#   4) slug 매칭: 같은 디렉토리의 *-<slug>.md 또는 <slug>.md
+resolve_dep() {
+  local from="$1"; local dep="$2"
+  local from_dir; from_dir="$(dirname "$from")"
+  if [[ "$dep" = /* ]] && [[ -f "$dep" ]]; then echo "$dep"; return; fi
+  if [[ -n "${PROJECT_ROOT:-}" ]] && [[ -f "$PROJECT_ROOT/$dep" ]]; then
+    abspath "$PROJECT_ROOT/$dep"; return
+  fi
+  if [[ -f "$from_dir/$dep" ]]; then abspath "$from_dir/$dep"; return; fi
+  # slug 매칭
+  local cand
+  for cand in "$from_dir"/*-"$dep".md "$from_dir"/"$dep".md; do
+    [[ -f "$cand" ]] && { abspath "$cand"; return; }
+  done
+  echo ""
+}
+
+# ----- run-id 디렉토리 IO -----
+
+ensure_runs_dir() { mkdir -p "$RUNS_DIR"; }
+
+run_dir() { echo "$RUNS_DIR/$1"; }
+
+write_manifest() {
+  local rd="$1"; shift
+  : > "$rd/MANIFEST.txt"
+  local p
+  for p in "$@"; do printf '%s\n' "$p" >> "$rd/MANIFEST.txt"; done
+}
+
+read_manifest() {
+  local rd="$1"
+  [[ -f "$rd/MANIFEST.txt" ]] || return 1
+  cat "$rd/MANIFEST.txt"
+}
+
+# write_waves <run_dir> < topo_output ("wave=N\t<spec>" lines)
+write_waves() {
+  local rd="$1"
+  cat > "$rd/WAVES.txt"
+}
+
+# state 파일 — slug+abspath sha7 단위. pending|running|done|failed.
+# spec_slug 만으로는 (a) 다른 날짜 같은 이름 (2026-05-29-x.md vs 2026-05-28-x.md)
+# 와 (b) 다른 디렉토리 같은 basename 입력에서 같은 파일로 덮어쓴다. abspath sha7
+# 을 suffix 로 붙여 unique 보장. log_event 용 spec_slug 는 가독성용으로 유지.
+state_path() {
+  local rd="$1"; local spec="$2"
+  echo "$rd/state.$(spec_slug "$spec")-$(hash7 "$spec")"
+}
+
+set_state() {
+  local rd="$1"; local spec="$2"; local s="$3"
+  mkdir -p "$rd"
+  printf '%s\n' "$s" > "$(state_path "$rd" "$spec")"
+}
+
+get_state() {
+  local f; f="$(state_path "$1" "$2")"
+  [[ -f "$f" ]] && cat "$f" || echo "pending"
+}
+
+log_event() {
+  local rd="$1"; shift
+  mkdir -p "$rd"
+  printf '[%s] %s\n' "$(now_iso)" "$*" >> "$rd/LOG.md"
+}
+
+# ----- loop 인터페이스 -----
+
+# loop_start_bg <spec> — 비동기 시작. PID 를 출력.
+loop_start_bg() {
+  local spec="$1"
+  # shellcheck disable=SC2086
+  ( $LOOP_CMD start "$spec" </dev/null >/dev/null 2>&1 ) &
+  echo $!
+}
+
+# kill_tree <pid> [<sig>] — pid 와 그 자손 프로세스를 재귀적으로 kill.
+# subshell 만 죽이면 손자(자손 프로세스) 가 orphan 으로 남으므로 트리 재귀가 필요.
+# pgrep 가 없는 환경에서는 ps 폴백.
+kill_tree() {
+  local pid="$1"; local sig="${2:-TERM}"
+  local children=""
+  if command -v pgrep >/dev/null 2>&1; then
+    children=$(pgrep -P "$pid" 2>/dev/null || true)
+  else
+    children=$(ps -o pid= -o ppid= 2>/dev/null \
+                | awk -v p="$pid" '$2==p { print $1 }')
+  fi
+  local c
+  for c in $children; do
+    kill_tree "$c" "$sig"
+  done
+  kill -"$sig" "$pid" 2>/dev/null || true
+}
+
+# loop_stop <spec> — 동기 stop 위임.
+loop_stop() {
+  local spec="$1"
+  # shellcheck disable=SC2086
+  $LOOP_CMD stop "$spec" >/dev/null 2>&1 || true
+}
+
+# loop_status_state <spec> — loop.sh status 출력에서 STATE 컬럼만 추출.
+# 출력: idle|running|stale|terminal 또는 빈 줄.
+loop_status_state() {
+  local spec="$1"
+  # shellcheck disable=SC2086
+  $LOOP_CMD status "$spec" 2>/dev/null \
+    | awk 'NR==2 { print $2 }'
+}
+
+# loop_status_files <spec> — FILES 컬럼 (signals/ 내 파일 목록 또는 "-").
+loop_status_files() {
+  local spec="$1"
+  # shellcheck disable=SC2086
+  $LOOP_CMD status "$spec" 2>/dev/null \
+    | awk 'NR==2 { print $3 }'
+}
+
+# child_terminal_state <spec> — pending|running|done|failed
+# done : STATE=terminal 이고 FILES 안에 BLOCKED 가 없음.
+# failed : STATE=terminal 이고 FILES 안에 BLOCKED 가 있음 (워커 컨벤션).
+# running : STATE=running 또는 stale.
+# pending : STATE=idle 또는 미실행.
+child_terminal_state() {
+  local spec="$1"
+  local st files
+  st="$(loop_status_state "$spec")"
+  files="$(loop_status_files "$spec")"
+  case "$st" in
+    terminal)
+      if echo "$files" | grep -q 'BLOCKED'; then echo "failed"; else echo "done"; fi
+      ;;
+    running|stale) echo "running" ;;
+    *) echo "pending" ;;
   esac
-  [[ "$m" == *__* ]] && die "milestone-id에 '__' 사용 불가"
-  [[ "$m" == *' '* ]] && die "milestone-id에 공백 사용 불가"
+}
+
+# ----- DAG / wave 구성 -----
+
+# build_dag <spec1> <spec2> ... → stdout 에 "wave=N\t<abspath>" 줄.
+# bash 3.2 호환: 인덱스 기반 indeg/graph.
+# graph 는 "i->j i->k" 문자열로 인코딩, indeg 는 평행 배열.
+build_dag() {
+  local -a SPECS=()
+  local s
+  for s in "$@"; do SPECS+=("$s"); done
+  local n=${#SPECS[@]}
+  local -a INDEG=()
+  local -a EDGES=()  # "i,j" pairs
+  local i j
+  for ((i=0; i<n; i++)); do INDEG[i]=0; done
+
+  # deps 해석 → edges
+  local dep dep_path
+  for ((i=0; i<n; i++)); do
+    while IFS= read -r dep; do
+      [[ -z "$dep" ]] && continue
+      dep_path="$(resolve_dep "${SPECS[i]}" "$dep")"
+      if [[ -z "$dep_path" ]]; then
+        echo "WARN: ${SPECS[i]}: depends_on '$dep' 해석 실패 (무시)" >&2
+        continue
+      fi
+      # 입력 SPECS 안에서 인덱스 찾기
+      local found=-1
+      for ((j=0; j<n; j++)); do
+        if [[ "${SPECS[j]}" == "$dep_path" ]]; then found=$j; break; fi
+      done
+      if [[ $found -lt 0 ]]; then
+        # 외부 의존성은 dispatch 범위 밖, 무시.
+        continue
+      fi
+      EDGES+=("$found,$i")
+      INDEG[i]=$((INDEG[i]+1))
+    done < <(extract_depends_on "${SPECS[i]}")
+  done
+
+  # Kahn's algorithm
+  local wave=1
+  local done_count=0
+  while (( done_count < n )); do
+    local -a current=()
+    for ((i=0; i<n; i++)); do
+      if [[ "${INDEG[i]}" -eq 0 ]]; then current+=("$i"); fi
+    done
+    if [[ ${#current[@]} -eq 0 ]]; then
+      # cycle — 남은 인덱스 보고
+      local -a cyc=()
+      for ((i=0; i<n; i++)); do
+        [[ "${INDEG[i]}" -gt 0 ]] && cyc+=("${SPECS[i]}")
+      done
+      echo "CYCLE:${cyc[*]}" >&2
+      return 2
+    fi
+    local idx
+    for idx in "${current[@]}"; do
+      printf 'wave=%d\t%s\n' "$wave" "${SPECS[idx]}"
+      INDEG[idx]=-1
+      done_count=$((done_count+1))
+      # 영향받는 노드 indeg 감소. bash 3.2 set -u 호환: 빈 배열 가드.
+      local e a b
+      for e in "${EDGES[@]+"${EDGES[@]}"}"; do
+        a="${e%,*}"; b="${e#*,}"
+        if [[ "$a" -eq "$idx" ]]; then INDEG[b]=$((INDEG[b]-1)); fi
+      done
+    done
+    wave=$((wave+1))
+  done
   return 0
 }
 
-compute_milestone_paths() {
-  local milestone="$1"
-  validate_milestone "$milestone"
-  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
-    || die "git 저장소 안에서 실행해야 합니다."
-  MILESTONE="$milestone"
-  MILESTONE_DIR="$PROJECT_ROOT/milestones/$milestone"
-  PRD_PATH="$MILESTONE_DIR/prd/PRD.md"
-  DAG_PATH="$MILESTONE_DIR/dispatch/DAG.md"
-  LOG_PATH="$MILESTONE_DIR/dispatch/DISPATCH_LOG.md"
-  LOOPS_BASE="$MILESTONE_DIR/loops"
-}
+# ----- subcommand: start -----
 
-ensure_dispatch_dir() {
-  mkdir -p "$MILESTONE_DIR/dispatch"
-}
+cmd_start() {
+  require_git_root
+  local resume=""
+  local max_parallel=0
+  local -a inputs=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --resume) resume="$2"; shift 2 ;;
+      --max-parallel) max_parallel="$2"; shift 2 ;;
+      --) shift; while [[ $# -gt 0 ]]; do inputs+=("$1"); shift; done ;;
+      -*) die "알 수 없는 옵션: $1" ;;
+      *) inputs+=("$1"); shift ;;
+    esac
+  done
 
-# child 워크트리 경로 (v0.2 nested 정책: milestones/<m>/loops/<c>/.worktree)
-child_wt_path() {
-  local milestone="$1"
-  local child="$2"
-  echo "$PROJECT_ROOT/milestones/$milestone/loops/$child/.worktree"
-}
-
-# child의 lock 파일 경로 (loop.sh 명명 규칙과 일치)
-child_lock_path() {
-  local milestone="$1"
-  local child="$2"
-  echo "$PROJECT_ROOT/milestones/$milestone/loops/$child/.lock"
-}
-
-# child 메타 디렉터리 (cleanup 후 archive PLAN.md/NOTES.md/... 위치)
-child_archive_path() {
-  local milestone="$1"
-  local child="$2"
-  echo "$PROJECT_ROOT/milestones/$milestone/loops/$child"
-}
-
-# child 의 sentinel 상태: done / escalated / running / idle / missing.
-# 완료(`done`) 검출은 task 저장소(GitHub Issue)의 LOOP_DONE_LABEL 라벨 단일 의존.
-# loop.sh 와 동일 helper(task_status_is_done) 를 source 해 공유.
-# ESCALATION 은 워크트리 안의 .loop/ESCALATION.md 파일 sentinel 유지.
-child_state() {
-  local milestone="$1"
-  local child="$2"
-  local wt="$(child_wt_path "$milestone" "$child")"
-  local lock="$(child_lock_path "$milestone" "$child")"
-
-  # done 신호 — task 저장소 라벨 단일 의존. gh 부재·매핑 실패는 task_status_is_done
-  # 가 1(판정 불가) 로 폴백하므로 자연스럽게 다음 분기로 떨어진다.
-  if task_status_is_done "$milestone/$child" 2>/dev/null; then
-    echo "done"
-    return
-  fi
-  if [[ -f "$wt/.loop/ESCALATION.md" ]]; then
-    echo "escalated"
-    return
-  fi
-  if [[ -f "$lock" ]]; then
-    echo "running"
-    return
-  fi
-  if [[ -d "$wt" ]]; then
-    echo "idle"
-    return
-  fi
-  # 워크트리 없음 — cleanup 후 archive 확인 (PRD/DAG 보존, .loop/* 메타 이주)
-  local archive_dir="$(child_archive_path "$milestone" "$child")"
-  if [[ -d "$archive_dir" ]] && [[ -f "$archive_dir/PLAN.md" ]]; then
-    echo "archived"
-    return
-  fi
-  echo "missing"
-}
-
-# DAG.md에서 child 단위 목록 추출 (단순 grep)
-# 형식: "- child-name: ..."
-list_dag_children() {
-  local dag="$1"
-  [[ -f "$dag" ]] || return 0
-  grep -oE '^- [a-zA-Z0-9_-]+:' "$dag" 2>/dev/null \
-    | sed -e 's/^- //' -e 's/:$//' \
-    | sort -u
-}
-
-# ----- subcommand: status -----
-
-cmd_status() {
-  local milestone="$1"
-  [[ -z "$milestone" ]] && die "사용: $0 status <milestone>"
-  compute_milestone_paths "$milestone"
-
-  echo "Milestone: $milestone"
-  echo "Path:      $MILESTONE_DIR"
-
-  if [[ "$milestone" == "regular" ]]; then
-    echo "Type:      regular (ad-hoc catch-all, PRD/DAG 없음)"
+  local rd specs_abs=()
+  if [[ -n "$resume" ]]; then
+    rd="$(run_dir "$resume")"
+    [[ -d "$rd" ]] || die "run-id 없음: $resume"
+    # 기존 manifest 로 입력 복원. 호출자 명시 inputs 가 있으면 무시 (resume 일관성).
+    while IFS= read -r p; do specs_abs+=("$p"); done < "$rd/MANIFEST.txt"
+    log_event "$rd" "resume start"
   else
-    if [[ -f "$PRD_PATH" ]]; then
-      echo "PRD:       $PRD_PATH"
-      local markers
-      markers=$(grep -c '\[NEEDS CLARIFICATION' "$PRD_PATH" 2>/dev/null || echo 0)
-      if [[ "$markers" -gt 0 ]]; then
-        echo "Markers:   $markers (resolve via prd --resume)"
-      else
-        echo "Markers:   0"
+    [[ ${#inputs[@]} -ge 1 ]] || die "사용: $0 start <spec...> [--max-parallel N] [--resume <run-id>]"
+    # 입력 SPEC 검증
+    local p ap
+    for p in "${inputs[@]}"; do
+      [[ -f "$p" ]] || die "SPEC 파일을 찾을 수 없음: $p"
+      [[ -r "$p" ]] || die "SPEC 파일 읽기 불가: $p"
+      ap="$(abspath "$p")"
+      specs_abs+=("$ap")
+    done
+    # run-id 계산 — 타임스탬프 + 입력 sha7.
+    local ts h rid
+    ts="$(date -u +%Y%m%dT%H%M%S)"
+    h="$(hash7 "${specs_abs[@]}")"
+    rid="${ts}-${h}"
+    ensure_runs_dir
+    rd="$(run_dir "$rid")"
+    mkdir -p "$rd"
+    write_manifest "$rd" "${specs_abs[@]}"
+    log_event "$rd" "fresh start specs=${#specs_abs[@]}"
+    # DAG 구성 + WAVES.txt 기록. cycle 시 abort + run dir 삭제.
+    local waves_out
+    if ! waves_out="$(build_dag "${specs_abs[@]}" 2>&1)"; then
+      local cyc
+      cyc=$(echo "$waves_out" | grep '^CYCLE:' | sed 's/^CYCLE://')
+      rm -rf "$rd"
+      die "depends_on cycle 감지 — 구성 요소: $cyc"
+    fi
+    printf '%s\n' "$waves_out" > "$rd/WAVES.txt"
+    # 초기 상태 = pending
+    local s
+    for s in "${specs_abs[@]}"; do set_state "$rd" "$s" "pending"; done
+  fi
+
+  # wave 순회 — wave 별 SPEC 들 병렬 시작, wait, 결과 판정.
+  local current_wave=1 max_wave
+  max_wave=$(awk -F'[=\t]' '{print $2}' "$rd/WAVES.txt" | sort -n | tail -1)
+  local overall_rc=0
+  while (( current_wave <= max_wave )); do
+    local -a wave_specs=()
+    local line w sp
+    while IFS=$'\t' read -r w sp; do
+      [[ "$w" == "wave=$current_wave" ]] && wave_specs+=("$sp")
+    done < "$rd/WAVES.txt"
+
+    local -a launch_specs=()
+    for sp in "${wave_specs[@]}"; do
+      local st; st="$(get_state "$rd" "$sp")"
+      if [[ "$st" == "done" ]]; then
+        log_event "$rd" "wave=$current_wave skip-done $(spec_slug "$sp")"
+        continue
       fi
-    else
-      echo "PRD:       (없음 — prd 스킬로 작성)"
-    fi
+      launch_specs+=("$sp")
+    done
 
-    if [[ -f "$DAG_PATH" ]]; then
-      echo "DAG:       $DAG_PATH"
-    else
-      echo "DAG:       (없음 — dispatch start로 분해)"
-    fi
-  fi
+    log_event "$rd" "wave=$current_wave start specs=${#launch_specs[@]}"
 
-  # child 상태 — DAG에서 추출하거나 loops/ 하위 디렉토리 탐색
-  echo ""
-  echo "Children:"
-  local children=""
-  if [[ -f "$DAG_PATH" ]]; then
-    children=$(list_dag_children "$DAG_PATH")
-  fi
-  # DAG 없거나 비어있으면 nested loops/ 하위 디렉토리 탐색으로 추정
-  if [[ -z "$children" ]] && [[ -d "$LOOPS_BASE" ]]; then
-    children=$(ls "$LOOPS_BASE" 2>/dev/null | sort -u || true)
-  fi
-
-  if [[ -z "$children" ]]; then
-    echo "  (없음)"
-    return 0
-  fi
-
-  printf "  %-30s %s\n" "CHILD" "STATE"
-  printf "  %-30s %s\n" "------------------------------" "-------------"
-  while IFS= read -r child; do
-    [[ -z "$child" ]] && continue
-    local state
-    state=$(child_state "$milestone" "$child")
-    printf "  %-30s %s\n" "$child" "$state"
-  done <<< "$children"
-}
-
-# ----- subcommand: stop -----
-
-cmd_stop() {
-  local milestone="$1"
-  [[ -z "$milestone" ]] && die "사용: $0 stop <milestone>"
-  compute_milestone_paths "$milestone"
-  ensure_dispatch_dir
-
-  echo "[$(now_iso)] dispatch stop milestone=$milestone"
-  local any_stopped=0
-  local children=""
-  if [[ -f "$DAG_PATH" ]]; then
-    children=$(list_dag_children "$DAG_PATH")
-  fi
-  if [[ -z "$children" ]] && [[ -d "$LOOPS_BASE" ]]; then
-    children=$(ls "$LOOPS_BASE" 2>/dev/null | sort -u || true)
-  fi
-
-  if [[ -z "$children" ]]; then
-    echo "정지할 child 없음."
-    return 0
-  fi
-
-  while IFS= read -r child; do
-    [[ -z "$child" ]] && continue
-    local lock="$(child_lock_path "$milestone" "$child")"
-    if [[ -f "$lock" ]]; then
-      echo "[$(now_iso)] child $child stop 요청"
-      local pid
-      pid=$(cat "$lock" 2>/dev/null || echo "")
-      if [[ -n "$pid" ]] && [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-        kill -TERM "$pid" 2>/dev/null || true
-        any_stopped=1
-        log_event_internal "stop child=$child pid=$pid"
-      else
-        echo "  WARN: $child lock 파일에 활성 PID 없음 (stale)"
-        rm -f "$lock" || true
+    # 병렬 시작 (선택적 동시성 상한).
+    local -a pids=()
+    local -a started_specs=()
+    for sp in "${launch_specs[@]}"; do
+      if (( max_parallel > 0 )); then
+        while (( $(jobs -rp 2>/dev/null | wc -l | tr -d ' ') >= max_parallel )); do
+          sleep "${POLL_SECONDS:-1}"
+        done
       fi
-    fi
-  done <<< "$children"
+      set_state "$rd" "$sp" "running"
+      local pid; pid="$(loop_start_bg "$sp")"
+      pids+=("$pid")
+      started_specs+=("$sp")
+      log_event "$rd" "wave=$current_wave launch $(spec_slug "$sp") pid=$pid"
+    done
 
-  if [[ $any_stopped -eq 0 ]]; then
-    echo "활성 child loop 없음. 모두 이미 정지됨."
-  fi
+    # 같은 wave 의 모든 백그라운드 loop 끝날 때까지 대기.
+    # WAVE_TIMEOUT_SECONDS 초과 시 미종료 PID 들을 SIGTERM → SIGKILL 으로 정리하고
+    # overall_rc=2 로 break 한다. (단순 `wait` 는 hung child 가 있을 때 영구 정지.)
+    local wave_start now elapsed remaining_pids=0 wave_timed_out=0
+    wave_start=$(date +%s)
+    if (( ${#pids[@]} > 0 )); then
+      while :; do
+        remaining_pids=0
+        local pid
+        for pid in "${pids[@]}"; do
+          if kill -0 "$pid" 2>/dev/null; then remaining_pids=$((remaining_pids+1)); fi
+        done
+        if (( remaining_pids == 0 )); then break; fi
+        now=$(date +%s); elapsed=$((now - wave_start))
+        if (( elapsed >= WAVE_TIMEOUT_SECONDS )); then
+          wave_timed_out=1
+          log_event "$rd" "wave=$current_wave timeout elapsed=${elapsed}s cap=${WAVE_TIMEOUT_SECONDS}s remaining=${remaining_pids}"
+          for pid in "${pids[@]}"; do
+            kill -0 "$pid" 2>/dev/null && kill_tree "$pid" TERM
+          done
+          sleep 2
+          for pid in "${pids[@]}"; do
+            kill -0 "$pid" 2>/dev/null && kill_tree "$pid" KILL
+          done
+          for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+          break
+        fi
+        sleep "${POLL_SECONDS:-1}"
+      done
+    fi
+
+    # 결과 판정 — 자율 실행기 공개 인터페이스로 child 별 종료 상태 확인.
+    # timeout 으로 정리된 wave 라도 timeout 전에 이미 done 인 child 는 done 보존.
+    # 미종료(pending/running/unknown) 만 timeout-failed 로 마킹.
+    local wave_failed=0
+    for sp in "${started_specs[@]}"; do
+      local term; term="$(child_terminal_state "$sp")"
+      case "$term" in
+        done)
+          set_state "$rd" "$sp" "done"
+          log_event "$rd" "wave=$current_wave done $(spec_slug "$sp")"
+          ;;
+        failed)
+          set_state "$rd" "$sp" "failed"; wave_failed=1
+          log_event "$rd" "wave=$current_wave failed $(spec_slug "$sp")"
+          ;;
+        *)
+          set_state "$rd" "$sp" "failed"; wave_failed=1
+          if (( wave_timed_out == 1 )); then
+            log_event "$rd" "wave=$current_wave timeout-failed $(spec_slug "$sp") state=$term"
+          else
+            log_event "$rd" "wave=$current_wave unknown-terminal $(spec_slug "$sp") state=$term"
+          fi
+          ;;
+      esac
+    done
+
+    if (( wave_timed_out == 1 )); then
+      log_event "$rd" "wave=$current_wave fail (timeout) — 다음 wave 진입 차단"
+      overall_rc=2
+      break
+    fi
+
+    if (( wave_failed == 1 )); then
+      log_event "$rd" "wave=$current_wave fail — 다음 wave 진입 차단"
+      overall_rc=1
+      break
+    fi
+
+    current_wave=$((current_wave+1))
+  done
+
+  echo "run-id: $(basename "$rd")"
+  return "$overall_rc"
 }
 
 # ----- subcommand: list -----
 
 cmd_list() {
-  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
-    || die "git 저장소 안에서 실행해야 합니다."
-
-  local milestones_base="$PROJECT_ROOT/milestones"
-  if [[ ! -d "$milestones_base" ]]; then
-    echo "milestones/ 디렉터리 없음. 새 milestone 생성: Skill(skill: \"prd\", args: \"<milestone-id>\")"
+  require_git_root
+  if [[ ! -d "$RUNS_DIR" ]] || [[ -z "$(ls "$RUNS_DIR" 2>/dev/null)" ]]; then
+    echo "(no runs yet — 새 run: $0 start <spec...>)"
     return 0
   fi
-
-  printf "%-30s %-10s %-10s %s\n" "MILESTONE" "PRD" "DAG" "CHILDREN"
-  printf "%-30s %-10s %-10s %s\n" "------------------------------" "----------" "----------" "--------"
-
-  local entry
-  for entry in "$milestones_base"/*/; do
-    [[ -d "$entry" ]] || continue
-    local milestone
-    milestone=$(basename "$entry")
-    local prd_state="no" dag_state="no" child_count=0
-    [[ -f "$entry/prd/PRD.md" ]] && prd_state="yes"
-    [[ -f "$entry/dispatch/DAG.md" ]] && dag_state="yes"
-
-    # child 개수 — DAG가 있으면 거기서, 없으면 loops/ 하위 디렉토리 갯수
-    if [[ -f "$entry/dispatch/DAG.md" ]]; then
-      child_count=$(list_dag_children "$entry/dispatch/DAG.md" | grep -c . || true)
-    elif [[ -d "$entry/loops" ]]; then
-      child_count=$(ls "$entry/loops" 2>/dev/null | wc -l | tr -d ' ' || echo 0)
-    fi
-    printf "%-30s %-10s %-10s %s\n" "$milestone" "$prd_state" "$dag_state" "$child_count"
+  printf "%-32s %-6s %-6s %-6s %-6s %s\n" "RUN-ID" "SPECS" "DONE" "FAIL" "WAVES" "STARTED"
+  local rd rid waves specs done_n fail_n started
+  for rd in "$RUNS_DIR"/*/; do
+    [[ -d "$rd" ]] || continue
+    rid="$(basename "$rd")"
+    specs=$(wc -l < "$rd/MANIFEST.txt" 2>/dev/null | tr -d ' ' || echo 0)
+    waves=$(awk -F'[=\t]' '{print $2}' "$rd/WAVES.txt" 2>/dev/null | sort -n | tail -1)
+    [[ -z "$waves" ]] && waves=0
+    done_n=$(grep -lE '^done$' "$rd"/state.* 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    fail_n=$(grep -lE '^failed$' "$rd"/state.* 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    started=$(head -1 "$rd/LOG.md" 2>/dev/null | cut -c2-21 || echo "-")
+    printf "%-32s %-6s %-6s %-6s %-6s %s\n" "$rid" "$specs" "$done_n" "$fail_n" "$waves" "$started"
   done
 }
 
-# ----- subcommand: cleanup -----
+# ----- subcommand: status -----
 
-cmd_cleanup() {
-  local milestone="${1:-}"
-  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
-    || die "git 저장소 안에서 실행해야 합니다."
-  local milestones_base="$PROJECT_ROOT/milestones"
+cmd_status() {
+  local rid="${1:-}"
+  [[ -z "$rid" ]] && die "사용: $0 status <run-id>"
+  require_git_root
+  local rd; rd="$(run_dir "$rid")"
+  [[ -d "$rd" ]] || die "run-id 없음: $rid"
+  echo "run-id: $rid"
+  echo "path:   $rd"
+  echo ""
+  printf "%-6s %-10s %-9s %s\n" "WAVE" "STATE" "LOOP" "SPEC"
+  printf "%-6s %-10s %-9s %s\n" "----" "------" "----" "----"
+  local w sp st loopst
+  while IFS=$'\t' read -r w sp; do
+    w="${w#wave=}"
+    st="$(get_state "$rd" "$sp")"
+    loopst="$(loop_status_state "$sp" 2>/dev/null || echo "-")"
+    [[ -z "$loopst" ]] && loopst="-"
+    printf "wave=%-2s %-10s %-9s %s\n" "$w" "$st" "$loopst" "$sp"
+  done < "$rd/WAVES.txt"
+}
 
-  local milestones_to_clean=()
-  if [[ -n "$milestone" ]]; then
-    validate_milestone "$milestone"
-    milestones_to_clean=("$milestone")
-  else
-    # 모든 milestone (regular 포함, loops/ 하위가 있는 것만)
-    [[ -d "$milestones_base" ]] || { echo "milestones/ 디렉토리 없음. 정리할 것 없음."; return 0; }
-    local entry
-    for entry in "$milestones_base"/*/; do
-      [[ -d "$entry" ]] || continue
-      [[ -d "${entry}loops" ]] || continue
-      milestones_to_clean+=("$(basename "$entry")")
-    done
-  fi
+# ----- subcommand: stop -----
 
-  if [[ ${#milestones_to_clean[@]} -eq 0 ]]; then
-    echo "정리할 milestone 없음."
-    return 0
-  fi
-
-  local m
-  for m in "${milestones_to_clean[@]}"; do
-    compute_milestone_paths "$m"
-    local cleaned=0
-    if [[ -d "$LOOPS_BASE" ]]; then
-      local child
-      # `for child in $(ls ...)` 패턴은 공백·특수문자 포함 파일명에서 word
-      # splitting되어 위험. cmd_stop·cmd_status와 동일하게 while-read로 통일.
-      while IFS= read -r child; do
-        [[ -z "$child" ]] && continue
-        local wt="$(child_wt_path "$m" "$child")"
-        # Path guard — wt가 메인 레포 안의 예상 nested 경로 형태인지 검증.
-        # 변수 누락·외부 경로 누락을 차단해 rm -rf 사고 방지.
-        [[ -n "$wt" ]] || continue
-        [[ "$wt" == "$PROJECT_ROOT"/* ]] || continue
-        case "$wt" in
-          */milestones/*/loops/*/.worktree) ;;
-          *)
-            echo "[WARN] $m/$child: 워크트리 경로 형식 부적절 ($wt), skip" >&2
-            continue
-            ;;
-        esac
-        # cleanup 대상은 done 상태 child — 검출은 child_state(라벨 단일 의존).
-        if [[ "$(child_state "$m" "$child")" == "done" ]]; then
-          echo "[$(now_iso)] cleanup $m/$child (완료 라벨 부착, archival 포함)"
-          # 메타 파일 archival — loop.sh cmd_cleanup의 step 4와 동일 로직.
-          # loop.sh delegation 대신 inline 재구현 — git worktree로 등록되지
-          # 않은 mock·legacy 워크트리에서도 정리가 일관되게 동작하도록.
-          local archive_dir="$(child_archive_path "$m" "$child")"
-          mkdir -p "$archive_dir"
-          local f
-          for f in PLAN.md NOTES.md HANDOFF.md RUN_LOG.md ESCALATION.md; do
-            cp "$wt/.loop/$f" "$archive_dir/$f" 2>/dev/null || true
-          done
-          git -C "$PROJECT_ROOT" worktree remove --force "$wt" 2>/dev/null || true
-          rm -rf "$wt" 2>/dev/null || true
-          # lock 파일 제거 (loop.sh cmd_cleanup step 5와 동일)
-          # loop 비정상 종료 시 EXIT trap이 실행 안 돼 stale lock 잔존 가능
-          rm -f "$(child_lock_path "$m" "$child")" 2>/dev/null || true
-          cleaned=$((cleaned + 1))
-        fi
-      done < <(ls -1 "$LOOPS_BASE" 2>/dev/null || true)
+cmd_stop() {
+  local rid="${1:-}"
+  [[ -z "$rid" ]] && die "사용: $0 stop <run-id>"
+  require_git_root
+  local rd; rd="$(run_dir "$rid")"
+  [[ -d "$rd" ]] || die "run-id 없음: $rid"
+  local any=0 sp
+  while IFS= read -r sp; do
+    local st loopst
+    st="$(get_state "$rd" "$sp")"
+    loopst="$(loop_status_state "$sp" 2>/dev/null || echo "")"
+    if [[ "$st" == "running" ]] || [[ "$loopst" == "running" ]]; then
+      loop_stop "$sp"
+      set_state "$rd" "$sp" "failed"
+      log_event "$rd" "stop $(spec_slug "$sp")"
+      any=1
     fi
-    echo "milestone $m: $cleaned 개 cleanup. PRD/DAG 보존."
-  done
+  done < "$rd/MANIFEST.txt"
+  if (( any == 0 )); then echo "활성 child 없음"; fi
 }
 
-# ----- subcommand: logs -----
+# ----- subcommand: watch -----
 
-cmd_logs() {
-  local milestone="$1"
-  [[ -z "$milestone" ]] && die "사용: $0 logs <milestone>"
-  compute_milestone_paths "$milestone"
-  if [[ ! -f "$LOG_PATH" ]]; then
-    die "DISPATCH_LOG.md 없음: $LOG_PATH"
-  fi
-  cat "$LOG_PATH"
-}
-
-# ----- subcommand: log_event (모델 호출용) -----
-
-log_event_internal() {
-  local event="$1"
-  ensure_dispatch_dir
-  if [[ ! -f "$LOG_PATH" ]]; then
-    cat > "$LOG_PATH" <<EOF
-# DISPATCH_LOG — $MILESTONE
-
-이 파일은 runtime 로그입니다. git에 commit하지 마세요 (.gitignore 처리 권장).
-EOF
-  fi
-  echo "[$(now_iso)] $event" >> "$LOG_PATH"
-}
-
-cmd_log_event() {
-  local milestone="$1"; shift || true
-  [[ -z "$milestone" ]] && die "사용: $0 log_event <milestone> <event...>"
-  compute_milestone_paths "$milestone"
-  local event="$*"
-  [[ -z "$event" ]] && die "이벤트 본문이 비어 있음"
-  log_event_internal "$event"
-}
-
-# ----- subcommand: watch_wave -----
-#
-# 여러 child의 sentinel 파일을 폴링.
-# 한 명이라도 ESCALATION.md를 만들면 다른 child들 stop + exit 101.
-# 모두 완료 라벨(LOOP_DONE_LABEL) 부착이면 exit 100.
-# 타임아웃 시 exit 102.
-
-cmd_watch_wave() {
-  local milestone="$1"; shift || true
-  [[ -z "$milestone" ]] && die "사용: $0 watch_wave <milestone> <child1> [<child2> ...]"
-  [[ $# -eq 0 ]] && die "child 목록이 비어 있음"
-  compute_milestone_paths "$milestone"
-  ensure_dispatch_dir
-
-  local children=("$@")
-  local poll="${WATCH_POLL_SECONDS:-2}"
-  local timeout="${WATCH_TIMEOUT_SECONDS:-7200}"
-  local start_time
-  start_time=$(date +%s)
-
-  log_event_internal "watch_wave START children=[${children[*]}]"
-
+cmd_watch() {
+  local rid="${1:-}"
+  [[ -z "$rid" ]] && die "사용: $0 watch <run-id>"
+  require_git_root
+  local rd; rd="$(run_dir "$rid")"
+  [[ -d "$rd" ]] || die "run-id 없음: $rid"
+  local start; start=$(date +%s)
   while true; do
-    local all_done=1
-    local any_escalated=0
-    local escalated_child=""
-
-    local c
-    for c in "${children[@]}"; do
-      local state
-      state=$(child_state "$milestone" "$c")
-      case "$state" in
-        done)
-          ;;
-        escalated)
-          any_escalated=1
-          escalated_child="$c"
-          all_done=0
-          break
-          ;;
+    local all_terminal=1 any_fail=0 sp st
+    while IFS= read -r sp; do
+      st="$(get_state "$rd" "$sp")"
+      case "$st" in
+        done)   ;;
+        failed) any_fail=1 ;;
         *)
-          all_done=0
+          # 미완 — loop 공개 IF 로 현 상태 재확인.
+          local term; term="$(child_terminal_state "$sp")"
+          case "$term" in
+            done)   set_state "$rd" "$sp" "done" ;;
+            failed) set_state "$rd" "$sp" "failed"; any_fail=1 ;;
+            *)      all_terminal=0 ;;
+          esac
           ;;
       esac
-    done
-
-    if [[ $any_escalated -eq 1 ]]; then
-      log_event_internal "watch_wave ESCALATION child=$escalated_child — stopping others"
-      # 다른 진행 중 child들 stop
-      for c in "${children[@]}"; do
-        [[ "$c" == "$escalated_child" ]] && continue
-        local state
-        state=$(child_state "$milestone" "$c")
-        if [[ "$state" == "running" ]]; then
-          local lock="$(child_lock_path "$milestone" "$c")"
-          local pid
-          pid=$(cat "$lock" 2>/dev/null || echo "")
-          if [[ -n "$pid" ]] && [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-            kill -TERM "$pid" 2>/dev/null || true
-            log_event_internal "watch_wave fail-fast stop child=$c pid=$pid"
-          fi
-        fi
-      done
-      exit 101
+    done < "$rd/MANIFEST.txt"
+    if (( all_terminal == 1 )); then
+      if (( any_fail == 1 )); then return 1; fi
+      return 0
     fi
-
-    if [[ $all_done -eq 1 ]]; then
-      log_event_internal "watch_wave ALL DONE (LOOP_DONE_LABEL) children=[${children[*]}]"
-      exit 100
-    fi
-
-    # 타임아웃 체크
-    local now_time
-    now_time=$(date +%s)
-    if [[ $((now_time - start_time)) -ge $timeout ]]; then
-      log_event_internal "watch_wave TIMEOUT after ${timeout}s — stopping running children"
-      # 진행 중 child들 stop (ESCALATION 분기와 동일한 실패 격리, orphan 방지)
-      for c in "${children[@]}"; do
-        local state
-        state=$(child_state "$milestone" "$c")
-        if [[ "$state" == "running" ]]; then
-          local lock="$(child_lock_path "$milestone" "$c")"
-          local pid
-          pid=$(cat "$lock" 2>/dev/null || echo "")
-          if [[ -n "$pid" ]] && [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-            kill -TERM "$pid" 2>/dev/null || true
-            log_event_internal "watch_wave timeout-stop child=$c pid=$pid"
-          fi
-        fi
-      done
-      exit 102
-    fi
-
-    sleep "$poll"
+    local now; now=$(date +%s)
+    if (( now - start >= WAVE_TIMEOUT_SECONDS )); then return 2; fi
+    sleep "${POLL_SECONDS:-1}"
   done
 }
 
-# ----- 사용법 출력 -----
+# ----- 사용법 -----
 
 usage() {
   cat >&2 <<'EOF'
-autopilot dispatch 드라이버
+usage: dispatch.sh <subcommand> [args]
 
 Subcommands:
-  status <m>                            milestone 상태 (PRD/DAG/child) 조회
-  stop <m>                              진행 중 모든 child loop 정지
-  list                                  모든 milestone 목록
-  cleanup [<m>]                         완료된 워크트리 정리. PRD/DAG 보존
-  logs <m>                              milestones/<m>/dispatch/DISPATCH_LOG.md 출력
-  watch_wave <m> <child...>             wave 내 child들 sentinel 폴링 (모델이 호출)
-  log_event <m> <event...>              DISPATCH_LOG.md에 이벤트 추가 (모델이 호출)
+  start <spec...> [--max-parallel N] [--resume <run-id>]
+        1 개 이상의 SPEC 파일 경로를 받아 depends_on 으로 DAG 를 만들고
+        wave 단위로 loop driver 에 위임. --resume 이면 기존 run 의
+        미완 child 만 재실행.
+  list
+        모든 run-id 와 진행 요약.
+  status <run-id>
+        run-id 단위 per-SPEC wave/state.
+  stop <run-id>
+        진행 중 child loop 들을 정지 (loop driver 에 위임).
+  watch <run-id>
+        per-SPEC 상태를 폴링하며 모든 child 가 terminal 에 도달할 때까지
+        대기. exit 0=전부 done, 1=하나라도 failed, 2=timeout.
 
-자세한 내용: plugins/autopilot/skills/dispatch/SKILL.md
+환경 변수:
+  LOOP_CMD, DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS
 EOF
   exit 1
 }
 
-# ----- subcommand 디스패처 -----
+# ----- 디스패처 -----
 
-if [[ $# -lt 1 ]]; then
-  usage
-fi
-
-SUBCOMMAND="$1"
-shift
-
-case "$SUBCOMMAND" in
-  status)
-    cmd_status "${1:-}"
-    ;;
-  stop)
-    cmd_stop "${1:-}"
-    ;;
-  list)
-    cmd_list
-    ;;
-  cleanup)
-    cmd_cleanup "${1:-}"
-    ;;
-  logs)
-    cmd_logs "${1:-}"
-    ;;
-  watch_wave)
-    cmd_watch_wave "$@"
-    ;;
-  log_event)
-    cmd_log_event "$@"
-    ;;
-  *)
-    echo "알 수 없는 subcommand: $SUBCOMMAND" >&2
-    usage
-    ;;
+if [[ $# -lt 1 ]]; then usage; fi
+SUB="$1"; shift
+case "$SUB" in
+  start)  cmd_start  "$@" ;;
+  list)   cmd_list  ;;
+  status) cmd_status "$@" ;;
+  stop)   cmd_stop   "$@" ;;
+  watch)  cmd_watch  "$@" ;;
+  -h|--help|help) usage ;;
+  *) echo "알 수 없는 subcommand: $SUB" >&2; usage ;;
 esac
