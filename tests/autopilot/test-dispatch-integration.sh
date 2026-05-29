@@ -310,4 +310,86 @@ n=$(ls "$PROJECT/.dispatch/runs" 2>/dev/null | wc -l | tr -d ' ')
 echo "OK"
 
 echo ""
+echo "=== TEST 15: cmd_start wave timeout — hung child SIGTERM/KILL + rc=2 ==="
+# 별도 mock: start 가 30s sleep 하여 wait 가 실제로 블록.
+SLOW_MOCK="$WORK_DIR/slow-mock-loop.sh"
+cat > "$SLOW_MOCK" <<'SLOW'
+#!/usr/bin/env bash
+set -euo pipefail
+sub="${1:-}"; shift || true
+spec="${1:-}"
+case "$sub" in
+  start)
+    [[ -z "$spec" ]] && exit 2
+    touch "${spec}.started"
+    sleep 30
+    ;;
+  status)
+    [[ -z "$spec" ]] && exit 2
+    printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC
+    if [[ -f "${spec}.started" ]]; then
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' k running - 0 - "$spec"
+    else
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' k idle - 0 - "$spec"
+    fi
+    ;;
+  stop) touch "${spec}.stopped" ;;
+  list) printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC ;;
+  *) exit 2 ;;
+esac
+SLOW
+chmod +x "$SLOW_MOCK"
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-hung.md"
+
+t0=$(date +%s)
+set +e
+out=$(LOOP_CMD="bash $SLOW_MOCK" DISPATCH_WAVE_TIMEOUT_SECONDS=2 dispatch start "$SPEC_DIR/2026-05-29-hung.md" 2>&1)
+rc=$?
+set -e
+t1=$(date +%s); elapsed=$((t1 - t0))
+
+[[ $rc -eq 2 ]] || { echo "FAIL: timeout rc 기대 2, got $rc. out: $out"; exit 1; }
+(( elapsed < 15 )) || { echo "FAIL: timeout 15초 내 종료 기대, ${elapsed}s 경과"; exit 1; }
+
+# 남은 sleep 30 자식 프로세스가 정리되었는지 확인.
+# pgrep 무매치 시 rc=1 이라 pipefail 회피.
+sleep 1
+set +o pipefail
+stragglers=$(pgrep -f "sleep 30" 2>/dev/null | wc -l | tr -d ' ')
+set -o pipefail
+[[ "$stragglers" == "0" ]] || { echo "FAIL: timeout 후 sleep 30 자식 $stragglers 개 잔존"; exit 1; }
+
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+[[ -n "$run_id" ]] || { echo "FAIL: run-id 파싱 실패"; exit 1; }
+state_files=$(ls "$PROJECT/.dispatch/runs/$run_id"/state.* 2>/dev/null)
+[[ -n "$state_files" ]] || { echo "FAIL: state 파일 없음"; exit 1; }
+grep -q '^failed$' $state_files || { echo "FAIL: timeout 시 state=failed 기대"; exit 1; }
+echo "OK (rc=$rc elapsed=${elapsed}s)"
+
+echo ""
+echo "=== TEST 16: 같은 slug 다른 SPEC — state 파일 충돌 없음 ==="
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+# 같은 디렉토리, 다른 날짜, 같은 슬러그 ("collide")
+seed_spec "$SPEC_DIR/2026-05-29-collide.md"
+seed_spec "$SPEC_DIR/2026-05-28-collide.md"
+
+out=$(dispatch start "$SPEC_DIR/2026-05-29-collide.md" "$SPEC_DIR/2026-05-28-collide.md" 2>&1) || {
+  echo "FAIL: dispatch start 실패: $out"; exit 1;
+}
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+[[ -n "$run_id" ]] || { echo "FAIL: run-id 파싱 실패. got: $out"; exit 1; }
+
+# state.collide-<sha7> 가 2 개 별개로 존재해야 한다 (충돌 시 1 개로 합쳐짐).
+state_count=$(ls "$PROJECT/.dispatch/runs/$run_id"/state.collide-* 2>/dev/null | wc -l | tr -d ' ')
+[[ "$state_count" == "2" ]] || { echo "FAIL: state.collide-* 2 개 기대, $state_count 개. ls: $(ls "$PROJECT/.dispatch/runs/$run_id"/ 2>/dev/null)"; exit 1; }
+
+# 두 파일 모두 done 이어야 한다 (덮어쓰기로 한쪽이 누락되지 않아야).
+all_done_lines=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.collide-* 2>/dev/null | grep -c '^done$')
+[[ "$all_done_lines" == "2" ]] || { echo "FAIL: 두 state 파일 모두 done 기대 (got $all_done_lines)"; exit 1; }
+echo "OK"
+
+echo ""
 echo "=== 모든 dispatch 통합 테스트 통과 ==="

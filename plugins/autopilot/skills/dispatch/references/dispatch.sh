@@ -153,10 +153,13 @@ write_waves() {
   cat > "$rd/WAVES.txt"
 }
 
-# state 파일 — slug 단위. pending|running|done|failed.
+# state 파일 — slug+abspath sha7 단위. pending|running|done|failed.
+# spec_slug 만으로는 (a) 다른 날짜 같은 이름 (2026-05-29-x.md vs 2026-05-28-x.md)
+# 와 (b) 다른 디렉토리 같은 basename 입력에서 같은 파일로 덮어쓴다. abspath sha7
+# 을 suffix 로 붙여 unique 보장. log_event 용 spec_slug 는 가독성용으로 유지.
 state_path() {
   local rd="$1"; local spec="$2"
-  echo "$rd/state.$(spec_slug "$spec")"
+  echo "$rd/state.$(spec_slug "$spec")-$(hash7 "$spec")"
 }
 
 set_state() {
@@ -184,6 +187,25 @@ loop_start_bg() {
   # shellcheck disable=SC2086
   ( $LOOP_CMD start "$spec" </dev/null >/dev/null 2>&1 ) &
   echo $!
+}
+
+# kill_tree <pid> [<sig>] — pid 와 그 자손 프로세스를 재귀적으로 kill.
+# subshell 만 죽이면 손자(자손 프로세스) 가 orphan 으로 남으므로 트리 재귀가 필요.
+# pgrep 가 없는 환경에서는 ps 폴백.
+kill_tree() {
+  local pid="$1"; local sig="${2:-TERM}"
+  local children=""
+  if command -v pgrep >/dev/null 2>&1; then
+    children=$(pgrep -P "$pid" 2>/dev/null || true)
+  else
+    children=$(ps -o pid= -o ppid= 2>/dev/null \
+                | awk -v p="$pid" '$2==p { print $1 }')
+  fi
+  local c
+  for c in $children; do
+    kill_tree "$c" "$sig"
+  done
+  kill -"$sig" "$pid" 2>/dev/null || true
 }
 
 # loop_stop <spec> — 동기 stop 위임.
@@ -400,18 +422,45 @@ cmd_start() {
     done
 
     # 같은 wave 의 모든 백그라운드 loop 끝날 때까지 대기.
-    # bash 3.2 호환: `wait <pid>` 를 각 PID 에 순차 호출. 각 child loop 은
-    # 자기 wall-clock 캡으로 무한 대기 방지.
+    # WAVE_TIMEOUT_SECONDS 초과 시 미종료 PID 들을 SIGTERM → SIGKILL 으로 정리하고
+    # overall_rc=2 로 break 한다. (단순 `wait` 는 hung child 가 있을 때 영구 정지.)
+    local wave_start now elapsed remaining_pids=0 wave_timed_out=0
+    wave_start=$(date +%s)
     if (( ${#pids[@]} > 0 )); then
-      local pid
-      for pid in "${pids[@]}"; do
-        wait "$pid" 2>/dev/null || true
+      while :; do
+        remaining_pids=0
+        local pid
+        for pid in "${pids[@]}"; do
+          if kill -0 "$pid" 2>/dev/null; then remaining_pids=$((remaining_pids+1)); fi
+        done
+        if (( remaining_pids == 0 )); then break; fi
+        now=$(date +%s); elapsed=$((now - wave_start))
+        if (( elapsed >= WAVE_TIMEOUT_SECONDS )); then
+          wave_timed_out=1
+          log_event "$rd" "wave=$current_wave timeout elapsed=${elapsed}s cap=${WAVE_TIMEOUT_SECONDS}s remaining=${remaining_pids}"
+          for pid in "${pids[@]}"; do
+            kill -0 "$pid" 2>/dev/null && kill_tree "$pid" TERM
+          done
+          sleep 2
+          for pid in "${pids[@]}"; do
+            kill -0 "$pid" 2>/dev/null && kill_tree "$pid" KILL
+          done
+          for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
+          break
+        fi
+        sleep "${POLL_SECONDS:-1}"
       done
     fi
 
     # 결과 판정 — 자율 실행기 공개 인터페이스로 child 별 종료 상태 확인.
+    # timeout 으로 정리된 wave 는 미완 child 를 failed 처리하고 overall_rc=2.
     local wave_failed=0
     for sp in "${started_specs[@]}"; do
+      if (( wave_timed_out == 1 )); then
+        set_state "$rd" "$sp" "failed"; wave_failed=1
+        log_event "$rd" "wave=$current_wave timeout-failed $(spec_slug "$sp")"
+        continue
+      fi
       local term; term="$(child_terminal_state "$sp")"
       case "$term" in
         done)   set_state "$rd" "$sp" "done"   ; log_event "$rd" "wave=$current_wave done $(spec_slug "$sp")" ;;
@@ -421,6 +470,12 @@ cmd_start() {
                 log_event "$rd" "wave=$current_wave unknown-terminal $(spec_slug "$sp") state=$term" ;;
       esac
     done
+
+    if (( wave_timed_out == 1 )); then
+      log_event "$rd" "wave=$current_wave fail (timeout) — 다음 wave 진입 차단"
+      overall_rc=2
+      break
+    fi
 
     if (( wave_failed == 1 )); then
       log_event "$rd" "wave=$current_wave fail — 다음 wave 진입 차단"

@@ -30,9 +30,10 @@ description: "1 개 이상의 임의 SPEC 파일 경로를 받아 frontmatter de
 
 - 입력 검증: 각 경로가 파일로 존재하고 읽을 수 있어야 한다. 하나라도 누락이면 보고 후 즉시 abort.
 - DAG 구성: 각 SPEC frontmatter 의 `depends_on` 을 읽어 위상정렬. cycle 이면 abort.
-- `<project_root>/.dispatch/runs/<run-id>/MANIFEST.txt` · `WAVES.txt` · `state.<slug>` · `LOG.md` 생성.
+- `<project_root>/.dispatch/runs/<run-id>/MANIFEST.txt` · `WAVES.txt` · `state.<slug>-<sha7>` · `LOG.md` 생성. (`<slug>` 는 가독용, `<sha7>` 는 SPEC abspath 해시로 다른 날짜·디렉토리 동명 SPEC 충돌 방지.)
 - wave 순서대로 자율 실행기에 위임 호출하며 각 wave 의 모든 child 종료를 기다린 뒤 다음 wave 로 진입.
 - `--resume <run-id>` 이면 보관된 manifest 로 재개. done 인 child 는 재호출하지 않는다.
+- 한 wave 가 `DISPATCH_WAVE_TIMEOUT_SECONDS`(기본 7200) 를 초과하면 미종료 child 를 SIGTERM→SIGKILL 으로 정리하고 해당 SPEC 들을 failed 로 마킹한 뒤 다음 wave 진입을 차단한다.
 - exit code: `0`=전부 done, `1`=child 실패로 wave 차단, `2`=timeout.
 
 ### dispatch list
