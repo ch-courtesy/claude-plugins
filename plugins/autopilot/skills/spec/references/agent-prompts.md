@@ -29,7 +29,7 @@ spec 8-step에서 선택적으로 Agent에 위임할 수 있는 역할 2종. 공
 
 ## spec-self-reviewer
 
-언제: step 7 자체 검토 보강. 권장 신호: SPEC 100줄 초과, `[NEEDS CLARIFICATION]` 2개 이상, 사용자 요청.
+언제: step 7 자체 검토 보강. 권장 신호: SPEC 100줄 이상, `[NEEDS CLARIFICATION]` 2개 이상, 사용자 요청.
 
 임무: 작성된 SPEC 초안을 `self-review.md` 5축 + `personas.md` 세 적대 렌즈로 독립 검토하고 발견만 보고한다. 수정·마커 삽입 금지(메인이 반영한다).
 
