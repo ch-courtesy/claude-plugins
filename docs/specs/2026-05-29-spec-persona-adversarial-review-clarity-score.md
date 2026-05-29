@@ -51,6 +51,11 @@ autopilot `spec` 스킬에 두 가지 가산 기능을 추가한다. 두 기능 
 
 - The 기존 미해결 마커 동작과 마커 해결 재개 흐름은 본 변경 후에도 동일하게 유지되어야 한다.
 
+**테스트 정합 (가산성 전제 보정)**
+
+- The 대상 spec 스킬 계약·설치 테스트(test-spec-skill.sh, test-spec-skill-frontmatter.sh, test-spec-status-transition.sh, test-skill-install.sh)는 현 경량 spec 스킬(검증실패 라우팅·PRD·milestone·task 상태전이·test_sweep_paths 등 제거된 기능)을 검증하는 stale assert를 포함해 baseline이 red이므로, 본 변경은 이 stale assert를 현 스킬 계약에 맞게 정정·갱신한 뒤 그 위에 신규 persona/clarity 기능 검증 assert를 가산해야 한다. 제거된 기능을 검증하는 stale assert의 삭제·수정은 본 작업 scope 내에서 정당하며 '테스트 약화'로 보지 않는다(존재하지 않는 기능 검증의 제거).
+- When 본 변경이 완료되면, 위 네 테스트는 현 spec 스킬 계약과 신규 persona/clarity 기능을 정확히 반영해 모두 통과(green)해야 한다.
+
 ## 범위
 포함:
 - autopilot `spec` 스킬의 페르소나 카탈로그(신규 단일 출처 참조 문서)
@@ -60,7 +65,7 @@ autopilot `spec` 스킬에 두 가지 가산 기능을 추가한다. 두 기능 
 - autopilot `spec` 스킬의 명확화 종결 단계에 clarity 점수 산정·제시·소프트 권고 추가
 - autopilot `spec` 스킬 진입 문서의 단계 설명·참조 표 갱신
 - autopilot `spec` 스킬의 보조 위임 양식에 존재하는 단계 번호 오기 정정(실제 단계 수와 일치)
-- 위 변경에 대응하는 spec 스킬 계약·설치 테스트의 가산 assert
+- 위 변경에 대응하는 spec 스킬 계약·설치 테스트의 **정합 갱신 + 가산 assert**: 대상 4개 테스트(test-spec-skill.sh, test-spec-skill-frontmatter.sh, test-spec-status-transition.sh, test-skill-install.sh)의 stale assert(제거된 기능 검증)를 현 경량 spec 스킬 계약에 맞게 정정·갱신하고, 그 위에 신규 persona/clarity 기능 검증 assert를 가산한다(상세 인수 기준은 위 "테스트 정합" 절).
 
 비-목표 / 제외:
 - loop 스킬측 페르소나 검증·lateral 회복(별도 SPEC)
