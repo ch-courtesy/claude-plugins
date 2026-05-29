@@ -133,6 +133,19 @@ bash -n "$DISPATCH_SH" || { echo "FAIL: dispatch.sh syntax 오류"; exit 1; }
 echo "OK: syntax"
 
 echo ""
+echo "=== using-autopilot 스킬 + SessionStart hook 구조 검증 ==="
+UA_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/using-autopilot/SKILL.md"
+UA_HOOKS_JSON="$REPO_ROOT/plugins/autopilot/hooks/hooks.json"
+UA_HOOK_SH="$REPO_ROOT/plugins/autopilot/hooks/session-start.sh"
+[[ -f "$UA_SKILL_MD" ]] || { echo "FAIL: using-autopilot/SKILL.md 부재"; exit 1; }
+grep -q 'name: using-autopilot' "$UA_SKILL_MD" \
+  || { echo "FAIL: using-autopilot/SKILL.md frontmatter에 'name: using-autopilot' 없음"; exit 1; }
+[[ -f "$UA_HOOKS_JSON" ]] || { echo "FAIL: hooks/hooks.json 부재"; exit 1; }
+[[ -x "$UA_HOOK_SH" ]] || { echo "FAIL: hooks/session-start.sh 실행 권한 없음"; exit 1; }
+sh -n "$UA_HOOK_SH" || { echo "FAIL: session-start.sh syntax 오류"; exit 1; }
+echo "OK: using-autopilot 스킬·hook 구조"
+
+echo ""
 echo "=== plugin.json version bump (>= 0.2.0) ==="
 # v0.1.0 → 0.2.0 cutover로 multi-task scope 도입. 최소 0.2.0 이상 보장.
 PLUGIN_VERSION=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$PLUGIN_JSON" \

@@ -1,0 +1,61 @@
+---
+name: using-autopilot
+description: Use at the start of any session in an autopilot-installed project — routes new code-change signals (기능 추가·동작 수정·지침 작성·새로 만들기) to autopilot:spec as the mandatory first step, overriding generic brainstorming-first guidance for such work.
+---
+
+# using-autopilot
+
+autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다. 새 코드 변경은 **의도를 먼저 자기완결적 SPEC 문서로 떠서**(`autopilot:spec`) → 구현(`autopilot:dispatch`)으로 흐른다. 이 스킬은 그 첫 분기를 강제한다.
+
+<EXTREMELY-IMPORTANT>
+새 코드 변경 신호를 감지하면, **다른 어떤 응답·도구 호출·탐색보다 먼저** `Skill(skill="spec", args="<자연어 task 설명>")`을 호출한다. 1%라도 새 코드 변경일 가능성이 있으면 spec을 먼저 띄운다. 이것은 협상 대상이 아니다.
+</EXTREMELY-IMPORTANT>
+
+## 트리거 (이 중 하나라도 해당되면 spec 먼저)
+
+자연어로 다음 의도가 보이면 새 코드 변경 신호다:
+
+- **기능 추가** — "X 기능 만들어줘", "X 추가해줘", "X 붙여줘"
+- **동작 수정** — "X 동작 바꿔줘", "X 고쳐줘"(버그 수정 포함하되, 단순 디버깅은 아래 예외 참조)
+- **지침 작성** — "X 규칙 만들어줘", "X 지침 써줘"
+- **새로 만들기** — "X 스킬/플러그인/모듈 만들꺼야", "X 새로 만들어줘"
+
+`autopilot:spec`의 description이 정확히 이 신호들을 트리거로 선언한다. spec의 명확화 인터뷰(집요함·결정 트리·추천 답·코드 우선)가 설계 탐색을 수행하므로, 별도의 사전 설계 단계 없이 spec이 곧 첫 단계다.
+
+## brainstorming-first 강제와의 관계 (명시적 override)
+
+`superpowers:using-superpowers`는 "creating features / building components 같은 창작 작업엔 무조건 `superpowers:brainstorming`을 먼저"를 강제한다. **autopilot이 설치된 프로젝트에서, 위 트리거에 해당하는 새 코드 변경 작업에 한해 이 강제를 대체한다** — brainstorming 대신 `autopilot:spec`이 첫 단계다.
+
+근거(왜 이 규칙이 그 자리에서 더 구체적이고 우선하는가):
+
+- **specificity** — brainstorming-first는 모든 "창작 작업"에 걸리는 일반 규칙이다. 본 규칙은 "autopilot 설치 + 새 코드 변경 신호"라는 더 좁은 조건에 걸린다. 구체적 규칙이 일반 규칙을 이긴다.
+- **기능 동치** — spec의 명확화 인터뷰가 brainstorming의 의도·범위·제약 탐색을 수행한다. 설계 탐색이 빠지는 게 아니라 spec 안으로 들어온다.
+- **파이프라인 정합** — 산출물(자기완결 SPEC)이 곧바로 `autopilot:dispatch`의 입력이 된다.
+
+milestone 규모(다중 독립 서브시스템)는 spec의 **범위 분해 게이트**가 처리하므로 별도 brainstorming이 필요 없다.
+
+## Red flags — 이 생각이 들면 멈추고 spec을 먼저 띄운다
+
+| 생각 | 현실 |
+|---|---|
+| "일단 brainstorming부터 하자" | autopilot 프로젝트의 새 코드 변경은 spec이 첫 단계다. brainstorming이 아니다. |
+| "이건 너무 사소해서 SPEC까지는…" | 사소한 변경일수록 spec이 빠르게 끝난다. 자기완결 의도 문서는 항상 남긴다. |
+| "바로 코드부터 짜자" | 의도(검증 가능한 EARS 수용 기준) 없이 구현하지 않는다. spec → dispatch. |
+| "먼저 코드베이스를 좀 둘러보고" | 탐색은 spec의 1단계(컨텍스트 탐색)와 코드-우선 원칙이 수행한다. spec 안에서 한다. |
+| "사용자가 그냥 만들라고 했으니" | "만들어줘"는 WHAT이지 HOW가 아니다 — spec이 HOW 이전에 WHAT을 확정한다. |
+
+## 예외 (spec 라우팅 불필요)
+
+- 이미 진행 중인 spec 워크플로의 연속, 또는 `--resume` 마커 해소.
+- 새 코드 변경이 **아닌** 작업: 순수 질의응답, 코드 읽기·설명, 검색, 단순 디버깅(원인 조사·로그 분석), 운영 명령(테스트 실행·상태 조회).
+- 사용자가 spec을 건너뛰라고 **명시적으로** 지시한 경우(사용자 지침이 최우선).
+
+## 파이프라인
+
+```
+새 코드 변경 신호
+   └─ autopilot:spec      → docs/specs/<날짜>-<slug>.md (자기완결 SPEC, EARS 수용 기준)
+        └─ autopilot:dispatch → SPEC(들)을 wave 단위로 구현
+```
+
+spec은 외부 상태(이슈·브랜치·원격)를 만들지 않고 SPEC 문서만 산출한다. 구현·검증·실행은 dispatch가 맡는다.
