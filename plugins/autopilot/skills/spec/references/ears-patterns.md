@@ -1,27 +1,27 @@
-# EARS patterns (optimized)
+# 완료 조건 문장 패턴 (평이화)
 
-SPEC 수용 기준은 가능하면 EARS로 쓴다. frontmatter `ears_language`: `ko`(default), `en`, `hybrid`.
+SPEC의 **완료 조건**은 가능하면 아래 5문장 패턴 중 하나로 쓴다. 사용자에게는 어려운 영문 용어 대신 평이한 한국어로 안내한다. 라벨은 "완료 조건"이며 약어를 쓰지 않는다 — 다만 각 조건은 여전히 관찰 가능·독립 테스트 가능해야 한다(내부 검증 구조 보존). frontmatter `ears_language`: `ko`(default), `en`, `hybrid`.
 
-## 5 patterns
+## 5문장 패턴 (평이한 한국어 안내)
 
-- Ubiquitous: 항상 성립. `The system shall ...` / `시스템은 ...해야 한다`
-- Event-driven: 이벤트 발생 시. `When <event>, the system shall ...`
-- State-driven: 상태 동안. `While <state>, the system shall ...`
-- Unwanted behavior: 예외/오류 시. `If <condition>, the system shall ...`
-- Optional feature: 기능 활성화 시. `Where <feature>, the system shall ...`
+- **항상**: 조건 없이 늘 성립. `시스템은 ...해야 한다`
+- **…할 때**: 어떤 사건이 일어날 때. `...할 때, 시스템은 ...해야 한다`
+- **…인 동안**: 어떤 상태가 유지되는 동안. `...인 동안, 시스템은 ...해야 한다`
+- **…이면(오류)**: 예외·오류 조건이면. `...이면, 시스템은 ...해야 한다`
+- **…기능이 켜지면**: 선택 기능이 활성화되면. `...기능이 켜지면, 시스템은 ...해야 한다`
 
 ## 작성 규칙
 
-- 각 기준은 관찰 가능한 결과와 검증 방법을 포함한다.
+- 각 조건은 관찰 가능한 결과와 검증 방법을 포함한다.
 - 구현 방법, 파일명, 클래스명, 라이브러리명은 피한다. WHAT/HOW 방어선 유지.
-- 하나의 기준에는 하나의 검증 가능한 요구만 둔다.
+- 하나의 조건에는 하나의 검증 가능한 요구만 둔다.
 - 모호한 단어("적절히", "빠르게", "잘")는 수치·상태·출력으로 바꾼다.
 - 독립 테스트 가능해야 한다.
 
 ## 언어 모드
 
-- `ko`: 한국어 EARS. 키워드는 자연스럽게 번역.
-- `en`: 영어 EARS.
-- `hybrid`: EARS trigger는 영어, 설명은 한국어 허용.
+- `ko`: 한국어 완료 조건. 키워드는 위 평이한 안내대로 쓴다.
+- `en`: 영어 완료 조건. 트리거 키워드는 영어로 쓴다.
+- `hybrid`: 트리거는 영어, 설명은 한국어 허용.
 
-사용자에게 언어를 다시 묻지 말고 frontmatter 값을 따른다.
+사용자에게 언어를 다시 묻지 말고 frontmatter `ears_language` 값을 따른다.

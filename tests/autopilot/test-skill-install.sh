@@ -89,9 +89,15 @@ SPEC_SKILL_MD="$SPEC_SKILL_DIR/SKILL.md"
 grep -q 'name: spec' "$SPEC_SKILL_MD" \
   || { echo "FAIL: spec/SKILL.md frontmatter에 'name: spec' 없음"; exit 1; }
 echo "OK: name: spec"
+# 정합 갱신: 자연 인터뷰 재설계로 사용자 노출 용어를 평이화한다. 과거 'EARS 마커 존재'
+# 단언을 동등 강도의 신 계약('EARS 약어 부재' + '완료 조건' 라벨 존재) 단언으로 대체한다.
 grep -q 'EARS' "$SPEC_SKILL_MD" \
-  || { echo "FAIL: spec/SKILL.md description에 'EARS' 마커 없음"; exit 1; }
-echo "OK: EARS 마커"
+  && { echo "FAIL: spec/SKILL.md에 평이화 대상 'EARS' 약어 잔존"; exit 1; }
+echo "OK: EARS 약어 부재 (평이화)"
+SPEC_TEMPLATE_MD="$SPEC_SKILL_DIR/references/spec-template.md"
+grep -qE '^##[[:space:]]*완료 조건' "$SPEC_TEMPLATE_MD" \
+  || { echo "FAIL: spec-template.md 수용 기준 섹션 제목이 '완료 조건'이 아님"; exit 1; }
+echo "OK: '완료 조건' 라벨 (spec-template.md)"
 grep -q '\[NEEDS CLARIFICATION\]' "$SPEC_SKILL_MD" \
   || { echo "FAIL: spec/SKILL.md description에 '[NEEDS CLARIFICATION]' 마커 없음"; exit 1; }
 echo "OK: [NEEDS CLARIFICATION] 마커"

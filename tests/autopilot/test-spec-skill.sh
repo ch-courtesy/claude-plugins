@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# autopilot:spec 스킬 계약 검증 테스트 (경량 redesign + persona/clarity 가산)
+# autopilot:spec 스킬 계약 검증 테스트 (자연 인터뷰 재설계 + persona/clarity 가산)
 #
-# 정합 갱신: 과거 본 테스트는 제거된 기능(검증실패 라우팅 a/b/c·자연어 트리거·
-# 사전 명확화 라운드·마일스톤/PRD 라우팅·단일 task 생성·test_sweep_paths·
-# 10단계 워크플로)을 검증하는 stale assert 를 담고 있었다. 경량 spec 스킬은
-# 외부 상태(task·이슈·브랜치·원격)를 만들지 않고 SPEC 문서만 작성하는 8단계
-# 워크플로다. 본 테스트는 stale assert 를 현 경량 계약으로 정정한 뒤, 신규
-# persona 적대 리뷰 + clarity 점수 기능 검증 assert 를 가산한다.
+# 정합 갱신: 명확화 인터뷰 자연화 재설계로 spec 스킬은
+#   (a) 별도 "섹션별 SPEC 승인" 단계(구 step 5)를 제거해 워크플로가 7단계로 줄었고,
+#   (b) 사용자 노출 용어를 평이화해 "EARS" 약어를 쓰지 않고 "완료 조건" 라벨을 쓰며,
+#   (c) 인터뷰 종료·최종 승인 시 dispatch 로의 옵트인 자동 핸드오프를 도입했다.
+# 본 테스트는 과거의 'EARS 마커 존재 + 섹션별 SPEC + 8단계' 단언을
+#   동등 강도의 신 계약 단언('EARS 부재 + 완료 조건 + 섹션별 SPEC 부재 + 7단계 + 옵트인 핸드오프')으로
+#   재작성한다. 단언을 삭제·skip·약화하지 않는다(정합 갱신이지 커버리지 축소가 아니다).
+# persona 적대 리뷰 + clarity 점수 검증 assert 는 그대로 가산 보존한다.
 #
 # 정적(grep) 검사. 실제 사용자 인터랙션·외부 도구 호출은 e2e 범위 밖.
 
@@ -20,6 +22,8 @@ CLARIFICATION_MD="$SKILL_DIR/references/clarification.md"
 AGENT_PROMPTS="$SKILL_DIR/references/agent-prompts.md"
 PERSONAS_MD="$SKILL_DIR/references/personas.md"
 CLARITY_MD="$SKILL_DIR/references/clarity-score.md"
+SPEC_TEMPLATE="$SKILL_DIR/references/spec-template.md"
+EARS_PATTERNS="$SKILL_DIR/references/ears-patterns.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -30,28 +34,43 @@ ok()   { echo "OK: $*"; }
 # PART A — 현 경량 계약 정합 검증
 # ===========================================================================
 
-echo "=== TEST A1: 외부 상태 미생성 경량 계약 ==="
+echo "=== TEST A1: 외부 상태 미생성 경량 계약 + 제거 어구 부재 ==="
 # 경량 redesign: 산출물은 SPEC 문서뿐. task·이슈·브랜치·원격 미생성.
 grep -qE '외부 상태.*(만들지 않|미생성|않는다)' "$SKILL_MD" \
   || fail "SKILL.md에 '외부 상태 미생성' 계약 명시 없음"
 ok "외부 상태 미생성 계약 명시"
-# stale 기능 잔존 금지 (negative): 검증 실패 라우팅·PRD·milestone-id·test_sweep_paths
-for stale in '검증 실패 라우팅' 'milestone-id' 'test_sweep_paths' '마일스톤 규모'; do
+# stale/제거 기능 잔존 금지 (negative):
+#   - 검증 실패 라우팅·milestone-id·test_sweep_paths·마일스톤 규모: 경량 계약에서 이미 제거
+#   - 섹션별 SPEC: 자연 인터뷰 재설계로 섹션별 승인 단계 제거
+#   - EARS: 사용자 노출 용어 평이화로 약어 제거 ("완료 조건"으로 대체)
+for stale in '검증 실패 라우팅' 'milestone-id' 'test_sweep_paths' '마일스톤 규모' '섹션별 SPEC' 'EARS'; do
   if grep -qF "$stale" "$SKILL_MD"; then
-    fail "SKILL.md에 제거된 기능 어구 '$stale' 잔존 (경량 계약 위반)"
+    fail "SKILL.md에 제거/평이화 대상 어구 '$stale' 잔존 (신 계약 위반)"
   fi
 done
-ok "제거된 기능 어구(라우팅·milestone-id·test_sweep_paths 등) 잔존 없음"
+ok "제거/평이화 대상 어구(라우팅·milestone-id·섹션별 SPEC·EARS 등) 잔존 없음"
 
 echo ""
-echo "=== TEST A2: 8단계 워크플로 + 핵심 step 보존 ==="
-for step_kw in '컨텍스트 탐색' '범위 분해 게이트' '명확화 라운드' '접근법 비교' '섹션별 SPEC' 'SPEC 문서 작성' '자체 검토' '구현 스킬 추천'; do
+echo "=== TEST A2: 7단계 워크플로 + 핵심 step 보존 + 섹션별 승인 부재 ==="
+# 섹션별 SPEC 승인(구 step 5) 제거로 워크플로는 7단계.
+for step_kw in '컨텍스트 탐색' '범위 분해 게이트' '명확화' '접근법 비교' 'SPEC 문서 작성' '자체 검토' '구현 스킬 추천'; do
   grep -qF "$step_kw" "$SKILL_MD" \
-    || fail "8단계 step 키워드 '$step_kw' 보존 실패"
+    || fail "7단계 step 키워드 '$step_kw' 보존 실패"
 done
-ok "8단계 step 키워드 모두 존재"
+ok "7단계 step 키워드 모두 존재"
+step_count=$(grep -cE '^### [0-9]+\.' "$SKILL_MD")
+[[ "$step_count" -eq 7 ]] \
+  || fail "워크플로 step 헤더 수가 7이 아님 (실제: $step_count) — 섹션별 승인 제거로 7단계여야 함"
+ok "워크플로 step 헤더 정확히 7개 (줄어든 단계 수 단언)"
 grep -qF 'WHAT/HOW' "$SKILL_MD" || fail "WHAT/HOW 방어선 명시 보존 실패"
 ok "WHAT/HOW 방어선 보존"
+
+echo ""
+echo "=== TEST A2b: 평이화 — 완료 조건 라벨 + EARS 부재 ==="
+# 사용자 노출 용어 평이화: SKILL 본문은 "완료 조건" 라벨을 쓰고 "EARS" 약어를 쓰지 않는다.
+grep -qF '완료 조건' "$SKILL_MD" || fail "SKILL.md에 '완료 조건' 라벨 부재"
+ok "SKILL.md '완료 조건' 라벨 존재"
+# (EARS 부재는 A1 negative 루프에서 단언됨 — 여기서는 라벨 존재만 가산)
 
 echo ""
 echo "=== TEST A3: AskUserQuestion 기반 결정 + dispatch 추천 ==="
@@ -73,22 +92,22 @@ ref_count=$(grep -cE 'references/agent-prompts\.md' "$SKILL_MD")
 ok "agent-prompts.md 참조 2회 이상"
 
 echo ""
-echo "=== TEST A5: agent-prompts.md 단계 번호 오기 정정 (실제 8단계와 일치) ==="
-# 경량 스킬은 8단계다. 과거 양식의 '10-step'·context=step3·self-review=step9 오기를 정정.
-if grep -qE '10[- ]?step|10단계' "$AGENT_PROMPTS"; then
-  fail "agent-prompts.md에 stale '10-step/10단계' 잔존 (실제 8단계)"
+echo "=== TEST A5: agent-prompts.md 단계 번호 정합 (실제 7단계와 일치) ==="
+# 섹션별 승인 제거로 7단계다. stale '10-step'·'8-step/8단계' 잔존 금지.
+if grep -qE '10[- ]?step|10단계|8[- ]?step|8단계' "$AGENT_PROMPTS"; then
+  fail "agent-prompts.md에 stale '8/10-step·8/10단계' 잔존 (실제 7단계)"
 fi
-ok "agent-prompts.md에 stale 10-step 잔존 없음"
-grep -qE '8[- ]?step|8단계' "$AGENT_PROMPTS" \
-  || fail "agent-prompts.md에 정정된 '8-step/8단계' 표기 부재"
-ok "8-step 표기 존재"
-# context-explorer 는 step 1, self-reviewer 는 step 7 을 가리켜야 한다.
+ok "agent-prompts.md에 stale 8/10-step 잔존 없음"
+grep -qE '7[- ]?step|7단계' "$AGENT_PROMPTS" \
+  || fail "agent-prompts.md에 정정된 '7-step/7단계' 표기 부재"
+ok "7-step 표기 존재"
+# context-explorer 는 step 1, self-reviewer 는 step 6(자체 검토)을 가리켜야 한다.
 grep -qE 'step 1 컨텍스트 탐색|step 1 .*컨텍스트' "$AGENT_PROMPTS" \
   || fail "context-explorer 언제 절이 step 1(컨텍스트 탐색)을 가리키지 않음"
 ok "context-explorer → step 1"
-grep -qE 'step 7 자체 검토|step 7 .*자체 검토' "$AGENT_PROMPTS" \
-  || fail "self-reviewer 언제 절이 step 7(자체 검토)을 가리키지 않음"
-ok "self-reviewer → step 7"
+grep -qE 'step 6 자체 검토|step 6 .*자체 검토' "$AGENT_PROMPTS" \
+  || fail "self-reviewer 언제 절이 step 6(자체 검토)을 가리키지 않음"
+ok "self-reviewer → step 6"
 
 echo ""
 echo "=== TEST A6: 모듈 구성 표 + 헌법 §11.6 + 결정·합성 메인 책임 ==="
@@ -143,7 +162,7 @@ grep -qE '5 ?checks|5축|5 개 체크' "$SELF_REVIEW_MD" \
 ok "기존 5축 자체 검토 보존 (적대 렌즈 가산)"
 
 echo ""
-echo "=== TEST B4: SKILL.md step 7 적대 렌즈 + 메인 반영 ==="
+echo "=== TEST B4: SKILL.md step 6 적대 렌즈 + 메인 반영 ==="
 grep -qF 'references/personas.md' "$SKILL_MD" \
   || fail "SKILL.md가 references/personas.md를 참조하지 않음"
 ok "SKILL.md → personas.md 참조"
@@ -217,7 +236,7 @@ grep -qF 'AskUserQuestion' "$CLARIFICATION_MD" \
 ok "구조화 선택지(AskUserQuestion) 권고 매체 명시"
 
 echo ""
-echo "=== TEST C5: SKILL.md step 3 명확화 종결에 clarity 리드아웃·소프트 권고 ==="
+echo "=== TEST C5: SKILL.md 명확화 종결에 clarity 리드아웃·소프트 권고 ==="
 grep -qiF 'clarity' "$SKILL_MD" || fail "SKILL.md에 clarity 점수 언급 없음"
 ok "SKILL.md clarity 언급 존재"
 grep -qF 'references/clarity-score.md' "$SKILL_MD" \
@@ -234,5 +253,90 @@ grep -qE '^\|.*clarity-score\.md.*\|' "$SKILL_MD" \
 ok "모듈 표 clarity-score.md 행 존재"
 
 # ===========================================================================
+# PART D — 자연 인터뷰 + 옵트인 핸드오프 (신 계약)
+# ===========================================================================
+
 echo ""
-echo "=== 모든 spec 계약 + persona/clarity 테스트 통과 ==="
+echo "=== TEST D1: 자연 인터뷰 — 깔때기형 + 내부 커버리지 체크리스트 ==="
+[[ -f "$CLARIFICATION_MD" ]] || fail "clarification.md 부재"
+# 사용자의 최초 진술에서 출발하고 직전 답에서 다음 질문이 파생되는 단일 흐름
+grep -qE '최초 진술|처음 한 말|첫 문장|되짚' "$CLARIFICATION_MD" \
+  || fail "clarification.md에 '사용자 최초 진술 되짚기' 흐름 명시 없음"
+ok "clarification.md 최초 진술 되짚기 명시"
+grep -qE '직전 답.*파생|파생.*직전 답|이전 답.*파생' "$CLARIFICATION_MD" \
+  || fail "clarification.md에 '직전 답에서 다음 질문 파생' 명시 없음"
+ok "clarification.md 직전 답 파생 명시"
+# 목적·성공기준·제약·위험은 사용자 슬롯이 아니라 내부 커버리지 체크리스트
+grep -qE '내부 커버리지|커버리지 체크리스트' "$CLARIFICATION_MD" \
+  || fail "clarification.md에 '내부 커버리지 체크리스트' 개념 없음"
+ok "clarification.md 내부 커버리지 체크리스트 명시"
+grep -qE '나열(해|하지).*않|슬롯|카테고리.*나열' "$CLARIFICATION_MD" \
+  || fail "clarification.md에 '카테고리를 사용자에게 나열하지 않음' 명시 없음"
+ok "clarification.md 카테고리 비나열 명시"
+
+echo ""
+echo "=== TEST D2: 최종 단일 승인 (섹션별 승인 흡수) ==="
+grep -qE '마지막에 한 번|전체를.*한 번|완성된 SPEC.*한 번|최종.*단일 승인|단일 승인' "$SKILL_MD" \
+  || fail "SKILL.md에 '완성 SPEC을 마지막에 한 번 제시·단일 승인' 명시 없음"
+ok "SKILL.md 최종 단일 승인 명시"
+
+echo ""
+echo "=== TEST D3: 옵트인 자동 핸드오프 (명시 동의 시에만 dispatch) ==="
+grep -qF '옵트인' "$SKILL_MD" || fail "SKILL.md에 '옵트인' 핸드오프 개념 없음"
+ok "옵트인 개념 명시"
+grep -qE '구현까지 자동|자동으로 진행|자동 진행' "$SKILL_MD" \
+  || fail "SKILL.md에 '구현까지 자동 진행' 핸드오프 제안 없음"
+ok "자동 진행 제안 명시"
+grep -qE '명시.*동의|동의.*명시|명시적 동의' "$SKILL_MD" \
+  || fail "SKILL.md에 '명시 동의 시에만' 옵트인 경계 없음"
+ok "명시 동의 경계 명시"
+# 동의 시 dispatch 호출 / 미동의 시 어떤 후속 스킬도 호출하지 않음
+grep -qE '동의.*dispatch|dispatch.*호출|호출한다' "$SKILL_MD" \
+  || fail "SKILL.md에 '동의 시 dispatch 호출' 명시 없음"
+ok "동의 시 dispatch 호출 명시"
+
+echo ""
+echo "=== TEST D4: 미해결 마커 시 핸드오프 미제안 + --resume 안내 ==="
+grep -qE '\[NEEDS CLARIFICATION' "$SKILL_MD" \
+  || fail "SKILL.md에 '[NEEDS CLARIFICATION' 마커 언급 없음"
+ok "미해결 마커 언급 존재"
+grep -qE '자율 실행.*차단|차단된다' "$SKILL_MD" \
+  || fail "SKILL.md에 '마커 잔존 시 자율 실행 차단' 명시 없음"
+ok "마커 잔존 시 자율 실행 차단 명시"
+grep -q -- '--resume' "$SKILL_MD" \
+  || fail "SKILL.md에 '--resume 해결 방법' 안내 없음"
+ok "--resume 안내 존재"
+
+# ===========================================================================
+# PART E — 평이화: SPEC 템플릿 본문 + 완료 조건 문장 패턴
+# ===========================================================================
+
+echo ""
+echo "=== TEST E1: SPEC 템플릿 본문 평이화 (완료 조건 라벨, EARS 부재) ==="
+[[ -f "$SPEC_TEMPLATE" ]] || fail "spec-template.md 부재"
+grep -qE '^##[[:space:]]*완료 조건' "$SPEC_TEMPLATE" \
+  || fail "spec-template.md 수용 기준 섹션 제목이 '완료 조건'이 아님"
+ok "spec-template.md '## 완료 조건' 섹션 제목 존재"
+if grep -qF 'EARS' "$SPEC_TEMPLATE"; then
+  fail "spec-template.md 본문에 'EARS' 약어 잔존 (평이화 위반)"
+fi
+ok "spec-template.md 본문 'EARS' 부재"
+
+echo ""
+echo "=== TEST E2: 완료 조건 5문장 패턴 평이한 한국어 안내 ==="
+[[ -f "$EARS_PATTERNS" ]] || fail "ears-patterns.md 부재"
+# 영문 패턴 유형명(Ubiquitous/Event-driven 등) 대신 평이한 한국어 안내
+if grep -qE 'Ubiquitous|Event-driven|State-driven' "$EARS_PATTERNS"; then
+  fail "ears-patterns.md에 영문 패턴 유형명(Ubiquitous/Event-driven 등) 잔존 (평이화 위반)"
+fi
+ok "ears-patterns.md 영문 패턴 유형명 부재"
+# 평이한 한국어 안내 어구 존재: 항상 / …할 때 / …인 동안 / 오류(…이면) / 기능이 켜지면
+for plain in '항상' '할 때' '동안' '오류' '기능'; do
+  grep -qF "$plain" "$EARS_PATTERNS" \
+    || fail "ears-patterns.md에 평이한 한국어 패턴 안내 어구 '$plain' 없음"
+done
+ok "평이한 한국어 5문장 패턴 안내 존재"
+
+# ===========================================================================
+echo ""
+echo "=== 모든 spec 계약 + persona/clarity + 자연 인터뷰/옵트인 핸드오프 테스트 통과 ==="
