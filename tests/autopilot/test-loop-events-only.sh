@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # SPEC 173: autopilot:loop 스킬 실행 로그를 호출 세션으로 실시간 출력
 #
-# 검증 대상 (정적 grep 기반):
+# 검증 대상 (정적 grep 기반, 현 spec-file-driven loop contract):
 #
-# [loop SKILL.md]
+# [loop SKILL.md — `#### Monitor` 섹션]
 # 1. 기존 핵심 이벤트 정규식 패턴이 default 위치에서 제거됨
 #    (`--events-only` 분기 설명에만 잔존하면 OK)
 # 2. 새 default 필터가 "noise-only 제외" 의미를 표현하는 패턴으로 정의됨
@@ -12,29 +12,23 @@
 #    (명세·contract·`--no-monitor`와 일관 명시)
 # 4. 셸 드라이버 직접 호출 시 미적용이 명시됨
 #
-# [spec SKILL.md]
-# 5. step 10의 "지금 loop start 호출" 분기 설명에 `--events-only` 선택이 언급됨
-# 6. 자동 연계 args 구성에 그 선택이 반영됨
-#
 # 외부 API 호출은 수행하지 않는다.
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 LOOP_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/loop/SKILL.md"
-SPEC_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/spec/SKILL.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
 
 [[ -f "$LOOP_SKILL_MD" ]] || fail "$LOOP_SKILL_MD 부재"
-[[ -f "$SPEC_SKILL_MD" ]] || fail "$SPEC_SKILL_MD 부재"
 
 # 핵심 이벤트 정규식 패턴 (default 필터의 옛 형태) — `--events-only` 분기에만 잔존해야 함.
 KEY_EVENT_REGEX='이터 #|HALT|WARN|FAIL|ERROR|rate limit|claude 비정상|에스컬레이션|완료 신호'
 
 # ---------------------------------------------------------------------------
-# loop SKILL.md 의 "자동 Monitor 가설 (기본 동작)" 섹션 추출
+# loop SKILL.md 의 "#### Monitor" 섹션 추출
 # 다음 `#### ` 헤더 또는 `### ` 헤더 직전까지.
 extract_section() {
   local file="$1" start_marker="$2"
@@ -49,9 +43,9 @@ extract_section() {
   ' "$file"
 }
 
-DEFAULT_MONITOR_SECTION="$(extract_section "$LOOP_SKILL_MD" "#### 자동 Monitor 가설")"
+DEFAULT_MONITOR_SECTION="$(extract_section "$LOOP_SKILL_MD" "#### Monitor")"
 [[ -n "$DEFAULT_MONITOR_SECTION" ]] \
-  || fail "loop SKILL.md 에서 '#### 자동 Monitor 가설' 섹션을 찾을 수 없음"
+  || fail "loop SKILL.md 에서 '#### Monitor' 섹션을 찾을 수 없음"
 
 # ---------------------------------------------------------------------------
 echo "=== check 1: default 위치에서 기존 핵심 이벤트 정규식 제거 ==="
@@ -59,13 +53,11 @@ echo "=== check 1: default 위치에서 기존 핵심 이벤트 정규식 제거
 # `--events-only` 옵션 분기 설명 내부에서만 등장해야 함.
 #
 # 검증 전략:
-#   - 기본 동작 섹션에서 `--events-only` 라는 토큰이 나타나는 첫 위치 이전까지의
-#     "default 영역"을 추출
+#   - 기본 동작 섹션에서 `--events-only` 토큰의 첫 등장 *이전* 텍스트를
+#     "default 영역"으로 추출 (현 contract 는 default 필터 설명과 `--events-only`
+#     분기 설명을 같은 라인에 둘 수 있으므로 라인 단위가 아니라 토큰 단위로 절단)
 #   - 그 default 영역 안에 KEY_EVENT_REGEX 가 등장하면 실패
-DEFAULT_BEFORE_OPT="$(awk '
-  /--events-only/ { exit }
-  { print }
-' <<< "$DEFAULT_MONITOR_SECTION")"
+DEFAULT_BEFORE_OPT="$(awk 'BEGIN { RS = "--events-only" } { print; exit }' <<< "$DEFAULT_MONITOR_SECTION")"
 
 if grep -qF -- "$KEY_EVENT_REGEX" <<< "$DEFAULT_BEFORE_OPT"; then
   fail "check 1: 기존 핵심 이벤트 정규식이 default 필터 위치에 여전히 존재"
@@ -112,42 +104,13 @@ fi
 ok "check 4: 셸 드라이버 직접 호출 시 --events-only 미적용 명시 존재"
 
 # ---------------------------------------------------------------------------
-echo ""
-echo "=== check 5: spec SKILL.md step 10 분기에 --events-only 선택 언급 ==="
-# step 10 의 "지금 loop start 호출" 분기 설명에 `--events-only` opt-out 선택이 언급됨.
-# step 10 (## 10 또는 ### 10) 헤딩부터 다음 ## / ### 헤딩 직전까지를 추출.
-STEP10="$(awk '
-  BEGIN { capturing = 0 }
-  /^### 10\. / { capturing = 1; print; next }
-  capturing && /^### / { exit }
-  capturing && /^## / { exit }
-  capturing { print }
-' "$SPEC_SKILL_MD")"
+# 구 contract 검증 항목 제거 메모:
+#   기존 check 5·6 은 spec SKILL.md 의 "step 10 → 지금 loop start 호출 (--events-only
+#   opt-out)" 자동 연계 분기를 검증했다. spec-file-driven 리팩토링으로 spec 스킬은
+#   더 이상 loop 를 직접 기동하지 않고(8단계로 끝나며 구현 스킬 추천만 수행), 자동
+#   연계 chaining 과 거기에 딸린 `--events-only` opt-out 개념 자체가 제거되었다.
+#   현 contract 에 대응 개념이 없으므로(`--events-only` 는 이제 loop SKILL.md 에만
+#   존재) 두 항목은 재작성 대상이 아니라 삭제 대상이다.
 
-[[ -n "$STEP10" ]] || fail "check 5: spec SKILL.md 에서 '### 10.' step 섹션 추출 실패"
-grep -q -- "--events-only" <<< "$STEP10" \
-  || fail "check 5: spec SKILL.md step 10 에 '--events-only' 언급 부재"
-
-# "지금 loop start 호출" 옵션 라벨 부근에 events-only 가 있어야 함 (둘이 같은 단계에서 언급)
-grep -q "지금 loop start 호출" <<< "$STEP10" \
-  || fail "check 5: spec SKILL.md step 10 에 '지금 loop start 호출' 옵션 라벨 부재"
-ok "check 5: spec SKILL.md step 10 분기에 --events-only opt-out 선택 언급"
-
-# ---------------------------------------------------------------------------
-echo ""
-echo "=== check 6: 자동 연계 args 구성에 --events-only 반영 절차 ==="
-# step 10 의 자동 연계 흐름에서 `--events-only` 선택이 args 에 반영되는 절차 명시.
-# 예: args 입력 시 `--events-only` 토큰을 append 하는 절차 기술.
-# 다음 어휘 조합 중 적어도 하나:
-#   - "args" + "--events-only" 가 같은 라인 (또는 인접 ±1 라인 범위)
-#   - "args 에 --events-only 추가" 같은 절차 표현
-#   - `start <m>/<c> --events-only` 같은 구체 args 예시
-args_context="$(grep -E -A1 -B1 -- "--events-only" <<< "$STEP10" || true)"
-if ! grep -qE "args.*--events-only|--events-only.*args|start [^\\\$]*--events-only" <<< "$args_context"; then
-  fail "check 6: step 10 자동 연계 args 구성에 --events-only 반영 절차 부재"
-fi
-ok "check 6: step 10 자동 연계 args 구성에 --events-only 반영 명시"
-
-# ---------------------------------------------------------------------------
 echo ""
 echo "ALL CHECKS PASSED"
