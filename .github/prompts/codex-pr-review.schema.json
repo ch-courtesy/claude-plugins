@@ -123,7 +123,7 @@
           },
           "comment_type": {
             "type": "string",
-            "enum": ["inline", "issue"]
+            "enum": ["inline"]
           },
           "file": { "type": "string" },
           "line": {

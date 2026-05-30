@@ -242,11 +242,12 @@ jobs:
             }
 
             const findings = result.findings || [];
-            // inline candidate: comment_type=inline AND line is a positive integer on the diff
-            const isInline = (f) => f.comment_type === 'inline'
-              && typeof f.line === 'number' && f.line > 0;
-            const inlineFindings = findings.filter(isInline);
-            const issueFindings = findings.filter((f) => !isInline(f));
+            // inline-only policy: every finding is posted as an inline comment.
+            // There is no issue-level finding channel. Findings that cannot anchor
+            // directly to a changed line are anchored by the model to the nearest
+            // changed hunk line (with the real location stated in the body), so we
+            // never route a finding into an issue comment.
+            const inlineFindings = findings;
 
             const verdict = result.verdict;
             const mayApprove = !!result.automation_safety?.may_approve;
@@ -255,7 +256,7 @@ jobs:
             const blockingHi = findings.filter((f) =>
               f.severity === 'blocking' && (f.confidence_score ?? 0) >= 80).length;
 
-            // Event decision — same gating as before, generalized for inline+issue.
+            // Event decision — unchanged gating (verdict logic is out of scope).
             let event;
             if (findings.length === 0 && verdict === 'approve' && mayApprove && !diffTruncated) {
               event = 'APPROVE';
@@ -265,26 +266,17 @@ jobs:
               event = 'COMMENT';
             }
 
-            // Review body — summary + issue-level findings.
-            // Inline findings are posted per-line; not duplicated in body.
-            const renderIssue = (f, i) => {
-              const loc = f.file + ((typeof f.line === 'number' && f.line > 0) ? `:${f.line}` : '');
-              return `${i + 1}. [${f.severity}/${f.confidence_score}] ${f.title}\n   ${loc}\n   ${f.body}\n   Suggestion: ${f.suggestion}`;
-            };
-            const issueBlock = issueFindings.length === 0
-              ? '_No issue-level findings._'
-              : `### Issue-level findings\n\n${issueFindings.map(renderIssue).join('\n\n')}`;
-            const inlineNote = inlineFindings.length > 0
-              ? `\n\n_${inlineFindings.length} inline finding${inlineFindings.length === 1 ? '' : 's'} posted on the diff._`
-              : '';
+            // Review body carries NO finding evaluations (inline-only policy):
+            // findings live as inline comments. The formal review body holds only
+            // the hidden idempotency marker, plus an approval line when the verdict
+            // is approve. Non-approve reviews still submit the event (to carry the
+            // inline comments) but with no issue-level summary text.
             const marker = `<!-- ${prefix} head_sha=${head_sha} verdict=${verdict} -->`;
-            const body = ['## Codex PR Review',
-                          '',
-                          (result.summary || ''),
-                          '',
-                          issueBlock + inlineNote,
-                          '',
-                          marker].join('\n');
+            const body = (verdict === 'approve'
+              ? ['## Codex PR Review', '',
+                 '_Approved by automated review. Findings, if any, are posted as inline comments._',
+                 '', marker]
+              : [marker]).join('\n');
 
             // Inline review comments — path/line/body (start_line for multi-line range).
             // Inline review comments — path/line/body (start_line for multi-line range).
@@ -292,14 +284,17 @@ jobs:
             // can resolve them when the corresponding source has been fixed.
             const inlineMarker = '<!-- codex-review-inline -->';
             const inlineComments = inlineFindings.map((f) => {
+              // Anchor to f.line; fall back to f.start_line so a finding is never
+              // dropped (validation guarantees at least one is a positive int).
+              const anchor = (typeof f.line === 'number' && f.line > 0) ? f.line : f.start_line;
               const c = {
                 path: f.file,
                 body: `**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}\n\n${inlineMarker}`,
                 side: 'RIGHT',
-                line: f.line,
+                line: anchor,
               };
               if (typeof f.start_line === 'number'
-                  && f.start_line >= 1 && f.start_line < f.line) {
+                  && f.start_line >= 1 && f.start_line < anchor) {
                 c.start_line = f.start_line;
                 c.start_side = 'RIGHT';
               }
@@ -339,7 +334,7 @@ jobs:
               try {
                 await submit(event);
                 submitOk = true;
-                core.info(`Submitted ${event} review (${inlineComments.length} inline + ${issueFindings.length} issue findings).`);
+                core.info(`Submitted ${event} review (${inlineComments.length} inline findings).`);
               } catch (e) {
                 if (event === 'APPROVE') {
                   core.warning(`APPROVE failed (${e.status || ''} ${e.message}); falling back to COMMENT.`);
@@ -353,11 +348,12 @@ jobs:
               }
             }
 
-            // If review submission failed but we have inline findings, surface
-            // them in the managed PR comment so review content isn't lost.
+            // inline-only policy: do NOT fall back to dumping findings into an
+            // issue comment — that would place finding evaluations in an
+            // issue-level comment (AC2). If createReview failed, the findings stay
+            // unposted and the failure is surfaced in the workflow log only.
             if (!skipSubmit && !submitOk && inlineFindings.length > 0) {
-              fs.writeFileSync('.codex-review/inline-fallback-needed', '');
-              core.warning(`createReview failed; ${inlineFindings.length} inline finding(s) will appear in managed PR comment instead of inline.`);
+              core.warning(`createReview failed; ${inlineFindings.length} inline finding(s) could not be posted. Not dumping to an issue comment (inline-only policy); see logs.`);
             }
 
             // Auto-dismiss prior self CHANGES_REQUESTED reviews when this verdict is approve.
@@ -445,17 +441,10 @@ jobs:
             const fs = require('fs');
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
             const marker = process.env.CODEX_REVIEW_MARKER;
-            const findings = result.findings || [];
-            const isInline = (f) => f.comment_type === 'inline'
-              && typeof f.line === 'number' && f.line > 0;
-            const inlineFindings = findings.filter(isInline);
-            const issueFindings = findings.filter((f) => !isInline(f));
             const approvalFailed = fs.existsSync('.codex-review/approval-failed');
-            // Did the formal review (createReview) fail to post inline findings?
-            // If so we MUST surface findings in the managed comment regardless of
-            // verdict — otherwise inline finding detail is lost entirely. This
-            // overrides the verdict=approve gate (codex blocking finding on #232).
-            const inlineFallback = fs.existsSync('.codex-review/inline-fallback-needed');
+            // inline-only policy: findings live as inline comments. The managed
+            // (issue-level) comment NEVER renders finding evaluations — it is an
+            // approval-only comment, posted solely when the verdict is approve.
 
             // Find any prior managed comment from this workflow up-front; we may
             // need to supersede it even when the current verdict is non-approve.
@@ -471,21 +460,19 @@ jobs:
               c.body?.includes(marker)
             );
 
-            // Verdict gate: only verdict=approve gets a full managed comment,
-            // UNLESS the formal review failed to post (inlineFallback) — then
-            // we always need to surface findings somewhere.
+            // Verdict gate: the managed issue-level comment is posted ONLY on
+            // verdict=approve (AC3 — no issue-level summary comment otherwise).
             // If a prior commit posted an approve managed comment and the current
-            // verdict is non-approve (and no inlineFallback), replace it with a
-            // supersede notice so PR conversation accurately reflects the latest
-            // verdict (otherwise the stale approve would falsely advertise the PR).
-            const showFullBody = result.verdict === 'approve' || inlineFallback;
+            // verdict is non-approve, replace it with a supersede notice so the PR
+            // conversation reflects the latest verdict (no stale approve left).
+            const showFullBody = result.verdict === 'approve';
             if (result.eligibility?.status !== 'reviewed' || !showFullBody) {
               if (previous) {
                 const supersede = [
                   marker,
                   '## Codex PR Review',
                   '',
-                  `_Superseded by later review (current verdict: \`${result.verdict || 'unavailable'}\`). See the formal review for details._`,
+                  `_Superseded by later review (current verdict: \`${result.verdict || 'unavailable'}\`). See inline comments for any findings._`,
                 ].join('\n');
                 await github.rest.issues.updateComment({
                   owner: context.repo.owner,
@@ -495,45 +482,24 @@ jobs:
                 });
                 core.info(`Superseded stale managed comment (new verdict=${result.verdict || 'none'}).`);
               } else {
-                core.info(`Managed Codex review comment is only posted on verdict=approve or inline-fallback (current verdict: ${result.verdict || 'none'}, inlineFallback=false); no prior comment to supersede; skipping.`);
+                core.info(`Managed Codex review comment is only posted on verdict=approve (current verdict: ${result.verdict || 'none'}); no prior comment to supersede; skipping.`);
               }
               return;
             }
 
-            // Full body path (verdict=approve OR inline-fallback).
-            const renderIssue = (f, i) => [
-                  `${i + 1}. [${f.severity}/${f.confidence_score}] ${f.title}`,
-                  `${f.file}${(typeof f.line === 'number' && f.line > 0) ? `:${f.line}` : ''}`,
-                  f.body,
-                  `Suggestion: ${f.suggestion}`,
-                ].join('\n');
-            const issueText = issueFindings.length > 0
-              ? `### Issue-level findings\n\n${issueFindings.map(renderIssue).join('\n\n')}`
-              : '';
-            // inlineFallback defined above (controls verdict-gate).
-            const inlineDetailText = (inlineFallback && inlineFindings.length > 0)
-              ? `### Inline findings (review submission failed; included here for visibility)\n\n${inlineFindings.map(renderIssue).join('\n\n')}`
-              : '';
-            const inlineNote = (inlineFindings.length > 0 && !inlineFallback)
-              ? `_${inlineFindings.length} inline finding${inlineFindings.length === 1 ? '' : 's'} posted on the diff._`
-              : '';
-            const counts = `Findings: ${findings.length} total (${inlineFindings.length} inline · ${issueFindings.length} issue)`;
+            // Approve path: approval-expressing comment ONLY — no finding evaluation
+            // bodies, counts, or per-finding rendering (AC2/AC4).
             const summaryText = approvalFailed
-              ? 'Codex review found no findings, but formal approval could not be submitted by this workflow token.'
-              : (result.summary || 'No findings. (summary unavailable)');
+              ? 'Codex review found no blocking findings, but formal approval could not be submitted by this workflow token.'
+              : (result.summary || 'Approved — no blocking findings.');
             const body = [
               marker,
               '## Codex PR Review',
               '',
-              `Verdict: \`${result.verdict}\``,
-              '',
-              counts,
+              'Verdict: `approve`',
               '',
               summaryText,
-              issueText ? `\n${issueText}` : '',
-              inlineDetailText ? `\n${inlineDetailText}` : '',
-              inlineNote ? `\n${inlineNote}` : '',
-            ].filter((line, i, arr) => !(line === '' && arr[i-1] === '')).join('\n');
+            ].join('\n');
 
             // Reuse the pre-fetched `previous` comment for update/create decision.
             if (previous) {

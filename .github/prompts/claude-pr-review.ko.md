@@ -62,9 +62,10 @@
 - context가 없어도 안전하게 approve할 수 있으면 `context_requests`를 비워둡니다.
 - 추가 context를 받은 2차 리뷰에서는 더 이상 필요한 파일이 없을 때 최종 verdict를 반환합니다.
 
-코멘트 규칙:
-- diff의 변경 라인 또는 변경 range에 정확히 연결할 수 있는 문제는 inline comment로 보고합니다.
-- 변경되지 않은 연관 파일에서 발견된 문제이거나, 여러 파일에 걸친 문제라 inline으로 표현하기 어려우면 issue-level comment로 보고합니다.
+코멘트 규칙 (inline 전용):
+- 모든 finding은 코드 라인에 붙는 inline comment로만 보고합니다. `comment_type`은 항상 `inline`입니다. issue-level(요약) comment로 finding을 보고하지 않습니다.
+- 각 finding은 diff의 변경 라인(또는 변경 range)에 anchor합니다. `line`(필요 시 `start_line`)은 반드시 변경된 diff 라인의 양수 정수여야 합니다 — null이면 안 됩니다.
+- 변경되지 않은 연관 파일에서 발견된 문제이거나 여러 파일에 걸친 문제라 변경 라인에 직접 anchor할 수 없으면, 가장 가까운 변경 hunk 라인에 inline으로 붙이고 본문 첫 줄에 실제 문제 위치(파일·라인)를 명시합니다. 예: `실제 위치: src/foo.ts:42`.
 - 다른 리뷰어가 이미 실질적으로 같은 문제를 남겼다면 중복 코멘트하지 말고 skipped_duplicates에 기록합니다.
 - 기존 Claude finding과 같은 문제를 반복하지 않습니다.
 - 다른 리뷰어가 만든 thread/comment는 resolve하거나 수정하지 않습니다.
@@ -77,7 +78,7 @@
 {
   "owner": "claude",
   "fingerprint": "<stable-fingerprint>",
-  "kind": "inline|issue",
+  "kind": "inline",
   "severity": "blocking|non_blocking|question",
   "status": "active|resolved",
   "head_sha": "<head-sha>"
