@@ -16,11 +16,12 @@
 3. `.github/prompts/codex-pr-review.ko.md`를 system prompt처럼 붙인다.
 4. `codex exec --output-schema .github/prompts/codex-pr-review.schema.json`을 stdin 기반으로 실행한다.
 5. JSON schema를 검증한다.
-6. `verdict`에 따라 GitHub review를 제출한다.
-   - `approve`: `gh pr review --approve`
-   - `request_changes`: `gh pr review --request-changes`
-   - `comment`, `needs_context`, `unavailable`: `gh pr review --comment`
-7. managed issue comment를 marker 기반으로 create/update한다.
+6. `verdict`에 따라 GitHub review event를 `pulls.createReview`로 제출한다. **모든 finding은 inline 코멘트로만** 게시한다(inline-only 정책).
+   - `approve`: `APPROVE` (review body는 finding 평가 없이 승인 표현만)
+   - `request_changes`: `REQUEST_CHANGES` (body는 마커만, 평가 없음)
+   - `comment`, `needs_context`, `unavailable`: `COMMENT` (body는 마커만, 평가 없음)
+   - 변경 라인에 직접 anchor할 수 없는 finding도 issue 코멘트로 떨어뜨리지 않고, 가장 가까운 변경 hunk 라인에 inline으로 붙이고 본문에 실제 위치(파일·라인)를 명시한다.
+7. managed issue comment(marker 기반)는 **verdict=approve일 때만** 게시하며, 승인 표현만 담고 finding 평가 본문은 포함하지 않는다. approve가 아니면 게시하지 않고, 직전 approve 코멘트가 있으면 supersede 표시로 갱신한다.
 
 ## 단계적 고도화 계획
 
@@ -30,7 +31,7 @@
 - stdin으로 prompt를 전달해 shell `ARG_MAX` 한계를 피한다.
 - JSON schema로 최종 응답을 강제한다.
 - confidence score 80 미만 finding은 게시하지 않는다.
-- inline comment는 아직 생성하지 않고 summary review body에 묶는다.
+- (구) 초기 MVP는 inline comment 없이 summary review body에 묶었으나, 현재는 모든 finding을 inline 코멘트로만 게시한다(inline-only 정책).
 
 완료 기준:
 - JSON schema 검증이 실패하면 approve하지 않는다.
@@ -39,13 +40,13 @@
 
 ### Phase 2: Inline Comment Adapter
 
-- changed diff line에 매핑 가능한 finding만 GitHub inline review comment로 게시한다.
-- changed line에 매핑되지 않는 finding은 managed issue comment로 유지한다.
+- 모든 finding을 GitHub inline review comment로 게시한다(inline-only 정책).
+- changed line에 직접 매핑되지 않는 finding도 issue comment로 떨어뜨리지 않고, 가장 가까운 변경 hunk 라인에 inline으로 붙이고 본문에 실제 위치를 명시한다.
 - comment marker에 `fingerprint`, `head_sha`, `severity`, `status`를 저장한다.
 - 같은 fingerprint가 이미 존재하면 중복 게시하지 않는다.
 
 완료 기준:
-- diff line 매핑 실패 시 inline 대신 issue-level finding으로 degrade한다.
+- diff line 매핑이 어려운 finding도 가장 가까운 변경 라인에 inline으로 남기며 issue-level로 degrade하지 않는다.
 - 기존 다른 reviewer가 같은 이슈를 남겼으면 `skipped_duplicates`로 기록하고 게시하지 않는다.
 
 ### Phase 3: Thread Lifecycle

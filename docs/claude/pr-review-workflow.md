@@ -25,11 +25,12 @@ PR을 pinned `@anthropic-ai/claude-code` CLI(`claude -p`)로 직접 호출하여
 5. checkout credential extraheader 제거 + `GH_TOKEN` unset → **scratch cwd**(`mktemp -d`)에서 `claude -p --output-format json --json-schema "$schema" --strict-mcp-config --setting-sources "" --no-session-persistence` 실행.
 6. envelope JSON의 `.result` 텍스트에서 첫 `{` ~ 마지막 `}` 추출 → jq 파싱 → 11개 required 필드 검증 → `.claude-review/result.json` 저장.
 7. 모델이 `needs_context`를 반환하면 요청한 파일을 PR head에서 fetch(최대 5개, 400줄 절단)해 follow-up 프롬프트로 재호출.
-8. `verdict`에 따라 GitHub review 제출:
-   - `approve` + safety pass: `gh pr review --approve` (body 없음)
-   - `request_changes` + blocking finding(confidence ≥ 80): `gh pr review --request-changes`
-   - `comment`/`needs_context`/기타: `gh pr review --comment`
-9. managed issue comment를 marker(`<!-- claude-api-pr-review -->`) 기반으로 create/update.
+8. `verdict`에 따라 GitHub review event를 `pulls.createReview`로 제출. **모든 finding은 inline 코멘트로만** 게시한다(inline-only 정책):
+   - `approve` + safety pass: `APPROVE` (review body는 finding 평가 없이 승인 표현만)
+   - `request_changes` + blocking finding(confidence ≥ 80): `REQUEST_CHANGES` (body는 마커만, 평가 없음)
+   - `comment`/`needs_context`/기타: `COMMENT` (body는 마커만, 평가 없음)
+   - 변경 라인에 직접 anchor할 수 없는 finding도 issue 코멘트로 떨어뜨리지 않고, 모델이 가장 가까운 변경 hunk 라인에 inline으로 붙이고 본문에 실제 위치(파일·라인)를 명시한다.
+9. managed issue comment(marker `<!-- claude-api-pr-review -->`)는 **verdict=approve일 때만** 게시하며, 승인 표현만 담고 finding 평가 본문은 포함하지 않는다(AC2~AC4). approve가 아니면 게시하지 않고, 직전 approve 코멘트가 있으면 supersede 표시로 갱신한다.
 
 ## 구성
 

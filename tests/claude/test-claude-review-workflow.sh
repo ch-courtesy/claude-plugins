@@ -121,14 +121,20 @@ grep -qF 'IN("approve","request_changes","comment","needs_context","unavailable"
   || fail "verdict enum 검증 부재"
 grep -qF 'IN("guideline","bug","history","previous_pr","code_comment","cross_file")' "$WORKFLOW" \
   || fail "findings[].review_perspective enum 검증 부재 (schema required)"
-grep -qF 'IN("inline","issue")' "$WORKFLOW" \
-  || fail "findings[].comment_type enum 검증 부재 (schema required, 라우팅에 사용)"
+grep -qF 'IN("inline")' "$WORKFLOW" \
+  || fail "findings[].comment_type enum 검증이 inline 전용이 아님 (inline-only 정책: 모든 finding 은 inline)"
+if grep -qF 'IN("inline","issue")' "$WORKFLOW"; then
+  fail "comment_type 에 issue 가 잔존 — inline-only 정책에서 finding 은 issue 채널로 가지 않음"
+fi
 grep -qF '.fingerprint | type == "string"' "$WORKFLOW" \
   || fail "findings[].fingerprint 검증 부재 (schema required, dedup 에 사용)"
 grep -qF '.duplicate_of | (type == "string" or . == null)' "$WORKFLOW" \
   || fail "findings[].duplicate_of nullable 검증 부재"
-grep -qF 'if .comment_type == "inline"' "$WORKFLOW" \
-  || fail "inline comment_type 의 line/start_line 조건부 검증 부재 (inline 위치 정보 없으면 GitHub API 400)"
+grep -qF 'and ((.line | type == "number") or (.start_line | type == "number"))' "$WORKFLOW" \
+  || fail "모든 finding 의 line/start_line 필수 검증 부재 (inline-only: 모든 finding 이 변경 라인에 anchor 되어야 함, 없으면 fallback)"
+if grep -qF 'if .comment_type == "inline"' "$WORKFLOW"; then
+  fail "comment_type 조건부 line 검증 잔존 — inline-only 정책에서는 모든 finding 이 무조건 line 을 가져야 함"
+fi
 grep -qF '.line | (. == null or (type == "number" and . == (. | floor) and . >= 1))' "$WORKFLOW" \
   || fail "findings[].line 검증이 스키마 contract(integer ≥1 또는 null)를 강제하지 않음"
 grep -qF '.start_line | (. == null or (type == "number" and . == (. | floor) and . >= 1))' "$WORKFLOW" \
@@ -211,15 +217,22 @@ grep -q 'issues.createComment' "$WORKFLOW" \
 ok "check 6: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
-echo "=== check 7: verdict submission via Pulls REST API with inline comments + auto-dismiss ==="
+echo "=== check 7: verdict submission via Pulls REST API with inline-only comments + auto-dismiss ==="
 # Submit step is now a github-script step that calls pulls.createReview directly
 # so it can post inline review comments AND auto-dismiss stale CHANGES_REQUESTED.
 grep -qF 'github.rest.pulls.createReview' "$WORKFLOW" \
   || fail "Pulls REST createReview 호출 부재 — inline comments 게시 불가 (gh pr review 로는 inline 미지원)"
 grep -qF 'comments: inlineComments' "$WORKFLOW" \
   || fail "createReview 의 comments[] 배열에 inline findings 전달 부재"
-grep -qF "comment_type === 'inline'" "$WORKFLOW" \
-  || fail "inline/issue findings 분기 처리 부재 (comment_type 사용 안 함)"
+# inline-only 정책: 모든 finding 이 inline. issue 채널 분기/렌더가 없어야 한다.
+grep -qF 'inline-only' "$WORKFLOW" \
+  || fail "inline-only 정책 주석/마커 부재 (모든 finding 을 inline 으로 게시한다는 의도 명시 필요)"
+if grep -qF 'issueFindings' "$WORKFLOW"; then
+  fail "issueFindings 분기 잔존 — inline-only 정책에서 issue 채널 finding 라우팅 금지"
+fi
+if grep -qF 'Issue-level findings' "$WORKFLOW"; then
+  fail "'Issue-level findings' 렌더 잔존 — issue-level 코멘트에 finding 평가 본문 포함 금지 (AC2)"
+fi
 grep -qF "side: 'RIGHT'" "$WORKFLOW" \
   || fail "inline comment 의 side='RIGHT' 지정 부재"
 grep -qF 'start_line' "$WORKFLOW" \
@@ -238,10 +251,17 @@ grep -qF 'confidence_score' "$WORKFLOW" \
   || fail "confidence_score gate 부재"
 grep -qF '>= 80' "$WORKFLOW" \
   || fail "confidence_score >= 80 threshold 부재"
-grep -qF 'Managed Claude review comment is only posted on verdict=approve or inline-fallback' "$WORKFLOW" \
-  || fail "managed comment 게이트가 verdict=approve OR inline-fallback 가 아님 (inline finding 유실 위험)"
-grep -qF "result.verdict === 'approve' || inlineFallback" "$WORKFLOW" \
-  || fail "showFullBody 결정이 verdict=approve OR inlineFallback 가 아님"
+# 요약(issue-level) managed comment 는 approve 일 때만. inline-fallback 경로 제거(AC2/AC3).
+grep -qF 'Managed Claude review comment is only posted on verdict=approve' "$WORKFLOW" \
+  || fail "managed comment 게이트가 verdict=approve 전용이 아님 (AC3)"
+grep -qF "result.verdict === 'approve'" "$WORKFLOW" \
+  || fail "showFullBody 결정이 verdict=approve 조건을 사용하지 않음"
+if grep -qF 'inlineFallback' "$WORKFLOW"; then
+  fail "inlineFallback 경로 잔존 — createReview 실패 시 finding 을 issue 코멘트로 덤프하면 AC2 위반"
+fi
+if grep -qF 'inline-fallback-needed' "$WORKFLOW"; then
+  fail "inline-fallback-needed marker 잔존 — inline-only 정책에서 제거되어야 함"
+fi
 grep -qF '!showFullBody' "$WORKFLOW" \
   || fail "early-return 조건이 showFullBody 변수를 사용하지 않음"
 # supersede stale approve managed comment when latest verdict is non-approve
@@ -260,7 +280,7 @@ grep -qF 'isResolved' "$WORKFLOW" \
   || fail "isResolved 조건 검사 부재 (이미 resolved thread skip)"
 grep -qF 'reviewThreads(first: 100)' "$WORKFLOW" \
   || fail "GraphQL reviewThreads 쿼리 부재"
-ok "check 7: createReview + inline comments + safety gates + COMMENT fallback"
+ok "check 7: createReview + inline-only findings + safety gates + approve-only managed comment"
 
 echo ""
 echo "=== check 7b: formal review idempotent per (head_sha, verdict) ==="
@@ -287,16 +307,19 @@ grep -qF 'Superseded by later review' "$WORKFLOW" \
 ok "check 7c: verdict=approve 시 옛 자기 CHANGES_REQUESTED reviews 자동 dismiss"
 
 echo ""
-echo "=== check 7d: inline-fallback in managed comment when createReview fails ==="
-grep -qF "fs.writeFileSync('.claude-review/inline-fallback-needed'" "$WORKFLOW" \
-  || fail "createReview 실패 시 inline-fallback-needed marker 생성 부재 — inline findings 가 어디에도 게시 안 됨 (codex finding 흡수 미완)"
-grep -qF "fs.existsSync('.claude-review/inline-fallback-needed')" "$WORKFLOW" \
-  || fail "Post step 에서 inline-fallback marker 확인 부재"
-grep -qF 'inlineDetailText' "$WORKFLOW" \
-  || fail "inline-fallback 시 inline findings 상세를 managed comment 본문에 포함하지 않음 (실제 review 결과 유실)"
-grep -qF 'review submission failed; included here for visibility' "$WORKFLOW" \
-  || fail "inline-fallback 본문 헤더 부재"
-ok "check 7d: createReview 실패 시 inline findings 가 managed comment 본문으로 폴백됨"
+echo "=== check 7d: managed comment 은 finding 평가 본문을 렌더하지 않는다 (inline-only) ==="
+# inline-only 정책: finding 평가는 inline 코멘트 전용. managed(issue-level) comment 에
+# finding 상세를 렌더하던 inlineDetailText / renderIssue 경로는 제거되어야 한다 (AC2/AC4).
+if grep -qF 'inlineDetailText' "$WORKFLOW"; then
+  fail "inlineDetailText 잔존 — managed comment 에 inline finding 상세 렌더 금지 (AC2)"
+fi
+if grep -qF 'renderIssue' "$WORKFLOW"; then
+  fail "renderIssue 잔존 — issue-level 코멘트에 finding 평가 본문 렌더 금지 (AC2)"
+fi
+if grep -qF 'review submission failed; included here for visibility' "$WORKFLOW"; then
+  fail "inline-fallback 본문 헤더 잔존 — inline-only 정책에서 제거되어야 함"
+fi
+ok "check 7d: managed comment 에 finding 평가 렌더 경로 제거됨"
 
 echo ""
 echo "=== check 8a: 출력 언어 untrusted block 끝에 재강조 (영어 응답 예방) ==="
@@ -319,6 +342,32 @@ grep -q 'confidence_score < 80' "$PROMPT" \
 grep -q 'structured output' "$PROMPT" \
   || fail "prompt structured output 규칙 부재"
 ok "check 8: prompt 핵심 정책 존재"
+
+echo ""
+echo "=== check 8b: inline-only 코멘트 정책 (prompt + schema) ==="
+# 모든 finding 은 inline 코멘트로만. anchor 불가 finding 도 가장 가까운 변경 라인에 inline,
+# 본문에 실제 위치 명시. issue-level 코멘트로 finding 을 보고하지 않는다 (AC1/AC2/AC5).
+grep -q 'inline' "$PROMPT" \
+  || fail "prompt inline 코멘트 정책 부재"
+grep -q '가장 가까운 변경' "$PROMPT" \
+  || fail "prompt 에 anchor 불가 finding 을 가장 가까운 변경 라인에 inline 으로 붙이는 지침 부재 (AC5)"
+grep -q '실제 위치' "$PROMPT" \
+  || fail "prompt 에 inline 본문에 실제 문제 위치(파일·라인) 명시 지침 부재 (AC5)"
+if grep -q 'issue-level comment로 보고' "$PROMPT"; then
+  fail "prompt 가 finding 을 issue-level comment 로 보고하도록 지시함 — inline-only 정책 위반"
+fi
+grep -qF '"kind": "inline"' "$PROMPT" \
+  || fail "prompt hidden marker 의 kind 가 inline 전용이 아님"
+if grep -qF 'inline|issue' "$PROMPT"; then
+  fail "prompt 에 inline|issue 잔존 — inline-only 정책에서 kind 는 inline 만"
+fi
+# schema: comment_type enum 은 inline 전용
+grep -qF '"inline"' "$SCHEMA" \
+  || fail "schema comment_type 에 inline 값 부재"
+if grep -qF '"issue"' "$SCHEMA"; then
+  fail "schema comment_type enum 에 issue 잔존 — inline-only 정책에서 제거되어야 함"
+fi
+ok "check 8b: prompt·schema 가 inline-only + 강제 anchoring 정책을 반영"
 
 echo ""
 echo "=== check 9: privileged job checks out trusted base, not PR-controlled code ==="
