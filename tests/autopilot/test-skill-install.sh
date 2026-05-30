@@ -8,14 +8,11 @@ SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/loop"
 SKILL_REFS="$SKILL_DIR/references"
 
 echo "=== 스킬 디렉토리 구조 ==="
+# 정합 갱신: 경량 redesign 으로 loop 스킬은 별도 template ref 파일들
+# (plan/notes/handoff/runlog/escalation-template)을 제거했다. 현 실제 구조만 검증.
 for f in SKILL.md \
          references/constitution.md \
          references/loop.sh \
-         references/plan-template.md \
-         references/notes-template.md \
-         references/handoff-template.md \
-         references/runlog-template.md \
-         references/escalation-template.md \
          references/operational-guide.md \
          references/status-format.md \
          references/troubleshooting.md \
@@ -71,11 +68,17 @@ echo "OK"
 echo ""
 echo "=== spec 스킬 구조 검증 ==="
 SPEC_SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/spec"
+# persona/clarity 가산: 두 신규 단일 출처 참조 문서(personas.md·clarity-score.md)도
+# spec 스킬 references 에 존재해야 한다.
 for f in SKILL.md \
          references/spec-template.md \
          references/ears-patterns.md \
          references/self-review.md \
-         references/decomposition-gate.md; do
+         references/decomposition-gate.md \
+         references/clarification.md \
+         references/agent-prompts.md \
+         references/personas.md \
+         references/clarity-score.md; do
   [[ -f "$SPEC_SKILL_DIR/$f" ]] || { echo "FAIL: spec/$f 부재"; exit 1; }
   echo "OK: spec/$f"
 done
@@ -95,10 +98,11 @@ echo "OK: [NEEDS CLARIFICATION] 마커"
 grep -q -- '--resume' "$SPEC_SKILL_MD" \
   || { echo "FAIL: spec/SKILL.md description에 '--resume' 마커 없음"; exit 1; }
 echo "OK: --resume 마커"
-# 신규 contract: feat 브랜치 자동 생성·SPEC.md commit 단계가 명시되어야 함
+# 정합 갱신: 경량 redesign 으로 spec 스킬은 외부 상태(브랜치 포함)를 만들지 않는다.
+# 과거 'feat/<task-id>' 브랜치 자동 생성 명세는 제거된 기능이므로 부재(negative)를 검증.
 grep -q 'feat/<task-id>' "$SPEC_SKILL_MD" \
-  || { echo "FAIL: spec/SKILL.md에 'feat/<task-id>' 브랜치 명세 없음 (신규 contract 미반영)"; exit 1; }
-echo "OK: feat/<task-id> 브랜치 명세"
+  && { echo "FAIL: spec/SKILL.md에 제거된 'feat/<task-id>' 브랜치 명세 잔존"; exit 1; }
+echo "OK: 제거된 feat/<task-id> 브랜치 명세 부재"
 grep -qE '슬러그|slug' "$SPEC_SKILL_MD" \
   || { echo "FAIL: spec/SKILL.md에 슬러그화 규칙 명세 없음"; exit 1; }
 echo "OK: 슬러그화 규칙 명세"
@@ -106,10 +110,10 @@ echo "OK: 슬러그화 규칙 명세"
 echo ""
 echo "=== dispatch 스킬 구조 검증 ==="
 DISPATCH_SKILL_DIR="$REPO_ROOT/plugins/autopilot/skills/dispatch"
+# 정합 갱신: 경량 dispatch 는 dag-template.md·decomposition-algorithm.md 를
+# 별도 ref 로 두지 않는다. 현 실제 구조(SKILL.md + dispatch.sh)만 검증.
 for f in SKILL.md \
-         references/dispatch.sh \
-         references/dag-template.md \
-         references/decomposition-algorithm.md; do
+         references/dispatch.sh; do
   [[ -f "$DISPATCH_SKILL_DIR/$f" ]] || { echo "FAIL: dispatch/$f 부재"; exit 1; }
   echo "OK: dispatch/$f"
 done
