@@ -7,7 +7,7 @@ description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍�
 
 선택한 컨텍스트 백엔드의 지침을 **백엔드 결합도**를 기준으로 둘로 갈라, 컨텍스트 카테고리 디렉터리 아래 두 sub-룰 파일로 기록합니다.
 
-- `rules/context/task-model.md` — 태스크 속성을 선택된 백엔드에 매핑·적용하는 **백엔드-결합** 내용.
+- `rules/context/task-model.md` — 태스크 속성을 선택된 백엔드에 매핑·적용하는 **백엔드 결합** 내용.
 - `rules/context/task-ops.md` — 백엔드와 무관한 **운영 규율·절차** 전반(태스크 우선 원칙, 작업 시작 신호, 상태 전이 책임, 운영 단계 규칙, append-only 기록 규율 등).
 
 출력 파일명은 `task-model`·`task-ops`로 **고정**입니다(템플릿 파일명·백엔드명에서 파생하지 않습니다). 디렉터리 구조라 향후 다른 컨텍스트 sub-룰이 같은 카테고리 아래 공존할 수 있습니다.
@@ -17,7 +17,7 @@ description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍�
 이 파일 옆 `templates/` 아래:
 
 - `templates/<backend>/task-model.md` — 백엔드별 task-model 본문. 이 파일의 frontmatter가 백엔드 선택 메타데이터입니다.
-- `templates/task-ops.md` — 모든 백엔드가 공유하는 백엔드-무관 task-ops 본문(frontmatter 없음).
+- `templates/task-ops.md` — 모든 백엔드가 공유하는 백엔드 무관 task-ops 본문(frontmatter 없음).
 
 `<backend>`는 백엔드 id(예: `filesystem`, `github-project`)이며 상호배타적 단일 선택지입니다. 새 백엔드를 추가하려면 `templates/` 아래에 `task-model.md`를 담은 새 디렉터리를 두면 되고, 이 SKILL.md는 변경하지 않습니다.
 
@@ -42,9 +42,9 @@ description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍�
 
    - **① 상태 집합** — 사용할 태스크 상태들이 무엇인지 묻습니다. 기본 후보 예시: `backlog`, `in_design`, `in_progress`, `blocked`, `review`, `done`, `cancelled`. 다중 선택 + "Other"를 허용합니다. 수집값 → `{{state_set}}`.
    - **② 전이 순서** — 상태들이 진행하는 순서를 묻습니다(예: `backlog → in_design → in_progress → review → done`). ①과 **분리된** 질문입니다. 수집값 → `{{transition_order}}`.
-   - **③ 이벤트별 목표 상태** — 아래 **고정 이벤트 카탈로그**(작업 워크플로 라이프사이클 모멘트)의 각 이벤트에 대해 "어느 상태로 전이할지"만 묻습니다. ②와 **분리된** 별도 단계입니다. 이벤트 자체는 사용자가 서술하지 않습니다 — 사용자는 각 이벤트의 목표 상태만 ①에서 고른 집합 중에서 지정합니다.
+   - **③ 이벤트별 목표 상태** — 아래 **고정 이벤트 카탈로그**(작업 워크플로 라이프사이클 이벤트)의 각 이벤트에 대해 "어느 상태로 전이할지"만 묻습니다. ②와 **분리된** 별도 단계입니다. 이벤트 자체는 사용자가 서술하지 않습니다 — 사용자는 각 이벤트의 목표 상태만 ①에서 고른 집합 중에서 지정합니다.
 
-     | 라이프사이클 모멘트 (고정) | placeholder |
+     | 라이프사이클 이벤트 (고정) | placeholder |
      |---|---|
      | 계획/스펙 문서 생성 | `{{event_plan_doc}}` |
      | 구현 시작 | `{{event_impl_start}}` |
@@ -53,7 +53,7 @@ description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍�
      | 차단 발견 | `{{event_blocked}}` |
      | 차단 해제 | `{{event_unblocked}}` |
 
-   ①의 상태 집합은 task-model의 상태 어휘·백엔드 매핑(`{{state_set}}`)에 반영됩니다. ②의 전이 순서와 ③의 이벤트별 목표 상태는 task-ops의 전이 트리거·운영 규칙에 반영됩니다.
+   ①의 상태 집합은 task-model의 상태 집합·백엔드 매핑(`{{state_set}}`)에 반영됩니다. ②의 전이 순서와 ③의 이벤트별 목표 상태는 task-ops의 전이 이벤트·운영 규칙에 반영됩니다.
 
 6. **본문 조립.** 두 산출물 본문을 조립합니다.
    - task-model 본문: 선택된 백엔드 `task-model.md`의 frontmatter를 제거한 본문에 4·5단계 수집값을 치환합니다.
