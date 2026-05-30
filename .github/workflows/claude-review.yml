@@ -548,11 +548,13 @@ jobs:
                 }
               }
 
-              // Resolve inline review threads whose source has been fixed.
-              // Condition: GitHub flagged the thread as outdated (the source
-              // line moved/changed) AND the latest verdict is approve (we
-              // consider the issue resolved). We only touch self-owned threads
-              // — identified by the hidden inline marker we embed above.
+              // Resolve our own inline review threads when the latest verdict
+              // is approve — a fresh approve supersedes all prior self inline
+              // findings (same intent as the dismiss-on-approve above). We only
+              // touch self-owned threads, identified by the hidden inline marker
+              // we embed above. Not gated on isOutdated: this path runs only on a
+              // clean approve (no current-round inline findings), so there are no
+              // live threads to resolve by mistake.
               try {
                 const threadResp = await github.graphql(`
                   query($owner:String!, $repo:String!, $pr:Int!) {
@@ -562,7 +564,6 @@ jobs:
                           nodes {
                             id
                             isResolved
-                            isOutdated
                             comments(first: 1) {
                               nodes { author { login } body }
                             }
@@ -572,10 +573,16 @@ jobs:
                     }
                   }`, { owner, repo, pr: pull_number });
                 const threads = threadResp.repository?.pullRequest?.reviewThreads?.nodes || [];
-                const myInlineThreads = threads.filter((t) =>
-                  t.isOutdated && !t.isResolved &&
-                  t.comments?.nodes?.[0]?.author?.login === botLogin &&
-                  (t.comments.nodes[0].body || '').includes(inlineMarker));
+                // GraphQL Actor.login omits the REST "[bot]" suffix (returns
+                // "github-actions"), so the REST botLogin never matches here —
+                // accept both forms.
+                const botLoginGql = botLogin.replace(/\[bot\]$/, '');
+                const myInlineThreads = threads.filter((t) => {
+                  const author = t.comments?.nodes?.[0]?.author?.login;
+                  return !t.isResolved &&
+                    (author === botLogin || author === botLoginGql) &&
+                    (t.comments.nodes[0].body || '').includes(inlineMarker);
+                });
                 for (const t of myInlineThreads) {
                   try {
                     await github.graphql(`
@@ -584,7 +591,7 @@ jobs:
                           thread { id isResolved }
                         }
                       }`, { id: t.id });
-                    core.info(`Resolved outdated self inline thread ${t.id}.`);
+                    core.info(`Resolved self inline thread ${t.id}.`);
                   } catch (e) {
                     core.warning(`Failed to resolve thread ${t.id}: ${e.message}`);
                   }
