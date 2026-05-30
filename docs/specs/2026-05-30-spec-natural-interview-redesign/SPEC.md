@@ -7,6 +7,9 @@ scope:
     - plugins/autopilot/skills/spec/references/spec-template.md
     - plugins/autopilot/skills/spec/references/clarity-score.md
     - plugins/autopilot/skills/spec/references/self-review.md
+    - plugins/autopilot/skills/spec/references/agent-prompts.md
+    - tests/autopilot/test-spec-skill.sh
+    - tests/autopilot/test-skill-install.sh
   exclude:
     - rules/**
     - milestones/**
@@ -29,6 +32,8 @@ scope:
 
 4. **자동화 핸드오프(옵트인)** — 인터뷰가 미해결 항목 없이 깨끗이 끝나고 사용자가 SPEC을 승인하면, "구현까지 자동으로 진행할까요?"를 구조화 질문으로 묻고, 사용자가 동의한 경우에 한해 구현 스킬(`autopilot:dispatch`)을 호출한다. 미해결 항목이 남아 자율 실행이 차단되는 경우에는 이 제안을 하지 않고 해결 방법을 안내한다.
 
+5. **계약 테스트 정합** — 위 변경은 spec 스킬의 구조 계약을 정적으로 단언하는 기존 계약 테스트(`tests/autopilot/test-spec-skill.sh`, `tests/autopilot/test-skill-install.sh`)와 충돌한다(8단계 골격·"섹션별 SPEC" 문자열·"EARS" 마커 단언). 이 테스트들을 신 계약(섹션별 승인 제거로 줄어든 워크플로 단계 수, "완료 조건" 라벨, 옵트인 핸드오프)에 맞게 **정합 갱신**한다. 단언을 삭제·skip·약화하지 않고 신 계약을 동등한 강도로 단언하도록 재작성한다.
+
 ## 완료 조건
 <!-- 각 기준은 관찰 가능하고 독립 검증 가능해야 함. -->
 
@@ -49,10 +54,16 @@ scope:
 - 인터뷰가 잠정 종결되면 완성된 SPEC 전체를 한 번 제시하고 단일 승인을 받아야 한다.
 
 ### 자동화 핸드오프(옵트인)
-- SPEC이 미해결 항목(`[NEEDS CLARIFICATION` 마커) 없이 작성되고 사용자가 최종 승인하면, 구현까지 자동 진행할지를 `AskUserQuestion`으로 물어야 한다.
+- SPEC이 미해결 명확화 마커(spec 스킬이 미결 항목에 남기는 마커) 없이 작성되고 사용자가 최종 승인하면, 구현까지 자동 진행할지를 `AskUserQuestion`으로 물어야 한다.
 - 사용자가 자동 진행에 동의하면 `autopilot:dispatch`가 작성된 SPEC 경로(들)로 호출되어야 한다.
 - 사용자가 동의하지 않으면 어떤 후속 스킬도 호출하지 않고 SPEC 경로와 다음 단계 안내만 남기고 종료해야 한다.
 - SPEC에 미해결 항목 마커가 남아 있으면 자동 진행 제안을 하지 않고, 자율 실행이 차단된다는 사실과 `--resume` 해결 방법을 안내해야 한다.
+
+### 계약 테스트 정합
+- 모든 spec 계약 테스트(`tests/autopilot/test-spec-skill.sh`, `tests/autopilot/test-skill-install.sh`)가 신 계약 기준으로 통과해야 한다(exit 0).
+- 계약 테스트는 "섹션별 SPEC" 승인 단계의 부재와 줄어든 워크플로 단계 수를 단언해야 한다(이전의 "섹션별 SPEC 존재 + 8단계" 단언을 대체).
+- 사용자 노출 문구의 "EARS" 마커 부재와 "완료 조건" 라벨의 존재를 단언해야 한다(이전의 "EARS 마커 존재" 단언을 대체).
+- 어떤 계약 테스트도 삭제·skip되거나 단언이 약화되지 않아야 한다(정합 갱신이지 커버리지 축소가 아니다).
 
 ## 범위
 포함:
@@ -60,7 +71,8 @@ scope:
 - 사용자·문서 노출 용어의 평이화("EARS" 제거, "완료 조건" 라벨)
 - 섹션별 승인 단계의 인터뷰 흡수와 최종 단일 승인
 - 인터뷰 종료 시 dispatch로의 옵트인 자동 핸드오프 도입
-- 위 변경에 따른 spec 스킬 내부 참조 문서 정합
+- 위 변경에 따른 spec 스킬 내부 참조 문서 정합(agent-prompts.md의 단계 번호·표기 포함)
+- 위 변경에 따른 계약 테스트(test-spec-skill.sh, test-skill-install.sh)의 신 계약 정합 갱신
 
 비-목표 / 제외:
 - `autopilot:dispatch`·`autopilot:loop` 등 구현·실행 스킬의 내부 동작 변경
