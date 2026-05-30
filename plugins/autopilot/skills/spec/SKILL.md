@@ -1,6 +1,6 @@
 ---
 name: spec
-description: "기능 추가·동작 수정·지침 작성·새로 만들기 등 새 코드 변경을 정의하는 자연어 신호에 대응. 명확화 인터뷰로 도중 질문 없이 수행 가능한 자기완결적 SPEC 문서(들)를 `docs/specs/<날짜>-<slug>.md`에 작성하고, 구현 스킬(autopilot:dispatch)을 추천합니다. 외부 상태(이슈·브랜치·원격)는 만들지 않습니다. 호출 'Skill(skill=\"spec\", args=\"<자연어 task 설명> [--resume <spec-path>]\")'."
+description: "기능 추가·동작 수정·지침 작성·새로 만들기 등 새 코드 변경을 정의하는 자연어 신호에 대응. 명확화 인터뷰로 도중 질문 없이 수행 가능한 자기완결적 SPEC 문서(들)를 `docs/specs/<날짜>-<slug>/SPEC.md`에 작성하고, 구현 스킬(autopilot:dispatch)을 추천합니다. 외부 상태(이슈·브랜치·원격)는 만들지 않습니다. 호출 'Skill(skill=\"spec\", args=\"<자연어 task 설명> [--resume <spec-path>]\")'."
 allowed-tools:
   - AskUserQuestion
   - Read
@@ -69,7 +69,7 @@ allowed-tools:
 
 분해 발행(step 2의 N개)에서는 단위마다 템플릿을 한 번씩 치환해 문서를 만들고, 각 문서의 `{{depends_on}}`에 선행 단위 slug 목록을 기록한다(`depends_on: ["<slug>"]`). 단일 발행이면 `{{depends_on}}` 줄을 제거한다.
 
-산출 경로는 `docs/specs/<YYYY-MM-DD>-<slug>.md`다. `<YYYY-MM-DD>`는 작성일(로컬 날짜), `<slug>`는 SPEC 제목에서 파생한다 — slug 파생·파일명 규칙은 `rules/engineering/branch-and-slug.md`가 단일 출처다. 빈 slug는 fallback 없이 abort하고 제목 수정을 요청한다. `docs/specs/` 디렉터리가 없으면 만든다.
+산출 경로는 `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`다 — 각 SPEC은 자신의 디렉토리를 갖고 문서 본문은 그 안의 `SPEC.md`에 둔다. `<YYYY-MM-DD>`는 작성일(로컬 날짜), `<slug>`는 SPEC 제목에서 파생한다 — slug 파생·파일명·디렉토리 레이아웃 규칙은 `rules/engineering/branch-and-slug.md`가 단일 출처다. 빈 slug는 fallback 디렉토리 없이 abort하고 제목 수정을 요청한다. 산출 디렉토리(`docs/specs/<YYYY-MM-DD>-<slug>/`)가 없으면 만든다. authoring 모드는 항상 이 신 디렉토리 레이아웃만 산출하며, 본문을 디렉토리 없이 `docs/specs/` 바로 아래 단일 파일로 두지 않는다.
 
 ### 7. 자체 검토
 
@@ -85,7 +85,7 @@ SPEC 경로(들)·요약과 함께 구현 스킬을 추천하고 종료한다. �
 
 ## --resume 요약
 
-대상 SPEC 문서 경로를 인자로 받는다. 문서가 없으면 abort, `[NEEDS CLARIFICATION` 마커가 없으면 종료한다. step 2는 생략, step 3은 남은 마커 섹션만 다시 묻는다. step 5-7은 마커 섹션만 갱신·재작성하고, step 8로 종결한다. 새 외부 상태는 만들지 않는다.
+대상 SPEC 문서 경로를 인자로 받는다. 구 형식(`docs/specs/<YYYY-MM-DD>-<slug>.md`)과 신 형식(`docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`) 경로를 모두 수용해 해당 문서를 그 자리에서 갱신한다(구 형식 문서를 신 레이아웃으로 옮기지 않는다 — 이전은 마이그레이션의 책임이다). 문서가 없으면 abort, `[NEEDS CLARIFICATION` 마커가 없으면 종료한다. step 2는 생략, step 3은 남은 마커 섹션만 다시 묻는다. step 5-7은 마커 섹션만 갱신·재작성하고, step 8로 종결한다. 새 외부 상태는 만들지 않는다.
 
 ## 모듈 구성 (references/)
 
