@@ -85,6 +85,70 @@ Minor=style/name/polish
 
 후속: 예면 통과, 수정 후 진행이면 Critical/Important fix, 아니오면 노트 의심점.
 
+## persona-adversarial-reviewer (적대 렌즈)
+
+용도: 완료 직전 자체 검토에서 **비자명 변경**(diff 100줄 이상 또는 관여 수용기준 2개 이상)을 세 적대 렌즈로 점검. 렌즈는 **발견만 보고**하고 최종 완료·차단 결정은 내리지 않는다(결정은 메인). 권장 모델: sonnet.
+
+렌즈 정의의 단일 출처는 `plugins/autopilot/skills/spec/references/personas.md`(contrarian·minimalist·constraint-auditor)다. 정의를 복제하지 말고 그 카탈로그를 읽혀 적용한다.
+
+Prompt:
+
+```text
+이번 이터 변경을 세 적대 렌즈로 점검하라. 렌즈 정의는 personas.md 카탈로그를 읽고 따른다.
+
+## 렌즈 정의 (단일 출처)
+plugins/autopilot/skills/spec/references/personas.md 의 contrarian·minimalist·constraint-auditor 를 읽어 적용하라.
+
+## 변경
+[git diff HEAD~1 HEAD 요약 + 의도 + 관여 수용기준]
+
+## 임무
+각 렌즈로 변경을 점검하고 렌즈 태그와 함께 발견만 보고한다.
+
+## 금지
+최종 완료·차단 결정, 변경 수정, 의심점 기록(이것들은 모두 메인 책임).
+
+## 응답
+### [contrarian]
+- [위치] <발견> — <이유>
+### [minimalist]
+- ...
+### [constraint-auditor]
+- ...
+```
+
+후속: 메인이 발견을 검토해 수정·완료·의심점 기록을 결정한다. 미해결 의심은 노트 `## 의심점`에 남긴다.
+
+## lateral-recovery-reframer (측면사고 회복)
+
+용도: 워커-판단 정체로 에스컬레이션하기 직전, 에피소드당 **한 번** 근본 원인 가설을 적대 렌즈로 재구성. **읽기(관찰)를 우선**하고 **발견만 보고**한다 — 최소 변경 재시도와 최종 결정은 메인이 수행한다. 권장 모델: sonnet. 페르소나 카탈로그(`personas.md`)를 재사용한다.
+
+Prompt:
+
+```text
+정체 상태의 근본 원인 가설을 적대 렌즈로 재구성하라. read-only 관찰을 우선한다.
+
+## 렌즈 (재사용)
+plugins/autopilot/skills/spec/references/personas.md 의 세 렌즈로 현재 가설을 비판·재구성하라.
+
+## 정체 상황
+[같은 에러/정체/진동/반복 실패 요약 + 지금까지 시도]
+
+## 임무
+- 현재 가설의 약점을 렌즈별로 지적
+- 관찰로 검증 가능한 대안 가설(들)과 그 신호 제안
+읽기 우선. 필요 시에도 광범위 수정은 하지 않는다.
+
+## 금지
+최소 변경 재시도 실행, 광범위 수정, 최종 결정(모두 메인 책임).
+
+## 응답
+- 재구성된 가설 후보: ...
+- 관찰할 신호 / 최소 검증: ...
+```
+
+후속: 메인이 한 차례 최소 변경으로 재시도한다. 진전이면 정상 루프, 무진전이면 표준 차단 에스컬레이션. 시도·판정은 노트에 기록.
+
 ## parallel-hypothesis-tester
 
 용도: 두 개 이상 독립 가설을 병렬 검증. 권장 모델: sonnet. Agent에게 최종 결정을 맡기지 않는다.
