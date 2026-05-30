@@ -47,19 +47,27 @@ require_git_root() {
   RUNS_DIR="$PROJECT_ROOT/.dispatch/runs"
 }
 
+# abspath — 절대·정규화 경로(.. 압축)를 반환. 호출처는 항상 존재하는 경로를 넘긴다
+# (cmd_start 은 -f 검사 후, resolve_dep 은 매칭된 후보). 절대 경로라도 `..` 가 섞일 수
+# 있으므로(신 레이아웃 형제 매칭 `<dir>/../*-<slug>/SPEC.md`) dirname+pwd 로 정규화한다.
 abspath() {
   local p="$1"
-  if [[ "$p" = /* ]]; then
-    echo "$p"
-  else
-    (cd "$(dirname "$p")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$p")")
-  fi
+  (cd "$(dirname "$p")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$p")")
 }
 
-# spec_slug — 파일명에서 .md 와 YYYY-MM-DD- prefix 제거.
+# spec_slug — SPEC 경로에서 slug 도출.
+#   구 형식 <date>-<slug>.md      → 파일명에서 .md·YYYY-MM-DD- prefix 제거.
+#   신 형식 <date>-<slug>/SPEC.md → 본문 파일(SPEC.md)이므로 부모 디렉토리명에서 도출.
+# 신·구 형식 모두 같은 의미의 slug 를 도출한다(레이아웃 전환 호환).
 spec_slug() {
   local b
-  b="$(basename "$1" .md)"
+  b="$(basename "$1")"
+  if [[ "$b" == "SPEC.md" ]]; then
+    # 신 디렉토리 레이아웃: 본문은 <date>-<slug>/SPEC.md → 부모 디렉토리명 사용.
+    b="$(basename "$(dirname "$1")")"
+  else
+    b="${b%.md}"
+  fi
   echo "$b" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//'
 }
 
@@ -111,7 +119,12 @@ extract_depends_on() {
 #   1) 절대 경로
 #   2) project-root 상대 경로
 #   3) from_spec 디렉토리 상대 경로
-#   4) slug 매칭: 같은 디렉토리의 *-<slug>.md 또는 <slug>.md
+#   4) slug 매칭 — 구·신 레이아웃 형제 모두 탐색:
+#        구 형식: <container>/*-<slug>.md      또는 <container>/<slug>.md
+#        신 형식: <container>/*-<slug>/SPEC.md 또는 <container>/<slug>/SPEC.md
+#      container 후보: from_dir (from 이 구 형식일 때 형제 위치) 와
+#                      from_dir/.. (from 이 신 형식 <slug>/SPEC.md 일 때 형제 위치).
+#      신·구 혼합 입력에서도 형제 의존을 올바르게 찾는다(레이아웃 전환 호환).
 resolve_dep() {
   local from="$1"; local dep="$2"
   local from_dir; from_dir="$(dirname "$from")"
@@ -120,10 +133,16 @@ resolve_dep() {
     abspath "$PROJECT_ROOT/$dep"; return
   fi
   if [[ -f "$from_dir/$dep" ]]; then abspath "$from_dir/$dep"; return; fi
-  # slug 매칭
-  local cand
-  for cand in "$from_dir"/*-"$dep".md "$from_dir"/"$dep".md; do
-    [[ -f "$cand" ]] && { abspath "$cand"; return; }
+  # slug 매칭 — container 후보별로 구·신 패턴 탐색.
+  local container cand
+  for container in "$from_dir" "$from_dir/.."; do
+    for cand in \
+      "$container"/*-"$dep".md \
+      "$container"/"$dep".md \
+      "$container"/*-"$dep"/SPEC.md \
+      "$container"/"$dep"/SPEC.md; do
+      [[ -f "$cand" ]] && { abspath "$cand"; return; }
+    done
   done
   echo ""
 }
