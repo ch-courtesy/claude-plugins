@@ -10,7 +10,7 @@ scope:
     - rules/**
     - milestones/**
     - CLAUDE.md
-depends_on: ["spec-persona-adversarial-review-clarity-score"]
+depends_on: ["spec-persona-adversarial-review-clarity-score", "loop-contract-test-realignment"]
 ---
 
 # loop 스킬: persona verification + lateral unstuck
