@@ -7,6 +7,11 @@
 
 set -euo pipefail
 
+# 일부 CI/loop 환경이 GIT_AUTHOR_*/GIT_COMMITTER_* 를 빈 문자열로 export 하면
+# git config(user.name/email)를 덮어써 git commit 이 "empty ident name" 으로 실패한다.
+# 임시 repo 의 로컬 config 가 적용되도록 빈 ident 환경변수를 해제한다.
+unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL 2>/dev/null || true
+
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 DISPATCH_SH="$REPO_ROOT/plugins/autopilot/skills/dispatch/references/dispatch.sh"
 [[ -x "$DISPATCH_SH" ]] || { echo "FAIL: dispatch.sh 실행 권한 없음"; exit 1; }

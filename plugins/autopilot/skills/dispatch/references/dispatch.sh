@@ -210,15 +210,17 @@ loop_start_bg() {
 
 # kill_tree <pid> [<sig>] — pid 와 그 자손 프로세스를 재귀적으로 kill.
 # subshell 만 죽이면 손자(자손 프로세스) 가 orphan 으로 남으므로 트리 재귀가 필요.
-# pgrep 가 없는 환경에서는 ps 폴백.
+# pgrep 가 없으면 ps 폴백, ps 마저 없으면 자손 열거를 건너뛰고 pid 만 직접 kill.
+# set -euo pipefail 하에서 pgrep·ps 부재가 비0 종료로 스크립트를 죽이지 않도록
+# command -v 로 존재를 먼저 확인하고 파이프라인 끝에 `|| true` 가드를 둔다.
 kill_tree() {
   local pid="$1"; local sig="${2:-TERM}"
   local children=""
   if command -v pgrep >/dev/null 2>&1; then
     children=$(pgrep -P "$pid" 2>/dev/null || true)
-  else
+  elif command -v ps >/dev/null 2>&1; then
     children=$(ps -o pid= -o ppid= 2>/dev/null \
-                | awk -v p="$pid" '$2==p { print $1 }')
+                | awk -v p="$pid" '$2==p { print $1 }' || true)
   fi
   local c
   for c in $children; do
