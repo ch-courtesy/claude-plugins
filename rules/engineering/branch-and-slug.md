@@ -2,7 +2,7 @@
 
 SPEC 제목에서 slug를 만드는 규칙, SPEC 문서 파일명 규칙, 그리고 SPEC을 feat 브랜치로 commit·동기화하는 규칙의 단일 출처입니다.
 
-- **slug·파일명**: spec 스킬이 SPEC 문서를 `docs/specs/<YYYY-MM-DD>-<slug>.md`로 저장할 때 이 규칙으로 slug를 만듭니다.
+- **slug·파일명**: spec 스킬이 SPEC 문서를 `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`로 저장할 때 이 규칙으로 slug를 만듭니다.
 - **feat 브랜치·commit·원격 동기화**: SPEC 문서를 받아 git에 반영하는 주체(구현 스킬·오케스트레이터·호출자)가 따릅니다. spec 스킬 자체는 더 이상 브랜치를 만들지 않습니다.
 
 ## slug 규칙
@@ -31,7 +31,9 @@ slug=$(printf '%s' "$title" \
 
 ## SPEC 문서 파일명
 
-spec 스킬의 산출 경로는 `docs/specs/<YYYY-MM-DD>-<slug>.md`입니다. `<YYYY-MM-DD>`는 작성일(로컬 날짜), `<slug>`는 위 규칙으로 SPEC 제목에서 파생합니다. 디렉터리가 없으면 만듭니다.
+각 SPEC은 자신의 디렉토리를 가집니다. spec 스킬의 산출 경로는 `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`이며, 문서 본문은 그 디렉토리 안의 `SPEC.md`에 둡니다. `<YYYY-MM-DD>`는 작성일(로컬 날짜), `<slug>`는 위 규칙으로 SPEC 제목에서 파생합니다. 디렉터리가 없으면 만듭니다.
+
+이 per-spec 디렉토리 레이아웃은 그 SPEC의 loop 실행이 만드는 모든 per-spec 아티팩트(워크트리·락·실행 메타·신호)를 같은 스펙 디렉토리 하위에 격리하기 위한 것입니다 — 서로 다른 스펙의 실행이 공통 부모를 공유하지 않습니다. 아래 `<spec_path>`는 이 `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md` 본문 경로를 가리킵니다.
 
 ## feat 브랜치 + commit
 

@@ -4,10 +4,10 @@
 
 ```
 KEY            STATE     FILES                ITERS  LAST-UPDATE          SPEC
-9e02e26a1655   running   -                    12     2026-05-27T14:22Z    docs/specs/2026-05-27-foo.md
-3f1461d10812   terminal  DONE                 8      2026-05-26T10:15Z    docs/specs/2026-05-26-bar.md
-a1b2c3d4e5f6   terminal  BLOCKED              5      2026-05-27T11:33Z    /abs/path/other-spec.md
-b2c3d4e5f6a7   terminal  DONE,NOTES.txt       7      2026-05-27T09:11Z    /abs/path/multi-sig.md
+9e02e26a1655   running   -                    12     2026-05-27T14:22Z    docs/specs/2026-05-27-foo/SPEC.md
+3f1461d10812   terminal  DONE                 8      2026-05-26T10:15Z    docs/specs/2026-05-26-bar/SPEC.md
+a1b2c3d4e5f6   terminal  BLOCKED              5      2026-05-27T11:33Z    /abs/path/other-spec/SPEC.md
+b2c3d4e5f6a7   terminal  DONE,NOTES.txt       7      2026-05-27T09:11Z    /abs/path/multi-sig/SPEC.md
 ```
 
 - `KEY`: 스펙 절대 경로 sha256 앞 12자 (실행 단위 고유 식별자).
