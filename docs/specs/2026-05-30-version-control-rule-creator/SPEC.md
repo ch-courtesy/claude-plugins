@@ -24,7 +24,7 @@ scope:
 - 생성되는 지침은 호스팅 백엔드의 **심사·승인 모델**(승인 상태·스레드 해소·필수 체크·소유권 경계·머지 방식)을 다룬다. CLI 명령 사용법은 다루지 않는다.
 - 백엔드별 지침은 기존 범용 리뷰 원칙을 **대체하지 않고 그 위에 얹는** 백엔드 특화 규율이다.
 - 이 카테고리는 첫 sub-룰(심사·승인) 외에 브랜치 전략·커밋 컨벤션 등 다른 git sub-룰로 확장 가능해야 하며, 확장은 새 템플릿 추가만으로 가능해야 한다(스킬 본문 변경 없이).
-- 백엔드를 판별할 수 없으면(origin 없음·미지원 호스트) 추측해서 생성하지 않고 중단하고 안내한다.
+- 백엔드 판별은 공식 도메인(github.com·gitlab.com 계열)은 호스트명 정밀 매칭으로, self-hosted 호스트는 그 호스트에 대한 부작용 없는 read-only API probe로 한다. 판별할 수 없으면(origin 없음·probe inconclusive·도달 불가) 추측해서 생성하지 않고 중단하고 안내한다. 호스트명 substring 매칭은 쓰지 않는다(오판별 방지).
 - `plugins/` 하위에 산출물이 추가되므로, 같은 변경 안에서 플러그인 버전 단일 출처가 함께 올라가야 한다.
 
 개념 경계(혼동 방지):
@@ -35,9 +35,11 @@ scope:
 <!-- EARS 5패턴과 언어 규칙은 references/ears-patterns.md. 각 기준은 관찰 가능하고 독립 검증 가능해야 함. -->
 
 - WHEN 스킬이 호출되면, THE 스킬 SHALL 자신의 templates 디렉터리를 열거해 각 템플릿의 sub-룰 ID와 (있으면) 백엔드 변형을 식별한다.
-- WHEN 백엔드 변형을 가진 sub-룰을 처리하면, THE 스킬 SHALL git origin remote URL을 https·ssh 양식 모두에서 파싱해 호스트로부터 백엔드(github/gitlab)를 판별한다.
+- WHEN 백엔드 변형을 가진 sub-룰을 처리하면, THE 스킬 SHALL git origin remote URL을 https·ssh 양식 모두에서 파싱해 호스트를 추출한다.
+- WHEN 추출한 호스트가 공식 GitHub·GitLab 도메인(`github.com`·`*.github.com`·`*.ghe.com`·`*.githubenterprise.com` / `gitlab.com`·`*.gitlab.com`)에 정밀히 일치하면, THE 스킬 SHALL 네트워크 호출 없이 호스트명만으로 백엔드를 판별한다.
+- WHEN 추출한 호스트가 공식 도메인에 해당하지 않으면(self-hosted 등), THE 스킬 SHALL 그 호스트에 대해 부작용 없는 read-only API probe(잘 알려진 엔드포인트의 상태코드·응답 헤더·본문 마커 조합)로 백엔드(github/gitlab)를 식별한다.
 - IF git origin remote가 설정되어 있지 않으면, THEN THE 스킬 SHALL 어떤 룰 파일도 생성하지 않고 origin을 먼저 설정하라는 안내를 출력하고 종료한다.
-- IF origin 호스트가 지원 백엔드(github·gitlab) 중 어느 것에도 매핑되지 않으면, THEN THE 스킬 SHALL 감지된 호스트와 지원 백엔드 목록을 안내하고 어떤 룰 파일도 생성하지 않고 종료한다.
+- IF 호스트가 공식 도메인도 아니고 probe로도 백엔드를 확정하지 못하면(도달 불가·timeout·inconclusive 포함), THEN THE 스킬 SHALL 감지된 호스트와 지원 백엔드 목록을 안내하고 어떤 룰 파일도 생성하지 않고 종료한다(추측 생성 금지).
 - WHEN 백엔드가 성공적으로 판별되면, THE 스킬 SHALL 해당 백엔드 변형의 frontmatter를 제거한 본문을 `version-control` 카테고리의 해당 sub-룰 파일 하나로 기록하며, 출력 파일명에 백엔드 식별자를 남기지 않는다.
 - IF 기록 대상 sub-룰 파일이 이미 존재하면, THEN THE 스킬 SHALL 차이를 제시하고 사용자의 명시적 교체 동의가 있을 때만 덮어쓴다.
 - THE 스킬 SHALL 한 번의 호출에서 `version-control` 카테고리의 단일 sub-룰 파일만 생성·갱신하고, 다른 카테고리의 기존 지침(범용 리뷰 원칙·릴리스 버전 지침 포함)을 변경하지 않는다.
@@ -50,7 +52,7 @@ scope:
 
 ## 범위
 포함:
-- `version-control-rule-creator` 스킬 본문(템플릿 디스패처 + git origin 백엔드 자동 판별 로직).
+- `version-control-rule-creator` 스킬 본문(템플릿 디스패처 + git origin 백엔드 자동 판별 로직: 공식 도메인 호스트명 정밀 매칭 + self-hosted read-only API probe + 미확정 시 중단).
 - GitHub·GitLab 두 백엔드의 변경 제안 심사·승인 지침 템플릿.
 - 플러그인 버전 단일 출처와 마켓플레이스 미러의 동반 버전 상향.
 
@@ -67,10 +69,10 @@ scope:
 
 ## 제약 (있을 때만)
 - 형제 rule-creator 스킬과 구조·규약(템플릿 frontmatter 파싱, 기존 파일 덮어쓰기 보호, 본문 그대로 복사)을 일관되게 따른다.
-- 백엔드 자동 판별은 git origin remote URL 파싱으로만 수행하고, 외부 네트워크 호출에 의존하지 않는다.
+- 백엔드 자동 판별: 공식 도메인은 호스트명 정밀 매칭으로 네트워크 없이 판별하고, self-hosted는 부작용 없는 read-only API probe만 사용한다(상태 변경 요청 금지, GET류만). probe는 best-effort이며 timeout·인증요구(401/403)·도달 불가는 inconclusive로 처리해 중단·안내로 귀결한다.
 - 백엔드 변형은 파일명 규약으로 식별하며, 출력 sub-룰 파일명에는 백엔드 식별자를 남기지 않는다.
 - 심사·승인 지침 본문은 호스팅 백엔드 중립 용어 "변경 제안"으로 PR/MR을 가리키고, 범용 리뷰 원칙을 복제하지 않고 참조·보강한다.
 
 ## 위험 (있을 때만)
-- self-hosted GitHub Enterprise·GitLab은 호스트 문자열에 `github`/`gitlab`이 포함될 때만 판별된다. 이를 포함하지 않는 자가 호스팅 인스턴스는 미지원으로 분류되어 중단·안내된다(의도된 동작).
+- self-hosted 호스트는 API probe로 판별하므로, 네트워크가 닿지 않는 환경(VPN·사내망 미연결)에서는 probe가 inconclusive가 되어 미판별→중단·안내로 귀결된다(의도된 동작 — 오판별보다 안전). 호스트명 substring 매칭을 쓰지 않으므로 `github-mirror.*`·`github-to-gitlab.*` 류의 오판별·비결정성은 발생하지 않는다.
 - `version-control` 카테고리는 기존 범용 리뷰 지침(별도 파일)과 개념이 인접해, 사용자가 둘을 혼동할 수 있다 — 지침 본문에서 범용 원칙과의 관계를 명시해 완화한다.
