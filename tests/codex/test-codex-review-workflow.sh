@@ -151,14 +151,23 @@ fi
 ok "check 8: CODEX_ACCESS_TOKEN 기반 인증 제거됨"
 
 echo ""
-echo "=== check 9: review output is posted idempotently ==="
-grep -q '<!-- codex-cli-pr-review -->' "$WORKFLOW" \
-  || fail "중복 방지 marker 부재"
-grep -q 'issues.updateComment' "$WORKFLOW" \
-  || fail "기존 리뷰 코멘트 update 경로 부재"
-grep -q 'issues.createComment' "$WORKFLOW" \
-  || fail "신규 리뷰 코멘트 create 경로 부재"
-ok "check 9: marker 기반 update/create 코멘트 경로 존재"
+echo "=== check 9: 관리형 issue-level 코멘트 채널이 제거됨 (AC1/AC2/AC3) ==="
+# 'Post Codex review comment' 스텝과 그 issues.create/updateComment 기반 관리형
+# 코멘트 게시·갱신 경로는 더 이상 존재하지 않아야 한다. 승인·지적은 정식 리뷰(①)와
+# inline 코멘트가 전달하므로 issue-level 관리형 채널을 완전히 없앤다.
+if grep -q 'Post Codex review comment' "$WORKFLOW"; then
+  fail "'Post Codex review comment' 스텝 잔존 — 관리형 issue-level 코멘트 채널 제거되어야 함 (AC3)"
+fi
+if grep -q '<!-- codex-cli-pr-review -->' "$WORKFLOW"; then
+  fail "관리형 코멘트 marker (codex-cli-pr-review) 잔존 — 채널 제거되어야 함 (AC3)"
+fi
+if grep -q 'issues\.createComment' "$WORKFLOW"; then
+  fail "issues.createComment 잔존 — 관리형 issue-level 코멘트 게시 경로 제거되어야 함 (AC1/AC3)"
+fi
+if grep -q 'issues\.updateComment' "$WORKFLOW"; then
+  fail "issues.updateComment 잔존 — 관리형 issue-level 코멘트 갱신/supersede 경로 제거되어야 함 (AC2/AC3)"
+fi
+ok "check 9: 관리형 issue-level 코멘트 채널 부재"
 
 echo ""
 echo "=== check 10: verdict submission via Pulls REST API with inline comments (APPROVE/COMMENT only) ==="
@@ -196,25 +205,21 @@ grep -qF 'automation_safety' "$WORKFLOW" \
   || fail "automation_safety gate 부재"
 grep -qF 'confidence_score' "$WORKFLOW" \
   || fail "confidence_score 부재"
-# 요약(issue-level) managed comment 는 approve 일 때만. inline-fallback 경로 제거(AC2/AC3).
-grep -qF 'Managed Codex review comment is only posted on verdict=approve' "$WORKFLOW" \
-  || fail "managed comment 게이트가 verdict=approve 전용이 아님 (AC3)"
-grep -qF "result.verdict === 'approve'" "$WORKFLOW" \
-  || fail "showFullBody 결정이 verdict=approve 조건을 사용하지 않음"
+# inline-fallback 경로는 존재하면 안 된다 (createReview 실패 시 finding 을 issue 코멘트로 덤프 금지, AC2).
 if grep -qF 'inlineFallback' "$WORKFLOW"; then
   fail "inlineFallback 경로 잔존 — createReview 실패 시 finding 을 issue 코멘트로 덤프하면 AC2 위반"
 fi
 if grep -qF 'inline-fallback-needed' "$WORKFLOW"; then
   fail "inline-fallback-needed marker 잔존 — inline-only 정책에서 제거되어야 함"
 fi
-grep -qF '!showFullBody' "$WORKFLOW" \
-  || fail "early-return 조건이 showFullBody 변수를 사용하지 않음"
-# supersede stale approve managed comment when latest verdict is non-approve
-grep -qF '이후 리뷰로 대체됨 (현재 결과' "$WORKFLOW" \
-  || fail "verdict!=approve 일 때 옛 approve managed comment supersede 분기 부재 (stale approve 가 PR 대화에 남음)"
-grep -qF 'Superseded stale managed comment' "$WORKFLOW" \
-  || fail "supersede core.info log 부재"
-ok "check 10: createReview + inline comments + APPROVE/COMMENT only + approve-only managed comment"
+# 관리형 issue-level 코멘트 게이트(showFullBody)와 supersede 경로는 제거되어야 한다 (AC1/AC2/AC3).
+if grep -qF 'showFullBody' "$WORKFLOW"; then
+  fail "showFullBody 잔존 — 관리형 코멘트 verdict 게이트 제거되어야 함 (AC3)"
+fi
+if grep -qF 'Superseded stale managed comment' "$WORKFLOW"; then
+  fail "관리형 코멘트 supersede 경로 잔존 — issue-level 코멘트 채널 제거되어야 함 (AC2)"
+fi
+ok "check 10: createReview + inline comments + APPROVE/COMMENT only + 관리형 채널 부재"
 
 echo ""
 echo "=== check 10b: formal review idempotent per (head_sha, verdict) ==="
@@ -387,24 +392,10 @@ grep -qF '_승인 — 지적 사항은 인라인 코멘트 참조._' "$WORKFLOW"
 if grep -qF 'Approved by automated review' "$WORKFLOW"; then
   fail "영어 승인 안내 문구 잔존"
 fi
-# AC2: summary 없을 때 기본 라벨 한국어.
-grep -qF '승인 — 차단 지적 없음' "$WORKFLOW" \
-  || fail "한국어 기본 승인 라벨 '승인 — 차단 지적 없음' 부재"
-if grep -qF 'Approved — no blocking findings.' "$WORKFLOW"; then
-  fail "영어 기본 승인 라벨 잔존"
-fi
-# AC3: 토큰 권한으로 정식 승인 미제출 안내 한국어.
-grep -qF '승인 가능 — 단, 토큰 권한으로 정식 승인 미제출' "$WORKFLOW" \
-  || fail "한국어 토큰 승인 실패 안내 부재"
-if grep -qF 'could not be submitted by this workflow token' "$WORKFLOW"; then
-  fail "영어 토큰 승인 실패 안내 잔존"
-fi
-# AC5: verdict 표시 줄 한국어 라벨. 단, 숨김 마커 verdict enum 은 보존.
-grep -qF '결과: 승인' "$WORKFLOW" \
-  || fail "한국어 verdict 표시 줄 '결과: 승인' 부재"
-if grep -qF 'Verdict: `approve`' "$WORKFLOW"; then
-  fail "영어 verdict 표시 줄 'Verdict: \`approve\`' 잔존"
-fi
+# NOTE: 관리형 issue-level 코멘트(②) 채널 제거(SPEC 2026-05-31-codex-review-approve-managed-comment)로
+# 그 스텝에만 있던 한국어 라벨('승인 — 차단 지적 없음', '승인 가능 — 단, 토큰 권한으로 정식 승인 미제출',
+# verdict 표시 줄 '결과: 승인')은 더 이상 존재하지 않는다. 해당 단언은 채널과 함께 제거됨.
+# 정식 리뷰(①) 본문의 한국어 보일러플레이트(위 섹션 헤더·승인 안내)는 유지·검증한다.
 # AC5 제약: 숨김 마커의 verdict enum 값(verdict=...) 은 변경 금지.
 grep -qF 'head_sha=${head_sha} verdict=${verdict}' "$WORKFLOW" \
   || fail "숨김 멱등성 마커의 verdict enum 바인딩이 변경됨 (멱등성·승인 게이팅 위험)"
