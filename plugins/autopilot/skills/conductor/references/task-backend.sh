@@ -91,10 +91,30 @@ tb_backend_gh() {
         --jq '.projectItems[]?.status.name // empty' 2>/dev/null | head -1
       ;;
     set-status)
-      # set-status <id> <status>: Project Status field 전이는 사람이 셋업한
-      # project/field 식별자에 의존하므로 gh project item-edit 로 위임한다.
-      # 식별자 미설정 환경에서는 no-op(미러는 호출자가 기록). 어휘는 이미 검증됨.
-      gh issue edit "$1" --add-label "status:$2" >/dev/null 2>&1 || true
+      # set-status <id> <status>: GitHub Project 의 Status 필드를 실제로 전이한다.
+      #   "백엔드가 진실의 원천" 계약(C1/C5)을 지키려면, 전이가 실제로 성공한
+      #   경우에만 0 을 반환해야 한다(호출자는 그때만 미러를 갱신한다).
+      #   Project/field/option 식별자는 환경에서 주입한다:
+      #     CONDUCTOR_PROJECT_ID    project (number/id)
+      #     CONDUCTOR_STATUS_FIELD  Status 필드 이름(기본 "Status")
+      #   식별자 미설정이면 전이할 수 없으므로 가독용 라벨만 남기고 **실패(비-0)**
+      #   를 반환한다 — 라벨-only no-op 을 성공으로 보고하지 않는다.
+      local _id="$1" _status="$2" _field="${CONDUCTOR_STATUS_FIELD:-Status}"
+      gh issue edit "$_id" --add-label "status:$_status" >/dev/null 2>&1 || true
+      if [[ -z "${CONDUCTOR_PROJECT_ID:-}" ]]; then
+        tb_die "Project Status 전이 불가: CONDUCTOR_PROJECT_ID 미설정 (라벨만 기록, 미러 미갱신)"
+        return 1
+      fi
+      # item id 조회 → Status 필드 단일 옵션값으로 edit. 어느 단계라도 실패하면 비-0.
+      local _item
+      _item="$(gh project item-list "$CONDUCTOR_PROJECT_ID" --owner "@me" --format json \
+        --jq ".items[] | select(.content.number == ($_id|tonumber)) | .id" 2>/dev/null | head -1)"
+      [[ -n "$_item" ]] || { tb_die "Project item 미발견: issue=$_id"; return 1; }
+      gh project item-edit --project-id "$CONDUCTOR_PROJECT_ID" --id "$_item" \
+        --field-name "$_field" --single-select-option-id "$_status" >/dev/null 2>&1 \
+        || gh project item-edit --id "$_item" --field-name "$_field" \
+             --text "$_status" >/dev/null 2>&1 \
+        || { tb_die "Project Status 전이 실패: issue=$_id → $_status"; return 1; }
       ;;
     get-body) gh issue view "$1" --json body --jq '.body' 2>/dev/null ;;
     set-body) gh issue edit "$1" --body-file "$2" >/dev/null 2>&1 ;;
@@ -219,12 +239,18 @@ spec_fallback_title() {
 }
 
 # tb_set_status <task-id> <status> — 어휘 검증 후 백엔드 전이 + 미러 기록.
+#   "백엔드가 진실의 원천": 백엔드 전이가 실제로 성공한 경우에만 미러를 갱신한다.
+#   전이가 실패하면 미러를 갱신하지 않고 오류를 전파해, conductor 가 실제로는
+#   전이되지 않은 상태를 전이됐다고 오판하지 않게 한다(poll 정합 깨짐 방지).
 tb_set_status() {
   local id="$1" status="$2" iid
   tb_valid_status "$status" || { tb_die "잘못된 상태 어휘: $status"; return 1; }
   iid="$(get_field "$id" issue)"
   [[ -n "$iid" ]] || { tb_die "issue 미연결 task: $id"; return 1; }
-  tb_backend set-status "$iid" "$status"
+  if ! tb_backend set-status "$iid" "$status"; then
+    tb_die "백엔드 상태 전이 실패 — 미러 미갱신: $id → $status"
+    return 1
+  fi
   set_field "$id" backend-status "$status"
   log_event "$id" "상태 전이 → $status"
 }

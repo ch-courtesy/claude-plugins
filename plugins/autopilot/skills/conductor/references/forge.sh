@@ -110,11 +110,13 @@ child_terminal_state() {
 #   미검출이면 'other'(하드 차단으로 보수적 처리).
 loop_blocked_category() {
   local cat
+  # set -euo pipefail 환경: grep 미매치 시 pipefail 로 파이프라인이 non-zero 가 되어
+  # 할당문이 함수를 종료시킨다. `|| true` 로 감싸 미검출 시 빈 문자열→'other' fallback
+  # 이 실제로 동작하게 한다(awk 한 번으로 추출해 파이프 단계도 줄인다).
   # shellcheck disable=SC2086
   cat="$($LOOP_CMD logs "$1" 2>/dev/null \
-    | grep -i -m1 '^category:' \
-    | sed -E 's/^[Cc]ategory:[[:space:]]*//' \
-    | tr -d '[:space:]')"
+    | awk 'tolower($0) ~ /^category:/ { sub(/^[Cc][Aa][Tt][Ee][Gg][Oo][Rr][Yy]:[[:space:]]*/, ""); gsub(/[[:space:]]/, ""); print; exit }' \
+    || true)"
   [[ -n "$cat" ]] && printf '%s\n' "$cat" || printf '%s\n' "other"
 }
 
