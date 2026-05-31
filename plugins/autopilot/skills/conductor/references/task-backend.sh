@@ -105,15 +105,25 @@ tb_backend_gh() {
         tb_die "Project Status 전이 불가: CONDUCTOR_PROJECT_ID 미설정 (라벨만 기록, 미러 미갱신)"
         return 1
       fi
-      # item id 조회 → Status 필드 단일 옵션값으로 edit. 어느 단계라도 실패하면 비-0.
-      local _item
+      # gh project 식별자 의미(중요):
+      #   --single-select-option-id 는 옵션 *이름*("Backlog" 등)이 아니라 옵션 *ID*
+      #   (영숫자 식별자)를 요구한다. --field-name 도 환경에 따라 동작이 다르므로
+      #   field-id 까지 조회해 명시한다. 따라서 (1) item id, (2) Status field id,
+      #   (3) 상태 이름→option id 를 차례로 조회한 뒤 ID 기반으로만 edit 한다.
+      #   어느 조회·전이라도 실패하면 비-0 을 반환해 호출자가 미러를 갱신하지 않게 한다.
+      local _item _fid _oid
       _item="$(gh project item-list "$CONDUCTOR_PROJECT_ID" --owner "@me" --format json \
         --jq ".items[] | select(.content.number == ($_id|tonumber)) | .id" 2>/dev/null | head -1)"
       [[ -n "$_item" ]] || { tb_die "Project item 미발견: issue=$_id"; return 1; }
+      # Status 필드의 field id 와, 상태 이름에 대응하는 single-select option id 조회.
+      _fid="$(gh project field-list "$CONDUCTOR_PROJECT_ID" --owner "@me" --format json \
+        --jq ".fields[] | select(.name == \"$_field\") | .id" 2>/dev/null | head -1)"
+      [[ -n "$_fid" ]] || { tb_die "Status field id 조회 실패: field=$_field"; return 1; }
+      _oid="$(gh project field-list "$CONDUCTOR_PROJECT_ID" --owner "@me" --format json \
+        --jq ".fields[] | select(.name == \"$_field\") | .options[] | select(.name == \"$_status\") | .id" 2>/dev/null | head -1)"
+      [[ -n "$_oid" ]] || { tb_die "Status 옵션 id 조회 실패: $_status (옵션 이름이 보드와 일치하는지 확인)"; return 1; }
       gh project item-edit --project-id "$CONDUCTOR_PROJECT_ID" --id "$_item" \
-        --field-name "$_field" --single-select-option-id "$_status" >/dev/null 2>&1 \
-        || gh project item-edit --id "$_item" --field-name "$_field" \
-             --text "$_status" >/dev/null 2>&1 \
+        --field-id "$_fid" --single-select-option-id "$_oid" >/dev/null 2>&1 \
         || { tb_die "Project Status 전이 실패: issue=$_id → $_status"; return 1; }
       ;;
     get-body) gh issue view "$1" --json body --jq '.body' 2>/dev/null ;;
