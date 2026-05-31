@@ -209,7 +209,7 @@ fi
 grep -qF '!showFullBody' "$WORKFLOW" \
   || fail "early-return 조건이 showFullBody 변수를 사용하지 않음"
 # supersede stale approve managed comment when latest verdict is non-approve
-grep -qF 'Superseded by later review' "$WORKFLOW" \
+grep -qF '이후 리뷰로 대체됨 (현재 결과' "$WORKFLOW" \
   || fail "verdict!=approve 일 때 옛 approve managed comment supersede 분기 부재 (stale approve 가 PR 대화에 남음)"
 grep -qF 'Superseded stale managed comment' "$WORKFLOW" \
   || fail "supersede core.info log 부재"
@@ -246,7 +246,7 @@ grep -qF "r.state === 'CHANGES_REQUESTED'" "$WORKFLOW" \
   || fail "dismiss 대상 식별이 state=CHANGES_REQUESTED 로 제한되지 않음"
 grep -qF "verdict === 'approve'" "$WORKFLOW" \
   || fail "dismiss 게이트가 verdict=approve 조건 부재"
-grep -qF 'Superseded by later review' "$WORKFLOW" \
+grep -qF '리뷰로 대체됨 — 결과: 승인' "$WORKFLOW" \
   || fail "dismiss message 부재"
 ok "check 10c: verdict=approve 시 옛 자기 CHANGES_REQUESTED reviews 자동 dismiss"
 
@@ -327,6 +327,43 @@ grep -q '"confidence_score"' "$SCHEMA" \
 grep -q '"context_requests"' "$SCHEMA" \
   || fail "schema context_requests 부재"
 ok "check 12: schema 핵심 필드 존재"
+
+echo ""
+echo "=== check 13: PR 게시 보일러플레이트 한국어화 (SPEC 2026-05-31) ==="
+# AC1/AC6: 섹션 헤더 한국어. PR 코멘트 본문 헤더(## 접두)만 검사 — 워크플로 name 은 제외.
+grep -qF '## Codex PR 리뷰' "$WORKFLOW" \
+  || fail "한국어 섹션 헤더 '## Codex PR 리뷰' 부재"
+if grep -qF '## Codex PR Review' "$WORKFLOW"; then
+  fail "영어 섹션 헤더 '## Codex PR Review' 잔존"
+fi
+# AC1: approve 안내 문구 한국어.
+grep -qF '_승인 — 지적 사항은 인라인 코멘트 참조._' "$WORKFLOW" \
+  || fail "한국어 승인 안내 문구 부재"
+if grep -qF 'Approved by automated review' "$WORKFLOW"; then
+  fail "영어 승인 안내 문구 잔존"
+fi
+# AC2: summary 없을 때 기본 라벨 한국어.
+grep -qF '승인 — 차단 지적 없음' "$WORKFLOW" \
+  || fail "한국어 기본 승인 라벨 '승인 — 차단 지적 없음' 부재"
+if grep -qF 'Approved — no blocking findings.' "$WORKFLOW"; then
+  fail "영어 기본 승인 라벨 잔존"
+fi
+# AC3: 토큰 권한으로 정식 승인 미제출 안내 한국어.
+grep -qF '승인 가능 — 단, 토큰 권한으로 정식 승인 미제출' "$WORKFLOW" \
+  || fail "한국어 토큰 승인 실패 안내 부재"
+if grep -qF 'could not be submitted by this workflow token' "$WORKFLOW"; then
+  fail "영어 토큰 승인 실패 안내 잔존"
+fi
+# AC5: verdict 표시 줄 한국어 라벨. 단, 숨김 마커 verdict enum 은 보존.
+grep -qF '결과: 승인' "$WORKFLOW" \
+  || fail "한국어 verdict 표시 줄 '결과: 승인' 부재"
+if grep -qF 'Verdict: `approve`' "$WORKFLOW"; then
+  fail "영어 verdict 표시 줄 'Verdict: \`approve\`' 잔존"
+fi
+# AC5 제약: 숨김 마커의 verdict enum 값(verdict=...) 은 변경 금지.
+grep -qF 'head_sha=${head_sha} verdict=${verdict}' "$WORKFLOW" \
+  || fail "숨김 멱등성 마커의 verdict enum 바인딩이 변경됨 (멱등성·승인 게이팅 위험)"
+ok "check 13: 보일러플레이트 한국어화 + 숨김 마커/enum 보존"
 
 echo ""
 echo "ALL CHECKS PASSED"

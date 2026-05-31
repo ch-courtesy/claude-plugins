@@ -194,7 +194,7 @@ jobs:
               '{
                 eligibility: {status: "reviewed", reason: "fallback: claude review output unparseable"},
                 verdict: "comment",
-                summary: ("Claude review output could not be parsed against the schema: " + $reason),
+                summary: ("리뷰 출력 파싱 실패: " + $reason),
                 confidence: "low",
                 reviewed_context: {
                   base_sha: $base, head_sha: $head, diff_truncated: false,
@@ -441,8 +441,8 @@ jobs:
             // inline comments) but with no issue-level summary text.
             const marker = `<!-- ${prefix} head_sha=${head_sha} verdict=${verdict} -->`;
             const body = (verdict === 'approve'
-              ? ['## Claude PR Review', '',
-                 '_Approved by automated review. Findings, if any, are posted as inline comments._',
+              ? ['## Claude PR 리뷰', '',
+                 '_승인 — 지적 사항은 인라인 코멘트 참조._',
                  '', marker]
               : [marker]).join('\n');
 
@@ -536,7 +536,7 @@ jobs:
                 try {
                   await github.rest.pulls.dismissReview({
                     owner, repo, pull_number, review_id: old.id,
-                    message: `Superseded by later review on ${head_sha} (verdict=approve)`,
+                    message: `이후 ${head_sha} 리뷰로 대체됨 — 결과: 승인`,
                   });
                   core.info(`Dismissed prior self review #${old.id} (${(old.commit_id || '').slice(0,7)} CHANGES_REQUESTED).`);
                 } catch (e) {
@@ -637,9 +637,9 @@ jobs:
               if (previous) {
                 const supersede = [
                   marker,
-                  '## Claude PR Review',
+                  '## Claude PR 리뷰',
                   '',
-                  `_Superseded by later review (current verdict: \`${result.verdict || 'unavailable'}\`). See inline comments for any findings._`,
+                  `_이후 리뷰로 대체됨 (현재 결과: \`${result.verdict || 'unavailable'}\`). 지적 사항은 인라인 코멘트 참조._`,
                 ].join('\n');
                 await github.rest.issues.updateComment({
                   owner: context.repo.owner,
@@ -657,13 +657,13 @@ jobs:
             // Approve path: approval-expressing comment ONLY — no finding evaluation
             // bodies, counts, or per-finding rendering (AC2/AC4).
             const summaryText = approvalFailed
-              ? 'Claude review found no blocking findings, but formal approval could not be submitted by this workflow token.'
-              : (result.summary || 'Approved — no blocking findings.');
+              ? '승인 가능 — 단, 토큰 권한으로 정식 승인 미제출'
+              : (result.summary || '승인 — 차단 지적 없음');
             const body = [
               marker,
-              '## Claude PR Review',
+              '## Claude PR 리뷰',
               '',
-              'Verdict: `approve`',
+              '결과: 승인',
               '',
               summaryText,
             ].join('\n');
