@@ -209,7 +209,7 @@ fi
 grep -qF '!showFullBody' "$WORKFLOW" \
   || fail "early-return 조건이 showFullBody 변수를 사용하지 않음"
 # supersede stale approve managed comment when latest verdict is non-approve
-grep -qF 'Superseded by later review' "$WORKFLOW" \
+grep -qF '이후 리뷰로 대체됨 (현재 결과' "$WORKFLOW" \
   || fail "verdict!=approve 일 때 옛 approve managed comment supersede 분기 부재 (stale approve 가 PR 대화에 남음)"
 grep -qF 'Superseded stale managed comment' "$WORKFLOW" \
   || fail "supersede core.info log 부재"
@@ -246,7 +246,7 @@ grep -qF "r.state === 'CHANGES_REQUESTED'" "$WORKFLOW" \
   || fail "dismiss 대상 식별이 state=CHANGES_REQUESTED 로 제한되지 않음"
 grep -qF "verdict === 'approve'" "$WORKFLOW" \
   || fail "dismiss 게이트가 verdict=approve 조건 부재"
-grep -qF 'Superseded by later review' "$WORKFLOW" \
+grep -qF '리뷰로 대체됨 — 결과: 승인' "$WORKFLOW" \
   || fail "dismiss message 부재"
 ok "check 10c: verdict=approve 시 옛 자기 CHANGES_REQUESTED reviews 자동 dismiss"
 
