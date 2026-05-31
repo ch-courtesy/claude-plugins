@@ -184,7 +184,7 @@ jobs:
           # failure as a comment-mode review (verdict=comment, no findings).
           # The Submit step then posts a managed comment with the failure
           # summary instead of silently dropping the run or producing a fake
-          # approve/request_changes.
+          # approve verdict.
           write_fallback() {
             local reason="$1"
             jq -n \
@@ -306,7 +306,7 @@ jobs:
             if ! jq -e '
               (.eligibility | type == "object")
               and (.eligibility.status | IN("reviewed","skipped","unavailable"))
-              and (.verdict | IN("approve","request_changes","comment","needs_context","unavailable"))
+              and (.verdict | IN("approve","comment","needs_context","unavailable"))
               and (.summary | type == "string")
               and (.confidence | IN("high","medium","low"))
               and (.automation_safety | type == "object")
@@ -419,17 +419,14 @@ jobs:
 
             const verdict = result.verdict;
             const mayApprove = !!result.automation_safety?.may_approve;
-            const mayRequest = !!result.automation_safety?.may_request_changes;
             const diffTruncated = !!result.reviewed_context?.diff_truncated;
-            const blockingHi = findings.filter((f) =>
-              f.severity === 'blocking' && (f.confidence_score ?? 0) >= 80).length;
 
-            // Event decision — unchanged gating (verdict logic is out of scope).
+            // Event decision — official review event is APPROVE or COMMENT only.
+            // The changes-requested review state is abolished: blocking findings
+            // surface as inline comments (inline-only policy), not as a review state.
             let event;
             if (findings.length === 0 && verdict === 'approve' && mayApprove && !diffTruncated) {
               event = 'APPROVE';
-            } else if (!diffTruncated && verdict === 'request_changes' && mayRequest && blockingHi > 0) {
-              event = 'REQUEST_CHANGES';
             } else {
               event = 'COMMENT';
             }
@@ -447,16 +444,21 @@ jobs:
               : [marker]).join('\n');
 
             // Inline review comments — path/line/body (start_line for multi-line range).
-            // The hidden marker lets us later identify self-owned threads so we
-            // can resolve them when the corresponding source has been fixed.
-            const inlineMarker = '<!-- claude-review-inline -->';
+            // The hidden marker lets us later identify self-owned threads so we can
+            // resolve them on a finding-unit (fingerprint) basis. We extend the
+            // existing self-identification marker by appending the finding's
+            // fingerprint — the base substring (inlineMarkerBase) is preserved so
+            // self-identification keeps working, and the fingerprint lets a later
+            // run map the model's resolved_threads judgments back to this thread.
+            const inlineMarkerBase = '<!-- claude-review-inline';
             const inlineComments = inlineFindings.map((f) => {
               // Anchor to f.line; fall back to f.start_line so a finding is never
               // dropped (validation guarantees at least one is a positive int).
               const anchor = (typeof f.line === 'number' && f.line > 0) ? f.line : f.start_line;
+              const fingerprintMarker = `${inlineMarkerBase} fingerprint=${f.fingerprint} -->`;
               const c = {
                 path: f.file,
-                body: `**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}\n\n${inlineMarker}`,
+                body: `**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}\n\n${fingerprintMarker}`,
                 side: 'RIGHT',
                 line: anchor,
               };
@@ -473,7 +475,7 @@ jobs:
               github.rest.pulls.listReviews,
               { owner, repo, pull_number, per_page: 100 });
             // 중복 감지 시 즉시 return하지 않는다 — 제출(submit)만 건너뛰고
-            // approve verdict 후처리(이전 CHANGES_REQUESTED dismiss·outdated thread resolve)는 계속 실행한다.
+            // self inline thread 의 finding 단위 resolve 후처리는 verdict 와 무관하게 계속 실행한다.
             let skipSubmit = false;
             if (existingReviews.some((r) =>
                 r.user?.login === botLogin && (r.body || '').includes(marker))) {
@@ -495,7 +497,6 @@ jobs:
               comments: inlineComments,
             });
 
-            let actualEvent = event;
             let submitOk = false;
             if (!skipSubmit) {
               try {
@@ -506,7 +507,6 @@ jobs:
                 if (event === 'APPROVE') {
                   core.warning(`APPROVE failed (${e.status || ''} ${e.message}); falling back to COMMENT.`);
                   fs.writeFileSync('.claude-review/approval-failed', '');
-                  actualEvent = 'COMMENT';
                   try { await submit('COMMENT'); submitOk = true; }
                   catch (e2) { core.warning(`Fallback COMMENT also failed (${e2.status || ''} ${e2.message}); continuing.`); }
                 } else {
@@ -523,78 +523,73 @@ jobs:
               core.warning(`createReview failed; ${inlineFindings.length} inline finding(s) could not be posted. Not dumping to an issue comment (inline-only policy); see logs.`);
             }
 
-            // Auto-dismiss prior self CHANGES_REQUESTED reviews when this verdict is approve.
-            // Resolves the "old issue raised but latest verdict=approve" state mismatch users see.
-            const verdictIsApprove = verdict === 'approve'
-              && (actualEvent === 'APPROVE' || fs.existsSync('.claude-review/approval-failed'));
-            if (verdictIsApprove) {
-              const oldChanges = existingReviews.filter((r) =>
-                r.user?.login === botLogin &&
-                r.state === 'CHANGES_REQUESTED' &&
-                (r.body || '').includes(prefix));
-              for (const old of oldChanges) {
-                try {
-                  await github.rest.pulls.dismissReview({
-                    owner, repo, pull_number, review_id: old.id,
-                    message: `이후 ${head_sha} 리뷰로 대체됨 — 결과: 승인`,
-                  });
-                  core.info(`Dismissed prior self review #${old.id} (${(old.commit_id || '').slice(0,7)} CHANGES_REQUESTED).`);
-                } catch (e) {
-                  core.warning(`Failed to dismiss prior review #${old.id}: ${e.status || ''} ${e.message}`);
-                }
-              }
-
-              // Resolve our own inline review threads when the latest verdict
-              // is approve — a fresh approve supersedes all prior self inline
-              // findings (same intent as the dismiss-on-approve above). We only
-              // touch self-owned threads, identified by the hidden inline marker
-              // we embed above. Not gated on isOutdated: this path runs only on a
-              // clean approve (no current-round inline findings), so there are no
-              // live threads to resolve by mistake.
-              try {
-                const threadResp = await github.graphql(`
-                  query($owner:String!, $repo:String!, $pr:Int!) {
-                    repository(owner: $owner, name: $repo) {
-                      pullRequest(number: $pr) {
-                        reviewThreads(first: 100) {
-                          nodes {
-                            id
-                            isResolved
-                            comments(first: 1) {
-                              nodes { author { login } body }
-                            }
+            // Resolve self inline threads on a finding-unit (fingerprint) basis.
+            // This runs on every review execution regardless of verdict — it is
+            // NOT gated on approve. Two tiers:
+            //   (1) primary  — fingerprints the model listed in resolved_threads;
+            //   (2) fallback — self threads whose fingerprint is absent from this
+            //                   round's findings set (no longer reported).
+            // A self thread whose fingerprint is still in the findings set (and
+            // not in resolved_threads) is left untouched. Only self-owned threads
+            // are touched; threads whose marker has no extractable fingerprint are
+            // left untouched.
+            const resolvedFingerprints = new Set(
+              (result.resolved_threads || [])
+                .map((r) => r && r.fingerprint)
+                .filter((fp) => typeof fp === 'string' && fp.length > 0));
+            const findingFingerprints = new Set(
+              findings
+                .map((f) => f && f.fingerprint)
+                .filter((fp) => typeof fp === 'string' && fp.length > 0));
+            try {
+              const threadResp = await github.graphql(`
+                query($owner:String!, $repo:String!, $pr:Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $pr) {
+                      reviewThreads(first: 100) {
+                        nodes {
+                          id
+                          isResolved
+                          comments(first: 1) {
+                            nodes { author { login } body }
                           }
                         }
                       }
                     }
-                  }`, { owner, repo, pr: pull_number });
-                const threads = threadResp.repository?.pullRequest?.reviewThreads?.nodes || [];
-                // GraphQL Actor.login omits the REST "[bot]" suffix (returns
-                // "github-actions"), so the REST botLogin never matches here —
-                // accept both forms.
-                const botLoginGql = botLogin.replace(/\[bot\]$/, '');
-                const myInlineThreads = threads.filter((t) => {
-                  const author = t.comments?.nodes?.[0]?.author?.login;
-                  return !t.isResolved &&
-                    (author === botLogin || author === botLoginGql) &&
-                    (t.comments.nodes[0].body || '').includes(inlineMarker);
-                });
-                for (const t of myInlineThreads) {
-                  try {
-                    await github.graphql(`
-                      mutation($id:ID!) {
-                        resolveReviewThread(input: {threadId: $id}) {
-                          thread { id isResolved }
-                        }
-                      }`, { id: t.id });
-                    core.info(`Resolved self inline thread ${t.id}.`);
-                  } catch (e) {
-                    core.warning(`Failed to resolve thread ${t.id}: ${e.message}`);
                   }
+                }`, { owner, repo, pr: pull_number });
+              const threads = threadResp.repository?.pullRequest?.reviewThreads?.nodes || [];
+              // GraphQL Actor.login omits the REST "[bot]" suffix (returns
+              // "github-actions"), so the REST botLogin never matches here —
+              // accept both forms.
+              const botLoginGql = botLogin.replace(/\[bot\]$/, '');
+              const fpRe = /<!-- claude-review-inline fingerprint=([^\s]+) -->/;
+              for (const t of threads) {
+                if (t.isResolved) continue;
+                const author = t.comments?.nodes?.[0]?.author?.login;
+                if (author !== botLogin && author !== botLoginGql) continue;
+                const cbody = t.comments?.nodes?.[0]?.body || '';
+                if (!cbody.includes(inlineMarkerBase)) continue;
+                const m = cbody.match(fpRe);
+                const fp = m && m[1];
+                if (!fp) continue; // legacy/markerless thread — leave untouched (AC7)
+                const byModel = resolvedFingerprints.has(fp);
+                const byFallback = !byModel && !findingFingerprints.has(fp);
+                if (!byModel && !byFallback) continue; // still reported — leave (AC5)
+                try {
+                  await github.graphql(`
+                    mutation($id:ID!) {
+                      resolveReviewThread(input: {threadId: $id}) {
+                        thread { id isResolved }
+                      }
+                    }`, { id: t.id });
+                  core.info(`Resolved self inline thread ${t.id} (fingerprint=${fp}, via=${byModel ? 'resolved_threads' : 'fallback'}).`);
+                } catch (e) {
+                  core.warning(`Failed to resolve thread ${t.id}: ${e.message}`);
                 }
-              } catch (e) {
-                core.warning(`Failed to fetch review threads for resolve: ${e.message}`);
               }
+            } catch (e) {
+              core.warning(`Failed to fetch review threads for resolve: ${e.message}`);
             }
 
       - name: Post Claude review comment

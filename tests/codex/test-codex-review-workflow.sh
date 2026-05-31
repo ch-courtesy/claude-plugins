@@ -161,9 +161,10 @@ grep -q 'issues.createComment' "$WORKFLOW" \
 ok "check 9: marker 기반 update/create 코멘트 경로 존재"
 
 echo ""
-echo "=== check 10: verdict submission via Pulls REST API with inline comments + auto-dismiss ==="
-# Submit step is now a github-script step that calls pulls.createReview directly
-# so it can post inline review comments AND auto-dismiss stale CHANGES_REQUESTED.
+echo "=== check 10: verdict submission via Pulls REST API with inline comments (APPROVE/COMMENT only) ==="
+# Submit step is a github-script step that calls pulls.createReview directly
+# so it can post inline review comments. Official event is APPROVE or COMMENT
+# only — REQUEST_CHANGES is abolished (AC10/AC11).
 grep -qF 'github.rest.pulls.createReview' "$WORKFLOW" \
   || fail "Pulls REST createReview 호출 부재 — inline comments 게시 불가 (gh pr review 로는 inline 미지원)"
 grep -qF 'comments: inlineComments' "$WORKFLOW" \
@@ -183,8 +184,10 @@ grep -qF 'start_line' "$WORKFLOW" \
   || fail "multi-line inline comment 의 start_line 처리 부재"
 grep -qF "event === 'APPROVE'" "$WORKFLOW" \
   || fail "APPROVE event 분기 부재"
-grep -qF "'REQUEST_CHANGES'" "$WORKFLOW" \
-  || fail "REQUEST_CHANGES event 분기 부재"
+# AC16(e): REQUEST_CHANGES review event 를 제출하는 분기가 존재하면 실패.
+if grep -qF 'REQUEST_CHANGES' "$WORKFLOW"; then
+  fail "REQUEST_CHANGES 잔존 — 공식 review event 는 APPROVE/COMMENT 만 (AC10/AC11)"
+fi
 grep -qF "fs.writeFileSync('.codex-review/approval-failed'" "$WORKFLOW" \
   || fail "APPROVE 실패 시 approval-failed marker 부재"
 grep -qF "'github-actions[bot]'" "$WORKFLOW" \
@@ -192,9 +195,7 @@ grep -qF "'github-actions[bot]'" "$WORKFLOW" \
 grep -qF 'automation_safety' "$WORKFLOW" \
   || fail "automation_safety gate 부재"
 grep -qF 'confidence_score' "$WORKFLOW" \
-  || fail "confidence_score gate 부재"
-grep -qF '>= 80' "$WORKFLOW" \
-  || fail "confidence_score >= 80 threshold 부재"
+  || fail "confidence_score 부재"
 # 요약(issue-level) managed comment 는 approve 일 때만. inline-fallback 경로 제거(AC2/AC3).
 grep -qF 'Managed Codex review comment is only posted on verdict=approve' "$WORKFLOW" \
   || fail "managed comment 게이트가 verdict=approve 전용이 아님 (AC3)"
@@ -213,18 +214,7 @@ grep -qF '이후 리뷰로 대체됨 (현재 결과' "$WORKFLOW" \
   || fail "verdict!=approve 일 때 옛 approve managed comment supersede 분기 부재 (stale approve 가 PR 대화에 남음)"
 grep -qF 'Superseded stale managed comment' "$WORKFLOW" \
   || fail "supersede core.info log 부재"
-# auto-resolve self inline threads on verdict=approve (outdated 무관)
-grep -qF "<!-- codex-review-inline -->" "$WORKFLOW" \
-  || fail "inline comment 의 self-identification marker (codex-review-inline) 부재"
-grep -qF 'resolveReviewThread' "$WORKFLOW" \
-  || fail "GraphQL resolveReviewThread mutation 호출 부재 — self inline thread 자동 resolve 안 됨"
-grep -qF 'botLoginGql' "$WORKFLOW" \
-  || fail "GraphQL author login 형식 정규화(botLoginGql) 부재 — GraphQL은 'github-actions' 반환, REST '[bot]' 형식만 비교하면 self thread 매칭 실패로 resolve 안 됨"
-grep -qF 'isResolved' "$WORKFLOW" \
-  || fail "isResolved 조건 검사 부재 (이미 resolved thread skip)"
-grep -qF 'reviewThreads(first: 100)' "$WORKFLOW" \
-  || fail "GraphQL reviewThreads 쿼리 부재"
-ok "check 10: createReview + inline comments + safety gates + COMMENT fallback"
+ok "check 10: createReview + inline comments + APPROVE/COMMENT only + approve-only managed comment"
 
 echo ""
 echo "=== check 10b: formal review idempotent per (head_sha, verdict) ==="
@@ -236,19 +226,56 @@ grep -qF "r.state === 'APPROVED' && r.commit_id === head_sha" "$WORKFLOW" \
   || fail "동일 head_sha approve 중복 방지 부재"
 grep -qF 'already exists; skipping duplicate' "$WORKFLOW" \
   || fail "marker 기반 중복 review skip 메시지 부재"
-ok "check 10b: marker + APPROVED state + head_sha 기준 멱등"
+ok "check 10b: marker + APPROVED state + head_sha 기준 멱등 (REST botLogin 식별 불변, AC14)"
 
 echo ""
-echo "=== check 10c: auto-dismiss prior CHANGES_REQUESTED when verdict=approve ==="
-grep -qF 'github.rest.pulls.dismissReview' "$WORKFLOW" \
-  || fail "옛 CHANGES_REQUESTED reviews 자동 dismiss 호출 부재"
-grep -qF "r.state === 'CHANGES_REQUESTED'" "$WORKFLOW" \
-  || fail "dismiss 대상 식별이 state=CHANGES_REQUESTED 로 제한되지 않음"
-grep -qF "verdict === 'approve'" "$WORKFLOW" \
-  || fail "dismiss 게이트가 verdict=approve 조건 부재"
-grep -qF '리뷰로 대체됨 — 결과: 승인' "$WORKFLOW" \
-  || fail "dismiss message 부재"
-ok "check 10c: verdict=approve 시 옛 자기 CHANGES_REQUESTED reviews 자동 dismiss"
+echo "=== check 10c: dismiss-on-approve(CHANGES_REQUESTED dismiss) 로직 제거됨 (AC13) ==="
+if grep -qF 'github.rest.pulls.dismissReview' "$WORKFLOW"; then
+  fail "dismissReview 잔존 — dismiss-on-approve 로직 제거 필요 (AC13)"
+fi
+if grep -qF 'CHANGES_REQUESTED' "$WORKFLOW"; then
+  fail "CHANGES_REQUESTED 잔존 — REQUEST_CHANGES 폐지로 거둘 대상 없음 (AC13)"
+fi
+if grep -qF 'verdictIsApprove' "$WORKFLOW"; then
+  fail "verdictIsApprove 게이트 잔존 — self thread resolve 는 verdict 무관이어야 함 (AC6)"
+fi
+ok "check 10c: dismiss-on-approve / CHANGES_REQUESTED 제거됨"
+
+echo ""
+echo "=== check 10e: finding-unit (fingerprint) self inline thread resolve, verdict 무관 (AC1~AC9) ==="
+# AC1/AC9: 게시 inline 마커가 기존 self-식별 substring 을 보존하면서 finding fingerprint 운반.
+grep -qF '<!-- codex-review-inline' "$WORKFLOW" \
+  || fail "inline self-식별 마커 substring(<!-- codex-review-inline) 부재 (AC9 기존 식별 보존)"
+grep -qF 'fingerprint=${f.fingerprint}' "$WORKFLOW" \
+  || fail "게시 inline 마커에 finding fingerprint 미운반 (AC1) — fingerprint=\${f.fingerprint} 필요"
+# AC3: resolved_threads 소비 1차 경로.
+grep -qF 'resolved_threads' "$WORKFLOW" \
+  || fail "resolved_threads 소비 경로 부재 (AC3)"
+grep -qF 'resolvedFingerprints' "$WORKFLOW" \
+  || fail "resolved_threads fingerprint 집합(resolvedFingerprints) 부재 (AC3)"
+# AC4: fingerprint-부재 fallback 2차 경로.
+grep -qF 'findingFingerprints' "$WORKFLOW" \
+  || fail "이번 라운드 findings fingerprint 집합(findingFingerprints) 부재 (AC4 fallback)"
+# AC6: verdict 게이트 밖에서 매 실행 resolve (sentinel 마커).
+grep -qF 'regardless of verdict' "$WORKFLOW" \
+  || fail "resolve 가 verdict 무관 실행임을 명시하는 마커(regardless of verdict) 부재 (AC6)"
+grep -qF 'resolveReviewThread' "$WORKFLOW" \
+  || fail "GraphQL resolveReviewThread mutation 호출 부재 — self inline thread 자동 resolve 안 됨"
+grep -qF 'botLoginGql' "$WORKFLOW" \
+  || fail "GraphQL author login 형식 정규화(botLoginGql) 부재 (AC9)"
+grep -qF 'isResolved' "$WORKFLOW" \
+  || fail "isResolved 조건 검사 부재 (AC8 이미 resolved thread skip)"
+grep -qF 'reviewThreads(first: 100)' "$WORKFLOW" \
+  || fail "GraphQL reviewThreads 쿼리 부재"
+ok "check 10e: fingerprint 운반 + resolved_threads 1차 + fallback 2차 + verdict 무관 resolve"
+
+echo ""
+echo "=== check 10f: request_changes verdict 어휘 제거 (workflow) (AC12/AC16f) ==="
+# may_request_changes 필드(automation_safety)는 유지(non-goal). 그 외 request_changes 토큰 금지.
+if grep -oE '[a-z_]*request_changes' "$WORKFLOW" | grep -qvE '^may_request_changes$'; then
+  fail "request_changes verdict 어휘 잔존 (may_request_changes 외) — workflow 에서 제거 필요 (AC12)"
+fi
+ok "check 10f: workflow verdict 어휘에 request_changes 없음 (may_request_changes 만 잔존)"
 
 echo ""
 echo "=== check 10d: managed comment 은 finding 평가 본문을 렌더하지 않는다 (inline-only) ==="
@@ -315,6 +342,24 @@ if grep -qF '"issue"' "$SCHEMA"; then
   fail "schema comment_type enum 에 issue 잔존 — inline-only 정책에서 제거되어야 함"
 fi
 ok "check 11c: prompt·schema 가 inline-only + 강제 anchoring 정책을 반영"
+
+echo ""
+echo "=== check 11d: resolved_threads 채우기 지시 + request_changes 어휘 제거 (prompt·schema) ==="
+# AC2: 기존 self thread 마커 fingerprint 근거로 resolved_threads 를 채우라는 지시.
+grep -q 'resolved_threads' "$PROMPT" \
+  || fail "prompt 에 resolved_threads 기록 지시 부재 (AC2)"
+grep -q 'fingerprint' "$PROMPT" \
+  || fail "prompt 에 fingerprint 근거 지시 부재 (AC2)"
+# AC12/AC16(f): request_changes 어휘가 prompt·schema verdict enum 에서 제거.
+if grep -qF 'request_changes' "$PROMPT"; then
+  fail "prompt 에 request_changes 어휘 잔존 — 모델이 산출하지 않도록 제거 필요 (AC12)"
+fi
+if grep -oE '[a-z_]*request_changes' "$SCHEMA" | grep -qvE '^may_request_changes$'; then
+  fail "schema verdict enum 에 request_changes 잔존 (AC12)"
+fi
+grep -q 'may_request_changes' "$SCHEMA" \
+  || fail "may_request_changes 필드가 schema 에서 제거됨 — non-goal: 미사용으로 남기되 유지해야 함"
+ok "check 11d: resolved_threads 지시 + request_changes 어휘 제거 (may_request_changes 필드 유지)"
 
 echo ""
 echo "=== check 12: schema requires automation safety and context fields ==="
