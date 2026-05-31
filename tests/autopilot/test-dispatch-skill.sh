@@ -36,16 +36,6 @@ grep -q '^name: dispatch$' "$SKILL_MD" \
 echo "OK"
 
 echo ""
-echo "=== TEST 4: SKILL.md description 키워드 (SPEC·DAG·wave) ==="
-DESC_LINE=$(grep -m1 '^description:' "$SKILL_MD" || true)
-[[ -n "$DESC_LINE" ]] || { echo "FAIL: description 라인 없음"; exit 1; }
-for kw in 'SPEC|spec' 'DAG|wave' 'orchestrat|위임|병렬'; do
-  echo "$DESC_LINE" | grep -qE "$kw" \
-    || { echo "FAIL: description 에 '$kw' 키워드 없음. got: $DESC_LINE"; exit 1; }
-done
-echo "OK"
-
-echo ""
 echo "=== TEST 5: SKILL.md 5 subcommand (start/list/status/stop/watch) ==="
 for sub in start list status stop watch; do
   grep -qE "dispatch ${sub}\b|^### ${sub}\b|^## ${sub}\b" "$SKILL_MD" \

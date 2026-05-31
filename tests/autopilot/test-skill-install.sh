@@ -99,10 +99,10 @@ grep -qE '^##[[:space:]]*완료 조건' "$SPEC_TEMPLATE_MD" \
   || { echo "FAIL: spec-template.md 수용 기준 섹션 제목이 '완료 조건'이 아님"; exit 1; }
 echo "OK: '완료 조건' 라벨 (spec-template.md)"
 grep -q '\[NEEDS CLARIFICATION\]' "$SPEC_SKILL_MD" \
-  || { echo "FAIL: spec/SKILL.md description에 '[NEEDS CLARIFICATION]' 마커 없음"; exit 1; }
+  || { echo "FAIL: spec/SKILL.md 본문에 '[NEEDS CLARIFICATION]' 마커 없음"; exit 1; }
 echo "OK: [NEEDS CLARIFICATION] 마커"
 grep -q -- '--resume' "$SPEC_SKILL_MD" \
-  || { echo "FAIL: spec/SKILL.md description에 '--resume' 마커 없음"; exit 1; }
+  || { echo "FAIL: spec/SKILL.md 본문에 '--resume' 마커 없음"; exit 1; }
 echo "OK: --resume 마커"
 # 정합 갱신: 경량 redesign 으로 spec 스킬은 외부 상태(브랜치 포함)를 만들지 않는다.
 # 과거 'feat/<task-id>' 브랜치 자동 생성 명세는 제거된 기능이므로 부재(negative)를 검증.
@@ -131,7 +131,7 @@ grep -q 'name: dispatch' "$DISPATCH_SKILL_MD" \
   || { echo "FAIL: dispatch/SKILL.md frontmatter에 'name: dispatch' 없음"; exit 1; }
 echo "OK: name: dispatch"
 grep -qE 'start|status|stop|list|cleanup|logs|resume' "$DISPATCH_SKILL_MD" \
-  || { echo "FAIL: dispatch/SKILL.md description에 서브커맨드 마커 없음"; exit 1; }
+  || { echo "FAIL: dispatch/SKILL.md 본문에 서브커맨드 마커 없음"; exit 1; }
 echo "OK: 서브커맨드 마커"
 
 echo ""

@@ -1,6 +1,6 @@
 ---
 name: spec
-description: "기능 추가·동작 수정·지침 작성·새로 만들기 등 새 코드 변경을 정의하는 자연어 신호에 대응. 명확화 인터뷰로 도중 질문 없이 수행 가능한 자기완결적 SPEC 문서(들)를 `docs/specs/<날짜>-<slug>/SPEC.md`에 작성하고, 구현 스킬(autopilot:dispatch)을 추천합니다. 외부 상태(이슈·브랜치·원격)는 만들지 않습니다. 호출 'Skill(skill=\"spec\", args=\"<자연어 task 설명> [--resume <spec-path>]\")'."
+description: "어떤 작업이든 시작하기 전 가장 먼저 사용 — 의도·요구사항·설계를 명확화 인터뷰로 탐색해 자기완결적 SPEC 문서를 작성하고 구현 스킬(autopilot:dispatch)을 추천. 호출 'Skill(skill=\"spec\", args=\"<자연어 task 설명> [--resume <spec-path>]\")'."
 allowed-tools:
   - AskUserQuestion
   - Read
@@ -21,6 +21,7 @@ allowed-tools:
   - Bash(printf:*)
   - Bash(pwd:*)
   - Bash(mkdir -p docs/specs/**)
+  - Bash(mkdir -p:*)
   - ToolSearch
 ---
 
@@ -69,7 +70,7 @@ allowed-tools:
 
 분해 발행(step 2의 N개)에서는 단위마다 템플릿을 한 번씩 치환해 문서를 만들고, 각 문서의 `{{depends_on}}`에 선행 단위 slug 목록을 기록한다(`depends_on: ["<slug>"]`). 단일 발행이면 `{{depends_on}}` 줄을 제거한다.
 
-산출 경로는 `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`다 — 각 SPEC은 자신의 디렉토리를 갖고 문서 본문은 그 안의 `SPEC.md`에 둔다. `<YYYY-MM-DD>`는 작성일(로컬 날짜), `<slug>`는 SPEC 제목에서 파생한다 — slug 파생·파일명·디렉토리 레이아웃 규칙은 `rules/engineering/branch-and-slug.md`가 단일 출처다. 빈 slug는 fallback 디렉토리 없이 abort하고 제목 수정을 요청한다. 산출 디렉토리(`docs/specs/<YYYY-MM-DD>-<slug>/`)가 없으면 만든다. authoring 모드는 항상 이 신 디렉토리 레이아웃만 산출하며, 본문을 디렉토리 없이 `docs/specs/` 바로 아래 단일 파일로 두지 않는다.
+산출 경로의 해석 규칙·기본값의 단일 출처는 `rules/engineering/branch-and-slug.md`의 "SPEC 산출 경로 해석"이다 — 이미 로드된 프로젝트 지침에 spec 경로 선언이 있으면 그 선언(베이스·per-spec 네이밍 포함)을 따르고, 없으면 기본값 `docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`를 쓴다(이 규칙을 여기서 중복 정의하지 않고 그 단일 출처를 따른다). 어느 경우에도 각 SPEC은 자신의 전용 디렉토리를 갖고 문서 본문은 그 안의 `SPEC.md`에 둔다 — `<YYYY-MM-DD>`는 작성일(로컬 날짜), `<slug>`는 SPEC 제목에서 파생한다. 빈 slug는 기본 네이밍에서 fallback 디렉토리 없이 abort하고 제목 수정을 요청한다. 해석된 산출 디렉토리가 없으면 만들며, 기본값이 아닌 선언 경로에 대해서도 생성이 차단되지 않아야 한다. authoring 모드는 항상 per-spec 디렉토리 + 그 안 `SPEC.md` 레이아웃만 산출하며, 본문을 디렉토리 없이 베이스 바로 아래 단일 파일로 두지 않는다.
 
 ### 6. 자체 검토
 
@@ -92,7 +93,7 @@ allowed-tools:
 
 ## --resume 요약
 
-대상 SPEC 문서 경로를 인자로 받는다. 구 형식(`docs/specs/<YYYY-MM-DD>-<slug>.md`)과 신 형식(`docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`) 경로를 모두 수용해 해당 문서를 그 자리에서 갱신한다(구 형식 문서를 신 레이아웃으로 옮기지 않는다 — 이전은 마이그레이션의 책임이다). 문서가 없으면 abort, `[NEEDS CLARIFICATION` 마커가 없으면 종료한다. step 2는 생략, step 3은 남은 마커 섹션만 다시 묻는다. step 5-6은 마커 섹션만 갱신·재작성하고, step 7로 종결한다. 새 외부 상태는 만들지 않는다.
+대상 SPEC 문서 경로를 인자로 받는다. 경로가 기본값 형태이든 외부 선언값(베이스·네이밍이 다른) 형태이든, 인자로 받은 그 경로의 문서를 그 자리에서 갱신한다 — 특정 베이스·네이밍을 가정해 거부하지 않는다(경로 해석 규칙의 단일 출처는 `rules/engineering/branch-and-slug.md`). 구 형식(`docs/specs/<YYYY-MM-DD>-<slug>.md`)과 신 형식(`docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`) 경로를 모두 수용해 해당 문서를 그 자리에서 갱신한다(구 형식 문서를 신 레이아웃으로 옮기지 않는다 — 이전은 마이그레이션의 책임이다). 문서가 없으면 abort, `[NEEDS CLARIFICATION` 마커가 없으면 종료한다. step 2는 생략, step 3은 남은 마커 섹션만 다시 묻는다. step 5-6은 마커 섹션만 갱신·재작성하고, step 7로 종결한다. 새 외부 상태는 만들지 않는다.
 
 ## 모듈 구성 (references/)
 
