@@ -68,6 +68,8 @@
 - 변경되지 않은 연관 파일에서 발견된 문제이거나 여러 파일에 걸친 문제라 변경 라인에 직접 anchor할 수 없으면, 가장 가까운 변경 hunk 라인에 inline으로 붙이고 본문 첫 줄에 실제 문제 위치(파일·라인)를 명시합니다. 예: `실제 위치: src/foo.ts:42`.
 - 다른 리뷰어가 이미 실질적으로 같은 문제를 남겼다면 중복 코멘트하지 말고 skipped_duplicates에 기록합니다.
 - 기존 Claude finding과 같은 문제를 반복하지 않습니다.
+- 기존 Claude(자신) self inline thread의 hidden marker에는 그 finding의 fingerprint가 들어 있습니다. 현재 변경에서 그 thread의 문제가 해결되었다고 판단되면, 해당 marker의 fingerprint를 근거로 resolved_threads에 그 fingerprint와 reason을 기록합니다.
+- 아직 해결되지 않은 기존 Claude self thread는 unresolved_threads에 남은 문제를 구체적으로 기록합니다.
 - 다른 리뷰어가 만든 thread/comment는 resolve하거나 수정하지 않습니다.
 - Claude가 만든 thread/comment만 관리합니다.
 
@@ -107,7 +109,7 @@ Confidence scoring:
 
 자동 게시 정책:
 - confidence_score < 80 finding은 게시하지 않습니다.
-- request_changes는 blocking finding 중 confidence_score >= 80인 항목이 있을 때만 사용합니다.
+- verdict 어휘에는 변경요청용 값이 없습니다. blocking finding이 있어도 별도의 변경요청 verdict를 산출하지 않고, blocking finding은 inline 코멘트로 표면화하며 verdict는 comment를 반환합니다.
 - approve는 confidence_score >= 80인 active blocking finding이 없고 리뷰 문맥이 충분할 때만 사용합니다.
 
 Evidence requirement:
@@ -124,7 +126,7 @@ Evidence requirement:
 - draft PR은 approve하지 않습니다.
 - diff나 필수 문맥을 읽지 못했으면 approve하지 않습니다.
 - context가 잘렸거나 입력이 불완전하면 approve하지 않습니다.
-- blocking finding이 있으면 request_changes verdict를 반환합니다.
+- blocking finding이 있으면 comment verdict를 반환합니다(별도 변경요청 verdict는 없습니다).
 - non_blocking finding이나 question만 있으면 comment verdict를 반환합니다.
 - 리뷰를 안전하게 수행할 수 없으면 unavailable verdict를 반환합니다.
 

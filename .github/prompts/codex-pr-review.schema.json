@@ -30,7 +30,7 @@
     },
     "verdict": {
       "type": "string",
-      "enum": ["approve", "request_changes", "comment", "needs_context", "unavailable"]
+      "enum": ["approve", "comment", "needs_context", "unavailable"]
     },
     "summary": { "type": "string" },
     "confidence": {
