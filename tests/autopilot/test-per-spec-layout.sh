@@ -58,15 +58,6 @@ done < <(grep -E "$OLD_PATH_RE" "$SPEC_SKILL_MD" || true)
 ok "AC1-2: 구 단일 파일 경로는 backward-compat 문맥에서만 등장"
 
 echo ""
-echo "=== AC1-3: spec SKILL.md description 은 신 레이아웃만 표기 ==="
-desc_line=$(grep -m1 '^description:' "$SPEC_SKILL_MD" || true)
-grep -qF 'docs/specs/<날짜>-<slug>/SPEC.md' <<< "$desc_line" \
-  || fail "AC1-3: description 에 신 레이아웃 'docs/specs/<날짜>-<slug>/SPEC.md' 부재"
-grep -qE 'docs/specs/<날짜>-<slug>\.md' <<< "$desc_line" \
-  && fail "AC1-3: description 에 구 단일 파일 경로 잔존"
-ok "AC1-3: description 신 레이아웃만 표기"
-
-echo ""
 echo "=== AC6: 빈 slug abort 지시 보존 (rule + spec) ==="
 grep -qE 'abort|중단' "$RULE_MD" \
   || fail "AC6: rule 문서에 빈 slug abort 지시 부재"

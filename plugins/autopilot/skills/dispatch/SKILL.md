@@ -1,6 +1,6 @@
 ---
 name: dispatch
-description: "1 개 이상의 임의 SPEC 파일 경로를 받아 frontmatter depends_on 으로 DAG 를 추론하고, wave 단위로 자율 실행기에 병렬 위임한 뒤 결과를 취합하는 spec-list-driven orchestrator. start/list/status/stop/watch 서브커맨드로 run lifecycle 을 관리."
+description: "하나 이상의 SPEC 파일을 구현 단계로 넘기고 싶을 때 사용 — 의존성(depends_on)을 풀어 wave 단위로 자율 실행기에 병렬 위임하고 결과를 취합. 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch)."
 ---
 
 # dispatch

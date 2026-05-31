@@ -1,6 +1,6 @@
 ---
 name: spec
-description: "기능 추가·동작 수정·지침 작성·새로 만들기 등 새 코드 변경을 정의하는 자연어 신호에 대응. 명확화 인터뷰로 도중 질문 없이 수행 가능한 자기완결적 SPEC 문서(들)를 `docs/specs/<날짜>-<slug>/SPEC.md`에 작성하고, 구현 스킬(autopilot:dispatch)을 추천합니다. 외부 상태(이슈·브랜치·원격)는 만들지 않습니다. 호출 'Skill(skill=\"spec\", args=\"<자연어 task 설명> [--resume <spec-path>]\")'."
+description: "어떤 작업이든 시작하기 전 가장 먼저 사용 — 의도·요구사항·설계를 명확화 인터뷰로 탐색해 자기완결적 SPEC 문서를 작성하고 구현 스킬(autopilot:dispatch)을 추천. 호출 'Skill(skill=\"spec\", args=\"<자연어 task 설명> [--resume <spec-path>]\")'."
 allowed-tools:
   - AskUserQuestion
   - Read

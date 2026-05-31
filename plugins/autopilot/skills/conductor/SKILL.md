@@ -1,6 +1,6 @@
 ---
 name: conductor
-description: "spec→dispatch 자동화 파이프라인을 엔드투엔드로 닫는 forge 호출 레이어 오케스트레이터. intake/start/review/merge/poll/status/list/stop 서브커맨드로 task 단위 lifecycle 을 관리하며, SPEC 작성은 spec 스킬·구현 위임은 dispatch 스킬의 공개 인터페이스로만 조합한다. 본 골격(C0)은 정의·라우터·상태 저장소까지만 제공하고 forge·task backend 연동은 후속 단위(C1~C5)가 채운다."
+description: "자연어 의도 → SPEC → 구현 → 리뷰 → 머지 파이프라인을 task 단위로 끝까지 자동으로 닫고 싶을 때 사용 — SPEC 작성(spec)·구현 위임(dispatch)을 forge/task backend 위에서 엔드투엔드로 오케스트레이션. 호출 'Skill(skill=\"conductor\", args=\"<subcommand> [<args>]\")' (intake/start/review/merge/poll/status/list/stop)."
 ---
 
 # conductor

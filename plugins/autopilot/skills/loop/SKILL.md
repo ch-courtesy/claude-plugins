@@ -1,6 +1,6 @@
 ---
 name: loop
-description: 스펙 파일 기반 로컬 자율 수행 루프(랄프 루프) 운영 인터페이스. 스펙 파일 경로를 받아 격리 작업 공간에서 자율 구현하고 .loop/signals/ 디렉토리의 파일로 terminal 상태를 표현한다. start/status/stop/list/cleanup/logs 서브커맨드로 lifecycle을 관리한다.
+description: 단일 SPEC 파일을 격리 작업 공간에서 자율적으로 구현(랄프 루프)하고 싶을 때 사용. 호출 'Skill(skill="loop", args="<subcommand> [<args>]")' (start/status/stop/list/cleanup/logs).
 allowed-tools:
   - Monitor
   - Read
