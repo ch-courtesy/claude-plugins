@@ -8,3 +8,4 @@ milestones/**/loops/**/.worktree/
 milestones/**/loops/**/.lock
 .claude/worktrees/
 .claude/settings.local.json
+.conductor/
