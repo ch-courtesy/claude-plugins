@@ -411,4 +411,33 @@ grep -qF 'head_sha=${head_sha} verdict=${verdict}' "$WORKFLOW" \
 ok "check 13: 보일러플레이트 한국어화 + 숨김 마커/enum 보존"
 
 echo ""
+echo "=== check 14: GitHub App 설치 토큰 발급 + identity 통일 + graceful fallback + self-trigger 게이트 (SPEC 2026-05-31 app-token-approve) ==="
+# AC1/제약(토큰 발급 방식): actions/create-github-app-token 으로 단명 설치 토큰 발급, SHA 고정.
+grep -qE 'uses: actions/create-github-app-token@[0-9a-f]{40}' "$WORKFLOW" \
+  || fail "actions/create-github-app-token SHA 고정 발급 스텝 부재 (단명 설치 토큰, 장기 PAT 금지)"
+grep -qF 'id: app-token' "$WORKFLOW" \
+  || fail "App 토큰 스텝 id(app-token) 부재 — outputs.token 참조 불가"
+# AC5/제약(graceful degradation): 시크릿 없으면 스텝 skip, 실패해도 job 중단 금지.
+grep -qF 'REVIEW_APP_ID' "$WORKFLOW" \
+  || fail "App 토큰 발급 게이트(REVIEW_APP_ID 시크릿 존재 판정) 부재 — 시크릿 미구성 환경 graceful skip 불가 (AC5)"
+grep -qF 'continue-on-error: true' "$WORKFLOW" \
+  || fail "App 토큰 발급 실패 시 job 중단 방지(continue-on-error) 부재 (AC5)"
+# AC1/AC2/제약(identity 통일): 게시 스텝 토큰이 App 토큰 우선·없으면 기본 토큰.
+fallback_count="$(grep -cF 'steps.app-token.outputs.token || github.token' "$WORKFLOW")"
+[[ "$fallback_count" -ge 2 ]] \
+  || fail "게시 스텝 github-token 이 App-토큰-or-기본 토큰 fallback 표현식을 쓰지 않음 (Submit·Post 최소 2곳, 현재 $fallback_count) (AC2/AC5)"
+# AC3/제약(봇 로그인 동적 해석): App 봇 슬러그로 botLogin 해석, 기본 토큰 시 github-actions[bot].
+grep -qF 'app-slug' "$WORKFLOW" \
+  || fail "App 봇 로그인 동적 해석용 app-slug 출력 사용 부재 (AC3)"
+grep -qF 'process.env.APP_SLUG' "$WORKFLOW" \
+  || fail "게시/식별 스텝이 APP_SLUG env 로 봇 로그인 동적 해석 안 함 (AC3)"
+grep -qF "'github-actions[bot]'" "$WORKFLOW" \
+  || fail "기본 토큰 시 botLogin fallback(github-actions[bot]) 부재 (AC3 위험 분기)"
+# AC4/제약(self-trigger 차단): 게이트가 App 봇 identity 가 게시한 이벤트도 배제(3 이벤트 분기).
+appbot_gate_count="$(grep -cF 'vars.REVIEW_APP_BOT_LOGIN' "$WORKFLOW")"
+[[ "$appbot_gate_count" -ge 3 ]] \
+  || fail "self-trigger 게이트에 App 봇(vars.REVIEW_APP_BOT_LOGIN) 배제가 3개 이벤트 분기 모두에 없음 (현재 $appbot_gate_count) (AC4)"
+ok "check 14: App 설치 토큰 발급 + identity 통일 + 봇 로그인 동적 해석 + self-trigger 게이트"
+
+echo ""
 echo "ALL CHECKS PASSED"
