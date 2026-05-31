@@ -25,18 +25,27 @@ jobs:
           && github.event.issue.pull_request != null
           && contains(github.event.comment.body, '@codex')
           && github.event.comment.user.login != 'github-actions[bot]'
+          && github.event.comment.user.login != vars.REVIEW_APP_BOT_LOGIN
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
       || (github.event_name == 'pull_request_review_comment'
           && contains(github.event.comment.body, '@codex')
           && github.event.comment.user.login != 'github-actions[bot]'
+          && github.event.comment.user.login != vars.REVIEW_APP_BOT_LOGIN
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
       || (github.event_name == 'pull_request_review'
           && github.event.review.body != null
           && contains(github.event.review.body, '@codex')
           && github.event.review.user.login != 'github-actions[bot]'
+          && github.event.review.user.login != vars.REVIEW_APP_BOT_LOGIN
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # Expose the App-id secret as env so the App-token step's `if:` can detect
+      # whether App-token issuance is configured — secrets cannot be referenced
+      # in a step `if:` directly. Empty when unset → the App-token step is skipped
+      # and the posting steps fall back to the default GITHUB_TOKEN (AC5).
+      REVIEW_APP_ID: ${{ secrets.REVIEW_APP_ID }}
     steps:
       - name: Resolve pull request context
         id: pr
@@ -65,6 +74,23 @@ jobs:
             core.setOutput('base_sha', pr.base.sha);
             core.setOutput('head_sha', pr.head.sha);
             core.setOutput('title', pr.title || '');
+
+      - name: Generate GitHub App installation token
+        id: app-token
+        # Short-lived installation token so the review can submit an official
+        # APPROVE that the default GITHUB_TOKEN cannot (github-actions[bot] hits
+        # the self-approve 403/422 on its own workflow's PRs). Skipped when the
+        # App secrets are not configured, and `continue-on-error` keeps a failed
+        # issuance from aborting the job — the posting steps then fall back to the
+        # default GITHUB_TOKEN (AC5). The token is consumed ONLY by the posting
+        # github-script steps below (as step outputs), never exported into the
+        # review CLI step, so the reviewer model never sees it.
+        if: ${{ env.REVIEW_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+        with:
+          app-id: ${{ secrets.REVIEW_APP_ID }}
+          private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
 
       - name: Check out pull request
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
@@ -225,8 +251,12 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           CODEX_FORMAL_PREFIX: codex-formal-review
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         with:
-          github-token: ${{ github.token }}
+          # App installation token (if issued) so the official APPROVE is not
+          # blocked by the default token's self-approve restriction; falls back to
+          # the default GITHUB_TOKEN when App issuance was skipped/failed (AC1/AC5).
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
             const fs = require('fs');
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
@@ -234,7 +264,13 @@ jobs:
             const pull_number = Number(process.env.PR_NUMBER);
             const head_sha = process.env.PR_HEAD_SHA;
             const prefix = process.env.CODEX_FORMAL_PREFIX;
-            const botLogin = 'github-actions[bot]';
+            // Bot login identity: when posting via the App installation token the
+            // author is `<app-slug>[bot]`; with the default token it is
+            // `github-actions[bot]`. Resolve dynamically so idempotency detection
+            // and self inline-thread identification track the actual posting
+            // identity rather than a hardcoded login (AC3).
+            const appSlug = process.env.APP_SLUG;
+            const botLogin = appSlug ? `${appSlug}[bot]` : 'github-actions[bot]';
 
             if (result.eligibility?.status !== 'reviewed') {
               core.info('No review output to post.');
@@ -429,13 +465,22 @@ jobs:
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           CODEX_REVIEW_MARKER: '<!-- codex-cli-pr-review -->'
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         with:
-          github-token: ${{ github.token }}
+          # Same App-token-or-default identity as the verdict step so the managed
+          # comment is authored by the same bot (AC2); falls back to the default
+          # GITHUB_TOKEN when App issuance was skipped/failed (AC5).
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
             const fs = require('fs');
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
             const marker = process.env.CODEX_REVIEW_MARKER;
             const approvalFailed = fs.existsSync('.codex-review/approval-failed');
+            // Resolve the posting bot login dynamically so the prior managed
+            // comment is matched by the actual author identity (App bot or the
+            // default github-actions[bot]) rather than a hardcoded login (AC3).
+            const appSlug = process.env.APP_SLUG;
+            const botLogin = appSlug ? `${appSlug}[bot]` : 'github-actions[bot]';
             // inline-only policy: findings live as inline comments. The managed
             // (issue-level) comment NEVER renders finding evaluations — it is an
             // approval-only comment, posted solely when the verdict is approve.
@@ -450,7 +495,7 @@ jobs:
               per_page: 100,
             });
             const previous = existingComments.find((c) =>
-              c.user?.login === 'github-actions[bot]' &&
+              c.user?.login === botLogin &&
               c.body?.includes(marker)
             );
 
