@@ -9,3 +9,6 @@ milestones/**/loops/**/.lock
 .claude/worktrees/
 .claude/settings.local.json
 .conductor/
+
+# dispatch run artifacts
+.dispatch/
