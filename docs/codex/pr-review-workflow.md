@@ -17,6 +17,7 @@
 2. trusted base를 checkout하고 base/head와 diff를 공유 helper(`.github/scripts/pr-review-context.sh`)로 수집한다.
 3. `.github/prompts/codex-pr-review.ko.md`를 system prompt처럼 붙이고 untrusted PR context(metadata·comments·diff)와 출력 언어 지시를 더해 프롬프트 파일을 조립한다.
 4. 공식 action `openai/codex-action`을 호출한다. 공유 스키마(`.github/prompts/codex-pr-review.schema.json`)는 `output-schema-file` 입력으로, 조립한 프롬프트는 `prompt-file` 입력으로, 샌드박스는 `read-only`, reasoning effort는 `medium`, 결과 JSON은 `output-file` 입력으로 수신하고, auth.json 디렉터리는 `codex-home` 입력으로 전달한다.
+   - **server-info 시드(중요)**: action은 API 키가 있을 때만 Responses API 프록시를 띄워 `<codex-home>/<run_id>.json`(server-info)을 쓰지만, 그 파일을 읽는 "Read server info" 스텝은 프롬프트만 있으면 무조건 실행된다. API 키 없이 auth.json만 쓰면 읽을 파일이 없어 `Failed to read server info`로 죽는다. 그래서 부트스트랩 단계에서 codex-home에 `auth.json`과 함께 더미 server-info(`{"port":1}`)를 같은 `<run_id>.json` 이름으로 미리 심는다. 프록시 설정 스텝도 API 키 게이트라 건너뛰므로 더미 port는 실제로 연결되지 않고 codex는 auth.json으로 OpenAI에 직접 인증한다. (이 시드는 고정한 action SHA의 step 게이트 동작에 결합되어 있다 — action 갱신 시 재검증 필요.)
 5. 결과 JSON을 저장 직후 `jq empty`로 유효성을 검증한다.
 6. 모델이 `needs_context`를 반환하면 요청 파일(최대 5개)을 PR head에서 수집해 2차 호출로 최종 verdict를 받는다(Claude 리뷰와 동일한 2-pass 흐름).
 7. 게시는 자매 Claude 워크플로와 **동일한 구조**다(`claude-review.yml`의 'Submit … review verdict' + 'Post … review comment' 스텝을 codex 라벨·마커로 치환).

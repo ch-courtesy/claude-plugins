@@ -109,6 +109,17 @@ jobs:
           mkdir -p "$codex_home"
           printf '%s' "$CODEX_AUTH_JSON" > "$codex_home/auth.json"
           chmod 600 "$codex_home/auth.json"
+          # Seed a placeholder Responses API proxy "server info" file so the
+          # action's "Read server info" step succeeds. That step is gated on a
+          # prompt being supplied (always true here), but the steps that START
+          # the proxy and WRITE this file are gated on an OpenAI API key input
+          # being set — which we deliberately do not supply, since we auth via
+          # auth.json. Without this seed the read step loops on the missing file
+          # and the job fails with "Failed to read server info". The proxy config
+          # step is also api-key-gated, so it is skipped: the placeholder port is
+          # never dialed and codex talks to OpenAI directly using auth.json.
+          # File name must match action.yml: "$codex_home/<github.run_id>.json".
+          printf '{"port":1}' > "$codex_home/${GITHUB_RUN_ID}.json"
           echo "CODEX_HOME_DIR=$codex_home" >> "$GITHUB_ENV"
 
       - name: Prepare Codex review input
