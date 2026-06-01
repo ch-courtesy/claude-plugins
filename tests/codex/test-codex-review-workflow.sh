@@ -76,10 +76,13 @@ codex_home_input_count="$(count 'codex-home: ${{ env.CODEX_HOME_DIR }}' "$WORKFL
 # Placeholder server-info seed: the action's "Read server info" step fires on
 # prompt presence but the proxy that writes that file only runs with an API
 # key. Without the seed the job dies on "Failed to read server info". The seed
-# file name must be "<codex_home>/<github.run_id>.json" per action.yml.
-grep -q 'port' "$WORKFLOW" \
-  && grep -Eq '"\$codex_home/\$\{GITHUB_RUN_ID\}\.json"|\$codex_home/\$GITHUB_RUN_ID\.json' "$WORKFLOW" \
-  || fail "codex-home 에 더미 server-info(<run_id>.json, port) 시드 부재 — auth.json 단독 호출 시 'Read server info' 실패 회귀 (AC2)"
+# file name must be "<codex_home>/<github.run_id>.json" per action.yml, and the
+# JSON must carry a numeric "port" (read-server-info skips a non-numeric port).
+# Assert port + run_id filename on the SAME line so a seed that drops the port
+# (e.g. printf '{}' > ".../<run_id>.json") fails — a separate `grep port` would
+# pass on unrelated tokens like "export" elsewhere in the workflow.
+grep -Eq "printf '\{\"port\":[0-9]+\}' > \"\\\$codex_home/\\\$\{GITHUB_RUN_ID\}\.json\"" "$WORKFLOW" \
+  || fail "codex-home 에 더미 server-info 시드(<run_id>.json, numeric port) 부재 — auth.json 단독 호출 시 'Read server info' 실패 회귀 (AC2)"
 ok "check 4: CODEX_AUTH_JSON → codex-home/auth.json(600) + server-info 시드 → action codex-home 입력"
 
 echo ""
