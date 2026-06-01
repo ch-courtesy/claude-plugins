@@ -372,6 +372,19 @@ grep -qE '검증 기준이 아|검증 기준 아' "$SKILL_MD" \
 ok "SKILL.md 목적 비검증 규칙 명시"
 
 echo ""
+echo "=== TEST F2b: SKILL.md 구조 계약 — 워크플로 헤더 7개 + 대문자 EARS 부재 ==="
+# 완료 조건 8: 워크플로 단계 헤더는 정확히 7개 (새 단계 추가 금지)
+header_count=$(grep -cE '^###[[:space:]]+[0-9]+\.' "$SKILL_MD")
+[[ "$header_count" -eq 7 ]] \
+  || fail "SKILL.md 워크플로 헤더가 7개가 아님 (실제 $header_count) — 새 단계 추가 금지 (완료 조건 8)"
+ok "SKILL.md 워크플로 단계 헤더 정확히 7개"
+# 완료 조건 9: 대문자 EARS 문자열 부재 (소문자 ears-patterns.md 경로는 허용)
+if grep -qF 'EARS' "$SKILL_MD"; then
+  fail "SKILL.md에 대문자 EARS 문자열 존재 — 평이한 한국어 유지 (완료 조건 9)"
+fi
+ok "SKILL.md 대문자 EARS 문자열 부재"
+
+echo ""
 echo "=== TEST F3: clarification.md '충분' 종결 조건에 목적(왜) ==="
 grep -qE '목적\(왜\)' "$CLARIFICATION_MD" \
   || fail "clarification.md 종결 조건에 '목적(왜)' 항목 부재"
