@@ -1,4 +1,4 @@
-# Agent dispatch briefs (optimized)
+# Agent dispatch briefs
 
 자율 루프 한 이터 안에서 Agent를 위임할 때 쓰는 brief. 결정·합성은 항상 메인 이터 책임이다.
 
