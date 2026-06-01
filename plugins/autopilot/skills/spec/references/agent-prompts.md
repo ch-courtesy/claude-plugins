@@ -1,4 +1,4 @@
-# spec subagent briefs (optimized)
+# spec subagent briefs
 
 spec 7-step에서 선택적으로 Agent에 위임할 수 있는 역할 2종. 공통 원칙: 결정·합성은 메인, 중첩 dispatch 금지, SPEC 작성·마커 삽입·patch 생성은 메인 책임.
 

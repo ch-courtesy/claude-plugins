@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# SPEC 113: autopilot:spec / autopilot:loop SKILL.md frontmatter 권한 허용
-# 패턴 정적 검증.
+# autopilot:spec SKILL.md frontmatter 권한 허용 패턴 정적 검증 (spec 전용).
 #
-# AC1·AC2 — 두 SKILL.md frontmatter에 권한 허용 패턴 배열이 존재.
-# AC3    — 두 SKILL.md frontmatter는 YAML로 parse 성공.
-# AC4    — 배열은 catch-all 패턴(`Bash(*)`·`*` 단독)을 포함하지 않는다.
-# AC5    — 배열은 `gh pr` prefix를 제외한 모든 `gh ` prefix 패턴을 포함하지 않는다.
-# AC6    — 배열 내 중복 항목 없음.
-# AC7    — spec/SKILL.md 배열에 issue #113 본문 `autopilot:spec` + `공통·보조` 패턴 모두 포함.
-# AC8    — loop/SKILL.md 배열에 issue #113 본문 `autopilot:loop` + `공통·보조` 패턴 모두 포함.
+# 원래 이 테스트는 issue #113("spec·loop" 권한 계약)을 따라 spec·loop 두 SKILL.md를
+# 한 파일에서 함께 검사했다. 그러나 두 스킬은 각각 독립 재설계로 권한 계약이 바뀌었고
+# (spec 경량화 40c0e42 — git plumbing 제거 / loop v0.7.0 8f3b75d — phase 스크립트 제거),
+# #113의 결합은 공통 섹션·공통 위생 규칙을 한 곳에 둔 역사적 산물일 뿐 구조적 의존이 아니다.
+# 본 테스트는 spec 전용으로 분리해 현 경량 spec 계약만 검증한다. loop 권한 검증은 범위 밖이다.
 #
-# 비교 기준 집합(AC7·AC8)은 SPEC 작성 시점의 issue body를 frozen reference로
-# 본 스크립트에 박는다. 외부 API 호출은 수행하지 않는다.
+# AC1 — spec SKILL.md frontmatter 에 allowed-tools 배열이 존재(YAML seq).
+# AC3 — spec SKILL.md frontmatter 는 YAML 로 parse 성공.
+# AC4 — 배열은 catch-all 패턴(`Bash(*)`·`*` 단독)을 포함하지 않는다.
+# AC5 — 배열은 `gh pr` prefix 를 제외한 모든 `gh ` prefix 패턴을 포함하지 않는다.
+# AC6 — 배열 내 중복 항목 없음.
+# AC7 — 경량 spec 계약: 현 spec/SKILL.md 가 선언해야 하는 큐레이트 Bash 패턴을 모두 포함.
+#
+# 비교 기준 집합(AC7)은 경량화 후 spec 계약을 frozen reference 로 본 스크립트에 박는다.
+# 외부 API 호출은 수행하지 않는다.
 #
 # 의존성:
 #   - yq (mikefarah Go 구현) — frontmatter YAML parse용.
@@ -22,7 +26,6 @@ set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SPEC_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/spec/SKILL.md"
-LOOP_SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/loop/SKILL.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -30,7 +33,6 @@ ok()   { echo "OK: $*"; }
 command -v yq >/dev/null 2>&1 || fail "yq (mikefarah) 필요 — target 프로젝트 의존성. 설치: macOS \`brew install yq\` / Linux \`apt install yq\` 또는 https://github.com/mikefarah/yq/releases"
 
 [[ -f "$SPEC_SKILL_MD" ]] || fail "$SPEC_SKILL_MD 부재"
-[[ -f "$LOOP_SKILL_MD" ]] || fail "$LOOP_SKILL_MD 부재"
 
 # ---------------------------------------------------------------------------
 # frontmatter 추출 (첫 --- ~ 두 번째 --- 사이)
@@ -47,33 +49,24 @@ extract_frontmatter() {
 }
 
 SPEC_FM="$(extract_frontmatter "$SPEC_SKILL_MD")"
-LOOP_FM="$(extract_frontmatter "$LOOP_SKILL_MD")"
-
 [[ -n "$SPEC_FM" ]] || fail "spec SKILL.md frontmatter 추출 실패"
-[[ -n "$LOOP_FM" ]] || fail "loop SKILL.md frontmatter 추출 실패"
 
 # ---------------------------------------------------------------------------
 echo "=== AC3: YAML parse ==="
 echo "$SPEC_FM" | yq eval . - >/dev/null 2>&1 \
   || fail "AC3: spec SKILL.md frontmatter YAML parse 실패"
-echo "$LOOP_FM" | yq eval . - >/dev/null 2>&1 \
-  || fail "AC3: loop SKILL.md frontmatter YAML parse 실패"
-ok "AC3: spec·loop SKILL.md frontmatter YAML parse 통과"
+ok "AC3: spec SKILL.md frontmatter YAML parse 통과"
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== AC1·AC2: allowed-tools 배열 존재 ==="
+echo "=== AC1: allowed-tools 배열 존재 ==="
 spec_kind="$(printf '%s\n' "$SPEC_FM" | yq eval '.allowed-tools | tag' -)"
-loop_kind="$(printf '%s\n' "$LOOP_FM" | yq eval '.allowed-tools | tag' -)"
 [[ "$spec_kind" == "!!seq" ]] \
   || fail "AC1: spec SKILL.md allowed-tools 가 YAML 배열(seq) 아님 (실측: $spec_kind)"
-[[ "$loop_kind" == "!!seq" ]] \
-  || fail "AC2: loop SKILL.md allowed-tools 가 YAML 배열(seq) 아님 (실측: $loop_kind)"
-ok "AC1·AC2: 두 SKILL.md allowed-tools 가 YAML 배열"
+ok "AC1: spec SKILL.md allowed-tools 가 YAML 배열"
 
 # 배열 항목 수집 — newline-separated
 spec_items="$(printf '%s\n' "$SPEC_FM" | yq eval '.allowed-tools[]' -)"
-loop_items="$(printf '%s\n' "$LOOP_FM" | yq eval '.allowed-tools[]' -)"
 
 # ---------------------------------------------------------------------------
 echo ""
@@ -90,7 +83,6 @@ check_no_catchall() {
   done <<< "$items"
 }
 check_no_catchall "spec" "$spec_items"
-check_no_catchall "loop" "$loop_items"
 ok "AC4: catch-all (Bash(*)·*) 부재"
 
 # ---------------------------------------------------------------------------
@@ -123,7 +115,6 @@ check_gh_only_pr() {
   done <<< "$items"
 }
 check_gh_only_pr "spec" "$spec_items"
-check_gh_only_pr "loop" "$loop_items"
 ok "AC5: gh pr 외 gh 패턴 부재"
 
 # ---------------------------------------------------------------------------
@@ -137,95 +128,29 @@ check_no_dup() {
   fi
 }
 check_no_dup "spec" "$spec_items"
-check_no_dup "loop" "$loop_items"
 ok "AC6: 중복 항목 부재"
 
 # ---------------------------------------------------------------------------
 echo ""
-echo "=== AC7·AC8: issue #113 본문 enumerate 패턴 포함 ==="
-
-# issue #113 본문의 `autopilot:spec` 섹션 패턴 (gh 패턴 제외)
-# SPEC 108 AC2 — spec/SKILL.md 의 trailing ' *' 는 ':*' 로 정규화됨.
-# 'Bash(git branch *)' 는 short-prefix 'Bash(git branch:*)' 로 dedup 흡수 (SPEC 108).
+echo "=== AC7: 경량 spec 계약 — 큐레이트 Bash 패턴 포함 ==="
+# 경량화(40c0e42) 후 spec 은 git plumbing·worktree·Task 권한을 갖지 않는다.
+# spec 은 SPEC 문서 저작에 필요한 읽기·요약·문서 작성용 Bash 만 선언한다.
 SPEC_REQ=(
-  'Bash(git -C * rev-parse:*)'
-  'Bash(git -C * status --porcelain)'
-  'Bash(git -C * log:*)'
-  'Bash(git -C * branch:*)'
-  'Bash(git -C * show-ref:*)'
-  'Bash(git -C * for-each-ref:*)'
-  'Bash(git -C * ls-files:*)'
-  'Bash(git -C * diff:*)'
-  'Bash(git -C * checkout:*)'
-  'Bash(git -C * checkout -b:*)'
-  'Bash(git -C * add:*)'
-  'Bash(git -C * commit:*)'
-  'Bash(git update-ref:*)'
-  'Bash(git branch:*)'
-  'Bash(git -C * hash-object -w:*)'
-  'Bash(GIT_INDEX_FILE=* git -C * read-tree:*)'
-  'Bash(GIT_INDEX_FILE=* git -C * update-index --add --cacheinfo:*)'
-  'Bash(GIT_INDEX_FILE=* git -C * write-tree)'
-  'Bash(git -C * commit-tree * -p:*)'
-  'Bash(mkdir -p milestones/**)'
+  'Bash(git log:*)'
+  'Bash(git status:*)'
+  'Bash(ls:*)'
+  'Bash(cat:*)'
+  'Bash(find:*)'
+  'Bash(grep:*)'
+  'Bash(echo:*)'
+  'Bash(head:*)'
   'Bash(awk:*)'
   'Bash(sed:*)'
   'Bash(tr:*)'
-  'Bash(grep -rE * plugins/autopilot/**)'
-  'Bash(grep -rln * plugins/autopilot/**)'
-)
-
-# issue #113 본문의 `autopilot:loop` 섹션 패턴 (gh 패턴 제외)
-# SPEC 170 — trailing wildcard 형식을 ` *`(공백+별표) → `:*` 로 정규화
-# SPEC 190 — sub-phase 직호출 (review-fix/rebase/cleanup) + 일반 git 명령 + python3 inline 보강.
-#   commit 110a6bf 가 loop/SKILL.md 에서 tail -F·rm */ESCALATION.md 항목을 제거했으므로
-#   본 frozen reference 도 동일하게 정렬한다 (SPEC 190 verify 0 exit 강제).
-LOOP_REQ=(
-  'Bash(bash * loop.sh start:*)'
-  'Bash(bash * loop.sh status:*)'
-  'Bash(bash * loop.sh stop:*)'
-  'Bash(bash * loop.sh list)'
-  'Bash(bash * loop.sh cleanup:*)'
-  'Bash(bash * loop.sh logs:*)'
-  'Bash(bash * review-fix-phase.sh:*)'
-  'Bash(bash * rebase-phase.sh:*)'
-  'Bash(bash * cleanup-phase.sh:*)'
-  'Bash(git fetch:*)'
-  'Bash(git push:*)'
-  'Bash(git rebase:*)'
-  'Bash(git switch:*)'
-  'Bash(git cherry-pick:*)'
-  'Bash(git worktree:*)'
-  'Bash(git branch:*)'
-  'Bash(git reset:*)'
-  'Bash(git revert:*)'
-  'Bash(git stash:*)'
-  'Bash(git checkout:*)'
-  'Bash(git diff:*)'
-  'Bash(git log:*)'
-  'Bash(git show:*)'
-  'Bash(git status:*)'
-  'Bash(git rev-parse:*)'
-  'Bash(git rev-list:*)'
-  'Bash(git merge-base:*)'
-  'Bash(git show-ref:*)'
-  'Bash(git ls-files:*)'
-  'Bash(git ls-remote:*)'
-  'Bash(git commit:*)'
-  'Bash(git pull:*)'
-  'Bash(python3 -c:*)'
-)
-
-# issue #113 본문의 `공통·보조` 섹션 패턴 (gh 패턴 제외).
-# SPEC 108·170 머지 이후 두 SKILL.md 모두 `:*` trailing wildcard로 통일됨.
-# SPEC 190 — commit 110a6bf 가 두 SKILL.md 에서 rm */ESCALATION.md·rm */DONE 항목을 제거했으므로
-#   frozen reference 도 동일하게 정렬 (verify 0 exit 강제).
-COMMON_REQ=(
-  'Bash(git -C * stash list)'
-  'Bash(git -C * stash pop:*)'
-  'Bash(git -C * stash show:*)'
-  'Bash(ps -p:*)'
-  'Bash(cat */*.lock)'
+  'Bash(printf:*)'
+  'Bash(pwd:*)'
+  'Bash(mkdir -p docs/specs/**)'
+  'Bash(mkdir -p:*)'
 )
 
 check_contains_all() {
@@ -243,13 +168,19 @@ check_contains_all() {
   fi
 }
 
-check_contains_all "spec/SKILL.md" "$spec_items" \
-  "${SPEC_REQ[@]}" "${COMMON_REQ[@]}"
-ok "AC7: spec SKILL.md 에 issue spec 섹션 + 공통·보조 섹션 패턴 모두 포함"
+check_contains_all "spec/SKILL.md" "$spec_items" "${SPEC_REQ[@]}"
+ok "AC7: spec SKILL.md 에 경량 계약 Bash 패턴 모두 포함"
 
-check_contains_all "loop/SKILL.md" "$loop_items" \
-  "${LOOP_REQ[@]}" "${COMMON_REQ[@]}"
-ok "AC8: loop SKILL.md 에 issue loop 섹션 + 공통·보조 섹션 패턴 모두 포함"
+# ---------------------------------------------------------------------------
+# 경량 계약 negative: spec 은 git 쓰기·plumbing·worktree 권한을 갖지 않는다.
+echo ""
+echo "=== AC7b: 경량 계약 — git 쓰기·plumbing 권한 부재 ==="
+for forbidden in 'commit-tree' 'write-tree' 'read-tree' 'update-ref' 'hash-object' 'git worktree' 'git -C * commit' 'git -C * checkout'; do
+  if grep -qF -- "$forbidden" <<< "$spec_items"; then
+    fail "AC7b: spec/SKILL.md 에 경량 계약 위반 권한 잔존: $forbidden (경량화 40c0e42 로 제거됨)"
+  fi
+done
+ok "AC7b: git 쓰기·plumbing·worktree 권한 부재 (경량 계약 준수)"
 
 echo ""
 echo "ALL CHECKS PASSED"
