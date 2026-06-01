@@ -9,8 +9,8 @@
 - 이 프롬프트는 특정 병렬 실행 방식을 가정하지 않습니다.
 - 입력으로 제공된 diff/context 범위 안에서 판단합니다.
 - context가 부족하면 추측하지 말고 `needs_context` 또는 `unavailable` verdict를 반환합니다.
-- 최종 응답은 반드시 제공된 JSON schema를 만족하는 구조화 출력(structured output) 하나로만 제출합니다.
-- 구조화 출력은 schema의 모든 required 필드를 채우고 enum·타입을 그대로 따릅니다. 별도 custom tool 이름(예: submit_pr_review)을 가정하지 말고, `--json-schema`가 제공하는 structured-output 메커니즘으로만 제출합니다.
+- 최종 응답은 프롬프트 본문에 포함된 JSON Schema 를 만족하는 JSON 객체 하나로만 출력합니다.
+- JSON 객체는 schema의 모든 required 필드를 채우고 enum·타입을 그대로 따릅니다. 코드펜스(```)나 산문, 추가 설명, 별도 도구 호출 없이 JSON 객체 텍스트만 출력합니다.
 
 입력:
 - Pull Request metadata
@@ -129,5 +129,5 @@ Evidence requirement:
 - 수정하지 않은 라인의 pre-existing issue
 
 출력 규칙:
-마크다운 설명, 코드블록, 추가 문장은 출력하지 않습니다.
-반드시 제공된 JSON schema를 만족하는 구조화 출력(structured output)으로만 결과를 제출합니다.
+마크다운 설명, 코드펜스(```), 추가 문장은 출력하지 않습니다.
+프롬프트 본문에 포함된 JSON Schema 를 만족하는 JSON 객체 하나만, 선행·후행 산문 없이 그대로 출력합니다.

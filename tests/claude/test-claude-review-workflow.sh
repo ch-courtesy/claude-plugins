@@ -49,12 +49,16 @@ grep -qE 'uses: anthropics/claude-code-action@[0-9a-f]{40}' "$WORKFLOW" \
   || fail "anthropics/claude-code-action SHA 고정 부재"
 grep -q 'claude_code_oauth_token:.*secrets\.CLAUDE_CODE_OAUTH_TOKEN' "$WORKFLOW" \
   || fail "claude_code_oauth_token input 매핑 부재"
-grep -q -- '--json-schema' "$WORKFLOW" \
-  || fail "Claude action json schema 지정 부재"
-grep -q 'steps\.prepare-claude-review\.outputs\.schema' "$WORKFLOW" \
-  || fail "Claude action schema output 연결 부재"
-grep -q 'steps\.claude-review\.outputs\.structured_output' "$WORKFLOW" \
-  || fail "Claude structured_output 저장 부재"
+if grep -q -- '--json-schema' "$WORKFLOW"; then
+  fail "--json-schema 강제 구조화 출력 채널 의존이 남아 있음 (prompt schema 방식으로 전환해야 함)"
+fi
+if grep -q 'structured_output' "$WORKFLOW"; then
+  fail "structured_output 강제 채널 의존이 남아 있음 (execution_file 결과 텍스트 파싱으로 전환해야 함)"
+fi
+grep -qF 'cat "$REVIEW_SCHEMA"' "$WORKFLOW" \
+  || fail "공유 스키마(REVIEW_SCHEMA)를 프롬프트 본문에 싣지 않음 (cat \"\$REVIEW_SCHEMA\" 부재)"
+grep -q 'steps\.claude-review\.outputs\.execution_file' "$WORKFLOW" \
+  || fail "1차 리뷰 결과를 claude-code-action execution_file 에서 가져오지 않음"
 if grep -q -- '--bare' "$WORKFLOW"; then
   fail "--bare 는 OAuth token 대신 API key 를 요구하므로 사용하면 안 됨"
 fi
@@ -65,7 +69,21 @@ grep -q '\.claude-review/result\.json' "$WORKFLOW" \
   || fail "Claude 최종 JSON 출력 파일 지정 부재"
 grep -q 'jq empty \.claude-review/result\.json' "$WORKFLOW" \
   || fail "Claude 최종 JSON jq 검증 부재"
-ok "check 2: pinned claude-code-action + schema + shared context 로 structured review 실행"
+ok "check 2: pinned claude-code-action + prompt schema + shared context 로 review 실행 (강제 구조화 출력 채널 미사용)"
+
+echo ""
+echo "=== check 2c: model result text is parsed into JSON with core-field validation ==="
+grep -q 'JSON 객체를 추출' "$WORKFLOW" \
+  || fail "모델 결과 텍스트에서 JSON 추출 실패 시 명확한 오류 부재"
+grep -q '필수 필드' "$WORKFLOW" \
+  || fail "추출 JSON 핵심 필드 확인(필수 필드) 부재"
+for field in verdict eligibility findings automation_safety reviewed_context; do
+  grep -q "\"$field\"" "$WORKFLOW" \
+    || fail "핵심 필드 확인 목록에 \"$field\" 부재"
+done
+grep -q 'steps\.claude-follow-up-review\.outputs\.execution_file' "$WORKFLOW" \
+  || fail "2차(follow-up) 리뷰도 execution_file 결과 텍스트 파싱을 쓰지 않음"
+ok "check 2c: 결과 텍스트 JSON 추출 + 핵심 필드 검증 (1차/2차 동일)"
 
 echo ""
 echo "=== check 2b: claude workflow supports targeted context follow-up ==="
@@ -175,9 +193,14 @@ grep -q 'Confidence scoring' "$PROMPT" \
   || fail "prompt confidence scoring 정책 부재"
 grep -q 'confidence_score < 80' "$PROMPT" \
   || fail "prompt confidence threshold 정책 부재"
-grep -q 'submit_pr_review' "$PROMPT" \
-  || fail "prompt structured tool output 규칙 부재"
-ok "check 8: prompt 핵심 정책 존재"
+grep -q 'JSON 객체' "$PROMPT" \
+  || fail "prompt JSON-only 출력 지시 부재"
+grep -q '코드펜스' "$PROMPT" \
+  || fail "prompt 코드펜스 금지 지시 부재"
+if grep -qE 'submit_pr_review|--json-schema|structured_output' "$PROMPT"; then
+  fail "prompt 가 강제 구조화 출력 채널/도구를 지시하고 있음 (JSON-only 출력으로 전환해야 함)"
+fi
+ok "check 8: prompt 핵심 정책 + JSON-only 출력 지시 존재"
 
 echo ""
 echo "=== check 9: privileged job checks out trusted base, not PR-controlled code ==="
