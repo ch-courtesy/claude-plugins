@@ -338,5 +338,69 @@ done
 ok "평이한 한국어 5문장 패턴 안내 존재"
 
 # ===========================================================================
+# PART F — 목적(WHY) 섹션 보존 (신 계약)
+# ===========================================================================
+
 echo ""
-echo "=== 모든 spec 계약 + persona/clarity + 자연 인터뷰/옵트인 핸드오프 테스트 통과 ==="
+echo "=== TEST F1: SPEC 템플릿 목적 섹션 + placeholder + 위치 ==="
+# 목적 섹션은 "무엇을 만들 것인가" 뒤, "완료 조건" 앞에 위치.
+grep -qE '^##[[:space:]]*목적' "$SPEC_TEMPLATE" \
+  || fail "spec-template.md에 목적 섹션 제목(## 목적 ...) 부재"
+ok "spec-template.md 목적 섹션 제목 존재"
+grep -qF '{{purpose}}' "$SPEC_TEMPLATE" \
+  || fail "spec-template.md에 목적 placeholder {{purpose}} 부재"
+ok "spec-template.md {{purpose}} placeholder 존재"
+what_ln=$(grep -nE '^##[[:space:]]*무엇을 만들 것인가' "$SPEC_TEMPLATE" | head -1 | cut -d: -f1)
+purpose_ln=$(grep -nE '^##[[:space:]]*목적' "$SPEC_TEMPLATE" | head -1 | cut -d: -f1)
+done_ln=$(grep -nE '^##[[:space:]]*완료 조건' "$SPEC_TEMPLATE" | head -1 | cut -d: -f1)
+[[ -n "$what_ln" && -n "$purpose_ln" && -n "$done_ln" ]] \
+  || fail "spec-template.md 섹션 줄번호 추출 실패 (what=$what_ln purpose=$purpose_ln done=$done_ln)"
+(( what_ln < purpose_ln && purpose_ln < done_ln )) \
+  || fail "목적 섹션 위치가 'WHAT 뒤·완료 조건 앞'이 아님 (what=$what_ln purpose=$purpose_ln done=$done_ln)"
+ok "목적 섹션 위치: '무엇을 만들 것인가' 뒤·'완료 조건' 앞"
+
+echo ""
+echo "=== TEST F2: SKILL.md step 5 — {{purpose}} 치환 + 종속 앵커·비검증 규칙 ==="
+grep -qF '{{purpose}}' "$SKILL_MD" \
+  || fail "SKILL.md 치환 대상 목록에 {{purpose}} 부재"
+ok "SKILL.md {{purpose}} 치환 대상 명시"
+grep -qF '종속 앵커' "$SKILL_MD" \
+  || fail "SKILL.md에 목적='완료 조건의 종속 앵커' 규칙 부재"
+ok "SKILL.md 목적 종속 앵커 규칙 명시"
+grep -qE '검증 기준이 아|검증 기준 아' "$SKILL_MD" \
+  || fail "SKILL.md에 목적='검증 기준이 아님' 규칙 부재"
+ok "SKILL.md 목적 비검증 규칙 명시"
+
+echo ""
+echo "=== TEST F3: clarification.md '충분' 종결 조건에 목적(왜) ==="
+grep -qE '목적\(왜\)' "$CLARIFICATION_MD" \
+  || fail "clarification.md 종결 조건에 '목적(왜)' 항목 부재"
+ok "clarification.md 종결 조건 목적(왜) 포함"
+
+echo ""
+echo "=== TEST F4: clarity-score.md 목적 차원 보존 의무 연결 ==="
+grep -qE '문장으로 남' "$CLARITY_MD" \
+  || fail "clarity-score.md 목적 차원이 'SPEC 문서에 문장으로 남았는가' 보존 의무와 미연결"
+ok "clarity-score.md 목적 보존 의무 연결"
+
+echo ""
+echo "=== TEST F5: self-review.md 5축 유지 + 목적 점검 흡수 ==="
+check_count=$(grep -cE '^[0-9]+\. ' "$SELF_REVIEW_MD")
+[[ "$check_count" -eq 5 ]] \
+  || fail "self-review.md 검사 항목 수가 5가 아님 (실제 $check_count) — 6번째 축 신설 금지"
+ok "self-review.md 검사 항목 정확히 5개"
+grep -qF '목적' "$SELF_REVIEW_MD" \
+  || fail "self-review.md 5축 중 목적 섹션 점검 흡수 부재"
+ok "self-review.md 목적 점검 흡수"
+
+echo ""
+echo "=== TEST F6: plugin.json 버전 0.14.0 ==="
+PLUGIN_JSON="$REPO_ROOT/plugins/autopilot/.claude-plugin/plugin.json"
+[[ -f "$PLUGIN_JSON" ]] || fail "plugin.json 부재"
+grep -qF '"version": "0.14.0"' "$PLUGIN_JSON" \
+  || fail "plugin.json version 이 0.14.0 이 아님"
+ok "plugin.json version 0.14.0"
+
+# ===========================================================================
+echo ""
+echo "=== 모든 spec 계약 + persona/clarity + 자연 인터뷰/옵트인 핸드오프 + 목적(WHY) 테스트 통과 ==="
