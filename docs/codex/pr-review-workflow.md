@@ -2,6 +2,8 @@
 
 이 문서는 `codex review` 자연어 출력 대신 직접 프롬프팅한 structured JSON을 사용해 PR 리뷰를 자동화하는 계획과 경계를 정의한다.
 
+모델 호출은 셸에서 `codex exec`를 직접 실행하지 않고 공식 GitHub Action `openai/codex-action`(SHA 고정, codex CLI 버전은 action의 `codex-version` 입력으로 고정)을 통해 이뤄진다. 인증은 ChatGPT 계정 `auth.json`을 codex-home 디렉터리로 부트스트랩하는 방식을 쓰며 API 키 입력은 사용하지 않는다. 리뷰 결과 게시는 자매 워크플로(Claude PR 리뷰, `claude-review.yml`)와 **동일한 구조**다 — 정식 리뷰 verdict 제출 + 마커 기반 관리형 PR 코멘트 1개. codex만의 독자 게시 경로(인라인 코멘트, fingerprint 기반 self thread 자동 resolve, GitHub App 토큰 정식 approve)는 사용하지 않는다.
+
 ## 목표
 
 - diff를 먼저 읽고 필요한 문맥만 확장한다.
@@ -12,51 +14,50 @@
 ## 현재 1차 워크플로
 
 1. PR context를 확인한다.
-2. base/head와 diff를 수집한다.
-3. `.github/prompts/codex-pr-review.ko.md`를 system prompt처럼 붙인다.
-4. `codex exec --output-schema .github/prompts/codex-pr-review.schema.json`을 stdin 기반으로 실행한다.
-5. JSON schema를 검증한다.
-6. `verdict`에 따라 GitHub review event를 `pulls.createReview`로 제출한다. **모든 finding은 inline 코멘트로만** 게시한다(inline-only 정책).
-   - `approve`: `APPROVE` (review body는 finding 평가 없이 승인 표현만)
-   - `request_changes`: `REQUEST_CHANGES` (body는 마커만, 평가 없음)
-   - `comment`, `needs_context`, `unavailable`: `COMMENT` (body는 마커만, 평가 없음)
-   - 변경 라인에 직접 anchor할 수 없는 finding도 issue 코멘트로 떨어뜨리지 않고, 가장 가까운 변경 hunk 라인에 inline으로 붙이고 본문에 실제 위치(파일·라인)를 명시한다.
-7. managed issue comment(marker 기반)는 **verdict=approve일 때만** 게시하며, 승인 표현만 담고 finding 평가 본문은 포함하지 않는다. approve가 아니면 게시하지 않고, 직전 approve 코멘트가 있으면 supersede 표시로 갱신한다.
+2. trusted base를 checkout하고 base/head와 diff를 공유 helper(`.github/scripts/pr-review-context.sh`)로 수집한다.
+3. `.github/prompts/codex-pr-review.ko.md`를 system prompt처럼 붙이고 untrusted PR context(metadata·comments·diff)와 출력 언어 지시를 더해 프롬프트 파일을 조립한다.
+4. 공식 action `openai/codex-action`을 호출한다. 공유 스키마(`.github/prompts/codex-pr-review.schema.json`)는 `output-schema-file` 입력으로, 조립한 프롬프트는 `prompt-file` 입력으로, 샌드박스는 `read-only`, reasoning effort는 `medium`, 결과 JSON은 `output-file` 입력으로 수신하고, auth.json 디렉터리는 `codex-home` 입력으로 전달한다.
+5. 결과 JSON을 저장 직후 `jq empty`로 유효성을 검증한다.
+6. 모델이 `needs_context`를 반환하면 요청 파일(최대 5개)을 PR head에서 수집해 2차 호출로 최종 verdict를 받는다(Claude 리뷰와 동일한 2-pass 흐름).
+7. 게시는 자매 Claude 워크플로와 **동일한 구조**다(`claude-review.yml`의 'Submit … review verdict' + 'Post … review comment' 스텝을 codex 라벨·마커로 치환).
+   - **정식 리뷰 verdict 제출**: `gh pr review`로 `--approve` / `--comment` / `--request-changes` 중 하나를 제출한다. 승인은 findings가 없고 `automation_safety.may_approve=true`이며 diff가 truncate되지 않았을 때만, request-changes는 confidence ≥ 80 blocking finding이 있을 때만. 본문 헤더는 `## Codex PR Review`이며 숨김 멱등 마커 `codex-formal-review head_sha=… verdict=…`를 담는다. 같은 (head_sha, verdict) 리뷰가 이미 있으면 중복 제출을 건너뛴다.
+   - **마커 관리형 PR 코멘트 1개**: findings를 담은 issue-level 코멘트를 마커(`<!-- codex-api-pr-review -->`) 기준으로 최대 1개만 생성하거나 갱신한다(clean approve일 때는 게시하지 않음). 기본 토큰 봇(`github-actions[bot]`)이 자기 소유 코멘트를 식별·갱신한다.
+
+   인라인 리뷰 코멘트, fingerprint 기반 self thread 자동 resolve, GitHub App 설치 토큰을 통한 정식 approve는 사용하지 않는다(Claude 리뷰와 동일한 한계: 워크플로 기본 토큰은 자기 PR을 정식 APPROVE하지 못해 COMMENT로 강등될 수 있다).
 
 ## 단계적 고도화 계획
 
 ### Phase 1: Structured Review MVP
 
-- `codex review` 대신 `codex exec`를 사용한다.
-- stdin으로 prompt를 전달해 shell `ARG_MAX` 한계를 피한다.
-- JSON schema로 최종 응답을 강제한다.
+- `codex review` 대신 structured `codex exec`(JSON schema 강제)를 사용한다. 단, codex는 셸에서 직접 실행하지 않고 공식 action `openai/codex-action`을 통해 호출한다(action 내부에서 `codex exec`가 실행됨).
+- 프롬프트는 `prompt-file` 입력으로 전달해 shell `ARG_MAX` 한계를 피한다.
+- JSON schema로 최종 응답을 강제하고 저장 직후 `jq empty`로 검증한다.
 - confidence score 80 미만 finding은 게시하지 않는다.
-- (구) 초기 MVP는 inline comment 없이 summary review body에 묶었으나, 현재는 모든 finding을 inline 코멘트로만 게시한다(inline-only 정책).
 
 완료 기준:
 - JSON schema 검증이 실패하면 approve하지 않는다.
 - `approve` verdict는 findings가 비어 있고 `automation_safety.may_approve=true`일 때만 제출된다.
 - `request_changes`는 confidence 80 이상의 blocking finding이 있을 때만 제출된다.
 
-### Phase 2: Inline Comment Adapter
+### Phase 2: Inline Comment Adapter (superseded)
 
-- 모든 finding을 GitHub inline review comment로 게시한다(inline-only 정책).
-- changed line에 직접 매핑되지 않는 finding도 issue comment로 떨어뜨리지 않고, 가장 가까운 변경 hunk 라인에 inline으로 붙이고 본문에 실제 위치를 명시한다.
-- comment marker에 `fingerprint`, `head_sha`, `severity`, `status`를 저장한다.
-- 같은 fingerprint가 이미 존재하면 중복 게시하지 않는다.
+> **Superseded.** 게시 구조를 자매 Claude 워크플로와 통일하면서 codex 독자 인라인 코멘트 경로는 제거되었다. findings는 인라인이 아니라 마커 관리형 PR 코멘트 1개에 담겨 게시된다("현재 1차 워크플로" 7번 참조). 아래는 과거 설계 기록이다.
 
-완료 기준:
-- diff line 매핑이 어려운 finding도 가장 가까운 변경 라인에 inline으로 남기며 issue-level로 degrade하지 않는다.
-- 기존 다른 reviewer가 같은 이슈를 남겼으면 `skipped_duplicates`로 기록하고 게시하지 않는다.
+- ~~모든 finding을 GitHub inline review comment로 게시한다(inline-only 정책).~~
+- ~~changed line에 직접 매핑되지 않는 finding도 issue comment로 떨어뜨리지 않고, 가장 가까운 변경 hunk 라인에 inline으로 붙이고 본문에 실제 위치를 명시한다.~~
+- ~~comment marker에 `fingerprint`, `head_sha`, `severity`, `status`를 저장한다.~~
+- ~~같은 fingerprint가 이미 존재하면 중복 게시하지 않는다.~~
 
-### Phase 3: Thread Lifecycle
+### Phase 3: Thread Lifecycle (superseded)
 
-- GraphQL `reviewThreads`를 읽어 `isResolved`, `isOutdated`, root comment body, marker를 수집한다.
-- Codex-owned active thread만 resolve/unresolve/reply 대상으로 삼는다.
-- 최신 push가 기존 finding을 고쳤으면 resolve한다.
-- 아직 고쳐지지 않았으면 같은 thread에 후속 피드백을 단다.
+> **Superseded.** Claude 동일 게시 구조에는 self thread lifecycle 관리가 없다. fingerprint 기반 self thread 자동 resolve 경로는 제거되었다. 아래는 과거 설계 기록이다.
 
-완료 기준:
+- ~~GraphQL `reviewThreads`를 읽어 `isResolved`, `isOutdated`, root comment body, marker를 수집한다.~~
+- ~~Codex-owned active thread만 resolve/unresolve/reply 대상으로 삼는다.~~
+- ~~최신 push가 기존 finding을 고쳤으면 resolve한다.~~
+- ~~아직 고쳐지지 않았으면 같은 thread에 후속 피드백을 단다.~~
+
+완료 기준(과거):
 - Codex가 만들지 않은 thread는 절대 resolve하지 않는다.
 - outdated thread는 fingerprint로 최신 diff에 남아 있는지 재확인한다.
 
