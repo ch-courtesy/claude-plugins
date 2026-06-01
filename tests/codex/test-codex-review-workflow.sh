@@ -73,7 +73,14 @@ grep -q 'codex-home: ${{ env\.CODEX_HOME_DIR }}' "$WORKFLOW" \
 codex_home_input_count="$(count 'codex-home: ${{ env.CODEX_HOME_DIR }}' "$WORKFLOW")"
 [[ "$codex_home_input_count" == "2" ]] \
   || fail "codex-home 입력이 1차/2차 action 호출 양쪽에 전달되지 않음 (현재 $codex_home_input_count)"
-ok "check 4: CODEX_AUTH_JSON → codex-home/auth.json(600) → action codex-home 입력"
+# Placeholder server-info seed: the action's "Read server info" step fires on
+# prompt presence but the proxy that writes that file only runs with an API
+# key. Without the seed the job dies on "Failed to read server info". The seed
+# file name must be "<codex_home>/<github.run_id>.json" per action.yml.
+grep -q 'port' "$WORKFLOW" \
+  && grep -Eq '"\$codex_home/\$\{GITHUB_RUN_ID\}\.json"|\$codex_home/\$GITHUB_RUN_ID\.json' "$WORKFLOW" \
+  || fail "codex-home 에 더미 server-info(<run_id>.json, port) 시드 부재 — auth.json 단독 호출 시 'Read server info' 실패 회귀 (AC2)"
+ok "check 4: CODEX_AUTH_JSON → codex-home/auth.json(600) + server-info 시드 → action codex-home 입력"
 
 echo ""
 echo "=== check 5: auth 디렉터리가 restrictive umask 아래 생성됨 (제약) ==="
