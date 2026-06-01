@@ -5,7 +5,7 @@ SPEC 작성 후 사용자 Q&A 없이 1회 자체 검토한다. 발견 사항은 
 ## 5 checks
 
 1. Placeholder: `{{...}}`, TBD, TODO, 빈 섹션 없음.
-2. Consistency: 제목, WHAT, acceptance, scope, verify가 서로 충돌하지 않음.
+2. Consistency: 제목, WHAT, 목적, acceptance, scope, verify가 서로 충돌하지 않음. 목적 섹션이 채워져 있고 WHAT·완료 조건과 정합하며, 검증 기준이 아닌 종속 앵커로만 쓰임. 목적이 명확한데 비어있거나 placeholder만 남으면 실패로 보되, 목적이 실제로 모호해 `[NEEDS CLARIFICATION: 왜 ...]` 마커를 남긴 경우는 계약대로 허용한다(이때 마커는 보존한다).
 3. Scope: `scope.include`가 필요한 변경을 포함하고 `scope.exclude`와 충돌하지 않음. 분해 발행(N개)이면 각 문서의 `depends_on`이 실제 선행 단위 slug를 가리키고, 단일 발행이면 `depends_on` 줄이 없어야 한다.
 4. Ambiguity: 두 가지로 해석 가능한 요구는 구체 질문 마커로 남김.
 5. 검증 가능성: 각 완료 조건이 관찰 가능하고 독립 테스트 가능하며 구현 방법을 강제하지 않음.
