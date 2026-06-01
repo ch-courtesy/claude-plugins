@@ -147,22 +147,30 @@ jobs:
             printf '\n'
           } >> .claude-review/prompt.md
 
+          # Embed the shared review schema into the prompt body and instruct the
+          # model to emit a single JSON object. We no longer rely on the forced
+          # structured output channel; the complex shared schema made the model
+          # frequently answer in plain text without calling that tool, which
+          # aborted the step. Instead the workflow extracts JSON from the
+          # model's result text.
           {
-            printf 'schema<<EOF\n'
-            jq -c . "$REVIEW_SCHEMA"
-            printf '\nEOF\n'
-          } >> "$GITHUB_OUTPUT"
+            printf '\n\n---\n\n'
+            printf '출력 형식 지시:\n'
+            printf '위 리뷰 정책에 따라, 아래 JSON Schema 를 만족하는 JSON 객체 하나만 출력하세요.\n'
+            printf '코드펜스(```)나 산문, 추가 설명을 붙이지 말고 JSON 객체만 출력합니다.\n\n'
+            printf 'JSON Schema:\n'
+            cat "$REVIEW_SCHEMA"
+            printf '\n'
+          } >> .claude-review/prompt.md
 
           # Inline the full review prompt as a step output so the model receives it
           # directly (mirroring the Codex workflow's stdin injection) instead of
-          # reading a file agentically. The read-then-respond agentic flow caused
-          # claude-code-action to finish with "Result subtype: success" but no
-          # structured_output, failing the --json-schema contract.
+          # reading a file agentically.
           prompt_delim="CLAUDE_PROMPT_EOF_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
           {
             printf 'prompt<<%s\n' "$prompt_delim"
             cat .claude-review/prompt.md
-            printf '\n\nReturn only the structured review object required by the JSON schema.\n'
+            printf '\n\n스키마에 맞는 JSON 객체 하나만 출력하세요. 코드펜스나 산문은 붙이지 마세요.\n'
             printf '%s\n' "$prompt_delim"
           } >> "$GITHUB_OUTPUT"
 
@@ -178,14 +186,62 @@ jobs:
           prompt: ${{ steps.prepare-claude-review.outputs.prompt }}
           claude_args: |
             --model ${{ vars.CLAUDE_REVIEW_MODEL || 'claude-sonnet-4-5-20250929' }}
-            --json-schema '${{ steps.prepare-claude-review.outputs.schema }}'
 
       - name: Save Claude review result
         env:
-          CLAUDE_STRUCTURED_OUTPUT: ${{ steps.claude-review.outputs.structured_output }}
+          CLAUDE_EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
         run: |
           set -euo pipefail
-          printf '%s\n' "$CLAUDE_STRUCTURED_OUTPUT" > .claude-review/result.json
+          # Extract the JSON review object from the model's final result text in
+          # the action execution log (no forced structured-output channel).
+          python3 - "$CLAUDE_EXECUTION_FILE" .claude-review/result.json <<'PY'
+          import json, re, sys
+
+          exec_file, out_path = sys.argv[1], sys.argv[2]
+
+          with open(exec_file) as fh:
+              raw = fh.read()
+
+          messages = []
+          try:
+              data = json.loads(raw)
+              messages = data if isinstance(data, list) else [data]
+          except json.JSONDecodeError:
+              for line in raw.splitlines():
+                  line = line.strip()
+                  if not line:
+                      continue
+                  try:
+                      messages.append(json.loads(line))
+                  except json.JSONDecodeError:
+                      continue
+
+          text = ""
+          for msg in messages:
+              if isinstance(msg, dict) and msg.get("type") == "result" and msg.get("result"):
+                  text = msg["result"]
+
+          if not text:
+              sys.exit("Claude 실행 로그(execution_file)에서 최종 결과 메시지를 찾지 못했습니다.")
+
+          # Strip any code fences / surrounding prose: keep first '{' .. last '}'.
+          match = re.search(r"\{.*\}", text, re.DOTALL)
+          if not match:
+              sys.exit("Claude 결과 텍스트에서 JSON 객체를 추출하지 못했습니다.")
+
+          try:
+              obj = json.loads(match.group(0))
+          except json.JSONDecodeError as exc:
+              sys.exit("추출한 JSON 이 유효하지 않습니다: %s" % exc)
+
+          required = ["verdict", "eligibility", "findings", "automation_safety", "reviewed_context"]
+          missing = [key for key in required if key not in obj]
+          if missing:
+              sys.exit("결과 JSON 에 필수 필드가 없습니다: %s" % ", ".join(missing))
+
+          with open(out_path, "w") as fh:
+              json.dump(obj, fh)
+          PY
           jq empty .claude-review/result.json
 
       - name: Prepare Claude follow-up context
@@ -256,15 +312,62 @@ jobs:
           prompt: ${{ steps.prepare-claude-follow-up.outputs.prompt }}
           claude_args: |
             --model ${{ vars.CLAUDE_REVIEW_MODEL || 'claude-sonnet-4-5-20250929' }}
-            --json-schema '${{ steps.prepare-claude-review.outputs.schema }}'
 
       - name: Save Claude follow-up review result
         if: steps.prepare-claude-follow-up.outputs.has_extra_context == 'true'
         env:
-          CLAUDE_STRUCTURED_OUTPUT: ${{ steps.claude-follow-up-review.outputs.structured_output }}
+          CLAUDE_EXECUTION_FILE: ${{ steps.claude-follow-up-review.outputs.execution_file }}
         run: |
           set -euo pipefail
-          printf '%s\n' "$CLAUDE_STRUCTURED_OUTPUT" > .claude-review/result.json
+          # Same extraction as the first pass: JSON object from the model's final
+          # result text in the action execution log.
+          python3 - "$CLAUDE_EXECUTION_FILE" .claude-review/result.json <<'PY'
+          import json, re, sys
+
+          exec_file, out_path = sys.argv[1], sys.argv[2]
+
+          with open(exec_file) as fh:
+              raw = fh.read()
+
+          messages = []
+          try:
+              data = json.loads(raw)
+              messages = data if isinstance(data, list) else [data]
+          except json.JSONDecodeError:
+              for line in raw.splitlines():
+                  line = line.strip()
+                  if not line:
+                      continue
+                  try:
+                      messages.append(json.loads(line))
+                  except json.JSONDecodeError:
+                      continue
+
+          text = ""
+          for msg in messages:
+              if isinstance(msg, dict) and msg.get("type") == "result" and msg.get("result"):
+                  text = msg["result"]
+
+          if not text:
+              sys.exit("Claude 실행 로그(execution_file)에서 최종 결과 메시지를 찾지 못했습니다.")
+
+          match = re.search(r"\{.*\}", text, re.DOTALL)
+          if not match:
+              sys.exit("Claude 결과 텍스트에서 JSON 객체를 추출하지 못했습니다.")
+
+          try:
+              obj = json.loads(match.group(0))
+          except json.JSONDecodeError as exc:
+              sys.exit("추출한 JSON 이 유효하지 않습니다: %s" % exc)
+
+          required = ["verdict", "eligibility", "findings", "automation_safety", "reviewed_context"]
+          missing = [key for key in required if key not in obj]
+          if missing:
+              sys.exit("결과 JSON 에 필수 필드가 없습니다: %s" % ", ".join(missing))
+
+          with open(out_path, "w") as fh:
+              json.dump(obj, fh)
+          PY
           jq empty .claude-review/result.json
 
       - name: Submit Claude review verdict
