@@ -251,8 +251,12 @@ echo "=== check 10e: finding-unit (fingerprint) self inline thread resolve, verd
 # AC1/AC9: 게시 inline 마커가 기존 self-식별 substring 을 보존하면서 finding fingerprint 운반.
 grep -qF '<!-- codex-review-inline' "$WORKFLOW" \
   || fail "inline self-식별 마커 substring(<!-- codex-review-inline) 부재 (AC9 기존 식별 보존)"
-grep -qF 'fingerprint=${f.fingerprint}' "$WORKFLOW" \
-  || fail "게시 inline 마커에 finding fingerprint 미운반 (AC1) — fingerprint=\${f.fingerprint} 필요"
+# AC1: 게시 inline 마커는 워크플로가 결정론적으로 계산한 fingerprint 를 운반한다.
+grep -qF 'fingerprint=${computeFingerprint(f)}' "$WORKFLOW" \
+  || fail "게시 inline 마커가 결정론적 computeFingerprint(f) 를 운반하지 않음 (AC1)"
+if grep -qF 'fingerprint=${f.fingerprint}' "$WORKFLOW"; then
+  fail "게시 마커가 모델 자유 생성 f.fingerprint 를 운반 — 결정론 계산으로 전환되어야 함 (AC1)"
+fi
 # AC3: resolved_threads 소비 1차 경로.
 grep -qF 'resolved_threads' "$WORKFLOW" \
   || fail "resolved_threads 소비 경로 부재 (AC3)"
@@ -273,6 +277,27 @@ grep -qF 'isResolved' "$WORKFLOW" \
 grep -qF 'reviewThreads(first: 100)' "$WORKFLOW" \
   || fail "GraphQL reviewThreads 쿼리 부재"
 ok "check 10e: fingerprint 운반 + resolved_threads 1차 + fallback 2차 + verdict 무관 resolve"
+
+echo ""
+echo "=== check 10g: 결정론적 fingerprint 계산 — file+perspective+normalized title, 줄번호 비의존 (AC1/AC2/AC7) ==="
+# AC1/AC2: fingerprint 는 finding 의 안정 속성(파일 경로·리뷰 관점·정규화 제목)에서만
+# 결정론적으로 계산되며 line/start_line 에는 의존하지 않는다 — 줄 이동에도 동일 fp.
+grep -qF 'computeFingerprint' "$WORKFLOW" \
+  || fail "결정론적 fingerprint 계산 함수(computeFingerprint) 부재 (AC1)"
+grep -qF 'crypto' "$WORKFLOW" \
+  || fail "fingerprint 해시 계산(crypto) 부재 (AC1)"
+grep -qF "[f.file || '', f.review_perspective || '', normalizeTitle(f.title)]" "$WORKFLOW" \
+  || fail "fingerprint 입력이 file+review_perspective+normalized title 로 한정되지 않음 (AC1 제약)"
+# 정규화 방식은 두 워크플로에서 동일해야 한다(제약). 정확한 구현 라인을 잠근다.
+grep -qF "replace(/[^\\p{L}\\p{N}]+/gu, ' ')" "$WORKFLOW" \
+  || fail "제목 정규화(문장부호/공백 → 단일 공백) 구현 부재 또는 불일치 (제약: 두 워크플로 동일)"
+grep -qF "normalize('NFKC')" "$WORKFLOW" \
+  || fail "제목 정규화 NFKC 부재 또는 불일치 (제약: 두 워크플로 동일)"
+# 줄 비의존: findingFingerprints 가 모델 f.fingerprint 가 아니라 computeFingerprint 로 산정.
+grep -qF 'findings.map((f) => computeFingerprint(f))' "$WORKFLOW" \
+  || grep -qF 'findings.map(computeFingerprint)' "$WORKFLOW" \
+  || fail "findingFingerprints 가 결정론적 computeFingerprint 로 산정되지 않음 (AC4)"
+ok "check 10g: 결정론적 fingerprint(file+perspective+title), 줄번호 비의존"
 
 echo ""
 echo "=== check 10f: request_changes verdict 어휘 제거 (workflow) (AC12/AC16f) ==="
@@ -335,11 +360,8 @@ grep -q '실제 위치' "$PROMPT" \
 if grep -q 'issue-level comment로 보고' "$PROMPT"; then
   fail "prompt 가 finding 을 issue-level comment 로 보고하도록 지시함 — inline-only 정책 위반"
 fi
-grep -qF '"kind": "inline"' "$PROMPT" \
-  || fail "prompt hidden marker 의 kind 가 inline 전용이 아님"
-if grep -qF 'inline|issue' "$PROMPT"; then
-  fail "prompt 에 inline|issue 잔존 — inline-only 정책에서 kind 는 inline 만"
-fi
+grep -q 'inline comment로만 보고' "$PROMPT" \
+  || fail "prompt inline-only 보고 지침 부재 (모든 finding 은 inline)"
 # schema: comment_type enum 은 inline 전용
 grep -qF '"inline"' "$SCHEMA" \
   || fail "schema comment_type 에 inline 값 부재"
@@ -365,6 +387,26 @@ fi
 grep -q 'may_request_changes' "$SCHEMA" \
   || fail "may_request_changes 필드가 schema 에서 제거됨 — non-goal: 미사용으로 남기되 유지해야 함"
 ok "check 11d: resolved_threads 지시 + request_changes 어휘 제거 (may_request_changes 필드 유지)"
+
+echo ""
+echo "=== check 11e: 프롬프트 마커 형식이 실제 게시·매칭 마커와 일치 (AC5/AC7) ==="
+# AC5: 프롬프트가 모델에게 기존 self thread fingerprint 출처로 안내하는 마커 형식은,
+# 워크플로가 실제 게시(fingerprintMarker)하고 resolve 시 매칭(fpRe)하는 마커와 동일해야 한다.
+# 워크플로 실제 마커: <!-- codex-review-inline fingerprint=... -->
+grep -qF 'codex-review-inline fingerprint=' "$PROMPT" \
+  || fail "프롬프트가 실제 게시·매칭 마커 형식(codex-review-inline fingerprint=)을 가리키지 않음 (AC5)"
+# 어긋난 옛 JSON 마커 형식(<!-- codex-review: {json} -->)은 제거되어야 한다.
+if grep -qF '<!-- codex-review:' "$PROMPT"; then
+  fail "프롬프트에 옛 JSON 마커 형식(<!-- codex-review:) 잔존 — 실제 마커와 어긋남 (AC5)"
+fi
+# 프롬프트는 모델이 fingerprint 를 생성하지 않음을 반영해야 한다(줄 기반 생성 지시 제거).
+if grep -q 'changed line' "$PROMPT"; then
+  fail "프롬프트에 changed line 기반 fingerprint 생성 지시 잔존 — 결정론 계산은 워크플로 소관 (AC1)"
+fi
+# 워크플로의 게시 마커와 매칭 정규식이 동일 substring 을 공유하는지(자체 정합) 확인.
+grep -qF 'codex-review-inline fingerprint=' "$WORKFLOW" \
+  || fail "워크플로 마커 substring(codex-review-inline fingerprint=)이 프롬프트 안내와 불일치 (AC5)"
+ok "check 11e: 프롬프트 마커 == 실제 게시·매칭 마커"
 
 echo ""
 echo "=== check 12: schema requires automation safety and context fields ==="

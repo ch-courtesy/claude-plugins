@@ -84,26 +84,14 @@
 - 다른 리뷰어가 만든 thread/comment는 resolve하거나 수정하지 않습니다.
 - Codex가 만든 thread/comment만 관리합니다.
 
-중복 방지:
-모든 Codex comment에는 아래 hidden marker를 포함해야 합니다.
+self thread 식별 마커:
+워크플로는 게시하는 각 Codex inline comment 본문 끝에 아래 형식의 hidden marker를 자동으로 덧붙입니다. 이 마커는 워크플로가 실제로 게시하고 resolve 시 매칭하는 형식입니다.
 
-<!-- codex-review:
-{
-  "owner": "codex",
-  "fingerprint": "<stable-fingerprint>",
-  "kind": "inline",
-  "severity": "blocking|non_blocking|question",
-  "status": "active|resolved",
-  "head_sha": "<head-sha>"
-}
--->
+<!-- codex-review-inline fingerprint=<deterministic-fingerprint> -->
 
-fingerprint는 아래 값을 정규화하여 안정적으로 생성합니다.
-- issue category
-- file path
-- changed line 또는 nearest changed hunk
-- normalized title
-- normalized root cause
+fingerprint 값은 워크플로가 finding의 안정 속성(파일 경로 + 리뷰 관점 `review_perspective` + 정규화한 제목)으로부터 결정론적으로 계산합니다. 줄 번호에는 의존하지 않으므로, 같은 finding은 PR 진화로 줄 위치가 바뀌어도 실행 간 동일한 fingerprint를 갖습니다. 모델은 이 fingerprint를 직접 생성하지 않습니다 — 마커는 워크플로가 부여합니다.
+
+기존 Codex(자신) self inline thread를 resolve로 판단할 때는, 그 thread 첫 코멘트의 위 마커에서 `fingerprint=` 뒤의 값을 그대로 읽어 그 값과 reason을 resolved_threads에 기록합니다. 아직 해결되지 않은 thread는 같은 방식으로 읽은 fingerprint를 unresolved_threads에 기록합니다.
 
 심각도:
 - blocking: merge 전에 반드시 수정해야 하는 문제입니다. correctness, security, data loss, clear regression, broken CI/release behavior에 사용합니다.
