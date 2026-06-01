@@ -53,6 +53,16 @@ check "git.md frontmatter declares sub_rule git" grep -qE '^sub_rule:[[:space:]]
 check "git.md declares an inputs block" grep -qF 'inputs:' "$TPL"
 check "git.md declares force_push_policy input" grep -qF 'force_push_policy' "$TPL"
 
+# --- 4-bis) step order: backend determination is described BEFORE git-family gating ---
+# Guards the reviewed contradiction where the gating step referenced a later
+# detection step's result (forward reference / step-number vs execution-order mismatch).
+detstep="$(lineno_re "$SKILL" '^[0-9]+\. \*\*백엔드 판별')"
+gatestep="$(lineno_re "$SKILL" 'git 계열 공통 sub-룰 게이팅')"
+check "SKILL.md describes backend determination before git-family gating" \
+  bash -c "[ -n '$detstep' ] && [ -n '$gatestep' ] && [ '$detstep' -lt '$gatestep' ]"
+check "SKILL.md has no forward-reference to a later detection step in gating" \
+  bash -c "! grep -qF '3단계의 백엔드 판별 결과를 재사용' '$SKILL'"
+
 # --- 5) 금지 option: first, Recommended, carries prohibition clause ---
 check "git.md marks an option (Recommended)" grep -qF '(Recommended)' "$TPL"
 check "git.md prohibition option text mentions force push 금지" bash -c "grep -qF 'force push' '$TPL' && grep -qF '금지' '$TPL'"
