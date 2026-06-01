@@ -93,7 +93,6 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "fingerprint",
           "severity",
           "confidence_score",
           "review_perspective",
@@ -107,7 +106,6 @@
           "duplicate_of"
         ],
         "properties": {
-          "fingerprint": { "type": "string" },
           "severity": {
             "type": "string",
             "enum": ["blocking", "non_blocking", "question"]

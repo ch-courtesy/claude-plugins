@@ -272,6 +272,25 @@ jobs:
             const appSlug = process.env.APP_SLUG;
             const botLogin = appSlug ? `${appSlug}[bot]` : 'github-actions[bot]';
 
+            // Deterministic finding fingerprint. Derived ONLY from the finding's
+            // stable attributes — file path, review perspective, and a normalized
+            // title — so the same finding keeps the same fingerprint across review
+            // runs even as the PR evolves and the line shifts (line/start_line are
+            // deliberately excluded). The workflow computes this; the model no
+            // longer supplies a free-form fingerprint. The same normalization is
+            // used in claude-review.yml so both workflows agree.
+            const crypto = require('crypto');
+            const normalizeTitle = (s) => String(s == null ? '' : s)
+              .normalize('NFKC')
+              .toLowerCase()
+              .replace(/[^\p{L}\p{N}]+/gu, ' ')
+              .trim();
+            const computeFingerprint = (f) => crypto
+              .createHash('sha256')
+              .update([f.file || '', f.review_perspective || '', normalizeTitle(f.title)].join(' '))
+              .digest('hex')
+              .slice(0, 16);
+
             if (result.eligibility?.status !== 'reviewed') {
               core.info('No review output to post.');
               return;
@@ -323,7 +342,7 @@ jobs:
               // Anchor to f.line; fall back to f.start_line so a finding is never
               // dropped (validation guarantees at least one is a positive int).
               const anchor = (typeof f.line === 'number' && f.line > 0) ? f.line : f.start_line;
-              const fingerprintMarker = `${inlineMarkerBase} fingerprint=${f.fingerprint} -->`;
+              const fingerprintMarker = `${inlineMarkerBase} fingerprint=${computeFingerprint(f)} -->`;
               const c = {
                 path: f.file,
                 body: `**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}\n\n${fingerprintMarker}`,
@@ -405,10 +424,10 @@ jobs:
               (result.resolved_threads || [])
                 .map((r) => r && r.fingerprint)
                 .filter((fp) => typeof fp === 'string' && fp.length > 0));
-            const findingFingerprints = new Set(
-              findings
-                .map((f) => f && f.fingerprint)
-                .filter((fp) => typeof fp === 'string' && fp.length > 0));
+            // Deterministic fingerprints for this round's findings (workflow-computed,
+            // not model-supplied) — the fallback tier resolves any self thread whose
+            // fingerprint is absent from this set.
+            const findingFingerprints = new Set(findings.map((f) => computeFingerprint(f)));
             try {
               const threadResp = await github.graphql(`
                 query($owner:String!, $repo:String!, $pr:Int!) {
