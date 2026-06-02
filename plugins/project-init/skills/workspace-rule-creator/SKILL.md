@@ -1,6 +1,15 @@
 ---
 name: workspace-rule-creator
 description: 현재 프로젝트에 맞는 작업공간 위생 sub-룰(임시 파일 등)을 `rules/workspace/<sub>.md`로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 작업공간 위생 sub-룰 지침을 새로 만들고 싶어 할 때.
+allowed-tools:
+  - AskUserQuestion
+  - Read
+  - Write
+  - Glob
+  - Bash(ls:*)
+  - Bash(mkdir -p:*)
+  - Bash(diff:*)
+  - Bash(git diff:*)
 ---
 
 # workspace-rule-creator

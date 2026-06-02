@@ -1,6 +1,15 @@
 ---
 name: bootstrap
 description: 새 프로젝트를 시작할 때 기본 지침을 자동으로 설정합니다. 사용자가 "새 프로젝트 시작", "프로젝트 초기화", "레포 새로 만들기", "initialize a project", "set up a new repo"처럼 새 프로젝트를 준비하려는 의도를 보이거나, 현재 디렉토리가 비어 있고 `CLAUDE.md`가 없을 때 자동으로 활성화됩니다. 각 카테고리의 지침 생성은 형제 스킬(`*-rule-creator`)에 위임합니다.
+allowed-tools:
+  - AskUserQuestion
+  - Read
+  - Write
+  - Skill
+  - Glob
+  - Bash(ls:*)
+  - Bash(diff:*)
+  - Bash(git diff:*)
 ---
 
 # bootstrap
