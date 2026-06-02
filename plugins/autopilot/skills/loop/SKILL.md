@@ -36,7 +36,9 @@ loop은 어떤 도구가 만든 스펙이든 **임의의 스펙 파일 경로**�
 
 ## Subcommands
 
-### start <spec-path> [--max-iterations N] [--wall-clock-minutes N] [--no-monitor] [--events-only]
+### start <spec-path> [--max-iterations N] [--wall-clock-minutes N]
+
+> 위 bracket의 플래그는 `loop.sh`가 받는 인자다. `--no-monitor`·`--events-only`는 SKILL 차원 모니터링 옵션이라 `loop.sh`에 전달하지 않는다(전달하면 `알 수 없는 옵션`으로 실패) — 의미·우선순위는 아래 [Monitor](#monitor) 절 참조.
 
 반드시 `Bash(bash $SKILL_DIR/references/loop.sh start <spec-path> [...flags], run_in_background: true)`로 실행한다. 동기 실행은 Monitor 가설을 막으므로 금지.
 
