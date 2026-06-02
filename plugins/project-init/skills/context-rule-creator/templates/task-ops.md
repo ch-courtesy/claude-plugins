@@ -40,9 +40,10 @@ AI 에이전트 간 작업 컨텍스트를 영속화하기 위한 **백엔드 �
 
 | 라이프사이클 이벤트 (고정) | 목표 상태 |
 |---|---|
+| 태스크 최초 등록 (아직 진행되지 않은 초기 상태) | {{event_initial}} |
 | 계획/스펙 문서 생성 | {{event_plan_doc}} |
 | 구현 시작 (첫 `Edit`/`Write`, `git add`/`git commit`) | {{event_impl_start}} |
-| 검증 통과 (DoD 모두 체크 + 검증 PASS + 변경 반영) | {{event_verify_pass}} |
+| 리뷰 요청 (구현 완료 후 검증·리뷰 단계 진입 — PR/리뷰 요청 생성) | {{event_review_start}} |
 | 머지/완료 (PR 머지 또는 사용자의 명시적 "완료"·"Done"·"닫아줘" 신호) | {{event_merge_done}} |
 | 차단 발견 | {{event_blocked}} (진행 로그에 `[blocked]` 항목으로 사유 기록) |
 | 차단 해제 | {{event_unblocked}} |
