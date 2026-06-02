@@ -1,4 +1,4 @@
-# ESCALATION troubleshooting (optimized)
+# ESCALATION troubleshooting
 
 차단 신호는 `.loop/signals/BLOCKED`(첫 줄 `category:`). 차단 해제 정식 절차는 본문의 원인을 보정한 뒤 BLOCKED 파일을 삭제하고 재시작. category 값과 의미는 `references/constitution.md §작업 매체` SoT.
 

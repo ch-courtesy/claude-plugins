@@ -178,12 +178,20 @@ acquire_lock() {
 
 # ----- 게이트 헬퍼 -----
 # 스펙 frontmatter(첫 --- ~ 둘째 ---) 추출.
+# SPEC_PATH 는 드라이버 프로세스 생애 동안 불변(워커는 스펙 편집 금지)이므로
+# SPEC_PATH 키로 1회만 sed 파싱하고 캐시한다 — 이터당 ~7회 호출되던 재파싱 제거.
 read_scope_yaml() {
-  sed -n '1,/^---$/{
+  if [[ "${_SCOPE_YAML_KEY:-}" == "$SPEC_PATH" ]]; then
+    printf '%s\n' "$_SCOPE_YAML_CACHE"
+    return
+  fi
+  _SCOPE_YAML_CACHE=$(sed -n '1,/^---$/{
     1d
     /^---$/d
     p
-  }' "$SPEC_PATH" 2>/dev/null
+  }' "$SPEC_PATH" 2>/dev/null)
+  _SCOPE_YAML_KEY="$SPEC_PATH"
+  printf '%s\n' "$_SCOPE_YAML_CACHE"
 }
 
 # test_paths override 또는 기본 휴리스틱으로 기존 테스트 파일 목록.
@@ -472,7 +480,8 @@ cmd_start() {
   if apply_secondary_override; then
     echo "[$(now_iso)] 보조 worktree 감지 — nested 생성 생략. 작업 공간: $WT"
     mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
-    [[ -f "$LOOP_DIR/BASE_SHA" ]] || git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" 2>/dev/null || true
+    [[ -f "$LOOP_DIR/BASE_SHA" ]] || git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" \
+      || die "BASE SHA 캡처 실패(보조 worktree): $LOOP_DIR/BASE_SHA"
   elif [[ ! -d "$WT" ]]; then
     echo "[$(now_iso)] 워크트리 생성: $WT (detached HEAD)"
     git -C "$SPEC_DIR" worktree add --detach "$WT" HEAD \
