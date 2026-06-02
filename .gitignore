@@ -9,6 +9,8 @@ milestones/**/loops/**/.lock
 .claude/worktrees/
 .claude/settings.local.json
 .fsd/
+# 업그레이드 전 conductor(구 이름) 런타임 상태 — 추적 노출 방지를 위해 유지
+.conductor/
 
 # dispatch run artifacts
 .dispatch/

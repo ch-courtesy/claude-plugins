@@ -100,9 +100,8 @@ tb_backend_gh() {
       #     FSD_STATUS_FIELD    Status 필드 이름(기본 "Status")
       #   식별자 미설정이면 전이할 수 없으므로 가독용 라벨만 남기고 **실패(비-0)**
       #   를 반환한다 — 라벨-only no-op 을 성공으로 보고하지 않는다.
-      #   (구 변수명 FSD_PROJECT_ID 는 번호로 간주해 하위호환 수용.)
       local _id="$1" _status="$2" _field="${FSD_STATUS_FIELD:-Status}"
-      local _num="${FSD_PROJECT_NUMBER:-${FSD_PROJECT_ID:-}}"
+      local _num="${FSD_PROJECT_NUMBER:-}"
       local _owner="${FSD_PROJECT_OWNER:-@me}"
       gh issue edit "$_id" --add-label "status:$_status" >/dev/null 2>&1 || true
       if [[ -z "$_num" ]]; then
