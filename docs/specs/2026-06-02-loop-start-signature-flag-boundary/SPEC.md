@@ -57,7 +57,7 @@ scope:
 - `references/loop.sh`의 인자 파서·플래그·동작 변경 — 본 변경은 문서 표기만 고친다.
 - Monitor 절의 `--no-monitor`/`--events-only` 의미 재정의 — 기존 설명은 유지하고 포인터만 추가한다.
 - 다른 서브커맨드(`status`/`stop`/`list`/`cleanup`/`logs`/`env`/`gates`/`paths`/`deps`) 시그니처 표기 변경.
-- `dispatch`·`conductor` 등 다른 스킬 문서나 `loop`를 호출하는 상위 오케스트레이터 문서 변경.
+- `dispatch`·`fsd` 등 다른 스킬 문서나 `loop`를 호출하는 상위 오케스트레이터 문서 변경.
 - 새 플래그 추가·기존 플래그 의미 변경.
 
 ## 의존성

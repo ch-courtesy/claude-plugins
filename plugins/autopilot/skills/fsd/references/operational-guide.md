@@ -1,6 +1,6 @@
-# conductor 상시 호스트 무인 운영 가이드 (C5)
+# fsd 상시 호스트 무인 운영 가이드 (C5)
 
-`conductor poll`(→ `references/poll.sh`)을 **전용 상시 호스트(dedicated always-on host)**에서
+`fsd poll`(→ `references/poll.sh`)을 **전용 상시 호스트(dedicated always-on host)**에서
 무인으로 주기 실행해 spec→dispatch→리뷰→머지 파이프라인을 사람 개입 없이 닫기 위한
 운영·보안 경계 문서다. 본 가이드는 호스트별 설정 산출물(systemd 유닛 등)을 만들지 않고
 **문서로만** 안내한다(SPEC 비-목표).
@@ -16,7 +16,7 @@
 ```
 전용 상시 호스트 (trust boundary)
 ├── 스케줄러 (cron / /schedule / /loop)
-│      └── conductor poll          ← 무인 자격증명을 쓰는 유일 지점
+│      └── fsd poll          ← 무인 자격증명을 쓰는 유일 지점
 │             ├── start  (dispatch → 자율 실행기 서브프로세스)   ※ push/merge 권한 미상속
 │             ├── integrate (C2)   push (작업 브랜치 한정 토큰)
 │             ├── review    (C3)   같은 head 브랜치 push (force 금지)
@@ -48,7 +48,7 @@
 - Fine-grained PAT 또는 GitHub App 설치 토큰을 권장한다(classic `repo` 광역 스코프 지양).
 - **대상 저장소를 이 레포 하나로 한정**한다(조직 전체 토큰 금지).
 - 토큰은 호스트의 비밀 저장소(예: `gh auth login` 의 OS 키체인, 또는 파일 권한 `600`
-  의 환경 파일)에만 둔다. 레포·로그·`.conductor/` 상태 디렉토리에 절대 커밋·기록하지 않는다.
+  의 환경 파일)에만 둔다. 레포·로그·`.fsd/` 상태 디렉토리에 절대 커밋·기록하지 않는다.
 - 만료·로테이션: 짧은 만료(예: 90일 이하) + 주기 로테이션. 유출 시 폐기 절차를 문서화한다.
 
 ### 2.2 배제할 권한 (명시적 비-스코프)
@@ -100,15 +100,15 @@ poll 의 `start`/`integrate`/`review` 는 구현을 **자율 실행기(loop/disp
 - **환경 변수 비전파**: `APPROVER`/`APPROVER_TOKEN` 등 승인 권한 자격증명을 자율 실행기
   자식의 환경에 내보내지 않는다(`export` 범위 점검). poll 은 자식에 task 컨텍스트
   (`POLL_CUR_TASK`)만 노출한다.
-- **작업 공간 격리**: 자식은 자기 격리 워크트리/작업 공간에서만 쓰고, conductor 상태
-  디렉토리(`.conductor/`) 밖을 건드리지 않는다. 정리는 머지 확인 후 loop 의 공개 cleanup
+- **작업 공간 격리**: 자식은 자기 격리 워크트리/작업 공간에서만 쓰고, fsd 상태
+  디렉토리(`.fsd/`) 밖을 건드리지 않는다. 정리는 머지 확인 후 loop 의 공개 cleanup
   인터페이스로만 위임한다(직접 삭제 금지).
 
 ---
 
 ## 5. 폴링 주기·실행 방식 (AC7)
 
-전용 상시 호스트에서 `conductor poll` 을 **주기적으로** 돌린다. poll 은 호출 단위 무상태·
+전용 상시 호스트에서 `fsd poll` 을 **주기적으로** 돌린다. poll 은 호출 단위 무상태·
 멱등이므로, 크래시·중복 실행에도 안전하다(중복 전이·중복 PR 없음). 다음 중 하나로 스케줄링한다.
 
 ### 5.1 권장 주기
@@ -124,12 +124,12 @@ poll 의 `start`/`integrate`/`review` 는 구현을 **자율 실행기(loop/disp
 
   ```cron
   # 10분마다 멱등 드레인 1회 (flock 으로 중복 실행 방지)
-  */10 * * * * /usr/bin/flock -n /tmp/conductor-poll.lock \
-      bash /path/to/plugins/autopilot/skills/conductor/references/poll.sh poll \
-      >> /var/log/conductor-poll.log 2>&1
+  */10 * * * * /usr/bin/flock -n /tmp/fsd-poll.lock \
+      bash /path/to/plugins/autopilot/skills/fsd/references/poll.sh poll \
+      >> /var/log/fsd-poll.log 2>&1
   ```
 
-- **하니스 `/schedule`** (원격 스케줄 에이전트): `conductor poll` 을 cron 식으로 등록.
+- **하니스 `/schedule`** (원격 스케줄 에이전트): `fsd poll` 을 cron 식으로 등록.
 - **하니스 `/loop`** (간격 반복 실행): 대화형/세션 호스트에서 `poll` 을 주기 반복.
 
 > 어느 수단이든 본 가이드는 **글루(어떻게 주기 실행할지)만 문서화**하고, systemd 유닛
@@ -141,4 +141,4 @@ poll 의 `start`/`integrate`/`review` 는 구현을 **자율 실행기(loop/disp
 - [ ] `APPROVER` ≠ `REVIEW_BOT` ≠ `BOT_TOKEN` 신원 (§3 분리 불변식).
 - [ ] 자율 실행기 자식에 승인·머지 권한 미상속 (§4).
 - [ ] poll 단일 실행 lock + 주기(§5.1) 설정.
-- [ ] 토큰을 레포·로그·`.conductor/` 에 기록하지 않음.
+- [ ] 토큰을 레포·로그·`.fsd/` 에 기록하지 않음.

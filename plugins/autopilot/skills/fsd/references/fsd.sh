@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# conductor.sh — autopilot:conductor 서브커맨드 라우터 (골격, C0)
+# fsd.sh — autopilot:fsd 서브커맨드 라우터 (골격, C0)
 #
 # 책임:
 #   - 호출을 받아 해당 서브커맨드 핸들러로 분기.
-#   - 프로젝트 루트 탐지 + 상태 저장소(.conductor/) 초기화.
+#   - 프로젝트 루트 탐지 + 상태 저장소(.fsd/) 초기화.
 #   - intake / start 는 spec·dispatch 조합까지만 수행한다 (forge 없음):
 #       intake  — SPEC 경로(들)로 task 를 등록 (상태 저장소에 기록).
 #       start   — task 의 SPEC(들)을 dispatch 의 공개 서브커맨드로 위임하고
@@ -13,23 +13,23 @@
 #   - forge(이슈/PR/머지/라벨)·task backend 연동.   → C1·C2·C4
 #   - 리뷰 피드백 루프.                              → C3
 #   - poll 드레인·상시 호스트 운영.                  → C5
-#   conductor 는 본 골격에서 forge CLI 를 직접 호출하지 않는다. dispatch·spec 의
+#   fsd 는 본 골격에서 forge CLI 를 직접 호출하지 않는다. dispatch·spec 의
 #   공개 인터페이스만 소비한다.
 #
 # 사용:
-#   bash conductor.sh intake <spec...>
-#   bash conductor.sh start  <spec...>
-#   bash conductor.sh review <task-id>     (미구현 — C3)
-#   bash conductor.sh merge  <task-id>     (미구현 — C4)
-#   bash conductor.sh poll                 (미구현 — C5)
-#   bash conductor.sh status <task-id>
-#   bash conductor.sh list
-#   bash conductor.sh stop   <task-id>
+#   bash fsd.sh intake <spec...>
+#   bash fsd.sh start  <spec...>
+#   bash fsd.sh review <task-id>     (미구현 — C3)
+#   bash fsd.sh merge  <task-id>     (미구현 — C4)
+#   bash fsd.sh poll                 (미구현 — C5)
+#   bash fsd.sh status <task-id>
+#   bash fsd.sh list
+#   bash fsd.sh stop   <task-id>
 #
 # 환경 변수:
 #   DISPATCH_CMD          dispatch driver 호출 명령 (기본: 형제 dispatch.sh).
 #                         테스트에서 mock 으로 치환 가능.
-#   CONDUCTOR_STATE_ROOT  상태 루트 (기본 <project_root>/.conductor). lib-state.sh 참조.
+#   FSD_STATE_ROOT  상태 루트 (기본 <project_root>/.fsd). lib-state.sh 참조.
 #
 # bash 3.2+ 호환 (associative array 미사용).
 
@@ -118,7 +118,7 @@ extract_run_id() {
 # SPEC 경로(들)로 task 를 등록한다. (backend 이슈 생성은 후속 C1.)
 cmd_intake() {
   require_git_root
-  [[ $# -ge 1 ]] || die "사용: conductor intake <spec...>"
+  [[ $# -ge 1 ]] || die "사용: fsd intake <spec...>"
   validate_specs "$@"
   local id
   id="$(derive_task_id "${ABS_SPECS[@]}")"
@@ -133,7 +133,7 @@ cmd_intake() {
 # task 의 SPEC(들)을 dispatch 에 위임하고 run 식별자를 기록한다.
 cmd_start() {
   require_git_root
-  [[ $# -ge 1 ]] || die "사용: conductor start <spec...>"
+  [[ $# -ge 1 ]] || die "사용: fsd start <spec...>"
   validate_specs "$@"
   local id
   id="$(derive_task_id "${ABS_SPECS[@]}")"
@@ -166,26 +166,26 @@ $out"
 
 # ----- subcommand: review (미구현 — C3) -----
 cmd_review() {
-  echo "conductor review: 미구현 — 리뷰 피드백 루프는 후속 단위(C3)가 채웁니다." >&2
+  echo "fsd review: 미구현 — 리뷰 피드백 루프는 후속 단위(C3)가 채웁니다." >&2
   exit 2
 }
 
 # ----- subcommand: merge (미구현 — C4) -----
 cmd_merge() {
-  echo "conductor merge: 미구현 — 머지·Done·cleanup 은 후속 단위(C4)가 채웁니다." >&2
+  echo "fsd merge: 미구현 — 머지·Done·cleanup 은 후속 단위(C4)가 채웁니다." >&2
   exit 2
 }
 
 # ----- subcommand: poll (미구현 — C5) -----
 cmd_poll() {
-  echo "conductor poll: 미구현 — poll 드레인·상시 호스트 운영은 후속 단위(C5)가 채웁니다." >&2
+  echo "fsd poll: 미구현 — poll 드레인·상시 호스트 운영은 후속 단위(C5)가 채웁니다." >&2
   exit 2
 }
 
 # ----- subcommand: status -----
 cmd_status() {
   local id="${1:-}"
-  [[ -z "$id" ]] && die "사용: conductor status <task-id>"
+  [[ -z "$id" ]] && die "사용: fsd status <task-id>"
   require_git_root
   task_exists "$id" || die "task 없음: $id"
   echo "task-id:  $id"
@@ -207,7 +207,7 @@ cmd_list() {
   local ids
   ids="$(list_tasks)"
   if [[ -z "$ids" ]]; then
-    echo "(no tasks yet — 새 task: conductor intake <spec...>)"
+    echo "(no tasks yet — 새 task: fsd intake <spec...>)"
     return 0
   fi
   printf "%-40s %-16s %s\n" "TASK-ID" "STATE" "RUN-ID"
@@ -222,7 +222,7 @@ cmd_list() {
 # task 가 소유한 dispatch run 을 dispatch 의 공개 stop 서브커맨드로 정지 위임.
 cmd_stop() {
   local id="${1:-}"
-  [[ -z "$id" ]] && die "사용: conductor stop <task-id>"
+  [[ -z "$id" ]] && die "사용: fsd stop <task-id>"
   require_git_root
   task_exists "$id" || die "task 없음: $id"
   local rid
@@ -241,7 +241,7 @@ cmd_stop() {
 # ----- 사용법 -----
 usage() {
   cat >&2 <<'EOF'
-usage: conductor.sh <subcommand> [args]
+usage: fsd.sh <subcommand> [args]
 
 Subcommands:
   intake <spec...>   SPEC 경로(들)로 task 를 등록(상태 저장소에 기록).
@@ -254,7 +254,7 @@ Subcommands:
   stop   <task-id>   task 가 소유한 dispatch run 정지 위임.
 
 환경 변수:
-  DISPATCH_CMD, CONDUCTOR_STATE_ROOT
+  DISPATCH_CMD, FSD_STATE_ROOT
 EOF
   exit 1
 }

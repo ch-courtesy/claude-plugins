@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# task-backend.sh — autopilot:conductor task 백엔드 어댑터 (C1)
+# task-backend.sh — autopilot:fsd task 백엔드 어댑터 (C1)
 #
-# conductor 가 task backend(이슈 + 프로젝트 보드)와 상호작용하는 **단일 지점**이다.
+# fsd 가 task backend(이슈 + 프로젝트 보드)와 상호작용하는 **단일 지점**이다.
 # 본 모듈은 다음 규칙의 실행자다(규칙 재정의 금지):
 #   - rules/context.md                          이슈=task, 상태 어휘, 본문 구조, 코멘트 접두 규약
 #   - rules/orchestration/task-state-alignment.md  4분기 상태 정합
@@ -26,7 +26,7 @@
 #   verb: create <title> | get-status <id> | set-status <id> <status>
 #         get-body <id> | set-body <id> <bodyfile> | comment <id> <message>
 #
-# task-id 는 conductor 의 로컬 상태 디렉토리 키(slug-hash)이고,
+# task-id 는 fsd 의 로컬 상태 디렉토리 키(slug-hash)이고,
 # 백엔드 식별자(이슈 번호)는 미러 필드 `issue` 에 보관한다. 미러 필드 `backend-status`
 # 는 백엔드 상태 어휘를 그대로 미러링한다. 두 필드는 lib-state.sh 헬퍼로 IO 한다.
 #
@@ -95,18 +95,17 @@ tb_backend_gh() {
       #   "백엔드가 진실의 원천" 계약(C1/C5)을 지키려면, 전이가 실제로 성공한
       #   경우에만 0 을 반환해야 한다(호출자는 그때만 미러를 갱신한다).
       #   Project/field/option 식별자는 환경에서 주입한다:
-      #     CONDUCTOR_PROJECT_NUMBER  project *번호* (item-list/field-list 위치 인자용)
-      #     CONDUCTOR_PROJECT_OWNER   project owner (기본 "@me")
-      #     CONDUCTOR_STATUS_FIELD    Status 필드 이름(기본 "Status")
+      #     FSD_PROJECT_NUMBER  project *번호* (item-list/field-list 위치 인자용)
+      #     FSD_PROJECT_OWNER   project owner (기본 "@me")
+      #     FSD_STATUS_FIELD    Status 필드 이름(기본 "Status")
       #   식별자 미설정이면 전이할 수 없으므로 가독용 라벨만 남기고 **실패(비-0)**
       #   를 반환한다 — 라벨-only no-op 을 성공으로 보고하지 않는다.
-      #   (구 변수명 CONDUCTOR_PROJECT_ID 는 번호로 간주해 하위호환 수용.)
-      local _id="$1" _status="$2" _field="${CONDUCTOR_STATUS_FIELD:-Status}"
-      local _num="${CONDUCTOR_PROJECT_NUMBER:-${CONDUCTOR_PROJECT_ID:-}}"
-      local _owner="${CONDUCTOR_PROJECT_OWNER:-@me}"
+      local _id="$1" _status="$2" _field="${FSD_STATUS_FIELD:-Status}"
+      local _num="${FSD_PROJECT_NUMBER:-}"
+      local _owner="${FSD_PROJECT_OWNER:-@me}"
       gh issue edit "$_id" --add-label "status:$_status" >/dev/null 2>&1 || true
       if [[ -z "$_num" ]]; then
-        tb_die "Project Status 전이 불가: CONDUCTOR_PROJECT_NUMBER 미설정 (라벨만 기록, 미러 미갱신)"
+        tb_die "Project Status 전이 불가: FSD_PROJECT_NUMBER 미설정 (라벨만 기록, 미러 미갱신)"
         return 1
       fi
       # gh project 식별자 의미(중요): 두 종류의 식별자가 섞이지 않게 한다.
@@ -206,7 +205,7 @@ tb_render_body() {
 $title — 자세한 내용은 아래 자동 동기화된 SPEC 전문 참조.
 
 ## 배경
-이 task 는 SPEC 문서를 단일 출처로 하는 conductor 파이프라인에서 생성되었다.
+이 task 는 SPEC 문서를 단일 출처로 하는 fsd 파이프라인에서 생성되었다.
 
 ## 제안
 아래 SPEC 의 수용 기준·범위·제약을 구현 흐름이 그대로 따른다.
@@ -257,7 +256,7 @@ spec_fallback_title() {
 
 # tb_set_status <task-id> <status> — 어휘 검증 후 백엔드 전이 + 미러 기록.
 #   "백엔드가 진실의 원천": 백엔드 전이가 실제로 성공한 경우에만 미러를 갱신한다.
-#   전이가 실패하면 미러를 갱신하지 않고 오류를 전파해, conductor 가 실제로는
+#   전이가 실패하면 미러를 갱신하지 않고 오류를 전파해, fsd 가 실제로는
 #   전이되지 않은 상태를 전이됐다고 오판하지 않게 한다(poll 정합 깨짐 방지).
 tb_set_status() {
   local id="$1" status="$2" iid
@@ -358,11 +357,11 @@ tb_comment() {
 }
 
 # ===== 자체 검증 (mock 백엔드) =====
-# self-referential 위험에 따라 runtime artifact(.conductor/·실제 이슈)를 검사하지 않고
+# self-referential 위험에 따라 runtime artifact(.fsd/·실제 이슈)를 검사하지 않고
 # mock 인터페이스로 동작만 검증한다.
 tb_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
-  export CONDUCTOR_STATE_ROOT="$TMP/.conductor"
+  export FSD_STATE_ROOT="$TMP/.fsd"
   local BK="$TMP/backend"; mkdir -p "$BK"; echo 0 > "$BK/.counter"
   mock_backend() {
     local verb="$1"; shift
