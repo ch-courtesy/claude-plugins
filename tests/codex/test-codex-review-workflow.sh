@@ -4,12 +4,15 @@
 # Static checks only: do not call GitHub, npm, or Codex.
 #
 # This workflow calls the model through the official openai/codex-action and
-# publishes results with the SAME structure as the sibling Claude PR review
-# workflow (formal review verdict + a single marker-managed PR comment). The
-# legacy codex-only paths — direct `codex exec`/`codex review` CLI calls,
-# inline review comments, fingerprint-based self thread auto-resolve, and the
-# GitHub App installation token / App-token APPROVE — are gone. These checks
-# assert the new structure exists and the removed paths are absent.
+# publishes results as a SINGLE inline review: findings become inline review
+# comments anchored to changed lines, the review summary rides in the review
+# body, and self-owned inline threads auto-resolve on a deterministic
+# fingerprint basis. The legacy codex-only paths — direct `codex exec`/`codex
+# review` CLI calls and the GitHub App installation token / App-token APPROVE —
+# are gone, as is the separate marker-managed issue-level finding comment.
+# These checks assert the inline+resolve structure exists and removed paths are
+# absent. The posting logic mirrors claude-review.yml byte-identically except
+# for label/marker/prefix strings.
 
 set -euo pipefail
 
@@ -187,82 +190,116 @@ fi
 ok "check 12: @codex + author association + 봇 차단 게이트, App 봇 분기 제거됨"
 
 echo ""
-echo "=== check 13: Claude 동일 게시 구조 — verdict 정식 리뷰 제출 (AC4/제약) ==="
-grep -q 'name: Submit Codex review verdict' "$WORKFLOW" \
-  || fail "'Submit Codex review verdict' 스텝 부재 (Claude 'Submit … review verdict' 구조 치환) (제약)"
-# 정식 리뷰 verdict 는 gh pr review 로 제출 (Claude 와 동일). approve/comment/request-changes 3 경로.
-grep -q 'gh pr review .*--approve' "$WORKFLOW" \
-  || fail "approve 정식 리뷰 제출 경로 부재 (AC4)"
-grep -q 'submit_review --comment' "$WORKFLOW" \
-  || fail "comment 정식 리뷰 제출 경로 부재 (AC4)"
-grep -q 'submit_review --request-changes' "$WORKFLOW" \
-  || fail "request-changes 정식 리뷰 제출 경로 부재 (AC4 — Claude 동일)"
-grep -qF '## Codex PR Review' "$WORKFLOW" \
-  || fail "정식 리뷰 본문 헤더 '## Codex PR Review' 부재 (제약: codex 라벨 치환)"
-# 멱등 마커 (head_sha, verdict) 기준.
-grep -qF 'codex-formal-review head_sha=$PR_HEAD_SHA verdict=$verdict' "$WORKFLOW" \
-  || fail "formal review 멱등 마커(codex-formal-review head_sha=.. verdict=..) 부재 (제약)"
-grep -qF 'already exists for $PR_HEAD_SHA / $verdict; skipping duplicate' "$WORKFLOW" \
-  || fail "marker 기반 중복 review skip 부재 (AC4 멱등)"
-grep -qF 'pulls/$PR_NUMBER/reviews' "$WORKFLOW" \
-  || fail "기존 review 조회(REST) 부재 — 멱등성 판정 불가"
-grep -q 'touch .codex-review/approval-failed' "$WORKFLOW" \
-  || fail "APPROVE 실패 시 approval-failed marker 부재 (Claude 동일 fallback)"
-ok "check 13: verdict 정식 리뷰 제출 (approve/comment/request-changes) + 멱등"
+echo "=== check 13: 단일 inline 리뷰 제출 — verdict/event + body summary + 멱등 (AC1/AC7) ==="
+grep -q 'name: Submit Codex inline review' "$WORKFLOW" \
+  || fail "'Submit Codex inline review' 스텝 부재 (단일 inline 리뷰 게시 스텝 치환) (제약)"
+# 단일 createReview(comments[]) 로 inline + 본문을 한 번에 제출. event 는 APPROVE/COMMENT 만.
+grep -qF 'github.rest.pulls.createReview' "$WORKFLOW" \
+  || fail "Pulls REST createReview 호출 부재 — inline 단일 리뷰 제출 불가 (AC1)"
+grep -qF "event === 'APPROVE'" "$WORKFLOW" \
+  || fail "APPROVE event 분기 부재 (AC1)"
+grep -qF "event = 'COMMENT'" "$WORKFLOW" \
+  || fail "COMMENT event 분기 부재 (AC1)"
+# REQUEST_CHANGES review event 는 폐지. may_request_changes(automation_safety) 외 request_changes 토큰 금지.
+if grep -qF 'REQUEST_CHANGES' "$WORKFLOW"; then
+  fail "REQUEST_CHANGES 잔존 — 공식 review event 는 APPROVE/COMMENT 만 (제약)"
+fi
+if grep -oE '[a-z_]*request_changes' "$WORKFLOW" | grep -qvE '^may_request_changes$'; then
+  fail "request_changes verdict 어휘 잔존 (may_request_changes 외) — 제거 필요 (제약)"
+fi
+# 리뷰 본문(body): 헤더 + summary(있으면) — 한국어 헤더.
+grep -qF '## Codex PR 리뷰' "$WORKFLOW" \
+  || fail "리뷰 본문 헤더 '## Codex PR 리뷰' 부재 (제약: codex 라벨)"
+grep -qF 'result.summary' "$WORKFLOW" \
+  || fail "리뷰 본문에 result.summary 포함 부재 (제약: summary 를 본문에 실음)"
+# 멱등 마커 (head_sha, verdict) 기준 + listReviews 조회 + 중복 skip.
+grep -qF 'CODEX_FORMAL_PREFIX: codex-formal-review' "$WORKFLOW" \
+  || fail "formal review 마커 prefix(CODEX_FORMAL_PREFIX: codex-formal-review) 부재 (제약)"
+grep -qF '${prefix} head_sha=${head_sha} verdict=${verdict}' "$WORKFLOW" \
+  || fail "formal review 멱등 마커 템플릿(<!-- {prefix} head_sha=.. verdict=.. -->) 부재 (제약)"
+grep -qF 'github.rest.pulls.listReviews' "$WORKFLOW" \
+  || fail "기존 review 조회(listReviews) 부재 — 멱등성 판정 불가 (AC1)"
+grep -qF 'skipping duplicate submission' "$WORKFLOW" \
+  || fail "marker 기반 중복 review 제출 skip 부재 (멱등)"
+# APPROVE 실패 → COMMENT 강등 + approval-failed 기록 (AC7).
+grep -qF "fs.writeFileSync('.codex-review/approval-failed'" "$WORKFLOW" \
+  || fail "APPROVE 실패 시 approval-failed marker 기록 부재 (AC7)"
+grep -qF "submit('COMMENT')" "$WORKFLOW" \
+  || fail "APPROVE 실패 시 같은 inline 코멘트로 COMMENT 강등 제출 부재 (AC7)"
+ok "check 13: 단일 inline 리뷰 제출 (APPROVE/COMMENT) + body summary + 멱등 + APPROVE fallback"
 
 echo ""
-echo "=== check 14: Claude 동일 게시 구조 — 마커 관리형 PR 코멘트 1개 (AC4/제약) ==="
+echo "=== check 14: 별도 마커 관리형 이슈 레벨 코멘트 게시 경로 부재 (AC6) ==="
 grep -q 'name: Post Codex review comment' "$WORKFLOW" \
-  || fail "'Post Codex review comment' 스텝 부재 (Claude 'Post … review comment' 구조 치환) (제약)"
-grep -qF '<!-- codex-api-pr-review -->' "$WORKFLOW" \
-  || fail "codex 전용 관리형 코멘트 마커(<!-- codex-api-pr-review -->) 부재 (제약)"
-grep -qF 'github.rest.issues.listComments' "$WORKFLOW" \
-  || fail "기존 관리형 코멘트 조회(issues.listComments) 부재 — 1개 갱신 보장 불가 (AC4)"
-grep -qF 'github.rest.issues.updateComment' "$WORKFLOW" \
-  || fail "기존 관리형 코멘트 갱신(issues.updateComment) 경로 부재 (AC4: 최대 1개 갱신)"
-grep -qF 'github.rest.issues.createComment' "$WORKFLOW" \
-  || fail "관리형 코멘트 생성(issues.createComment) 경로 부재 (AC4)"
-grep -qF 'comment.body?.includes(marker)' "$WORKFLOW" \
-  || fail "마커 기준 기존 코멘트 식별 부재 (AC4: 마커 기준 최대 1개)"
-ok "check 14: 마커 기반 관리형 PR 코멘트 생성/갱신 (최대 1개)"
+  && fail "'Post Codex review comment' 스텝 잔존 — 이슈 코멘트 게시 경로 제거 필요 (AC6)"
+if grep -qF '<!-- codex-api-pr-review -->' "$WORKFLOW"; then
+  fail "관리형 이슈 코멘트 마커(<!-- codex-api-pr-review -->) 잔존 (AC6)"
+fi
+if grep -qF 'github.rest.issues.createComment' "$WORKFLOW"; then
+  fail "issues.createComment 잔존 — 발견사항 이슈 코멘트 게시 금지 (AC6)"
+fi
+if grep -qF 'github.rest.issues.updateComment' "$WORKFLOW"; then
+  fail "issues.updateComment 잔존 — 관리형 이슈 코멘트 갱신 경로 금지 (AC6)"
+fi
+ok "check 14: 마커 관리형 이슈 레벨 코멘트 게시 경로 부재"
 
 echo ""
-echo "=== check 15: 인라인 리뷰 코멘트 게시 경로 부재 (AC5) ==="
-if grep -qF 'pulls.createReview' "$WORKFLOW"; then
-  fail "pulls.createReview 잔존 — 인라인 코멘트 게시 경로 제거되어야 함 (AC5)"
+echo "=== check 15: 인라인 리뷰 코멘트 게시 경로 존재 (AC1/AC2) ==="
+grep -qF 'comments: inlineComments' "$WORKFLOW" \
+  || fail "createReview 의 comments[] 배열에 inline findings(inlineComments) 전달 부재 (AC1)"
+grep -qF 'inline-only' "$WORKFLOW" \
+  || fail "inline-only 정책 주석/마커 부재 (모든 finding 을 inline 으로 게시) (AC6)"
+grep -qF "side: 'RIGHT'" "$WORKFLOW" \
+  || fail "inline comment side='RIGHT' 지정 부재 (AC1)"
+grep -qF 'start_line' "$WORKFLOW" \
+  || fail "multi-line inline comment 의 start_line 처리 부재 (AC1)"
+# createReview 실패 시 finding 을 이슈 코멘트로 덤프하지 않는다 (inline-only).
+if grep -qF 'inlineFallback' "$WORKFLOW"; then
+  fail "inlineFallback 경로 잔존 — createReview 실패 시 이슈 코멘트 덤프 금지 (AC6)"
 fi
-if grep -qF 'inlineComments' "$WORKFLOW"; then
-  fail "inlineComments 잔존 — 인라인 코멘트 경로 제거되어야 함 (AC5)"
-fi
-if grep -qF 'inline-only' "$WORKFLOW"; then
-  fail "inline-only 정책 잔존 — 인라인 게시 경로 제거되어야 함 (AC5)"
-fi
-if grep -qF "side: 'RIGHT'" "$WORKFLOW"; then
-  fail "inline comment side='RIGHT' 잔존 (AC5)"
-fi
-ok "check 15: 인라인 리뷰 코멘트 게시 경로 부재"
+ok "check 15: 인라인 리뷰 코멘트 게시 경로 존재 (createReview comments[] + RIGHT + start_line)"
 
 echo ""
-echo "=== check 16: fingerprint 기반 self thread 자동 resolve 경로 부재 (AC5) ==="
-if grep -qF 'computeFingerprint' "$WORKFLOW"; then
-  fail "computeFingerprint 잔존 — fingerprint resolve 경로 제거되어야 함 (AC5)"
+echo "=== check 16: fingerprint 기반 self thread 자동 resolve 경로 존재 (AC3/AC4) ==="
+grep -qF 'computeFingerprint' "$WORKFLOW" \
+  || fail "결정론적 fingerprint 계산(computeFingerprint) 부재 (AC3)"
+grep -qF 'resolveReviewThread' "$WORKFLOW" \
+  || fail "GraphQL resolveReviewThread mutation 부재 — self thread 자동 resolve 안 됨 (AC4)"
+grep -qF 'reviewThreads(first: 100)' "$WORKFLOW" \
+  || fail "GraphQL reviewThreads 조회 부재 (AC4)"
+grep -qF 'resolved_threads' "$WORKFLOW" \
+  || fail "resolved_threads 소비(1차) 경로 부재 (AC4)"
+grep -qF 'findingFingerprints' "$WORKFLOW" \
+  || fail "이번 라운드 findings fingerprint 집합(findingFingerprints) 부재 (AC4 fallback)"
+grep -qF '<!-- codex-review-inline' "$WORKFLOW" \
+  || fail "inline self-식별 마커 substring(<!-- codex-review-inline) 부재 (AC2)"
+grep -qF 'fingerprint=${computeFingerprint(f)}' "$WORKFLOW" \
+  || fail "게시 inline 마커가 결정론적 computeFingerprint(f) 를 운반하지 않음 (AC2/AC3)"
+grep -qF 'botLoginGql' "$WORKFLOW" \
+  || fail "GraphQL author login 형식 정규화(botLoginGql) 부재 (AC4)"
+grep -qF 'isResolved' "$WORKFLOW" \
+  || fail "isResolved 조건 검사 부재 (이미 resolved thread skip)"
+# verdict 무관 실행 + 모델 자유 fingerprint 미사용.
+grep -qF 'regardless of verdict' "$WORKFLOW" \
+  || fail "resolve 가 verdict 무관 실행임을 명시하는 마커(regardless of verdict) 부재 (AC4)"
+if grep -qF 'fingerprint=${f.fingerprint}' "$WORKFLOW"; then
+  fail "게시 마커가 모델 자유 생성 f.fingerprint 운반 — 결정론 계산으로 전환되어야 함 (AC3)"
 fi
-if grep -qF 'resolveReviewThread' "$WORKFLOW"; then
-  fail "resolveReviewThread 잔존 — self thread 자동 resolve 제거되어야 함 (AC5)"
-fi
-if grep -qF 'reviewThreads' "$WORKFLOW"; then
-  fail "reviewThreads GraphQL 조회 잔존 (AC5)"
-fi
-if grep -qF 'resolved_threads' "$WORKFLOW"; then
-  fail "resolved_threads 소비 경로 잔존 (AC5)"
-fi
-if grep -qF 'codex-review-inline' "$WORKFLOW"; then
-  fail "codex-review-inline fingerprint 마커 잔존 (AC5)"
-fi
-if grep -qiF 'fingerprint' "$WORKFLOW"; then
-  fail "fingerprint 어휘 잔존 — fingerprint 기반 resolve 제거되어야 함 (AC5)"
-fi
-ok "check 16: fingerprint self thread 자동 resolve 경로 부재"
+ok "check 16: fingerprint self thread 자동 resolve 경로 존재 (resolved_threads 1차 + fallback)"
+
+echo ""
+echo "=== check 16b: 결정론적 fingerprint — file+perspective+normalized title, 줄번호 비의존 (AC3) ==="
+grep -qF 'crypto' "$WORKFLOW" \
+  || fail "fingerprint 해시 계산(crypto) 부재 (AC3)"
+grep -qF "[f.file || '', f.review_perspective || '', normalizeTitle(f.title)]" "$WORKFLOW" \
+  || fail "fingerprint 입력이 file+review_perspective+normalized title 로 한정되지 않음 (AC3)"
+grep -qF "normalize('NFKC')" "$WORKFLOW" \
+  || fail "제목 정규화 NFKC 부재 또는 불일치 (제약: 두 워크플로 byte-identical)"
+grep -qF "replace(/[^\\p{L}\\p{N}]+/gu, ' ')" "$WORKFLOW" \
+  || fail "제목 정규화(문장부호/공백 → 단일 공백) 구현 부재 또는 불일치 (제약: 두 워크플로 동일)"
+grep -qF 'findings.map((f) => computeFingerprint(f))' "$WORKFLOW" \
+  || fail "findingFingerprints 가 결정론적 computeFingerprint 로 산정되지 않음 (AC3)"
+ok "check 16b: 결정론적 fingerprint(file+perspective+title), 줄번호 비의존"
 
 echo ""
 echo "=== check 17: GitHub App 설치 토큰 발급·App 토큰 approve 경로 부재 (AC5/제약) ==="
