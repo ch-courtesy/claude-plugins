@@ -430,13 +430,13 @@ jobs:
             printf '\n\n'
             jq -r '
               if (.findings | length) == 0 then
-                "No findings."
+                "발견 사항 없음."
               else
-                "Findings:\n" + (
+                "발견 사항:\n" + (
                   [.findings[] |
                     "- [" + .severity + "/" + (.confidence_score|tostring) + "] " +
                     .title + " (" + .file + ":" + (if .line == null or .line == 0 then "N/A" else (.line|tostring) end) + ")\n  " +
-                    .body + "\n  Suggestion: " + .suggestion
+                    .body + "\n  제안: " + .suggestion
                   ] | join("\n")
                 )
               end
@@ -492,19 +492,19 @@ jobs:
                   `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
                   `${finding.file}:${finding.line == null || finding.line === 0 ? 'N/A' : finding.line}`,
                   finding.body,
-                  `Suggestion: ${finding.suggestion}`,
+                  `제안: ${finding.suggestion}`,
                 ].join('\n')).join('\n\n');
             const body = [
               marker,
               '## Claude PR Review',
               '',
-              `Verdict: \`${result.verdict}\``,
+              `결과: \`${result.verdict}\``,
               '',
               approvalFailed
-                ? 'Claude review found no findings, but formal approval could not be submitted by this workflow token.'
-                : (result.summary || 'No findings. (summary unavailable)'),
+                ? 'Claude 리뷰에서 지적 사항을 찾지 못했으나, 이 워크플로 토큰 권한으로는 정식 승인을 제출하지 못했습니다.'
+                : (result.summary || '발견 사항 없음. (요약 없음)'),
               '',
-              approvalFailed ? 'No findings.' : findingText,
+              approvalFailed ? '발견 사항 없음.' : findingText,
             ].join('\n');
 
             const issue_number = Number(process.env.PR_NUMBER);
