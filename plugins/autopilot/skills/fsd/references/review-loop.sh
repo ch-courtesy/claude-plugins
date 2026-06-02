@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-loop.sh — autopilot:conductor 리뷰 피드백 자동수정 루프 (C3)
+# review-loop.sh — autopilot:fsd 리뷰 피드백 자동수정 루프 (C3)
 #
 # 책임 (비전 핵심: "리뷰 상태 task 는 피드백을 다시 스펙으로 만들어 같은 PR 브랜치에
 # 구현·푸시해 해결하고, 승인까지 반복한다"):
@@ -299,7 +299,7 @@ rl_round() {
   bh="$(rl_blocking_hash "$fb/must_reflect")"
   prev="$(get_field "$id" review-blocking-hash "")"
   if [[ -n "$prev" && "$bh" == "$prev" ]]; then
-    rl_escalate "$id" "차단성 지적 집합이 직전 라운드와 동일(핑퐁) — 봇↔conductor 무한루프 차단"
+    rl_escalate "$id" "차단성 지적 집합이 직전 라운드와 동일(핑퐁) — 봇↔fsd 무한루프 차단"
     return 10
   fi
   set_field "$id" review-blocking-hash "$bh"
@@ -343,7 +343,7 @@ rl_review_loop() {
 # self-referential: runtime artifact(실제 PR·브랜치) 미검사. 봇 리뷰 입력은 mock.
 rl_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
-  export CONDUCTOR_STATE_ROOT="$TMP/.conductor"
+  export FSD_STATE_ROOT="$TMP/.fsd"
   export PROJECT_ROOT="$TMP"
 
   # --- mock 백엔드 (task-backend) ---

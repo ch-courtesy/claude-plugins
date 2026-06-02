@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# poll.sh — autopilot:conductor 멱등 드레인 + 상시 호스트 운영 진입점 (C5)
+# poll.sh — autopilot:fsd 멱등 드레인 + 상시 호스트 운영 진입점 (C5)
 #
 # 책임 (파이프라인을 하나의 반복 가능한 단위로 닫는다):
 #   - 멱등 드레인(poll): 진행 중인 모든 task 를 한 바퀴 훑어, 백엔드(task backend·승인
@@ -13,7 +13,7 @@
 #     채택해 미러를 갱신한다(tb_reconcile, C1 공개 계약).
 #
 # 멱등성(같은 상태에서 두 번 실행해도 같은 결과, 부작용 없음):
-#   - 상태는 conductor 상태 저장소(C0)에 두고, 드레인 호출은 **호출 단위 무상태**여서
+#   - 상태는 fsd 상태 저장소(C0)에 두고, 드레인 호출은 **호출 단위 무상태**여서
 #     크래시 후 재시작이 안전하다. 각 전이 전 현재 상태를 재확인해 이미 처리한 전이를
 #     중복 수행하거나 중복 승인 요청(PR)을 만들지 않는다:
 #       · start   는 run-id 가 비었을 때만 (1회 dispatch 후 run-id 가 차서 재시작 안 함).
@@ -28,12 +28,12 @@
 # 다른 task 의 전진을 막지 않도록 한다. 상태 IO·정합 헬퍼만 sourcing 한다.
 #
 # 환경 변수 (테스트에서 mock 으로 치환 가능):
-#   POLL_CONDUCTOR_CMD  conductor.sh 호출 (start). 기본: 형제 conductor.sh.
+#   POLL_FSD_CMD  fsd.sh 호출 (start). 기본: 형제 fsd.sh.
 #   POLL_FORGE_CMD      forge.sh 호출 (terminal/integrate). 기본: 형제 forge.sh.
 #   POLL_REVIEW_CMD     review-loop.sh 호출 (run). 기본: 형제 review-loop.sh.
 #   POLL_MERGE_CMD      merge.sh 호출 (approval/finish). 기본: 형제 merge.sh.
 #   TASK_BACKEND_CMD    task backend 호출 (tb_reconcile 가 소비; C1, mock 가능).
-#   CONDUCTOR_STATE_ROOT 상태 루트 (기본 <project_root>/.conductor). lib-state.sh 참조.
+#   FSD_STATE_ROOT 상태 루트 (기본 <project_root>/.fsd). lib-state.sh 참조.
 #
 # 상시 호스트 무인 운영(토큰 스코프·approver 신원 분리·실행기 권한 격리·폴링 주기)은
 # operational-guide.md 가 문서화한다.
@@ -56,7 +56,7 @@ set +e
 set -uo pipefail
 
 # ----- 주입 가능한 액션 명령(기본: 형제 모듈, 서브프로세스 격리) -----
-POLL_CONDUCTOR_CMD="${POLL_CONDUCTOR_CMD:-bash $PL_SCRIPT_DIR/conductor.sh}"
+POLL_FSD_CMD="${POLL_FSD_CMD:-bash $PL_SCRIPT_DIR/fsd.sh}"
 POLL_FORGE_CMD="${POLL_FORGE_CMD:-bash $PL_SCRIPT_DIR/forge.sh}"
 POLL_REVIEW_CMD="${POLL_REVIEW_CMD:-bash $PL_SCRIPT_DIR/review-loop.sh}"
 POLL_MERGE_CMD="${POLL_MERGE_CMD:-bash $PL_SCRIPT_DIR/merge.sh}"
@@ -135,7 +135,7 @@ poll_task() {
     ""|Backlog|"In Design"|intake|unknown)
       if [[ -n "$spec" ]]; then
         pl_log "$id" "미시작(backend=${bstat:-none}) → 구현 시작 start"
-        $POLL_CONDUCTOR_CMD start "$spec" \
+        $POLL_FSD_CMD start "$spec" \
           || pl_log "$id" "start 위임 실패 spec=$spec"
       else
         pl_log "$id" "미시작이나 SPEC 경로 없음 — 전진 없음"
@@ -172,7 +172,7 @@ poll_drain() {
 # =====================================================================
 pl_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
-  export CONDUCTOR_STATE_ROOT="$TMP/.conductor"
+  export FSD_STATE_ROOT="$TMP/.fsd"
   export PROJECT_ROOT="$TMP"
   export PL_REF="$PL_SCRIPT_DIR"
   local TRACE="$TMP/trace"; : > "$TRACE"; export TRACE
@@ -189,10 +189,10 @@ pl_selftest() {
   export TASK_BACKEND_CMD=mock_backend
 
   # --- mock 액션 명령(서브프로세스) — 호출 기록 + 현실적 상태 시뮬 ---
-  cat > "$TMP/m-conductor.sh" <<'EOF'
+  cat > "$TMP/m-fsd.sh" <<'EOF'
 #!/usr/bin/env bash
 . "$PL_REF/lib-state.sh"
-echo "conductor $*" >> "$TRACE"
+echo "fsd $*" >> "$TRACE"
 [[ "$1" == "start" ]] && set_field "$POLL_CUR_TASK" run-id "run-$POLL_CUR_TASK"
 exit 0
 EOF
@@ -224,7 +224,7 @@ case "$1" in
 esac
 exit 0
 EOF
-  export POLL_CONDUCTOR_CMD="bash $TMP/m-conductor.sh"
+  export POLL_FSD_CMD="bash $TMP/m-fsd.sh"
   export POLL_FORGE_CMD="bash $TMP/m-forge.sh"
   export POLL_REVIEW_CMD="bash $TMP/m-review.sh"
   export POLL_MERGE_CMD="bash $TMP/m-merge.sh"
@@ -248,11 +248,11 @@ EOF
   ensure_task_dir s1; set_field s1 issue 10; printf 'Backlog' > "$BK/10.status"
   set_field s1 backend-status "Backlog"; add_spec s1 "$spec"
   poll_task s1 >/dev/null
-  [[ "$(tcount '^conductor start')" == "1" ]] && ok "AC2-a 미시작→start 위임" || bad "AC2-a 미시작→start 위임"
+  [[ "$(tcount '^fsd start')" == "1" ]] && ok "AC2-a 미시작→start 위임" || bad "AC2-a 미시작→start 위임"
   [[ -n "$(get_run_id s1)" ]] && ok "AC2-a run-id 기록됨" || bad "AC2-a run-id 기록됨"
   # AC3 멱등: 같은 상태(이제 run-id 참) 재드레인 → 중복 start 없음.
   MOCK_TERM=running poll_task s1 >/dev/null
-  chk "AC3 멱등: start 중복 없음(총 1회)" "$(tcount '^conductor start')" "1"
+  chk "AC3 멱등: start 중복 없음(총 1회)" "$(tcount '^fsd start')" "1"
 
   # ---- AC2-b: 구현 완료(loop done) + PR 없음 → 통합 integrate(C2) ----
   : > "$TRACE"
@@ -308,8 +308,8 @@ Commands:
   task <task-id>    한 task 만 정합·전진.
   selftest          mock 인터페이스로 AC2~4·멱등 검증.
 
-환경 변수: POLL_CONDUCTOR_CMD, POLL_FORGE_CMD, POLL_REVIEW_CMD, POLL_MERGE_CMD,
-          TASK_BACKEND_CMD, CONDUCTOR_STATE_ROOT
+환경 변수: POLL_FSD_CMD, POLL_FORGE_CMD, POLL_REVIEW_CMD, POLL_MERGE_CMD,
+          TASK_BACKEND_CMD, FSD_STATE_ROOT
 EOF
   exit 1
 }

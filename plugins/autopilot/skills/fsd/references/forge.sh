@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# forge.sh — autopilot:conductor 종료신호→push→PR 통합 (C2)
+# forge.sh — autopilot:fsd 종료신호→push→PR 통합 (C2)
 #
 # 책임 ("구현 완료"와 "승인 요청(Review)" 사이의 다리):
 #   - 종료 신호 매핑: 자율 실행기(loop)의 공개 상태 인터페이스만으로 child 의
@@ -32,7 +32,7 @@
 #   GIT_CMD               git 호출 (기본: git).
 #   FORGE_CMD             forge(PR) CLI 호출 (기본: gh).
 #   DEFAULT_BRANCH        base branch (기본: main).
-#   CONDUCTOR_STATE_ROOT  상태 루트 (기본 <project_root>/.conductor). lib-state.sh 참조.
+#   FSD_STATE_ROOT  상태 루트 (기본 <project_root>/.fsd). lib-state.sh 참조.
 #
 # bash 3.2+ 호환 (associative array 미사용).
 
@@ -204,7 +204,7 @@ ensure_pr() {
   # 신규 생성. body 자동 영역만 채우고 reviewer/label 은 정책 기본(미설정).
   # shellcheck disable=SC2086
   $FORGE_CMD pr create --head "$branch" --base "$DEFAULT_BRANCH" \
-    --title "$title" --body "conductor 통합: 구현 완료, 승인 요청." \
+    --title "$title" --body "fsd 통합: 구현 완료, 승인 요청." \
     >/dev/null 2>&1 || die "PR 생성 실패: $branch"
   existing_open_pr "$branch"
 }
@@ -247,7 +247,7 @@ forge_integrate() {
       local cat; cat="$(loop_blocked_category "$spec")"
       if [[ "$cat" == "spec-gap" ]]; then
         transition_to_in_design "$id"
-        log_event "$id" "BLOCKED spec-gap → In Design. 재개: conductor start --resume (스펙 강화 후)"
+        log_event "$id" "BLOCKED spec-gap → In Design. 재개: fsd start --resume (스펙 강화 후)"
         echo "task-id: $id"
         echo "state:   $ST_IN_DESIGN"
         echo "category: spec-gap"
@@ -284,7 +284,7 @@ Commands:
   terminal  <spec>             child 종료 상태(done|failed|running|pending) 출력.
   category  <spec>             BLOCKED 범주(spec-gap|...|other) 출력.
 
-환경 변수: LOOP_CMD, GIT_CMD, FORGE_CMD, DEFAULT_BRANCH, CONDUCTOR_STATE_ROOT
+환경 변수: LOOP_CMD, GIT_CMD, FORGE_CMD, DEFAULT_BRANCH, FSD_STATE_ROOT
 EOF
   exit 1
 }

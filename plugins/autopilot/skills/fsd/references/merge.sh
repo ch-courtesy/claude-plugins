@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# merge.sh — autopilot:conductor 머지 + Done + cleanup (C4)
+# merge.sh — autopilot:fsd 머지 + Done + cleanup (C4)
 #
 # 책임 (파이프라인 종착: "승인되면 머지되고 task 는 완료 상태가 된다"):
 #   - 승인 확인: 승인 요청(PR)에 **승인 권한 신원**(별도 approver 봇/PAT)의
@@ -41,7 +41,7 @@
 #   APPROVER              승인 권한 신원 login (설정 시 그 신원의 승인만 인정).
 #   REVIEW_BOT            자동 리뷰 봇 login (이 신원의 self-approve 는 무효).
 #   WATCH_DIRS            버전 워치 디렉토리 prefix (기본: plugins/).
-#   CONDUCTOR_STATE_ROOT  상태 루트 (기본 <project_root>/.conductor).
+#   FSD_STATE_ROOT  상태 루트 (기본 <project_root>/.fsd).
 #
 # bash 3.2+ 호환 (associative array 미사용).
 
@@ -252,7 +252,7 @@ Commands:
   version-gate <branch>          버전 범프 게이트 판정(0=통과, 1=차단).
 
 환경 변수: GIT_CMD, FORGE_CMD, LOOP_CMD, TASK_BACKEND_CMD, DEFAULT_BRANCH,
-          APPROVER, REVIEW_BOT, WATCH_DIRS, CONDUCTOR_STATE_ROOT
+          APPROVER, REVIEW_BOT, WATCH_DIRS, FSD_STATE_ROOT
 EOF
   exit 1
 }
@@ -265,7 +265,7 @@ selftest() {
   local tmp ng nf nl pass=0 fail=0
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
-  export CONDUCTOR_STATE_ROOT="$tmp/.conductor"
+  export FSD_STATE_ROOT="$tmp/.fsd"
 
   ng="$tmp/git.sh"; nf="$tmp/forge.sh"; nl="$tmp/loop.sh"
   local trace="$tmp/trace"

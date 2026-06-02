@@ -50,7 +50,7 @@ autopilot:spec이 발행하는 SPEC에서 변경의 WHY(왜)가 휘발되고 WHA
 - 완료 조건(5문장 패턴) 문법·언어 규칙 변경 없음 — 목적은 완료 조건에 인코딩하지 않는다.
 - clarity 점수의 척도·임계·전체 게이트화 없음 — 목적 한정 종결 게이트만 하드화하고 나머지는 소프트 권고 유지.
 - 자체 검토 축 개수 변경 없음(5축 유지).
-- spec 스킬 외 다른 스킬(loop·dispatch·conductor)·rules·CLAUDE.md 변경 없음.
+- spec 스킬 외 다른 스킬(loop·dispatch·fsd)·rules·CLAUDE.md 변경 없음.
 
 ## 검증
 <!-- 검증 기준의 단일 출처는 위 "완료 조건"이다. 검증을 실행하는 진입 명령(테스트·lint·빌드)은 SPEC이 선언하지 않는다. -->

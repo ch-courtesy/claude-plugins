@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# lib-state.sh — autopilot:conductor 상태 저장소 헬퍼 (골격, C0)
+# lib-state.sh — autopilot:fsd 상태 저장소 헬퍼 (골격, C0)
 #
 # 책임:
 #   - task 단위의 진행 상태를 프로젝트 루트 하위 전용 디렉토리에 보관·조회·기록.
-#   - 기본 위치: <project_root>/.conductor/tasks/<task-id>/
+#   - 기본 위치: <project_root>/.fsd/tasks/<task-id>/
 #     task 별로 격리된 디렉토리를 갖고 다음을 담는다:
 #       state          상태 로컬 미러 (intake|dispatching|dispatched|...|done|failed)
 #       SPECS.txt      이 task 가 다루는 SPEC 경로 목록 (append-only)
@@ -18,16 +18,16 @@
 #   - forge(PR/issue/label)·task backend 연동 (후속 단위 references 모듈 책임).
 #   - dispatch / loop 의 내부 상태 디렉토리·신호 파일 해석.
 #
-# 이 헬퍼는 sourcing 으로 사용한다. <project_root>/.conductor/ 디렉토리 밖 경로는
+# 이 헬퍼는 sourcing 으로 사용한다. <project_root>/.fsd/ 디렉토리 밖 경로는
 # 만들지 않는다. bash 3.2+ 호환 (associative array 미사용).
 
-# state_root — 상태 루트. CONDUCTOR_STATE_ROOT 로 재정의 가능(테스트용).
-#   기본: <project_root>/.conductor  (PROJECT_ROOT 는 호출자 conductor.sh 가 export)
+# state_root — 상태 루트. FSD_STATE_ROOT 로 재정의 가능(테스트용).
+#   기본: <project_root>/.fsd  (PROJECT_ROOT 는 호출자 fsd.sh 가 export)
 state_root() {
-  echo "${CONDUCTOR_STATE_ROOT:-${PROJECT_ROOT:-.}/.conductor}"
+  echo "${FSD_STATE_ROOT:-${PROJECT_ROOT:-.}/.fsd}"
 }
 
-# tasks_dir — 모든 task 디렉토리의 부모: .conductor/tasks
+# tasks_dir — 모든 task 디렉토리의 부모: .fsd/tasks
 tasks_dir() {
   echo "$(state_root)/tasks"
 }
