@@ -1,6 +1,18 @@
 ---
 name: version-control-rule-creator
 description: 현재 프로젝트의 git origin remote에서 호스팅 백엔드(GitHub/GitLab)를 자동 판별해, 그 백엔드에 맞는 변경 제안(PR/MR) 심사·승인 지침을 `rules/version-control/<sub>.md`로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 버전 관리(VCS) 워크플로 지침을 새로 만들고 싶어 할 때.
+allowed-tools:
+  - AskUserQuestion
+  - Read
+  - Write
+  - WebFetch
+  - Glob
+  - Bash(ls:*)
+  - Bash(mkdir -p:*)
+  - Bash(diff:*)
+  - Bash(git diff:*)
+  - Bash(git remote get-url:*)
+  - Bash(git config:*)
 ---
 
 # version-control-rule-creator
