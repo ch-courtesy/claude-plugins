@@ -2,6 +2,17 @@
 label: SPEC 레이아웃 (spec-layout)
 description: 개발 워크플로의 설계 단계 산출물인 SPEC 문서가 어디에 어떤 디렉터리 레이아웃으로 사는지를 정의합니다. 산출물 경로/레이아웃만 규정하고 상태 추적·머지·빌드는 다른 카테고리에 위임합니다.
 recommended: true
+inputs:
+  - name: spec_path
+    header: "SPEC 경로"
+    question: "각 SPEC의 per-spec 디렉터리 경로 템플릿은? 디렉터리 경로만 입력하고 끝의 `/SPEC.md`는 붙이지 마세요(`<YYYY-MM-DD>`·`<slug>` placeholder 사용 가능). 자유 입력은 'Other'로 직접 입력하세요."
+    options:
+      - label: "docs/specs/<YYYY-MM-DD>-<slug>"
+        description: "engineering 단일 출처(branch-and-slug.md)의 기본 레이아웃. 날짜+slug per-spec 디렉터리"
+        value: "docs/specs/<YYYY-MM-DD>-<slug>"
+      - label: "spec/<slug>"
+        description: "날짜 없이 slug만으로 per-spec 디렉터리를 명명하는 단순 레이아웃"
+        value: "spec/<slug>"
 ---
 
 # SPEC 레이아웃 지침
@@ -23,7 +34,7 @@ recommended: true
 기본 레이아웃은 다음과 같습니다:
 
 ```
-docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md
+{{spec_path}}/SPEC.md
 ```
 
 - `<YYYY-MM-DD>`는 SPEC 작성일(로컬 날짜)입니다.
@@ -51,7 +62,7 @@ SPEC 첫 H1(`# `)에서 slug를 만듭니다.
 
 - `spec-path:` 값은 베이스뿐 아니라 per-spec 디렉터리 네이밍까지 표현하는 경로 템플릿이며 `<YYYY-MM-DD>`·`<slug>` placeholder를 포함할 수 있습니다.
 - placeholder가 없어 디렉터리가 유일해지지 않으면, 서로 다른 SPEC이 같은 디렉터리를 공유하지 않도록 유일성을 보장하는 것은 선언자의 책임입니다.
-- 선언이 없으면 위 기본 레이아웃(`docs/specs/<YYYY-MM-DD>-<slug>/SPEC.md`)을 사용합니다.
+- 선언이 없으면 위 기본 레이아웃(`{{spec_path}}/SPEC.md`)을 사용합니다.
 - 재정의 유무·값과 무관하게 **per-spec 디렉터리 + 그 안 `SPEC.md`** 불변식은 보존됩니다.
 
 ## 위반 발견 시
