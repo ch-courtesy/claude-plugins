@@ -1,4 +1,4 @@
-# SPEC self-review (optimized)
+# SPEC self-review
 
 SPEC 작성 후 사용자 Q&A 없이 1회 자체 검토한다. 발견 사항은 인라인 수정하거나 `[NEEDS CLARIFICATION: <구체 질문>]` 마커로 남긴다.
 

@@ -24,6 +24,7 @@ PERSONAS_MD="$SKILL_DIR/references/personas.md"
 CLARITY_MD="$SKILL_DIR/references/clarity-score.md"
 SPEC_TEMPLATE="$SKILL_DIR/references/spec-template.md"
 EARS_PATTERNS="$SKILL_DIR/references/ears-patterns.md"
+DECOMP_MD="$SKILL_DIR/references/decomposition-gate.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -117,6 +118,31 @@ ok "§11.6 인용 존재"
 grep -qE '결정·합성.*메인|메인.*결정·합성|결정과 합성.*메인|결정.*합성은 메인' "$SKILL_MD" \
   || fail "SKILL.md에 '결정·합성은 메인 책임' 문구 부재"
 ok "결정·합성 메인 책임 문구 존재"
+
+echo ""
+echo "=== TEST A7: decomposition-gate.md 단계 번호·용어 정합 ==="
+[[ -f "$DECOMP_MD" ]] || fail "decomposition-gate.md 부재: $DECOMP_MD"
+# 워크플로는 7단계 — 구현 스킬 추천은 step 7이다. stale 'step 8' 잔존 금지.
+if grep -qE 'step 8|step8|8단계' "$DECOMP_MD"; then
+  fail "decomposition-gate.md에 stale 'step 8' 잔존 (실제 추천은 step 7)"
+fi
+ok "decomposition-gate.md stale 'step 8' 부재"
+grep -qE 'step 7' "$DECOMP_MD" \
+  || fail "decomposition-gate.md가 정정된 'step 7'(추천 단계)을 가리키지 않음"
+ok "decomposition-gate.md → step 7 참조"
+# SPEC 문서 작성은 step 5다. stale 'step 6'(구 번호) 잔존 금지.
+if grep -qE 'step 6' "$DECOMP_MD"; then
+  fail "decomposition-gate.md에 stale 'step 6' 잔존 (SPEC 문서 작성은 step 5)"
+fi
+ok "decomposition-gate.md stale 'step 6' 부재"
+grep -qE 'step 5' "$DECOMP_MD" \
+  || fail "decomposition-gate.md가 SPEC 문서 작성 단계 'step 5'를 가리키지 않음"
+ok "decomposition-gate.md → step 5 참조"
+# 평이화: 사용자 노출 용어는 '완료 조건' — 'EARS' 약어 잔존 금지.
+if grep -qF 'EARS' "$DECOMP_MD"; then
+  fail "decomposition-gate.md에 'EARS' 약어 잔존 (평이화 위반 — '완료 조건' 사용)"
+fi
+ok "decomposition-gate.md 'EARS' 부재"
 
 # ===========================================================================
 # PART B — persona 적대 리뷰 (신규 가산)
@@ -407,12 +433,12 @@ grep -qF '목적' "$SELF_REVIEW_MD" \
 ok "self-review.md 목적 점검 흡수"
 
 echo ""
-echo "=== TEST F6: plugin.json 버전 0.14.0 ==="
+echo "=== TEST F6: plugin.json 버전 0.14.1 ==="
 PLUGIN_JSON="$REPO_ROOT/plugins/autopilot/.claude-plugin/plugin.json"
 [[ -f "$PLUGIN_JSON" ]] || fail "plugin.json 부재"
-grep -qF '"version": "0.14.0"' "$PLUGIN_JSON" \
-  || fail "plugin.json version 이 0.14.0 이 아님"
-ok "plugin.json version 0.14.0"
+grep -qF '"version": "0.14.1"' "$PLUGIN_JSON" \
+  || fail "plugin.json version 이 0.14.1 이 아님"
+ok "plugin.json version 0.14.1"
 
 # ===========================================================================
 echo ""
