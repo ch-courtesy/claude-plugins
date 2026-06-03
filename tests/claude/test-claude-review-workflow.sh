@@ -355,4 +355,47 @@ rbt="$(awk -v n="github.event.review.user.type != 'Bot'" 'index($0,n){c++} END{p
 ok "check 12: App 토큰 발급(SHA 고정) + 동적 봇 식별 + graceful degradation + id-token 보존 + self-trigger 배제"
 
 echo ""
+echo "=== check 13: diff-only anchor 검증 + false-green 가드 (공유 단위) (AC1/AC2/AC4/AC5/제약) ==="
+ANCHOR_MODULE="$REPO_ROOT/.github/scripts/diff-anchor-filter.js"
+[[ -f "$ANCHOR_MODULE" ]] \
+  || fail "공유 검증 모듈 .github/scripts/diff-anchor-filter.js 부재 (제약: 단일 공유 단위)"
+# 두 워크플로가 byte 복제 대신 같은 단일 모듈을 require 한다.
+grep -qF '.github/scripts/diff-anchor-filter.js' "$WORKFLOW" \
+  || fail "워크플로가 공유 검증 모듈(.github/scripts/diff-anchor-filter.js)을 require 하지 않음 (AC5/제약)"
+grep -qF 'filterFindingsAgainstPatch' "$WORKFLOW" \
+  || fail "공유 검증 단위 호출(filterFindingsAgainstPatch) 부재 (AC1/AC5)"
+# 검증 입력은 이미 생성된 diff.patch — 새로 diff 계산하지 않는다 (제약).
+grep -qF ".review-context/diff.patch" "$WORKFLOW" \
+  || fail "anchor 검증 입력으로 .review-context/diff.patch 소비 부재 (제약)"
+# valid(in-diff)만 inline 제출 배치로 사용 — 제외는 배치 구성 전에.
+grep -qF 'valid: inlineFindings' "$WORKFLOW" \
+  || fail "in-diff valid finding 만 inlineFindings 로 사용하지 않음 (AC2/제약)"
+grep -qF 'excluded: excludedFindings' "$WORKFLOW" \
+  || fail "diff 밖 finding 분리(excluded) 부재 (AC2)"
+# 제외 finding 의 file·line·title 을 로그로 남긴다 (AC2).
+grep -qF 'Excluded out-of-diff finding' "$WORKFLOW" \
+  || fail "제외 finding 로그(file·line·title) 부재 (AC2)"
+# false-green 가드: 게시할 in-diff finding 이 있는데 제출 실패면 job 실패.
+grep -qF 'core.setFailed' "$WORKFLOW" \
+  || fail "제출 실패 시 job 을 실패시키는 가드(core.setFailed) 부재 (AC4)"
+grep -qE 'setFailed\(.*createReview failed' "$WORKFLOW" \
+  || fail "createReview 실패가 false-green 가드(setFailed)로 연결되지 않음 (AC4)"
+# 가드는 inlineFindings(=in-diff) 가 있을 때만 — 0건/정상강등은 실패로 보지 않음 (AC4/제약).
+grep -qF '!skipSubmit && !submitOk && inlineFindings.length > 0' "$WORKFLOW" \
+  || fail "false-green 가드 게이트(in-diff finding 존재 시에만 실패)가 inlineFindings.length>0 로 한정되지 않음 (AC4/제약)"
+# 실패를 경고로만 끝내던 옛 경로가 setFailed 로 대체됐는지 — createReview 실패에 warning 잔존 금지.
+if grep -qE 'core\.warning\(`createReview failed' "$WORKFLOW"; then
+  fail "createReview 실패가 여전히 core.warning 으로만 처리됨 — false-green 가드(setFailed) 회귀 (AC4)"
+fi
+# 공유 검증 모듈은 trusted-base 체크아웃에서 로드되므로, 모듈을 도입·수정하는
+# 워크플로 PR 에선 base 에 아직 없어 require 가 실패한다(self-bootstrap). 이때
+# unhandled crash 대신 unfiltered 로 graceful degrade 해야 한다 — require 를
+# try/catch 로 감싸고 기본값(findings)으로 fallback 한다.
+grep -qF 'let inlineFindings = findings;' "$WORKFLOW" \
+  || fail "validator 부재 시 fallback 기본값(let inlineFindings = findings) 부재 — self-bootstrap 시 unhandled crash 위험 (robustness)"
+grep -qF 'Shared diff-anchor validator unavailable' "$WORKFLOW" \
+  || fail "validator require 실패를 graceful degrade(경고+unfiltered fallback)로 처리하지 않음 (robustness)"
+ok "check 13: 공유 diff-only anchor 검증 + 제외 로그 + false-green setFailed 가드 + validator 부재 graceful degrade"
+
+echo ""
 echo "ALL CHECKS PASSED"

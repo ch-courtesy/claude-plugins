@@ -510,7 +510,45 @@ jobs:
             // inline-only policy: every finding is posted as an inline comment.
             // There is no issue-level finding channel — findings never get routed
             // into an issue comment.
-            const inlineFindings = findings;
+            //
+            // diff-only anchor validation (shared unit, identical in both
+            // workflows): only findings whose anchor (file + line, and both ends
+            // of a start_line range) lands on the PR diff's RIGHT side may be
+            // submitted. Anchoring off-diff lines makes GitHub reject the WHOLE
+            // createReview batch (422 "Path could not be resolved"), silently
+            // dropping valid findings too. Out-of-diff findings are excluded
+            // BEFORE the submit batch is built and logged; they are never
+            // relocated or force-posted.
+            //
+            // The shared validator is loaded from the trusted-base checkout
+            // ($GITHUB_WORKSPACE = base ref). On the very PR that introduces or
+            // modifies the validator the base predates it, so the require can
+            // fail — that is the expected "the workflow modifies itself, so it
+            // validates only post-merge" bootstrap. Degrade loudly (a clear
+            // warning, never an unhandled crash) to the pre-change unfiltered
+            // submission; the false-green guard below still fails the job on any
+            // genuine submit error.
+            let inlineFindings = findings;
+            let excludedFindings = [];
+            try {
+              const { filterFindingsAgainstPatch } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/diff-anchor-filter.js`);
+              let diffPatch = '';
+              try {
+                diffPatch = fs.readFileSync('.review-context/diff.patch', 'utf8');
+              } catch (e) {
+                core.warning(`Could not read .review-context/diff.patch (${e.message}); treating diff as empty — all findings will be excluded as off-diff.`);
+              }
+              ({ valid: inlineFindings, excluded: excludedFindings } =
+                filterFindingsAgainstPatch(findings, diffPatch));
+            } catch (e) {
+              core.warning(`Shared diff-anchor validator unavailable in trusted-base checkout (${e.message}); expected on the PR that introduces or modifies it (validates post-merge). Falling back to unfiltered inline submission for this run.`);
+            }
+            for (const x of excludedFindings) {
+              core.warning(`Excluded out-of-diff finding ${x.file}:${x.line}${x.start_line ? ` (start ${x.start_line})` : ''} — "${x.title}" (${x.reason}).`);
+            }
+            if (excludedFindings.length > 0) {
+              core.info(`${excludedFindings.length} finding(s) excluded as off-diff; ${inlineFindings.length} in-diff finding(s) will be submitted.`);
+            }
 
             const verdict = result.verdict;
             const mayApprove = !!result.automation_safety?.may_approve;
@@ -620,10 +658,16 @@ jobs:
 
             // inline-only policy: do NOT fall back to dumping findings into an
             // issue comment — that would place finding evaluations in an issue-level
-            // comment (AC6). If createReview failed, the findings stay unposted and
-            // the failure is surfaced in the workflow log only.
+            // comment (AC6). If createReview failed, the findings stay unposted.
+            //
+            // false-green guard: when there were in-diff findings to post but the
+            // submission ultimately failed, fail the job instead of ending green
+            // with the findings silently dropped. Excluding off-diff findings is
+            // normal (inlineFindings is then empty → nothing to post → no
+            // failure), and APPROVE→COMMENT degradation only happens with zero
+            // findings, so neither is treated as a failure.
             if (!skipSubmit && !submitOk && inlineFindings.length > 0) {
-              core.warning(`createReview failed; ${inlineFindings.length} inline finding(s) could not be posted. Not dumping to an issue comment (inline-only policy); see logs.`);
+              core.setFailed(`createReview failed; ${inlineFindings.length} in-diff inline finding(s) could not be posted (inline-only policy — not dumping to an issue comment). Failing the job to avoid a false-green review; see logs.`);
             }
 
             // Resolve self inline threads on a finding-unit (fingerprint) basis.
