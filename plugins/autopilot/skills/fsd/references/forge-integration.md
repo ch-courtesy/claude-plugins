@@ -2,7 +2,7 @@
 
 자율 루프(`autopilot:loop`)는 **스펙 파일 → 로컬 자율 구현 → DONE/BLOCKED 파일**의 순수 로컬 실행기다. 변경 제안(PR)·리뷰·머지·통합 후 정리 같은 **forge 연동은 루프 코어에 없다.** 이 지침은 그 연동 책임을 누가, 어떤 계약으로 수행하는지의 단일 출처다.
 
-(task 저장소 매핑은 `rules/context.md`, task 상태 정합·이슈 동기화는 `rules/orchestration/task-state-alignment.md`·`rules/orchestration/issue-sync.md`가 단일 출처다. 본 지침은 forge(변경 제안·리뷰·머지) 연동만 다룬다.)
+(task 저장소 매핑·이슈 동기화는 `rules/context.md`, task 상태 정합은 `rules/orchestration/task-state-alignment.md`가 단일 출처다. 본 지침은 forge(변경 제안·리뷰·머지) 연동만 다룬다.)
 
 ## 책임 경계
 
@@ -12,7 +12,7 @@
 | 완료 신호(`.loop/DONE`) / 차단 신호(`.loop/BLOCKED`) 생성 | 루프 코어 |
 | DONE 감지 → base sync → push → PR 생성·재사용 | **호출 레이어 (사용자·오케스트레이터)** |
 | 리뷰 폴링·자동 fix·승인·머지·머지 후 정리 | **호출 레이어** |
-| task 상태 전이·이슈 동기화 | `rules/context.md`·`rules/orchestration/` 지침 |
+| task 상태 전이·이슈 동기화 | `rules/context.md`·`rules/orchestration/task-state-alignment.md` |
 
 루프 코어는 forge 도구(`gh` 등)를 호출하지 않는다. 코어가 끝나면 작업 공간(`<spec_dir>/.worktree/`)과 그 커밋이 남고, 통합은 호출 레이어가 이어받는다.
 
