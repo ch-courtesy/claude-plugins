@@ -555,4 +555,153 @@ adv_state=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.adv-* 2>/dev/null)
 echo "OK"
 
 echo ""
+echo "=== TEST 19: 스트리밍 — 실패는 이행적 의존자만 차단, 독립 가지는 끝까지 진행 ==="
+# 그래프: sa(BLOCKED 실패) ; sc depends sa(이행 의존자) ; sd(독립 DONE) ; se depends sd.
+# wave 배리어라면 sa 실패가 wave1 에서 break 되어 wave2 의 se 가 sd 성공에도 시작
+# 못한다. 스트리밍이면 sd→se 가 sa 와 무관하게 끝까지 done 되고, sc 만 skipped 된다.
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-sa.md"
+seed_spec "$SPEC_DIR/2026-05-29-sc.md" '["sa"]'
+seed_spec "$SPEC_DIR/2026-05-29-sd.md"
+seed_spec "$SPEC_DIR/2026-05-29-se.md" '["sd"]'
+echo "BLOCKED" > "$SPEC_DIR/2026-05-29-sa.md.outcome"
+set +e
+out=$(dispatch start "$SPEC_DIR/2026-05-29-sa.md" "$SPEC_DIR/2026-05-29-sc.md" \
+  "$SPEC_DIR/2026-05-29-sd.md" "$SPEC_DIR/2026-05-29-se.md" 2>&1)
+rc=$?
+set -e
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+[[ -n "$run_id" ]] || { echo "FAIL: run-id 파싱 실패. got: $out"; exit 1; }
+[[ $rc -ne 0 ]] || { echo "FAIL: 실패 SPEC 있는데 rc=0. out: $out"; exit 1; }
+sa_state=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.sa-* 2>/dev/null)
+sc_state=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.sc-* 2>/dev/null)
+sd_state=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.sd-* 2>/dev/null)
+se_state=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.se-* 2>/dev/null)
+[[ "$sa_state" == "failed" ]] || { echo "FAIL: sa 기대 failed, got '$sa_state'"; exit 1; }
+[[ "$sd_state" == "done" ]] || { echo "FAIL: sd 기대 done, got '$sd_state'"; exit 1; }
+# 핵심: 독립 가지 se 가 sd 성공에 힘입어 끝까지 done (wave 배리어면 미시작/pending).
+[[ -f "$SPEC_DIR/2026-05-29-se.md.started" ]] \
+  || { echo "FAIL: 독립 가지 se 가 시작조차 안 됨 (배리어 의심)"; exit 1; }
+[[ "$se_state" == "done" ]] || { echo "FAIL: se 기대 done(독립 가지 완주), got '$se_state'"; exit 1; }
+# sc 는 sa 의 이행적 의존자 → skipped, 시작 안 됨.
+[[ ! -f "$SPEC_DIR/2026-05-29-sc.md.started" ]] \
+  || { echo "FAIL: 이행적 의존자 sc 가 시작됨 (차단 실패)"; exit 1; }
+[[ "$sc_state" == "skipped" ]] || { echo "FAIL: sc 기대 skipped, got '$sc_state'"; exit 1; }
+echo "OK"
+
+echo ""
+echo "=== TEST 20: 스트리밍 — dep done 즉시 시작(무관 SPEC 실행 중이어도 대기 안 함) ==="
+# rb_fast(독립, 즉시 done) ; rb_dep depends rb_fast ; rb_slow(독립, 4s sleep).
+# wave 배리어라면 rb_dep(wave2)는 wave1 의 rb_slow 완료(~4s)까지 기다린다.
+# 스트리밍이면 rb_fast done 즉시 rb_dep 가 시작(rb_slow 실행 중이어도).
+STREAM_MOCK="$WORK_DIR/stream-mock-loop.sh"
+cat > "$STREAM_MOCK" <<'STREAM'
+#!/usr/bin/env bash
+set -euo pipefail
+sub="${1:-}"; shift || true
+json=0; if [[ "${1:-}" == "--json" ]]; then json=1; shift; fi
+spec="${1:-}"; ctl="${spec}.ctl"
+case "$sub" in
+  start)
+    [[ -z "$spec" ]] && exit 2
+    touch "${spec}.started"
+    base="$(basename "$spec" .md)"
+    if [[ "$base" == *slow* ]]; then sleep 4; fi
+    printf 'terminal|DONE\n' > "$ctl"
+    ;;
+  status)
+    [[ -z "$spec" ]] && exit 2
+    state="idle"; files="-"
+    if [[ -f "$ctl" ]]; then IFS='|' read -r state files < "$ctl"
+    elif [[ -f "${spec}.started" ]]; then state="running"; fi
+    if (( json == 1 )); then
+      sig="[]"; [[ "$files" != "-" && -n "$files" ]] && sig="[\"$files\"]"
+      printf '{"key":"k","state":"%s","signals":%s,"iters":0,"last":"-","spec":"%s"}\n' "$state" "$sig" "$spec"
+    else
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' k "$state" "$files" 0 - "$spec"
+    fi ;;
+  stop) touch "${spec}.stopped" ;;
+  list) printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC ;;
+  *) exit 2 ;;
+esac
+STREAM
+chmod +x "$STREAM_MOCK"
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-rbfast.md"
+seed_spec "$SPEC_DIR/2026-05-29-rbdep.md" '["rbfast"]'
+seed_spec "$SPEC_DIR/2026-05-29-rbslow.md"
+( LOOP_CMD="bash $STREAM_MOCK" DISPATCH_WAVE_TIMEOUT_SECONDS=30 dispatch start \
+    "$SPEC_DIR/2026-05-29-rbfast.md" "$SPEC_DIR/2026-05-29-rbdep.md" \
+    "$SPEC_DIR/2026-05-29-rbslow.md" >/dev/null 2>&1 ) &
+DPID=$!
+t0=$(date +%s); dep_started=-1
+while (( $(date +%s) - t0 < 10 )); do
+  if [[ -f "$SPEC_DIR/2026-05-29-rbdep.md.started" ]]; then dep_started=$(( $(date +%s) - t0 )); break; fi
+  sleep 1
+done
+wait "$DPID" 2>/dev/null || true
+[[ "$dep_started" -ge 0 ]] || { echo "FAIL: rbdep 가 끝내 시작 안 됨"; exit 1; }
+# rb_slow 가 4s 걸리는데 rb_dep 가 그보다 충분히 빨리 시작해야 한다(배리어면 ~4s).
+(( dep_started <= 2 )) || { echo "FAIL: rbdep 시작이 ${dep_started}s — 무관 rbslow(4s) 대기 의심(배리어)"; exit 1; }
+echo "OK (rbdep 시작 ${dep_started}s, rbslow 대기 없음)"
+
+echo ""
+echo "=== TEST 21: 동시성 상한 — --max-parallel 동시 실행 수 보존 ==="
+# 4 독립 SPEC, 각 start 가 live 마커를 만들고 1s sleep 후 제거하며, 시작 시점의
+# 동시 live 수를 기록. --max-parallel 2 면 관측된 최대 동시 실행은 2 를 넘지 않아야
+# 하고(상한 보존), 병렬성이 실제로 일어나 2 에 도달해야 한다.
+CAP_MOCK="$WORK_DIR/cap-mock-loop.sh"
+LIVE_DIR="$WORK_DIR/live"; CC_LOG="$WORK_DIR/concurrency.log"
+mkdir -p "$LIVE_DIR"; : > "$CC_LOG"
+cat > "$CAP_MOCK" <<CAP
+#!/usr/bin/env bash
+set -euo pipefail
+sub="\${1:-}"; shift || true
+json=0; if [[ "\${1:-}" == "--json" ]]; then json=1; shift; fi
+spec="\${1:-}"; ctl="\${spec}.ctl"
+case "\$sub" in
+  start)
+    [[ -z "\$spec" ]] && exit 2
+    touch "\${spec}.started"
+    touch "$LIVE_DIR/\$\$"
+    ls "$LIVE_DIR" | wc -l | tr -d ' ' >> "$CC_LOG"
+    sleep 1
+    rm -f "$LIVE_DIR/\$\$"
+    printf 'terminal|DONE\n' > "\$ctl"
+    ;;
+  status)
+    [[ -z "\$spec" ]] && exit 2
+    state="idle"; files="-"
+    if [[ -f "\$ctl" ]]; then IFS='|' read -r state files < "\$ctl"
+    elif [[ -f "\${spec}.started" ]]; then state="running"; fi
+    if (( json == 1 )); then
+      sig="[]"; [[ "\$files" != "-" && -n "\$files" ]] && sig="[\"\$files\"]"
+      printf '{"key":"k","state":"%s","signals":%s,"iters":0,"last":"-","spec":"%s"}\n' "\$state" "\$sig" "\$spec"
+    else
+      printf '%s %s %s %s %s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC
+      printf '%s %s %s %s %s %s\n' k "\$state" "\$files" 0 - "\$spec"
+    fi ;;
+  stop) touch "\${spec}.stopped" ;;
+  list) : ;;
+  *) exit 2 ;;
+esac
+CAP
+chmod +x "$CAP_MOCK"
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+: > "$CC_LOG"; rm -f "$LIVE_DIR"/* 2>/dev/null || true
+for nm in c1 c2 c3 c4; do seed_spec "$SPEC_DIR/2026-05-29-$nm.md"; done
+LOOP_CMD="bash $CAP_MOCK" DISPATCH_WAVE_TIMEOUT_SECONDS=30 dispatch start \
+  "$SPEC_DIR/2026-05-29-c1.md" "$SPEC_DIR/2026-05-29-c2.md" \
+  "$SPEC_DIR/2026-05-29-c3.md" "$SPEC_DIR/2026-05-29-c4.md" --max-parallel 2 >/dev/null 2>&1
+max_cc=$(sort -n "$CC_LOG" | tail -1)
+[[ -n "$max_cc" ]] || { echo "FAIL: concurrency 로그 비어 있음"; exit 1; }
+(( max_cc <= 2 )) || { echo "FAIL: 동시성 상한 2 초과 관측: $max_cc (log: $(tr '\n' ',' < "$CC_LOG"))"; exit 1; }
+(( max_cc >= 2 )) || { echo "FAIL: 병렬성 미관측(max=$max_cc) — 상한 내 동시 실행이 일어나야 함"; exit 1; }
+echo "OK (관측 최대 동시 실행 $max_cc ≤ 2)"
+
+echo ""
 echo "=== 모든 dispatch 통합 테스트 통과 ==="
