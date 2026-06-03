@@ -64,11 +64,12 @@ firstdef="$(lineno_re "$TPL" 'default:[[:space:]]*true')"
 check "branch-naming.md first default belongs to the first option" \
   bash -c "[ -n '$firstdef' ] && [ -n '$secondlabel' ] && [ '$firstdef' -gt '$firstlabel' ] && [ '$firstdef' -lt '$secondlabel' ]"
 
-# both defaults precede the THIRD option label => they belong to options 1 & 2,
-# and neither the 3rd nor 4th option is default-checked.
-lastdef="$(grep -nE 'default:[[:space:]]*true' "$TPL" | tail -1 | cut -d: -f1)"
-check "branch-naming.md both defaults belong to the first two options (3rd/4th not default)" \
-  bash -c "[ -n '$lastdef' ] && [ -n '$thirdlabel' ] && [ '$lastdef' -lt '$thirdlabel' ]"
+# the SECOND default belongs to the SECOND option (between 2nd and 3rd label).
+# This guards against both defaults landing inside option 1 with option 2 unchecked
+# (which would still satisfy count==2 and "before 3rd label").
+seconddef="$(grep -nE 'default:[[:space:]]*true' "$TPL" | sed -n '2p' | cut -d: -f1)"
+check "branch-naming.md second default belongs to the second option" \
+  bash -c "[ -n '$seconddef' ] && [ -n '$secondlabel' ] && [ -n '$thirdlabel' ] && [ '$seconddef' -gt '$secondlabel' ] && [ '$seconddef' -lt '$thirdlabel' ]"
 
 # ===========================================================================
 # 3) single aggregate placeholder; NO per-policy placeholder
