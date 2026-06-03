@@ -32,6 +32,8 @@ cat > "$MOCK_LOOP" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 sub="${1:-}"; shift || true
+json=0
+if [[ "${1:-}" == "--json" ]]; then json=1; shift; fi
 spec="${1:-}"
 ctl="${spec}.ctl"
 outcome_file="${spec}.outcome"
@@ -48,10 +50,15 @@ case "$sub" in
     [[ -z "$spec" ]] && { echo "mock: status needs spec" >&2; exit 2; }
     state="idle"; files="-"
     [[ -f "$ctl" ]] && IFS='|' read -r state files < "$ctl"
-    # shellcheck disable=SC2059
-    printf "$fmt" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
-    # shellcheck disable=SC2059
-    printf "$fmt" "k" "$state" "$files" "0" "-" "$spec"
+    if (( json == 1 )); then
+      sig="[]"; [[ "$files" != "-" && -n "$files" ]] && sig="[\"$files\"]"
+      printf '{"key":"k","state":"%s","signals":%s,"iters":0,"last":"-","spec":"%s"}\n' "$state" "$sig" "$spec"
+    else
+      # shellcheck disable=SC2059
+      printf "$fmt" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
+      # shellcheck disable=SC2059
+      printf "$fmt" "k" "$state" "$files" "0" "-" "$spec"
+    fi
     ;;
   stop) touch "${spec}.stopped"; rm -f "$ctl" ;;
   list) printf "$fmt" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC" ;;

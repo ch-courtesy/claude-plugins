@@ -39,6 +39,13 @@ WAVE_TIMEOUT_SECONDS="${DISPATCH_WAVE_TIMEOUT_SECONDS:-7200}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+# yq 는 loop 의 구조화 상태(status --json) 파싱의 단일 출처다. 부재 시 종료 상태를
+# 판정할 수 없으므로 명확히 정지한다(텍스트 컬럼으로 silent fallback 하지 않음).
+require_yq() {
+  command -v yq >/dev/null 2>&1 \
+    || die "'yq' 가 필요합니다 — loop 구조화 상태(status --json) 판정에 사용됩니다."
+}
+
 now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 require_git_root() {
@@ -236,39 +243,54 @@ loop_stop() {
   $LOOP_CMD stop "$spec" >/dev/null 2>&1 || true
 }
 
-# loop_status_state <spec> — loop.sh status 출력에서 STATE 컬럼만 추출.
-# 출력: idle|running|stale|terminal 또는 빈 줄.
+# loop_status_json <spec> — loop 의 구조화 상태(JSON object 1줄)를 반환.
+# loop 의 공개 인터페이스(`status --json <spec>`)만 사용한다 — dispatch 는 loop 내부
+# signals/·worktree 파일을 직접 읽지 않는다(불변식 보존). 빈 출력이면 미지원(레거시
+# loop)·기록 부재.
+loop_status_json() {
+  local spec="$1"
+  # shellcheck disable=SC2086
+  $LOOP_CMD status --json "$spec" 2>/dev/null
+}
+
+# loop_status_state <spec> — 구조화 상태의 .state 만 추출(상태 표시용).
+# 출력: idle|running|stale|terminal|absent 또는 빈 줄(미지원·부재).
 loop_status_state() {
-  local spec="$1"
-  # shellcheck disable=SC2086
-  $LOOP_CMD status "$spec" 2>/dev/null \
-    | awk 'NR==2 { print $2 }'
+  local spec="$1" json
+  json="$(loop_status_json "$spec")"
+  [[ -z "$json" ]] && return 0
+  printf '%s' "$json" | yq -r '.state' 2>/dev/null
 }
 
-# loop_status_files <spec> — FILES 컬럼 (signals/ 내 파일 목록 또는 "-").
-loop_status_files() {
-  local spec="$1"
-  # shellcheck disable=SC2086
-  $LOOP_CMD status "$spec" 2>/dev/null \
-    | awk 'NR==2 { print $3 }'
-}
-
-# child_terminal_state <spec> — pending|running|done|failed
-# done : STATE=terminal 이고 FILES 안에 BLOCKED 가 없음.
-# failed : STATE=terminal 이고 FILES 안에 BLOCKED 가 있음 (워커 컨벤션).
-# running : STATE=running 또는 stale.
-# pending : STATE=idle 또는 미실행.
+# child_terminal_state <spec> — pending|running|done|failed|unknown
+# 종료 상태를 loop 의 구조화 상태(status --json)로만 판정한다 — 출력 표의 컬럼 위치나
+# 자유 텍스트 부분 문자열 일치에 의존하지 않는다(구조화 핸드오프 단일 출처).
+#   done    : .state=terminal 이고 .signals 에 "BLOCKED" 가 정확 일치로 없음.
+#   failed  : .state=terminal 이고 .signals 에 "BLOCKED" 가 정확 일치로 있음(워커 컨벤션).
+#   running : .state=running 또는 stale.
+#   pending : .state=idle 또는 absent(미실행).
+#   unknown : 구조화 상태 부재(레거시 loop·yq 부재) — 텍스트 컬럼으로 폴백하지 않음.
+#             호출자(결과 판정·watch)가 unknown 을 failed 로 처리한다.
 child_terminal_state() {
-  local spec="$1"
-  local st files
-  st="$(loop_status_state "$spec")"
-  files="$(loop_status_files "$spec")"
+  local spec="$1" json st
+  json="$(loop_status_json "$spec")"
+  if [[ -z "$json" ]]; then echo "unknown"; return; fi
+  st="$(printf '%s' "$json" | yq -r '.state' 2>/dev/null)"
   case "$st" in
     terminal)
-      if echo "$files" | grep -q 'BLOCKED'; then echo "failed"; else echo "done"; fi
+      # signals 를 먼저 변수로 받아 yq 의 비-0 종료가 pipefail 로 if 조건에
+      # 전파되지 않게 한다 — well-formed JSON 이면 동작 동일, 비정상 출력에도
+      # done/failed 오판(특히 BLOCKED 누락 → done 오분류)을 방지.
+      local sigs; sigs="$(printf '%s' "$json" | yq -r '.signals[]' 2>/dev/null || true)"
+      if printf '%s\n' "$sigs" | grep -Fxq 'BLOCKED'; then
+        echo "failed"
+      else
+        echo "done"
+      fi
       ;;
     running|stale) echo "running" ;;
-    *) echo "pending" ;;
+    idle|absent) echo "pending" ;;
+    *) echo "unknown" ;;
   esac
 }
 
@@ -345,10 +367,35 @@ build_dag() {
   return 0
 }
 
+# compute_dep_idx <spec...> — 호출자 스코프의 DEP_IDX[i] 에 spec i 의 (입력 집합 내)
+# 의존 인덱스 목록을 공백 구분 문자열로 채운다(bash 동적 스코프). build_dag 의 edge
+# 도출과 동일 기법(extract_depends_on + resolve_dep)을 재사용하되, wave 가 아니라
+# 준비도 스케줄링용 인접 정보를 만든다. 입력 집합 밖 의존성은 무시(dispatch 범위 밖).
+compute_dep_idx() {
+  local -a SP=()
+  local s
+  for s in "$@"; do SP+=("$s"); done
+  local n=${#SP[@]} i j dep dep_path
+  for ((i=0; i<n; i++)); do DEP_IDX[i]=""; done
+  for ((i=0; i<n; i++)); do
+    while IFS= read -r dep; do
+      [[ -z "$dep" ]] && continue
+      dep_path="$(resolve_dep "${SP[i]}" "$dep")"
+      [[ -z "$dep_path" ]] && continue
+      for ((j=0; j<n; j++)); do
+        if [[ "${SP[j]}" == "$dep_path" ]]; then
+          DEP_IDX[i]="${DEP_IDX[i]} $j"; break
+        fi
+      done
+    done < <(extract_depends_on "${SP[i]}")
+  done
+}
+
 # ----- subcommand: start -----
 
 cmd_start() {
   require_git_root
+  require_yq
   local resume=""
   local max_parallel=0
   local -a inputs=()
@@ -403,116 +450,128 @@ cmd_start() {
     for s in "${specs_abs[@]}"; do set_state "$rd" "$s" "pending"; done
   fi
 
-  # wave 순회 — wave 별 SPEC 들 병렬 시작, wait, 결과 판정.
-  local current_wave=1 max_wave
-  max_wave=$(awk -F'[=\t]' '{print $2}' "$rd/WAVES.txt" | sort -n | tail -1)
-  local overall_rc=0
-  while (( current_wave <= max_wave )); do
-    local -a wave_specs=()
-    local line w sp
-    while IFS=$'\t' read -r w sp; do
-      [[ "$w" == "wave=$current_wave" ]] && wave_specs+=("$sp")
-    done < "$rd/WAVES.txt"
+  # ----- 스트리밍 스케줄러 (SPEC별 준비도 기반) -----
+  # WAVES.txt 는 진단용으로 보존하되, 실제 실행은 wave 배리어가 아니라 각 SPEC 의
+  # depends_on 준비도로 구동한다. 한 SPEC 은 자신의 모든 dep 이 done 이 되는 즉시
+  # (같은 위상의 무관 SPEC 이 아직 실행 중이어도) 동시성 상한 이내에서 시작된다.
+  # 한 SPEC 이 failed 면 그 이행적 의존자만 skipped 로 차단되고, 의존 관계가 없는
+  # 가지는 끝까지 진행한다.
+  local n=${#specs_abs[@]}
+  local -a DEP_IDX=()
+  compute_dep_idx "${specs_abs[@]}"
 
-    local -a launch_specs=()
-    for sp in "${wave_specs[@]}"; do
-      local st; st="$(get_state "$rd" "$sp")"
-      if [[ "$st" == "done" ]]; then
-        log_event "$rd" "wave=$current_wave skip-done $(spec_slug "$sp")"
+  # resume: done 이 아닌 모든 상태(failed/skipped/running/pending)를 pending 으로
+  # 되돌려 미완 SPEC 을 스트리밍 스케줄에 따라 재시도(이미 done 인 SPEC 은 재실행 안 함).
+  if [[ -n "$resume" ]]; then
+    local ri
+    for ((ri=0; ri<n; ri++)); do
+      [[ "$(get_state "$rd" "${specs_abs[ri]}")" == "done" ]] \
+        || set_state "$rd" "${specs_abs[ri]}" "pending"
+    done
+  fi
+
+  local -a PIDS=() LAUNCH_TS=()
+  local i
+  for ((i=0; i<n; i++)); do PIDS[i]=""; LAUNCH_TS[i]=0; done
+  local overall_rc=0 timed_out=0
+  log_event "$rd" "stream start specs=$n max_parallel=$max_parallel"
+
+  while :; do
+    # 1) skip 전파 — pending 인데 dep 중 failed/skipped 가 있으면 skipped (fixpoint).
+    local changed=1 d ds
+    while (( changed == 1 )); do
+      changed=0
+      for ((i=0; i<n; i++)); do
+        [[ "$(get_state "$rd" "${specs_abs[i]}")" == "pending" ]] || continue
+        for d in ${DEP_IDX[i]}; do
+          ds="$(get_state "$rd" "${specs_abs[d]}")"
+          if [[ "$ds" == "failed" || "$ds" == "skipped" ]]; then
+            set_state "$rd" "${specs_abs[i]}" "skipped"
+            log_event "$rd" "skip $(spec_slug "${specs_abs[i]}") (dep $(spec_slug "${specs_abs[d]}") $ds)"
+            changed=1; break
+          fi
+        done
+      done
+    done
+
+    # 2) 준비된 pending 실행 — 모든 dep 이 done & 동시 실행 수 < 상한.
+    local running_count=0
+    for ((i=0; i<n; i++)); do
+      [[ "$(get_state "$rd" "${specs_abs[i]}")" == "running" ]] && running_count=$((running_count+1))
+    done
+    local ready
+    for ((i=0; i<n; i++)); do
+      [[ "$(get_state "$rd" "${specs_abs[i]}")" == "pending" ]] || continue
+      ready=1
+      for d in ${DEP_IDX[i]}; do
+        [[ "$(get_state "$rd" "${specs_abs[d]}")" == "done" ]] || { ready=0; break; }
+      done
+      (( ready == 1 )) || continue
+      if (( max_parallel > 0 )) && (( running_count >= max_parallel )); then continue; fi
+      set_state "$rd" "${specs_abs[i]}" "running"
+      local pid; pid="$(loop_start_bg "${specs_abs[i]}")"
+      PIDS[i]="$pid"; LAUNCH_TS[i]=$(date +%s)
+      running_count=$((running_count+1))
+      log_event "$rd" "launch $(spec_slug "${specs_abs[i]}") pid=$pid"
+    done
+
+    # 3) 종료된 running reap + per-spec runtime cap(WAVE_TIMEOUT_SECONDS).
+    local now term; now=$(date +%s)
+    for ((i=0; i<n; i++)); do
+      [[ "$(get_state "$rd" "${specs_abs[i]}")" == "running" ]] || continue
+      [[ -n "${PIDS[i]}" ]] || continue
+      if kill -0 "${PIDS[i]}" 2>/dev/null; then
+        # 아직 실행 중 — per-spec runtime cap 초과 시 SIGTERM→SIGKILL 으로 정리.
+        if (( now - LAUNCH_TS[i] >= WAVE_TIMEOUT_SECONDS )); then
+          timed_out=1
+          log_event "$rd" "timeout $(spec_slug "${specs_abs[i]}") elapsed=$((now - LAUNCH_TS[i]))s cap=${WAVE_TIMEOUT_SECONDS}s"
+          kill_tree "${PIDS[i]}" TERM; sleep 1
+          kill -0 "${PIDS[i]}" 2>/dev/null && kill_tree "${PIDS[i]}" KILL
+          wait "${PIDS[i]}" 2>/dev/null || true
+          # timeout 직전 이미 done 인 child 는 done 보존, 아니면 failed.
+          term="$(child_terminal_state "${specs_abs[i]}")"
+          if [[ "$term" == "done" ]]; then
+            set_state "$rd" "${specs_abs[i]}" "done"
+            log_event "$rd" "done $(spec_slug "${specs_abs[i]}") (완료 후 timeout 회수)"
+          else
+            set_state "$rd" "${specs_abs[i]}" "failed"
+            log_event "$rd" "timeout-failed $(spec_slug "${specs_abs[i]}") state=$term"
+          fi
+          PIDS[i]=""
+        fi
         continue
       fi
-      launch_specs+=("$sp")
-    done
-
-    log_event "$rd" "wave=$current_wave start specs=${#launch_specs[@]}"
-
-    # 병렬 시작 (선택적 동시성 상한).
-    local -a pids=()
-    local -a started_specs=()
-    for sp in "${launch_specs[@]}"; do
-      if (( max_parallel > 0 )); then
-        while (( $(jobs -rp 2>/dev/null | wc -l | tr -d ' ') >= max_parallel )); do
-          sleep "${POLL_SECONDS:-1}"
-        done
-      fi
-      set_state "$rd" "$sp" "running"
-      local pid; pid="$(loop_start_bg "$sp")"
-      pids+=("$pid")
-      started_specs+=("$sp")
-      log_event "$rd" "wave=$current_wave launch $(spec_slug "$sp") pid=$pid"
-    done
-
-    # 같은 wave 의 모든 백그라운드 loop 끝날 때까지 대기.
-    # WAVE_TIMEOUT_SECONDS 초과 시 미종료 PID 들을 SIGTERM → SIGKILL 으로 정리하고
-    # overall_rc=2 로 break 한다. (단순 `wait` 는 hung child 가 있을 때 영구 정지.)
-    local wave_start now elapsed remaining_pids=0 wave_timed_out=0
-    wave_start=$(date +%s)
-    if (( ${#pids[@]} > 0 )); then
-      while :; do
-        remaining_pids=0
-        local pid
-        for pid in "${pids[@]}"; do
-          if kill -0 "$pid" 2>/dev/null; then remaining_pids=$((remaining_pids+1)); fi
-        done
-        if (( remaining_pids == 0 )); then break; fi
-        now=$(date +%s); elapsed=$((now - wave_start))
-        if (( elapsed >= WAVE_TIMEOUT_SECONDS )); then
-          wave_timed_out=1
-          log_event "$rd" "wave=$current_wave timeout elapsed=${elapsed}s cap=${WAVE_TIMEOUT_SECONDS}s remaining=${remaining_pids}"
-          for pid in "${pids[@]}"; do
-            kill -0 "$pid" 2>/dev/null && kill_tree "$pid" TERM
-          done
-          sleep 2
-          for pid in "${pids[@]}"; do
-            kill -0 "$pid" 2>/dev/null && kill_tree "$pid" KILL
-          done
-          for pid in "${pids[@]}"; do wait "$pid" 2>/dev/null || true; done
-          break
-        fi
-        sleep "${POLL_SECONDS:-1}"
-      done
-    fi
-
-    # 결과 판정 — 자율 실행기 공개 인터페이스로 child 별 종료 상태 확인.
-    # timeout 으로 정리된 wave 라도 timeout 전에 이미 done 인 child 는 done 보존.
-    # 미종료(pending/running/unknown) 만 timeout-failed 로 마킹.
-    local wave_failed=0
-    for sp in "${started_specs[@]}"; do
-      local term; term="$(child_terminal_state "$sp")"
+      # PID 종료 — loop 구조화 상태로 종료 상태 판정.
+      term="$(child_terminal_state "${specs_abs[i]}")"
       case "$term" in
-        done)
-          set_state "$rd" "$sp" "done"
-          log_event "$rd" "wave=$current_wave done $(spec_slug "$sp")"
-          ;;
-        failed)
-          set_state "$rd" "$sp" "failed"; wave_failed=1
-          log_event "$rd" "wave=$current_wave failed $(spec_slug "$sp")"
-          ;;
-        *)
-          set_state "$rd" "$sp" "failed"; wave_failed=1
-          if (( wave_timed_out == 1 )); then
-            log_event "$rd" "wave=$current_wave timeout-failed $(spec_slug "$sp") state=$term"
-          else
-            log_event "$rd" "wave=$current_wave unknown-terminal $(spec_slug "$sp") state=$term"
-          fi
-          ;;
+        done)   set_state "$rd" "${specs_abs[i]}" "done";   log_event "$rd" "done $(spec_slug "${specs_abs[i]}")" ;;
+        failed) set_state "$rd" "${specs_abs[i]}" "failed"; log_event "$rd" "failed $(spec_slug "${specs_abs[i]}")" ;;
+        *)      set_state "$rd" "${specs_abs[i]}" "failed"; log_event "$rd" "unknown-terminal $(spec_slug "${specs_abs[i]}") state=$term" ;;
+      esac
+      PIDS[i]=""
+    done
+
+    # 4) 종료 판정 — 모든 SPEC 이 done/failed/skipped 이면 끝.
+    local pending_or_running=0
+    for ((i=0; i<n; i++)); do
+      case "$(get_state "$rd" "${specs_abs[i]}")" in
+        done|failed|skipped) ;;
+        *) pending_or_running=1 ;;
       esac
     done
-
-    if (( wave_timed_out == 1 )); then
-      log_event "$rd" "wave=$current_wave fail (timeout) — 다음 wave 진입 차단"
-      overall_rc=2
-      break
-    fi
-
-    if (( wave_failed == 1 )); then
-      log_event "$rd" "wave=$current_wave fail — 다음 wave 진입 차단"
-      overall_rc=1
-      break
-    fi
-
-    current_wave=$((current_wave+1))
+    (( pending_or_running == 0 )) && break
+    sleep "${POLL_SECONDS:-1}"
   done
+
+  # 종합 결과: timeout 있었으면 2, 아니면 하나라도 failed/skipped 면 1, 전부 done 이면 0.
+  local any_bad=0
+  for ((i=0; i<n; i++)); do
+    case "$(get_state "$rd" "${specs_abs[i]}")" in failed|skipped) any_bad=1 ;; esac
+  done
+  if (( timed_out == 1 )); then overall_rc=2
+  elif (( any_bad == 1 )); then overall_rc=1
+  else overall_rc=0; fi
+  log_event "$rd" "stream done rc=$overall_rc"
 
   echo "run-id: $(basename "$rd")"
   return "$overall_rc"
@@ -547,6 +606,7 @@ cmd_status() {
   local rid="${1:-}"
   [[ -z "$rid" ]] && die "사용: $0 status <run-id>"
   require_git_root
+  require_yq
   local rd; rd="$(run_dir "$rid")"
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
   echo "run-id: $rid"
@@ -570,6 +630,7 @@ cmd_stop() {
   local rid="${1:-}"
   [[ -z "$rid" ]] && die "사용: $0 stop <run-id>"
   require_git_root
+  require_yq
   local rd; rd="$(run_dir "$rid")"
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
   local any=0 sp
@@ -593,6 +654,7 @@ cmd_watch() {
   local rid="${1:-}"
   [[ -z "$rid" ]] && die "사용: $0 watch <run-id>"
   require_git_root
+  require_yq
   local rd; rd="$(run_dir "$rid")"
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
   local start; start=$(date +%s)
@@ -601,8 +663,9 @@ cmd_watch() {
     while IFS= read -r sp; do
       st="$(get_state "$rd" "$sp")"
       case "$st" in
-        done)   ;;
-        failed) any_fail=1 ;;
+        done)    ;;
+        failed)  any_fail=1 ;;
+        skipped) any_fail=1 ;;  # 이행적 실패로 차단된 SPEC — terminal(비완료).
         *)
           # 미완 — loop 공개 IF 로 현 상태 재확인.
           local term; term="$(child_terminal_state "$sp")"
@@ -632,18 +695,20 @@ usage: dispatch.sh <subcommand> [args]
 
 Subcommands:
   start <spec...> [--max-parallel N] [--resume <run-id>]
-        1 개 이상의 SPEC 파일 경로를 받아 depends_on 으로 DAG 를 만들고
-        wave 단위로 loop driver 에 위임. --resume 이면 기존 run 의
-        미완 child 만 재실행.
+        1 개 이상의 SPEC 파일 경로를 받아 depends_on 으로 DAG 를 만들고,
+        각 SPEC 을 그 의존성이 모두 done 이 되는 즉시(준비도 기반 스트리밍,
+        동시성 상한 이내) loop driver 에 위임한다. 한 SPEC 이 failed 면 그
+        이행적 의존자만 skipped 되고 독립 가지는 끝까지 진행. WAVES.txt 는
+        진단용으로 보존. --resume 이면 done 이 아닌 SPEC 만 재시도.
   list
         모든 run-id 와 진행 요약.
   status <run-id>
-        run-id 단위 per-SPEC wave/state.
+        run-id 단위 per-SPEC state(진단용 wave 표시 포함).
   stop <run-id>
         진행 중 child loop 들을 정지 (loop driver 에 위임).
   watch <run-id>
-        per-SPEC 상태를 폴링하며 모든 child 가 terminal 에 도달할 때까지
-        대기. exit 0=전부 done, 1=하나라도 failed, 2=timeout.
+        per-SPEC 상태를 폴링하며 모든 child 가 terminal(done/failed/skipped)에
+        도달할 때까지 대기. exit 0=전부 done, 1=failed/skipped 있음, 2=timeout.
 
 환경 변수:
   LOOP_CMD, DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS
