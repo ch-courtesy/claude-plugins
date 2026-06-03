@@ -370,12 +370,14 @@ jobs:
               event = 'COMMENT';
             }
 
-            // Review body: only on an actual APPROVE event does the body carry a
-            // single "승인되었습니다." line. Every non-approve review carries only the
-            // hidden idempotency marker, so findings live exclusively as inline
-            // comments (inline-only policy) and no review summary is ever written.
+            // Review body — built from the ACTUAL submit event, not the intended
+            // one. Only an APPROVE submission carries the single "승인되었습니다." line;
+            // every other submission (including the APPROVE→COMMENT degradation when
+            // the default token cannot self-approve) carries only the hidden
+            // idempotency marker, so findings live exclusively as inline comments
+            // (inline-only policy) and no review summary is ever written.
             const marker = `<!-- ${prefix} head_sha=${head_sha} verdict=${verdict} -->`;
-            const body = event === 'APPROVE'
+            const buildBody = (ev) => ev === 'APPROVE'
               ? ['## Codex PR 리뷰', '', '승인되었습니다.', '', marker].join('\n')
               : marker;
 
@@ -438,7 +440,7 @@ jobs:
               owner, repo, pull_number,
               commit_id: head_sha,
               event: ev,
-              body,
+              body: buildBody(ev),
               comments: inlineComments,
             });
 
