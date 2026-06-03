@@ -179,6 +179,24 @@ echo "$out" | grep -qE "terminal" || { echo "FAIL: status STATE 가 terminal 아
 ok
 
 # ---------------------------------------------------------------------------
+echo "=== TEST 4b: status --json 구조화(기계 판독) 출력 ==="
+jout=$(loop status --json "$SPEC2" 2>&1)
+# JSON 단일 object 이며 yq 로 파싱 가능해야 한다.
+echo "$jout" | yq -r '.state' >/dev/null 2>&1 \
+  || { echo "FAIL: status --json 출력이 yq 로 파싱 불가. got: $jout"; exit 1; }
+js=$(echo "$jout" | yq -r '.state' 2>/dev/null)
+[[ "$js" == "terminal" ]] \
+  || { echo "FAIL: --json .state 기대 terminal, got '$js'. raw: $jout"; exit 1; }
+# signals 배열에 DONE 이 정확 일치 원소로 존재.
+echo "$jout" | yq -r '.signals[]' 2>/dev/null | grep -qx "DONE" \
+  || { echo "FAIL: --json .signals[] 에 DONE 없음. raw: $jout"; exit 1; }
+# spec 필드가 절대 경로.
+jspec=$(echo "$jout" | yq -r '.spec' 2>/dev/null)
+[[ "$jspec" == "$SPEC2" ]] \
+  || { echo "FAIL: --json .spec 기대 $SPEC2, got '$jspec'"; exit 1; }
+ok
+
+# ---------------------------------------------------------------------------
 echo "=== TEST 5: 기록 없는 스펙 status → 안내 메시지 ==="
 SPEC_NR=$(mkspec norecord <<'EOF'
 ---
