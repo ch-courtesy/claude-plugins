@@ -33,7 +33,7 @@ task 상태 정합 계약은 autopilot 오케스트레이터(fsd/dispatch/loop)�
 - 활성 표면(`rules/`·`plugins/`·`CLAUDE.md`)에서 `rules/orchestration/task-state-alignment` 경로 문자열을 검색하면 매치가 없다.
 - 항상 fsd 번들 sibling(`forge-integration.md`·`task-backend.sh`)의 task-state-alignment 인용은 같은 references 디렉터리 안의 번들 상대 파일명(`task-state-alignment.md`)을 가리킨다.
 - 항상 `rules/context.md`의 task-state-alignment 인용은 새 번들 경로(`plugins/autopilot/skills/fsd/references/task-state-alignment.md`)를 가리킨다.
-- 항상 autopilot 플러그인 버전은 `plugins/autopilot/.claude-plugin/plugin.json`(단일 출처)과 루트 `.claude-plugin/marketplace.json`의 autopilot 항목(미러) 둘 다에서 동일하게 `0.17.2`이다(이전 `0.17.1`에서 PATCH 범프).
+- 항상 autopilot 플러그인 버전은 `plugins/autopilot/.claude-plugin/plugin.json`(단일 출처)과 루트 `.claude-plugin/marketplace.json`의 autopilot 항목(미러) 둘 다에서 동일하게 `0.18.1`이다(origin/main의 `0.18.0`에서 PATCH 범프; 머지로 베이스가 올라가 재범프).
 - `plugins/autopilot/skills/fsd/references/task-backend.sh`는 인용 주석 1줄만 갱신되고 스크립트 로직은 변경되지 않는다(무회귀).
 
 ## 범위
