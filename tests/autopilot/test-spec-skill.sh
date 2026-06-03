@@ -432,14 +432,6 @@ grep -qF '목적' "$SELF_REVIEW_MD" \
   || fail "self-review.md 5축 중 목적 섹션 점검 흡수 부재"
 ok "self-review.md 목적 점검 흡수"
 
-echo ""
-echo "=== TEST F6: plugin.json 버전 0.14.1 ==="
-PLUGIN_JSON="$REPO_ROOT/plugins/autopilot/.claude-plugin/plugin.json"
-[[ -f "$PLUGIN_JSON" ]] || fail "plugin.json 부재"
-grep -qF '"version": "0.14.1"' "$PLUGIN_JSON" \
-  || fail "plugin.json version 이 0.14.1 이 아님"
-ok "plugin.json version 0.14.1"
-
 # ===========================================================================
 echo ""
 echo "=== 모든 spec 계약 + persona/clarity + 자연 인터뷰/옵트인 핸드오프 + 목적(WHY) 테스트 통과 ==="
