@@ -1,0 +1,10 @@
+{"strategy":"s0-monolith","rep":1,"agents":1,"duration_ms":20334,"total_tokens":40969,"output_tokens":3774,"success_items":8,"total_items":8,"corrections":0,"run_id":"wf_35be5f5a-2cb"}
+{"strategy":"s0-monolith","rep":2,"agents":1,"duration_ms":24566,"total_tokens":25278,"output_tokens":2147,"success_items":8,"total_items":8,"corrections":0,"run_id":"wf_d3f00032-9ee"}
+{"strategy":"s1-serial","rep":1,"agents":8,"duration_ms":73011,"total_tokens":126569,"output_tokens":2776,"success_items":8,"total_items":8,"corrections":0,"run_id":"wf_26c5eb71-d11"}
+{"strategy":"s1-serial","rep":2,"agents":8,"duration_ms":66963,"total_tokens":127535,"output_tokens":2782,"success_items":8,"total_items":8,"corrections":0,"run_id":"wf_d52ed34e-256"}
+{"strategy":"s2-parallel","rep":1,"agents":8,"duration_ms":17680,"total_tokens":128616,"output_tokens":4026,"success_items":8,"total_items":8,"corrections":0,"run_id":"wf_40cfe78b-0e8"}
+{"strategy":"s2-parallel","rep":2,"agents":8,"duration_ms":17769,"total_tokens":127840,"output_tokens":2720,"success_items":8,"total_items":8,"corrections":0,"run_id":"wf_05f4a790-23f"}
+{"strategy":"s3-pipeline","rep":1,"agents":16,"duration_ms":35441,"total_tokens":263488,"output_tokens":6663,"success_items":8,"total_items":8,"corrections":1,"run_id":"wf_fbb55c56-c29"}
+{"strategy":"s3-pipeline","rep":2,"agents":16,"duration_ms":34063,"total_tokens":262850,"output_tokens":6369,"success_items":8,"total_items":8,"corrections":0,"run_id":"wf_db98d8af-b4a"}
+{"strategy":"s4-parallel-2stage","rep":1,"agents":16,"duration_ms":42590,"total_tokens":263995,"output_tokens":6675,"success_items":8,"total_items":8,"corrections":0,"run_id":"wf_9a100432-631"}
+{"strategy":"s4-parallel-2stage","rep":2,"agents":16,"duration_ms":40706,"total_tokens":262389,"output_tokens":6363,"success_items":8,"total_items":8,"corrections":0,"run_id":"wf_bcfbc88d-f8c"}
