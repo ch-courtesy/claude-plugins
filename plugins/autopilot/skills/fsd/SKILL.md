@@ -22,7 +22,7 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 - **자연어 의도로 호출되면** (예: `Skill(skill: "fsd", args: "<자연어 task 설명>")`) — 먼저 `Skill(skill: "spec", args: "<자연어 task 설명>")` 로 SPEC 을 산출하고, 그 결과 SPEC 경로(들)로 `intake` → `start` 를 이어 구현까지 자동으로 닫는다. spec 의 명확화 인터뷰·최종 단일 승인은 그대로 수행되어 자기완결 SPEC 을 보장하며, 승인된 SPEC 으로 task 등록·dispatch 위임이 자동으로 흐른다. SPEC 에 `[NEEDS CLARIFICATION` 미해결 마커가 남으면 자동 진행을 멈추고 `--resume` 해결을 안내한다.
 - **이미 SPEC 경로(들)가 주어지면** — spec 호출을 건너뛰고 바로 `intake <spec...>` → `start <spec...>` 를 수행한다.
 
-어느 모드든 SPEC 산출은 `spec` 스킬의 책임(외부 상태 안 만듦)이고, task 등록·run 소유·forge 연동은 `fsd` 의 책임이다 — 이 역할 분리는 불변이다. 현재 실효 자동 범위는 `intake → start`(dispatch 위임)까지이며, 그 이후 `review`·`merge`·`poll` 은 미구현 핸들러다(아래 Subcommands 참조).
+어느 모드든 SPEC 산출은 `spec` 스킬의 책임(외부 상태 안 만듦)이고, task 등록·run 소유·forge 연동은 `fsd` 의 책임이다 — 이 역할 분리는 불변이다. 현재 실효 자동 범위는 `intake → start`(dispatch 위임)에 더해 `review`(리뷰 생산자 호출→판정 분기)·`poll`(드레인 전이)까지이며, `merge`(C4) 만 미구현 핸들러다(아래 Subcommands 참조).
 
 ## 모델
 
@@ -43,7 +43,7 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
         ├── branch          # 작업 브랜치 이름            (forge 연동은 후속 단위)
         ├── pr              # PR 번호                      (forge 연동은 후속 단위)
         ├── run-id          # 이 task 가 소유한 dispatch run 식별자
-        ├── review-round    # 리뷰 라운드 카운터          (review 루프는 후속 단위)
+        ├── review-round    # 리뷰 라운드 카운터          (review 오케스트레이션이 누적)
         ├── head            # 마지막으로 관측한 head 식별자
         └── LOG.md          # append-only 이벤트 로그
 ```
@@ -73,10 +73,15 @@ task 의 SPEC(들)을 자율 실행기 오케스트레이터(`dispatch`)에 위�
 
 ### fsd review `<task-id>`
 
-PR 리뷰 피드백을 받아 추가 loop 라운드로 반영하는 루프.
+리뷰 생산자(`autopilot:review`)를 한 작업에 대해 1회 호출해 단일 판정을 얻고 그에 따라 전이한다.
 
-- 본 골격(C0): **미구현**. 호출 시 미구현 안내를 출력하고 비-0(2) 으로 종료.
-- **후속(C3)**: 리뷰 코멘트 수집 → loop 재위임 → `review-round` 증가 → 재푸시.
+- 입력: task-id. task 의 SPEC 경로·PR·브랜치를 상태 저장소에서 조회한다(PR 미생성이면 abort — 먼저 통합 필요).
+- 동작: `review-loop.sh run` 으로 단일 라운드를 위임한다(주입 가능 `FSD_REVIEW_CMD`). review-loop 가 생산자 판정을 받아:
+  - `request_changes` → 분류된 재작업 브리프(`rework_brief.must_adopt`)를 SPEC 델타로 만들어 구현(loop)을 재위임하고 같은 head 브랜치로 재푸시(새 PR 미생성·force 금지), `review-round` 증가. `defer` 지적은 별도 백로그 task 로 분리.
+  - `approve` → 머지 진행가능 상태로 전이(`state=review-approved`), 추가 라운드 미시작.
+  - `unavailable`·사람 리뷰어의 변경 요청 → 자동수정 멈추고 사람에게 에스컬레이션(승인 요청 Review 유지).
+- 가드: 라운드 수 상한(기본 3) 초과·무진전(must_adopt 0)·핑퐁(차단성 집합 직전 동일)이면 멈추고 에스컬레이션. 수렴(iterate-until-approved) 반복은 `poll` 드레인이 소유한다(한 호출=한 라운드).
+- 채택 분류는 `rules/change-adoption.md`, 리뷰 원칙은 `rules/review.md` 를 단일 출처로 따른다(생산자가 적용).
 
 ### fsd merge `<task-id>`
 
@@ -87,10 +92,10 @@ PR 리뷰 피드백을 받아 추가 loop 라운드로 반영하는 루프.
 
 ### fsd poll
 
-진행 중인 모든 task 의 dispatch run 상태를 드레인하며 전이를 진행한다(상시 호스트 운영 진입점).
+진행 중인 모든 task 를 한 바퀴 드레인하며 각 task 를 가능한 다음 한 스텝으로 전진시킨다(멱등, 상시 호스트 운영 진입점).
 
-- 본 골격(C0): **미구현**. 호출 시 미구현 안내를 출력하고 비-0(2) 으로 종료.
-- **후속(C5)**: poll 드레인 루프·상시 호스트 운영 가이드.
+- 동작: `poll.sh poll` 로 위임한다(주입 가능 `FSD_POLL_CMD`). 리뷰 상태 task 는 위 `review` 전이를 한 라운드 적용하고, 그 외는 start·integrate·merge 경로를 전이적으로 적용한다. 호출 단위 무상태·멱등이라 재실행이 안전하다.
+- 수렴: `review` 가 한 호출=한 라운드이므로, 리뷰→재구현→재리뷰→승인 수렴은 poll 의 반복 드레인이 소유한다(라운드 카운터·가드는 상태 저장소에 누적).
 
 ### fsd status `<task-id>`
 

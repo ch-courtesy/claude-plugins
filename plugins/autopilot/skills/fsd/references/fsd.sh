@@ -45,6 +45,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DISPATCH_CMD_DEFAULT="bash $SCRIPT_DIR/../../dispatch/references/dispatch.sh"
 DISPATCH_CMD="${DISPATCH_CMD:-$DISPATCH_CMD_DEFAULT}"
 
+# 리뷰 오케스트레이션·드레인 위임(주입 가능, 기본: 형제 모듈, 서브프로세스 격리).
+#   review-loop.sh 는 내부에서 autopilot:review 생산자를 호출해 판정을 만들고 전이한다.
+FSD_REVIEW_CMD="${FSD_REVIEW_CMD:-bash $SCRIPT_DIR/review-loop.sh}"
+FSD_POLL_CMD="${FSD_POLL_CMD:-bash $SCRIPT_DIR/poll.sh}"
+
 # ----- 공통 헬퍼 -----
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -164,10 +169,27 @@ $out"
   fi
 }
 
-# ----- subcommand: review (미구현 — C3) -----
+# ----- subcommand: review -----
+# 리뷰 생산자(autopilot:review)를 한 작업에 대해 1회 호출해 판정을 얻고 전이한다.
+#   request_changes → 분류된 재작업 브리프로 재구현·같은 브랜치 재푸시·라운드 증가,
+#   approve         → 머지 진행가능 전이(추가 라운드 미시작),
+#   unavailable·사람 리뷰어 변경요청 → 에스컬레이션.
+# 무한루프 가드(라운드캡·핑퐁·무진전)와 수렴은 review-loop·poll 오케스트레이터가 소유한다.
 cmd_review() {
-  echo "fsd review: 미구현 — 리뷰 피드백 루프는 후속 단위(C3)가 채웁니다." >&2
-  exit 2
+  require_git_root
+  local id="${1:-}"
+  [[ -n "$id" ]] || die "사용: fsd review <task-id>"
+  task_exists "$id" || die "task 없음: $id"
+  local spec pr branch
+  spec="$(get_specs "$id" | head -1)"
+  pr="$(get_pr "$id")"
+  branch="$(get_branch "$id")"
+  [[ -n "$spec" ]] || die "task 에 SPEC 경로가 없습니다: $id"
+  [[ -n "$pr" ]]   || die "task 에 승인 요청(PR)이 없습니다(먼저 통합 필요): $id"
+  log_event "$id" "review → 리뷰 생산자 1회 호출(단일 라운드)"
+  # review-loop 는 -e 없이(반환코드 직접 처리) 도므로 서브프로세스로 격리 위임한다.
+  # shellcheck disable=SC2086
+  $FSD_REVIEW_CMD run "$id" "$spec" "$pr" "$branch"
 }
 
 # ----- subcommand: merge (미구현 — C4) -----
@@ -176,10 +198,13 @@ cmd_merge() {
   exit 2
 }
 
-# ----- subcommand: poll (미구현 — C5) -----
+# ----- subcommand: poll -----
+# 진행 중인 모든 task 를 한 바퀴 드레인하며 가능한 다음 한 스텝으로 전진(멱등).
+# 리뷰 상태 task 는 review 라운드를, 그 외는 start·integrate·merge 경로를 전이적으로 적용한다.
 cmd_poll() {
-  echo "fsd poll: 미구현 — poll 드레인·상시 호스트 운영은 후속 단위(C5)가 채웁니다." >&2
-  exit 2
+  require_git_root
+  # shellcheck disable=SC2086
+  $FSD_POLL_CMD poll
 }
 
 # ----- subcommand: status -----
@@ -238,6 +263,55 @@ cmd_stop() {
   echo "stopped task-id: $id (run-id: $rid)"
 }
 
+# ----- 자체 검증 (mock 인터페이스) -----
+# review·poll 배선이 미구현 안내(exit 2)가 아니라 실제 오케스트레이터(review-loop·poll)로
+# 위임하는지 mock 으로 검증한다. 무거운 동작은 각 모듈 selftest 가 검증(여기선 배선만).
+fsd_selftest() {
+  set +e   # 반환코드 기반 검증(서브셸 exit 코드 캡처)을 위해 errexit 해제.
+  local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
+  export FSD_STATE_ROOT="$TMP/.fsd"
+  local TRACE="$TMP/trace"; : > "$TRACE"; export TRACE
+  local spec="$TMP/SPEC.md"; printf '# T\n## 수용 기준\n1. X.\n' > "$spec"
+
+  cat > "$TMP/m-review.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "review-loop $*" >> "$TRACE"
+EOF
+  cat > "$TMP/m-poll.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "poll $*" >> "$TRACE"
+EOF
+  export FSD_REVIEW_CMD="bash $TMP/m-review.sh"
+  export FSD_POLL_CMD="bash $TMP/m-poll.sh"
+
+  local fail=0 rc
+  ok()  { echo "PASS  $1"; }
+  bad() { echo "FAIL  $1"; fail=1; }
+
+  local id="t-rev"
+  ensure_task_dir "$id"; add_spec "$id" "$spec"
+  set_pr "$id" "PR-1"; set_branch "$id" "feat/x"
+
+  # review → review-loop 단일 라운드(run) 위임 (미구현 안내·exit2 아님).
+  ( cmd_review "$id" ) >/dev/null 2>&1; rc=$?
+  [[ "$rc" == "0" ]] && ok "review 위임 0 exit(미구현 아님)" || bad "review 위임 0 exit (rc=$rc)"
+  if grep -q "review-loop run $id .* PR-1 feat/x" "$TRACE"; then
+    ok "review→review-loop run 위임(spec·pr·branch 전달)"
+  else
+    bad "review→review-loop run 위임"
+  fi
+
+  # poll → poll 드레인 위임.
+  : > "$TRACE"
+  ( cmd_poll ) >/dev/null 2>&1; rc=$?
+  [[ "$rc" == "0" ]] && ok "poll 위임 0 exit(미구현 아님)" || bad "poll 위임 0 exit (rc=$rc)"
+  grep -q "^poll poll" "$TRACE" && ok "poll→poll 드레인 위임" || bad "poll→poll 드레인 위임"
+
+  echo "----"
+  [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
+  return $fail
+}
+
 # ----- 사용법 -----
 usage() {
   cat >&2 <<'EOF'
@@ -246,15 +320,15 @@ usage: fsd.sh <subcommand> [args]
 Subcommands:
   intake <spec...>   SPEC 경로(들)로 task 를 등록(상태 저장소에 기록).
   start  <spec...>   task 의 SPEC(들)을 dispatch 에 위임하고 run-id 를 기록.
-  review <task-id>   리뷰 피드백 루프 (미구현 — C3).
+  review <task-id>   리뷰 생산자 1회 호출 → 판정 분기(재구현·재푸시 / 머지진행가능 / 에스컬레이션).
   merge  <task-id>   머지·Done·cleanup (미구현 — C4).
-  poll               run 드레인·상태 폴링 (미구현 — C5).
+  poll               진행 중 task 한 바퀴 드레인·전이(멱등).
   status <task-id>   task 단위 상태 출력.
   list               모든 task 와 요약(빈 상태면 0 exit).
   stop   <task-id>   task 가 소유한 dispatch run 정지 위임.
 
 환경 변수:
-  DISPATCH_CMD, FSD_STATE_ROOT
+  DISPATCH_CMD, FSD_REVIEW_CMD, FSD_POLL_CMD, FSD_STATE_ROOT
 EOF
   exit 1
 }
@@ -271,6 +345,7 @@ case "$SUB" in
   status) cmd_status "$@" ;;
   list)   cmd_list   "$@" ;;
   stop)   cmd_stop   "$@" ;;
+  selftest) fsd_selftest ;;
   -h|--help|help) usage ;;
   *) echo "알 수 없는 subcommand: $SUB" >&2; usage ;;
 esac
