@@ -2,7 +2,7 @@
 
 SPEC 문서가 가리키는 작업을 외부 task 백엔드(GitHub Issue/Project 등)와 같은 상태로 맞추는 절차입니다. spec 스킬은 더 이상 task를 만들거나 상태를 맞추지 않으므로(SPEC 문서만 산출), 이 책임은 **구현 스킬·오케스트레이터(loop/dispatch) 또는 호출자**가 집니다.
 
-구체 백엔드(GitHub Issue/Project, 상태 필드, 라벨, CLI)는 `rules/context.md`가 단일 출처입니다. 본 문서는 백엔드 무관한 정합 분기만 정의합니다.
+구체 백엔드(GitHub Issue/Project, 상태 필드, 라벨, CLI)와 **태스크 내용(설계 문서 본문) 동기화 절차**는 `rules/context.md`가 단일 출처입니다. 본 문서는 백엔드 무관한 정합 분기만 정의합니다.
 
 ## 책임 소재 (no-task-no-work)
 
