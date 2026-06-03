@@ -222,5 +222,21 @@ st="$(bash "$REVIEW_SH" status --task t15)" || fail "H15: status 실패"
 echo "$st" | grep -q "request_changes" || fail "H15: status 에 마지막 판정 없음"
 ok "H15 status 마지막 판정 노출"
 
+# === H16: 스레드 라이프사이클 — resolved vs unresolved ===
+echo "=== H16: 스레드 라이프사이클 ==="
+export REVIEW_STATE_DIR="$WORK/state3"
+# 현재 라운드에 제기되는 finding 의 fp (still raised) + 이미 사라진 fp (resolved)
+stillfp="$(bash "$REVIEW_SH" fingerprint "plugins/x.sh" "bug" "keep me")"
+gonefp="aaaaaaaaaaaa"
+STILL='[{"severity":"non_blocking","confidence_score":88,"review_perspective":"bug","comment_type":"inline","file":"plugins/x.sh","line":5,"start_line":5,"title":"keep me","body":"실패","suggestion":"s","adoption":"defer"}]'
+set_mocks "$(mk_ctx false false)" "$(mk_spec '["AC1"]')" "$(mk_lens "$STILL" '["AC1"]' false)" "$(mk_threads "$stillfp $gonefp")"
+out="$(run_review t16)" || fail "H16: run 비정상 종료"
+res="$(echo "$out" | jq -r '.resolved_threads[].fingerprint')"
+unres="$(echo "$out" | jq -r '.unresolved_threads[].fingerprint')"
+echo "$res"   | grep -q "$gonefp"  || fail "H16: 사라진 스레드가 resolved 에 없음"
+echo "$res"   | grep -q "$stillfp" && fail "H16: 유지 스레드가 잘못 resolved 됨" || true
+echo "$unres" | grep -q "$stillfp" || fail "H16: 유지 스레드가 unresolved 에 없음"
+ok "H16 스레드 라이프사이클: resolved=$gonefp, unresolved=$stillfp"
+
 echo ""
 echo "ALL HARNESS TESTS PASSED"
