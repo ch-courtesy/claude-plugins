@@ -4,7 +4,8 @@
 #   - templates/branch-naming.md declares sub_rule branch-naming.
 #   - the policy input is ONE multi-select question (multi_select: true), named
 #     branch_policies — exactly one `- name:` entry.
-#   - the FIRST option (type 접두사) is default-checked (default: true).
+#   - exactly the first TWO options (type 접두사, 소문자 kebab-case) are
+#     default-checked (exactly two `default: true`); the 3rd/4th are not.
 #   - body uses a SINGLE aggregate placeholder ({{branch_policies}}); no per-policy
 #     placeholder.
 #   - always-create intro (H1 header + purpose sentence) stands without any policy.
@@ -47,17 +48,27 @@ check "branch-naming.md declares exactly ONE input (one aggregate question)" \
 check "branch-naming.md single input is named branch_policies" grep -qE '^[[:space:]]*-[[:space:]]*name:[[:space:]]*branch_policies[[:space:]]*$' "$TPL"
 
 # ===========================================================================
-# 2) first option = default-checked
+# 2) exactly the first TWO options default-checked; 3rd/4th NOT
 # ===========================================================================
 firstlabel="$(lineno_re "$TPL" '^[[:space:]]*-[[:space:]]*label:')"
+secondlabel="$(grep -nE '^[[:space:]]*-[[:space:]]*label:' "$TPL" | sed -n '2p' | cut -d: -f1)"
+thirdlabel="$(grep -nE '^[[:space:]]*-[[:space:]]*label:' "$TPL" | sed -n '3p' | cut -d: -f1)"
 check "branch-naming.md has at least one option label" bash -c "[ -n '$firstlabel' ]"
 
-# default: true must belong to the FIRST option (before any 2nd option label)
-deflineno="$(lineno_re "$TPL" 'default:[[:space:]]*true')"
-secondlabel="$(grep -nE '^[[:space:]]*-[[:space:]]*label:' "$TPL" | sed -n '2p' | cut -d: -f1)"
-check "branch-naming.md marks an option default-checked (default: true)" grep -qE 'default:[[:space:]]*true' "$TPL"
-check "branch-naming.md default-checked belongs to the first option" \
-  bash -c "[ -n '$deflineno' ] && [ '$deflineno' -gt '$firstlabel' ] && { [ -z '$secondlabel' ] || [ '$deflineno' -lt '$secondlabel' ]; }"
+# exactly TWO `default: true` markers (type 접두사 + 소문자 kebab-case)
+ndef="$(grep -cE 'default:[[:space:]]*true' "$TPL")"
+check "branch-naming.md marks exactly TWO options default-checked" bash -c "[ '$ndef' -eq 2 ]"
+
+# the first default belongs to the FIRST option (between 1st and 2nd label)
+firstdef="$(lineno_re "$TPL" 'default:[[:space:]]*true')"
+check "branch-naming.md first default belongs to the first option" \
+  bash -c "[ -n '$firstdef' ] && [ -n '$secondlabel' ] && [ '$firstdef' -gt '$firstlabel' ] && [ '$firstdef' -lt '$secondlabel' ]"
+
+# both defaults precede the THIRD option label => they belong to options 1 & 2,
+# and neither the 3rd nor 4th option is default-checked.
+lastdef="$(grep -nE 'default:[[:space:]]*true' "$TPL" | tail -1 | cut -d: -f1)"
+check "branch-naming.md both defaults belong to the first two options (3rd/4th not default)" \
+  bash -c "[ -n '$lastdef' ] && [ -n '$thirdlabel' ] && [ '$lastdef' -lt '$thirdlabel' ]"
 
 # ===========================================================================
 # 3) single aggregate placeholder; NO per-policy placeholder
