@@ -4,7 +4,7 @@
 
 이 규칙은 머지 *절차*를 새로 정의하지 않습니다. 브랜치 생성·SPEC 문서만 commit·`main` ff-merge·origin 동기화·force push 금지·실패 처리의 단일 출처는 `rules/engineering/branch-and-slug.md`(`feat 브랜치 + commit`·`원격 동기화` 절)이며, 본 규칙은 그 절차의 **호출 시점**만 고정합니다.
 
-(이 머지는 SPEC 문서를 구현 *전에* `main`에 반영하는 것입니다. 구현 *완료 후* 작업 공간 커밋의 PR·리뷰·머지 통합 흐름은 `rules/orchestration/forge-integration.md`가 단일 출처로, 별개의 단계입니다.)
+(이 머지는 SPEC 문서를 구현 *전에* `main`에 반영하는 것입니다. 구현 *완료 후* 작업 공간 커밋의 PR·리뷰·머지 통합 흐름은 `plugins/autopilot/skills/fsd/references/forge-integration.md`가 단일 출처로, 별개의 단계입니다.)
 
 ## 시퀀스
 

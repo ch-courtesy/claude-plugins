@@ -16,7 +16,7 @@
 #   - 종료 상태는 자율 실행기의 공개 인터페이스(`loop.sh status`/`logs`)로만 읽고,
 #     child 워크트리·내부 신호 파일을 직접 열지 않는다.
 #   - forge 통합은 단일 출처 규칙의 실행자다:
-#       rules/orchestration/forge-integration.md  (책임표·신호 계약·DONE 통합 흐름)
+#       forge-integration.md                       (책임표·신호 계약·DONE 통합 흐름; 같은 references 디렉터리)
 #       rules/engineering/branch-and-slug.md       (브랜치명·slug·원격 동기화 절차)
 #
 # **하지 않는 일** (다른 단위 책임):
