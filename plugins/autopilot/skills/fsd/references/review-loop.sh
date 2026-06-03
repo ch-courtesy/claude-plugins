@@ -340,7 +340,7 @@ rl_review_loop() {
 }
 
 # ===== 자체 검증 (mock 인터페이스) =====
-# self-referential: runtime artifact(실제 PR·브랜치) 미검사. 봇 리뷰 입력은 mock.
+# self-referential: runtime artifact(실제 PR·브랜치) 미검사. 리뷰 판정은 생산자 mock.
 rl_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
   export FSD_STATE_ROOT="$TMP/.fsd"
@@ -384,21 +384,46 @@ rl_selftest() {
   mock_impl() { printf 'impl spec=%s branch=%s\n' "$1" "$2" >> "$IMPLLOG"; }
   export IMPLEMENT_CMD=mock_impl
 
-  # --- mock 리뷰/피드백 조회 (상태 파일로 시나리오 주입) ---
+  # --- mock 포지 리뷰 메타(사람/head 게이트) + 리뷰 생산자 판정 ---
+  #   .review  : state/author/head (사람 리뷰어 변경요청·head-신선도 판정에만 사용)
+  #   .produce : 생산자 단일 판정 JSON (pipeline_verdict·rework_brief·reviewed_context)
   local RV="$TMP/review"; mkdir -p "$RV"
-  mock_review_fetch()   { cat "$RV/$1.review" 2>/dev/null || true; }
-  mock_feedback_fetch() { cat "$RV/$1.feedback" 2>/dev/null || true; }
-  export REVIEW_FETCH_CMD=mock_review_fetch FEEDBACK_FETCH_CMD=mock_feedback_fetch
+  mock_review_fetch() { cat "$RV/$1.review" 2>/dev/null || true; }
+  mock_produce()      { cat "$RV/$1.produce" 2>/dev/null || true; }
+  export REVIEW_FETCH_CMD=mock_review_fetch REVIEW_PRODUCE_CMD=mock_produce
 
   local base="$TMP/base.spec.md"
   printf '# 원본 기능 SPEC\n## 수용 기준 (EARS)\n1. 항상 X 한다.\n' > "$base"
 
-  local fail=0
+  local fail=0 rc out delta
   ok()  { echo "PASS  $1"; }
   bad() { echo "FAIL  $1"; fail=1; }
   chk() { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (want '$3' got '$2')"; fi; }
 
-  # 공통: task 생성(issue 연결) 헬퍼.
+  # 사람 리뷰 없는 평범한 포지 메타(생산자가 판정의 단일 출처). head 만 의미 있음.
+  forge_meta() { printf 'state: NONE\nauthor: \nhead: %s\n' "$1"; }
+  # 생산자 판정 JSON 생성기.
+  #   prod_rc <head> <must-title> [<defer-title>] — request_changes.
+  prod_rc() {
+    local head="$1" must="$2" defer="${3:-}"
+    local mj dj='[]'
+    mj="$(jq -n --arg t "$must" '[{title:$t, body:($t+" 상세"), severity:"blocking"}]')"
+    [[ -n "$defer" ]] && dj="$(jq -n --arg t "$defer" '[{title:$t, body:($t+" 상세"), severity:"blocking"}]')"
+    jq -n --arg h "$head" --argjson m "$mj" --argjson d "$dj" \
+      '{pipeline_verdict:"request_changes", reviewed_context:{head_sha:$h},
+        rework_brief:{must_adopt:$m, defer:$d, wont_adopt:[]}}'
+  }
+  prod_rc_empty() {  # request_changes 인데 must_adopt 0 (무진전).
+    local head="$1"
+    jq -n --arg h "$head" '{pipeline_verdict:"request_changes", reviewed_context:{head_sha:$h},
+        rework_brief:{must_adopt:[], defer:[], wont_adopt:[]}}'
+  }
+  prod_simple() {  # approve | unavailable.
+    local head="$1" v="$2"
+    jq -n --arg h "$head" --arg v "$v" '{pipeline_verdict:$v, reviewed_context:{head_sha:$h},
+        rework_brief:{must_adopt:[], defer:[], wont_adopt:[]}}'
+  }
+
   setup_task() {
     local id="$1" pr="$2"
     set_field "$id" issue "$pr"; mock_backend set-status "$pr" "Review"
@@ -406,83 +431,93 @@ rl_selftest() {
     set_field "$id" review-round 0
   }
 
-  # ---- AC4: 분류 + 안전경계 강등 금지 ----
-  chk "AC4 보안=must" "$(rl_classify '보안 취약점: 입력 검증 누락')" "must_reflect"
-  chk "AC4 test=must" "$(rl_classify 'test coverage 부족')" "must_reflect"
-  chk "AC4 계약=must" "$(rl_classify 'contract 위반 우려')" "must_reflect"
-  chk "AC4 nit=defer" "$(rl_classify '후속으로 변수명 정리(nit)')" "defer"
-  chk "AC4 style=no_need" "$(rl_classify '문체 취향: wording')" "no_need"
-  # 안전경계 + defer 키워드 동시 → 강등 금지(must 유지).
-  chk "AC4 안전경계 강등금지" "$(rl_classify '후속이지만 보안 권한 체크')" "must_reflect"
-
-  # ---- AC2: 봇 변경요청 + 새 head → 라운드 시작(구현·push) ----
+  # ---- AC2: 생산자 request_changes + 새 head → 재작업 라운드(구현·재푸시) ----
   setup_task tA 101
-  printf 'state: CHANGES_REQUESTED\nauthor: claude[bot]\nhead: sha-AAA\n' > "$RV/101.review"
-  printf 'summary\t보안 입력 검증 추가 필요\n' > "$RV/101.feedback"
+  forge_meta sha-AAA > "$RV/101.review"
+  prod_rc sha-AAA '보안 입력 검증 추가' > "$RV/101.produce"
   rl_round tA "$base" 101 "feat/tA-x"; rc=$?
   chk "AC2 라운드 수행(rc=0)" "$rc" "0"
   chk "AC2 라운드 카운터=1" "$(review_round tA)" "1"
   [[ -s "$IMPLLOG" ]] && ok "AC2 구현 실행됨" || bad "AC2 구현 실행됨"
-  # AC6: 같은 브랜치 push, 새 PR 생성 안 함.
-  grep -q 'feat/tA-x' "$PUSHLOG" && ok "AC6 같은 head 브랜치 push" || bad "AC6 같은 head 브랜치 push"
-  [[ ! -s "$PRLOG" ]] && ok "AC6 새 PR 미생성" || bad "AC6 새 PR 미생성"
+  grep -q 'feat/tA-x' "$PUSHLOG" && ok "AC2 같은 head 브랜치 push" || bad "AC2 같은 head 브랜치 push"
+  [[ ! -s "$PRLOG" ]] && ok "AC2 새 PR 미생성" || bad "AC2 새 PR 미생성"
   chk "AC2 head 처리 표시" "$(get_head tA)" "sha-AAA"
-
-  # 같은 head 재호출 → 라운드 미시작(rc=20).
+  # 같은 head 재호출 → 새 커밋 없음(rc=20).
   rl_round tA "$base" 101 "feat/tA-x"; chk "AC2 동일 head 미시작" "$?" "20"
 
-  # ---- AC3: 사람 리뷰어 변경요청 → 미시작 + 에스컬레이션 ----
+  # ---- AC3: 생산자 approve → 머지 진행가능 전이, 추가 라운드 미시작 ----
+  setup_task tB 107
+  : > "$IMPLLOG"
+  forge_meta sha-B > "$RV/107.review"
+  prod_simple sha-B approve > "$RV/107.produce"
+  rl_round tB "$base" 107 "feat/tB-x"; rc=$?
+  chk "AC3 approve rc=30" "$rc" "30"
+  chk "AC3 판정 기록=approve" "$(get_field tB review-verdict)" "approve"
+  chk "AC3 머지 진행가능 전이" "$(get_state tB)" "review-approved"
+  chk "AC3 추가 라운드 미시작" "$(review_round tB)" "0"
+  [[ ! -s "$IMPLLOG" ]] && ok "AC3 approve 시 구현 미위임" || bad "AC3 approve 시 구현 미위임"
+  # 멱등: 같은 head 재호출 → no-op(rc=20), 재머지·재구현 없음.
+  rl_round tB "$base" 107 "feat/tB-x"; chk "AC3 approve 멱등(rc=20)" "$?" "20"
+
+  # ---- AC4a: 생산자 unavailable → 에스컬레이션 ----
+  setup_task tU 108
+  forge_meta sha-U > "$RV/108.review"
+  prod_simple sha-U unavailable > "$RV/108.produce"
+  out="$(rl_round tU "$base" 108 "feat/tU-x")"; rc=$?
+  chk "AC4a unavailable 에스컬레이션(rc=10)" "$rc" "10"
+  case "$out" in *escalate*) ok "AC4a escalate 출력";; *) bad "AC4a escalate 출력";; esac
+  chk "AC4a 라운드 미증가" "$(review_round tU)" "0"
+
+  # ---- AC4b: 사람 리뷰어 변경요청 → 생산자 미consult·에스컬레이션 ----
   setup_task tH 102
   printf 'state: CHANGES_REQUESTED\nauthor: human-dev\nhead: sha-H\n' > "$RV/102.review"
-  printf 'summary\t보안 수정 필요\n' > "$RV/102.feedback"
+  prod_simple sha-H approve > "$RV/102.produce"   # 생산자가 approve 여도 사람 변경요청 우선.
   out="$(rl_round tH "$base" 102 "feat/tH-x")"; rc=$?
-  chk "AC3 사람=에스컬레이션(rc=10)" "$rc" "10"
-  case "$out" in *escalate*) ok "AC3 escalate 출력";; *) bad "AC3 escalate 출력";; esac
-  chk "AC3 라운드 미증가" "$(review_round tH)" "0"
-  chk "AC3 상태 Review 유지" "$(get_field tH backend-status)" "Review"
+  chk "AC4b 사람=에스컬레이션(rc=10)" "$rc" "10"
+  case "$out" in *escalate*) ok "AC4b escalate 출력";; *) bad "AC4b escalate 출력";; esac
+  chk "AC4b 라운드 미증가" "$(review_round tH)" "0"
+  chk "AC4b 상태 Review 유지" "$(get_field tH backend-status)" "Review"
 
   # ---- AC5: defer 지적 → 별도 백로그 task 분리(현 PR 미혼합) ----
   setup_task tD 103
-  printf 'state: CHANGES_REQUESTED\nauthor: github-actions[bot]\nhead: sha-D\n' > "$RV/103.review"
-  printf 'summary\t보안 검증 추가\ninline\t후속으로 리팩터(nit)\n' > "$RV/103.feedback"
+  forge_meta sha-D > "$RV/103.review"
+  prod_rc sha-D '보안 검증 추가' '후속으로 리팩터' > "$RV/103.produce"
   rl_round tD "$base" 103 "feat/tD-x" >/dev/null; rc=$?
   chk "AC5 라운드 수행" "$rc" "0"
-  # defer 지적이 별도 백로그 task 로 분리됐는지(미러 Backlog).
   chk "AC5 백로그 task 분리" "$(get_field tD-bl-103-1 backend-status '')" "Backlog"
-  # must(보안)만 델타에 반영됐는지 — 델타 본문에 nit 가 없어야(현 PR 미혼합).
   delta="$(task_dir tD)/.review-delta-103.spec.md"
   grep -q '보안 검증' "$delta" && ok "AC5 must 델타 반영" || bad "AC5 must 델타 반영"
   if grep -q '리팩터' "$delta"; then bad "AC5 defer 현PR 미혼합"; else ok "AC5 defer 현PR 미혼합"; fi
 
   # ---- AC7: force push 미사용 (mock git 은 force 인자 보면 exit99) ----
-  # 위 AC2/AC5 라운드가 mock_git push 를 호출했고 exit99 없이 통과 → force 미사용 입증.
   ok "AC7 force push 미사용(mock force→exit99 미발동)"
 
   # ---- AC8: 라운드 상한(3) 초과 → 중지 + 에스컬레이션, Review 유지 ----
   setup_task tC 104
   set_field tC review-round 3   # 다음 라운드는 4 → 초과.
-  printf 'state: CHANGES_REQUESTED\nauthor: claude[bot]\nhead: sha-C4\n' > "$RV/104.review"
-  printf 'summary\t보안 또 수정\n' > "$RV/104.feedback"
+  forge_meta sha-C4 > "$RV/104.review"
+  prod_rc sha-C4 '보안 또 수정' > "$RV/104.produce"
   out="$(rl_round tC "$base" 104 "feat/tC-x")"; rc=$?
   chk "AC8 캡 초과 에스컬레이션(rc=10)" "$rc" "10"
   case "$out" in *상한*) ok "AC8 상한 사유";; *) bad "AC8 상한 사유";; esac
   chk "AC8 상태 Review 유지" "$(get_field tC backend-status)" "Review"
 
-  # ---- AC9: must 0 인데 여전히 변경요청 → 무진전 에스컬레이션 ----
+  # ---- AC9: must 0 인데 여전히 request_changes → 무진전 에스컬레이션 ----
   setup_task tN 105
-  printf 'state: CHANGES_REQUESTED\nauthor: claude[bot]\nhead: sha-N\n' > "$RV/105.review"
-  printf 'summary\t문체 취향 wording 정리\n' > "$RV/105.feedback"   # 전부 no_need → must 0
+  forge_meta sha-N > "$RV/105.review"
+  prod_rc_empty sha-N > "$RV/105.produce"
   out="$(rl_round tN "$base" 105 "feat/tN-x")"; rc=$?
   chk "AC9 무진전 에스컬레이션(rc=10)" "$rc" "10"
   case "$out" in *무진전*) ok "AC9 무진전 사유";; *) bad "AC9 무진전 사유";; esac
 
-  # ---- AC10: 차단성 지적 집합 직전 라운드와 동일 → 핑퐁 에스컬레이션 ----
+  # ---- AC10: 차단성(must_adopt) 집합 직전 라운드와 동일 → 핑퐁 에스컬레이션 ----
   setup_task tP 106
-  printf 'state: CHANGES_REQUESTED\nauthor: claude[bot]\nhead: sha-P1\n' > "$RV/106.review"
-  printf 'summary\t보안 입력 검증 누락\n' > "$RV/106.feedback"
+  forge_meta sha-P1 > "$RV/106.review"
+  prod_rc sha-P1 '보안 입력 검증 누락' > "$RV/106.produce"
   rl_round tP "$base" 106 "feat/tP-x" >/dev/null; chk "AC10 1라운드 수행" "$?" "0"
-  # 같은 차단성 지적이 새 head 로 다시 옴(봇이 동일 지적 반복).
-  printf 'state: CHANGES_REQUESTED\nauthor: claude[bot]\nhead: sha-P2\n' > "$RV/106.review"
+  # 같은 차단성 지적이 새 head 로 다시 옴(생산자가 동일 must 반복).
+  forge_meta sha-P2 > "$RV/106.review"
+  prod_rc sha-P2 '보안 입력 검증 누락' > "$RV/106.produce"
   out="$(rl_round tP "$base" 106 "feat/tP-x")"; rc=$?
   chk "AC10 핑퐁 에스컬레이션(rc=10)" "$rc" "10"
   case "$out" in *핑퐁*) ok "AC10 핑퐁 사유";; *) bad "AC10 핑퐁 사유";; esac
