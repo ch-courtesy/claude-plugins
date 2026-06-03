@@ -133,57 +133,111 @@ grep -qE 'uses: actions/setup-node@[0-9a-f]{40}' "$WORKFLOW" \
 ok "check 5: Actions SHA 고정됨"
 
 echo ""
-echo "=== check 6: review output is posted idempotently ==="
-grep -q '<!-- claude-api-pr-review -->' "$WORKFLOW" \
-  || fail "중복 방지 marker 부재"
-grep -q 'issues.updateComment' "$WORKFLOW" \
-  || fail "기존 리뷰 코멘트 update 경로 부재"
-grep -q 'issues.createComment' "$WORKFLOW" \
-  || fail "신규 리뷰 코멘트 create 경로 부재"
-ok "check 6: marker 기반 update/create 코멘트 경로 존재"
-
-echo ""
-echo "=== check 7: verdict submission with graceful degradation ==="
-grep -q 'findings_count=' "$WORKFLOW" \
-  || fail "findings count 계산 부재"
-grep -q 'No review output to post' "$WORKFLOW" \
-  || fail "eligibility != reviewed 시 skip 경로 부재"
-grep -q 'approve_without_body=' "$WORKFLOW" \
-  || fail "finding 없는 approve 의 무본문 처리 부재"
-grep -q 'state == "APPROVED"' "$WORKFLOW" \
-  || fail "동일 head approve 중복 방지 부재"
-grep -Fq 'user.login == "github-actions[bot]"' "$WORKFLOW" \
-  || fail "approve 중복 체크가 봇 자신 리뷰로 제한되지 않음"
-grep -q 'touch \.claude-review/approval-failed' "$WORKFLOW" \
-  || fail "approve 실패 시 managed comment fallback marker 부재"
-grep -A3 'touch \.claude-review/approval-failed' "$WORKFLOW" | grep -q 'exit 0' \
-  || fail "approve 실패 후 정상 종료(다음 step 진행) 부재"
-if grep -q 'submit_review --approve' "$WORKFLOW"; then
-  fail "finding 없는 approve 는 body 없는 전용 경로만 사용해야 함"
+echo "=== check 6: 단일 inline 리뷰 제출 — verdict/event + body summary + 멱등 (AC1/AC7) ==="
+grep -q 'name: Submit Claude inline review' "$WORKFLOW" \
+  || fail "'Submit Claude inline review' 스텝 부재 (단일 inline 리뷰 게시 스텝 치환) (제약)"
+grep -qF 'github.rest.pulls.createReview' "$WORKFLOW" \
+  || fail "Pulls REST createReview 호출 부재 — inline 단일 리뷰 제출 불가 (AC1)"
+grep -qF "event === 'APPROVE'" "$WORKFLOW" \
+  || fail "APPROVE event 분기 부재 (AC1)"
+grep -qF "event = 'COMMENT'" "$WORKFLOW" \
+  || fail "COMMENT event 분기 부재 (AC1)"
+if grep -qF 'REQUEST_CHANGES' "$WORKFLOW"; then
+  fail "REQUEST_CHANGES 잔존 — 공식 review event 는 APPROVE/COMMENT 만 (제약)"
 fi
-grep -q 'submit_review --request-changes' "$WORKFLOW" \
-  || fail "request changes review 제출 경로 부재"
-grep -q 'submit_review --comment' "$WORKFLOW" \
-  || fail "comment review 제출 경로 부재"
-grep -q 'gh pr review "\$PR_NUMBER".*--body-file "\$body"' "$WORKFLOW" \
-  || fail "submit_review 의 gh pr review 호출 부재 (graceful degradation)"
-grep -q 'No managed Claude review comment to post' "$WORKFLOW" \
-  || fail "managed comment 게이트(미reviewed/무findings 생략) 부재"
-grep -q 'automation_safety\.may_approve' "$WORKFLOW" \
-  || fail "approve safety gate 부재"
-grep -q 'confidence_score >= 80' "$WORKFLOW" \
-  || fail "confidence threshold gate 부재"
-ok "check 7: verdict 제출 + graceful degradation + managed comment 게이트"
+if grep -oE '[a-z_]*request_changes' "$WORKFLOW" | grep -qvE '^may_request_changes$'; then
+  fail "request_changes verdict 어휘 잔존 (may_request_changes 외) — 제거 필요 (제약)"
+fi
+grep -qF '## Claude PR 리뷰' "$WORKFLOW" \
+  || fail "리뷰 본문 헤더 '## Claude PR 리뷰' 부재 (제약: claude 라벨)"
+grep -qF 'result.summary' "$WORKFLOW" \
+  || fail "리뷰 본문에 result.summary 포함 부재 (제약: summary 를 본문에 실음)"
+grep -qF 'CLAUDE_FORMAL_PREFIX: claude-formal-review' "$WORKFLOW" \
+  || fail "formal review 마커 prefix(CLAUDE_FORMAL_PREFIX: claude-formal-review) 부재 (제약)"
+grep -qF '${prefix} head_sha=${head_sha} verdict=${verdict}' "$WORKFLOW" \
+  || fail "formal review 멱등 마커 템플릿(<!-- {prefix} head_sha=.. verdict=.. -->) 부재 (제약)"
+grep -qF 'github.rest.pulls.listReviews' "$WORKFLOW" \
+  || fail "기존 review 조회(listReviews) 부재 — 멱등성 판정 불가 (AC1)"
+grep -qF 'skipping duplicate submission' "$WORKFLOW" \
+  || fail "marker 기반 중복 review 제출 skip 부재 (멱등)"
+grep -qF "fs.writeFileSync('.claude-review/approval-failed'" "$WORKFLOW" \
+  || fail "APPROVE 실패 시 approval-failed marker 기록 부재 (AC7)"
+grep -qF "submit('COMMENT')" "$WORKFLOW" \
+  || fail "APPROVE 실패 시 같은 inline 코멘트로 COMMENT 강등 제출 부재 (AC7)"
+grep -qF 'may_approve' "$WORKFLOW" \
+  || fail "approve safety gate(may_approve) 부재"
+ok "check 6: 단일 inline 리뷰 제출 (APPROVE/COMMENT) + body summary + 멱등 + APPROVE fallback"
 
 echo ""
-echo "=== check 7b: formal review submission is idempotent per (head_sha, verdict) ==="
-grep -q 'marker="claude-formal-review head_sha=\$PR_HEAD_SHA verdict=\$verdict"' "$WORKFLOW" \
-  || fail "formal review 중복 방지 marker 부재"
-grep -q 'gh api "repos/\$GITHUB_REPOSITORY/pulls/\$PR_NUMBER/reviews"' "$WORKFLOW" \
-  || fail "기존 review marker 조회 부재"
-grep -q 'skipping duplicate' "$WORKFLOW" \
-  || fail "중복 review 제출 skip 경로 부재"
-ok "check 7b: formal review 제출이 (head_sha, verdict) 기준 멱등"
+echo "=== check 7: 별도 마커 관리형 이슈 레벨 코멘트 게시 경로 부재 (AC6) ==="
+grep -q 'name: Post Claude review comment' "$WORKFLOW" \
+  && fail "'Post Claude review comment' 스텝 잔존 — 이슈 코멘트 게시 경로 제거 필요 (AC6)"
+if grep -qF '<!-- claude-api-pr-review -->' "$WORKFLOW"; then
+  fail "관리형 이슈 코멘트 마커(<!-- claude-api-pr-review -->) 잔존 (AC6)"
+fi
+if grep -qF 'issues.createComment' "$WORKFLOW"; then
+  fail "issues.createComment 잔존 — 발견사항 이슈 코멘트 게시 금지 (AC6)"
+fi
+if grep -qF 'issues.updateComment' "$WORKFLOW"; then
+  fail "issues.updateComment 잔존 — 관리형 이슈 코멘트 갱신 경로 금지 (AC6)"
+fi
+ok "check 7: 마커 관리형 이슈 레벨 코멘트 게시 경로 부재"
+
+echo ""
+echo "=== check 7b: 인라인 리뷰 코멘트 게시 경로 존재 (AC1/AC2) ==="
+grep -qF 'comments: inlineComments' "$WORKFLOW" \
+  || fail "createReview 의 comments[] 배열에 inline findings(inlineComments) 전달 부재 (AC1)"
+grep -qF 'inline-only' "$WORKFLOW" \
+  || fail "inline-only 정책 주석/마커 부재 (모든 finding 을 inline 으로 게시) (AC6)"
+grep -qF "side: 'RIGHT'" "$WORKFLOW" \
+  || fail "inline comment side='RIGHT' 지정 부재 (AC1)"
+grep -qF 'start_line' "$WORKFLOW" \
+  || fail "multi-line inline comment 의 start_line 처리 부재 (AC1)"
+if grep -qF 'inlineFallback' "$WORKFLOW"; then
+  fail "inlineFallback 경로 잔존 — createReview 실패 시 이슈 코멘트 덤프 금지 (AC6)"
+fi
+ok "check 7b: 인라인 리뷰 코멘트 게시 경로 존재 (createReview comments[] + RIGHT + start_line)"
+
+echo ""
+echo "=== check 7c: fingerprint 기반 self thread 자동 resolve 경로 존재 (AC3/AC4) ==="
+grep -qF 'computeFingerprint' "$WORKFLOW" \
+  || fail "결정론적 fingerprint 계산(computeFingerprint) 부재 (AC3)"
+grep -qF 'resolveReviewThread' "$WORKFLOW" \
+  || fail "GraphQL resolveReviewThread mutation 부재 — self thread 자동 resolve 안 됨 (AC4)"
+grep -qF 'reviewThreads(first: 100)' "$WORKFLOW" \
+  || fail "GraphQL reviewThreads 조회 부재 (AC4)"
+grep -qF 'resolved_threads' "$WORKFLOW" \
+  || fail "resolved_threads 소비(1차) 경로 부재 (AC4)"
+grep -qF 'findingFingerprints' "$WORKFLOW" \
+  || fail "이번 라운드 findings fingerprint 집합(findingFingerprints) 부재 (AC4 fallback)"
+grep -qF '<!-- claude-review-inline' "$WORKFLOW" \
+  || fail "inline self-식별 마커 substring(<!-- claude-review-inline) 부재 (AC2)"
+grep -qF 'fingerprint=${computeFingerprint(f)}' "$WORKFLOW" \
+  || fail "게시 inline 마커가 결정론적 computeFingerprint(f) 를 운반하지 않음 (AC2/AC3)"
+grep -qF 'botLoginGql' "$WORKFLOW" \
+  || fail "GraphQL author login 형식 정규화(botLoginGql) 부재 (AC4)"
+grep -qF 'isResolved' "$WORKFLOW" \
+  || fail "isResolved 조건 검사 부재 (이미 resolved thread skip)"
+grep -qF 'regardless of verdict' "$WORKFLOW" \
+  || fail "resolve 가 verdict 무관 실행임을 명시하는 마커(regardless of verdict) 부재 (AC4)"
+if grep -qF 'fingerprint=${f.fingerprint}' "$WORKFLOW"; then
+  fail "게시 마커가 모델 자유 생성 f.fingerprint 운반 — 결정론 계산으로 전환되어야 함 (AC3)"
+fi
+ok "check 7c: fingerprint self thread 자동 resolve 경로 존재 (resolved_threads 1차 + fallback)"
+
+echo ""
+echo "=== check 7d: 결정론적 fingerprint — file+perspective+normalized title, 줄번호 비의존 (AC3) ==="
+grep -qF 'crypto' "$WORKFLOW" \
+  || fail "fingerprint 해시 계산(crypto) 부재 (AC3)"
+grep -qF "[f.file || '', f.review_perspective || '', normalizeTitle(f.title)]" "$WORKFLOW" \
+  || fail "fingerprint 입력이 file+review_perspective+normalized title 로 한정되지 않음 (AC3)"
+grep -qF "normalize('NFKC')" "$WORKFLOW" \
+  || fail "제목 정규화 NFKC 부재 또는 불일치 (제약: 두 워크플로 byte-identical)"
+grep -qF "replace(/[^\\p{L}\\p{N}]+/gu, ' ')" "$WORKFLOW" \
+  || fail "제목 정규화(문장부호/공백 → 단일 공백) 구현 부재 또는 불일치 (제약: 두 워크플로 동일)"
+grep -qF 'findings.map((f) => computeFingerprint(f))' "$WORKFLOW" \
+  || fail "findingFingerprints 가 결정론적 computeFingerprint 로 산정되지 않음 (AC3)"
+ok "check 7d: 결정론적 fingerprint(file+perspective+title), 줄번호 비의존"
 
 echo ""
 echo "=== check 8: prompt captures token and confidence policies ==="

@@ -270,168 +270,224 @@ jobs:
           set -euo pipefail
           jq empty .codex-review/result.json
 
-      - name: Submit Codex review verdict
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-          PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
-        run: |
-          set -euo pipefail
-
-          result=".codex-review/result.json"
-          body=".codex-review/review-body.md"
-
-          verdict="$(jq -r '.verdict' "$result")"
-          may_approve="$(jq -r '.automation_safety.may_approve' "$result")"
-          may_request_changes="$(jq -r '.automation_safety.may_request_changes' "$result")"
-          eligibility="$(jq -r '.eligibility.status' "$result")"
-          diff_truncated="$(jq -r '.reviewed_context.diff_truncated' "$result")"
-          findings_count="$(jq '.findings | length' "$result")"
-          blocking_count="$(jq '[.findings[] | select(.severity == "blocking" and .confidence_score >= 80)] | length' "$result")"
-          approve_without_body=false
-
-          if [[ "$eligibility" != "reviewed" ]]; then
-            echo "No review output to post."
-            exit 0
-          fi
-
-          review_mode="comment"
-          if [[ "$findings_count" == "0" && "$verdict" == "approve" && "$may_approve" == "true" && "$diff_truncated" == "false" ]]; then
-            review_mode="approve"
-            approve_without_body=true
-          elif [[ "$findings_count" == "0" && ( "$verdict" == "comment" || "$verdict" == "needs_context" ) ]]; then
-            review_mode="comment"
-          elif [[ "$findings_count" == "0" ]]; then
-            review_mode="comment"
-          elif [[ "$diff_truncated" != "false" ]]; then
-            review_mode="comment"
-          elif [[ "$verdict" == "request_changes" && "$may_request_changes" == "true" && "$blocking_count" != "0" ]]; then
-            review_mode="request-changes"
-          fi
-
-          if [[ "$approve_without_body" == "true" ]]; then
-            if gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
-              | jq -e --arg head "$PR_HEAD_SHA" 'any(.[]; .user.login == "github-actions[bot]" and .state == "APPROVED" and .commit_id == $head)' >/dev/null; then
-              echo "Formal Codex approval already exists for $PR_HEAD_SHA; skipping duplicate."
-              exit 0
-            fi
-            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --approve; then
-              echo "Formal Codex approval failed; continuing with managed PR comment."
-              touch .codex-review/approval-failed
-              exit 0
-            else
-              exit 0
-            fi
-          fi
-
-          {
-            printf '## Codex PR Review\n\n'
-            jq -r '.summary' "$result"
-            printf '\n\n'
-            jq -r '
-              if (.findings | length) == 0 then
-                "발견 사항 없음."
-              else
-                "발견 사항:\n" + (
-                  [.findings[] |
-                    "- [" + .severity + "/" + (.confidence_score|tostring) + "] " +
-                    .title + " (" + .file + ":" + (if .line == null or .line == 0 then "N/A" else (.line|tostring) end) + ")\n  " +
-                    .body + "\n  제안: " + .suggestion
-                  ] | join("\n")
-                )
-              end
-            ' "$result"
-          } > "$body"
-
-          marker="codex-formal-review head_sha=$PR_HEAD_SHA verdict=$verdict"
-          printf '\n\n<!-- %s -->\n' "$marker" >> "$body"
-
-          if gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
-            | jq -e --arg marker "$marker" 'any(.[]; (.body // "") | contains($marker))' >/dev/null; then
-            echo "Formal Codex review already exists for $PR_HEAD_SHA / $verdict; skipping duplicate."
-            exit 0
-          fi
-
-          submit_review() {
-            if ! gh pr review "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" "$@" --body-file "$body"; then
-              echo "Formal Codex review submission failed; continuing with managed PR comment."
-            fi
-          }
-
-          case "$review_mode" in
-            request-changes)
-              submit_review --request-changes
-              ;;
-            comment)
-              submit_review --comment
-              ;;
-            *)
-              echo "unknown review mode: $review_mode" >&2
-              exit 1
-              ;;
-          esac
-
-      - name: Post Codex review comment
+      - name: Submit Codex inline review
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
-          CODEX_REVIEW_MARKER: '<!-- codex-api-pr-review -->'
+          PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          CODEX_FORMAL_PREFIX: codex-formal-review
         with:
           github-token: ${{ github.token }}
           script: |
             const fs = require('fs');
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
-            const marker = process.env.CODEX_REVIEW_MARKER;
-            const findings = result.findings || [];
-            const approvalFailed = fs.existsSync('.codex-review/approval-failed');
-            if (result.eligibility?.status !== 'reviewed' || (findings.length === 0 && !approvalFailed)) {
-              core.info('No managed Codex review comment to post.');
+            const { owner, repo } = context.repo;
+            const pull_number = Number(process.env.PR_NUMBER);
+            const head_sha = process.env.PR_HEAD_SHA;
+            const prefix = process.env.CODEX_FORMAL_PREFIX;
+            // Posting identity is always the default-token bot — there is no
+            // GitHub App installation token path. Idempotency detection and self
+            // inline-thread identification track this fixed login.
+            const botLogin = 'github-actions[bot]';
+
+            // Deterministic finding fingerprint. Derived ONLY from the finding's
+            // stable attributes — file path, review perspective, and a normalized
+            // title — so the same finding keeps the same fingerprint across review
+            // runs even as the PR evolves and the line shifts (line/start_line are
+            // deliberately excluded). The same normalization is used in
+            // claude-review.yml so both workflows agree byte-identically.
+            const crypto = require('crypto');
+            const normalizeTitle = (s) => String(s == null ? '' : s)
+              .normalize('NFKC')
+              .toLowerCase()
+              .replace(/[^\p{L}\p{N}]+/gu, ' ')
+              .trim();
+            const computeFingerprint = (f) => crypto
+              .createHash('sha256')
+              .update([f.file || '', f.review_perspective || '', normalizeTitle(f.title)].join(' '))
+              .digest('hex')
+              .slice(0, 16);
+
+            if (result.eligibility?.status !== 'reviewed') {
+              core.info('No review output to post.');
               return;
             }
-            const findingText = findings.map((finding, index) => [
-                  `${index + 1}. [${finding.severity}/${finding.confidence_score}] ${finding.title}`,
-                  `${finding.file}:${finding.line == null || finding.line === 0 ? 'N/A' : finding.line}`,
-                  finding.body,
-                  `제안: ${finding.suggestion}`,
-                ].join('\n')).join('\n\n');
-            const body = [
-              marker,
-              '## Codex PR Review',
-              '',
-              `결과: \`${result.verdict}\``,
-              '',
-              approvalFailed
-                ? 'Codex 리뷰에서 지적 사항을 찾지 못했으나, 이 워크플로 토큰 권한으로는 정식 승인을 제출하지 못했습니다.'
-                : (result.summary || '발견 사항 없음. (요약 없음)'),
-              '',
-              approvalFailed ? '발견 사항 없음.' : findingText,
-            ].join('\n');
 
-            const issue_number = Number(process.env.PR_NUMBER);
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number,
-              per_page: 100,
+            const findings = result.findings || [];
+            // inline-only policy: every finding is posted as an inline comment.
+            // There is no issue-level finding channel — findings never get routed
+            // into an issue comment.
+            const inlineFindings = findings;
+
+            const verdict = result.verdict;
+            const mayApprove = !!result.automation_safety?.may_approve;
+            const diffTruncated = !!result.reviewed_context?.diff_truncated;
+
+            // Event decision — official review event is APPROVE or COMMENT only.
+            // The changes-requested review state is abolished: blocking findings
+            // surface as inline comments (inline-only policy), not a review state.
+            let event;
+            if (findings.length === 0 && verdict === 'approve' && mayApprove && !diffTruncated) {
+              event = 'APPROVE';
+            } else {
+              event = 'COMMENT';
+            }
+
+            // Review body: header + summary (when present) + an approval line when
+            // the verdict is approve + the hidden idempotency marker. Finding
+            // evaluations live as inline comments only (inline-only policy).
+            const marker = `<!-- ${prefix} head_sha=${head_sha} verdict=${verdict} -->`;
+            const bodyLines = ['## Codex PR 리뷰', ''];
+            if (result.summary) bodyLines.push(String(result.summary), '');
+            if (verdict === 'approve') bodyLines.push('_승인 — 지적 사항은 인라인 코멘트 참조._', '');
+            bodyLines.push(marker);
+            const body = bodyLines.join('\n');
+
+            // Inline review comments — path/line/body (start_line for multi-line range).
+            // The hidden marker lets us later identify self-owned threads so we can
+            // resolve them on a finding-unit (fingerprint) basis. The base substring
+            // (inlineMarkerBase) is preserved for self-identification, and the
+            // appended fingerprint lets a later run map the model's resolved_threads
+            // judgments back to this thread.
+            const inlineMarkerBase = '<!-- codex-review-inline';
+            const inlineComments = inlineFindings.map((f) => {
+              // Anchor to f.line; fall back to f.start_line so a finding is never
+              // dropped (validation guarantees at least one is a positive int).
+              const anchor = (typeof f.line === 'number' && f.line > 0) ? f.line : f.start_line;
+              const fingerprintMarker = `${inlineMarkerBase} fingerprint=${computeFingerprint(f)} -->`;
+              const c = {
+                path: f.file,
+                body: `**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}\n\n${fingerprintMarker}`,
+                side: 'RIGHT',
+                line: anchor,
+              };
+              if (typeof f.start_line === 'number'
+                  && f.start_line >= 1 && f.start_line < anchor) {
+                c.start_line = f.start_line;
+                c.start_side = 'RIGHT';
+              }
+              return c;
             });
 
-            const previous = comments.find((comment) =>
-              comment.user?.login === 'github-actions[bot]' &&
-              comment.body?.includes(marker)
-            );
+            // Idempotency.
+            const existingReviews = await github.paginate(
+              github.rest.pulls.listReviews,
+              { owner, repo, pull_number, per_page: 100 });
+            // 중복 감지 시 즉시 return 하지 않는다 — 제출(submit)만 건너뛰고
+            // self inline thread 의 finding 단위 resolve 후처리는 verdict 와 무관하게 계속 실행한다.
+            let skipSubmit = false;
+            if (existingReviews.some((r) =>
+                r.user?.login === botLogin && (r.body || '').includes(marker))) {
+              core.info(`Formal Codex review for ${head_sha} verdict=${verdict} already exists; skipping duplicate submission.`);
+              skipSubmit = true;
+            }
+            if (!skipSubmit && event === 'APPROVE' && existingReviews.some((r) =>
+                r.user?.login === botLogin && r.state === 'APPROVED' && r.commit_id === head_sha)) {
+              core.info(`Formal Codex approval already exists for ${head_sha}; skipping duplicate submission.`);
+              skipSubmit = true;
+            }
 
-            if (previous) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: previous.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number,
-                body,
-              });
+            // Submit. Workflow token cannot self-approve — fall back to COMMENT if APPROVE 403/422s.
+            const submit = (ev) => github.rest.pulls.createReview({
+              owner, repo, pull_number,
+              commit_id: head_sha,
+              event: ev,
+              body,
+              comments: inlineComments,
+            });
+
+            let submitOk = false;
+            if (!skipSubmit) {
+              try {
+                await submit(event);
+                submitOk = true;
+                core.info(`Submitted ${event} review (${inlineComments.length} inline findings).`);
+              } catch (e) {
+                if (event === 'APPROVE') {
+                  core.warning(`APPROVE failed (${e.status || ''} ${e.message}); falling back to COMMENT.`);
+                  fs.writeFileSync('.codex-review/approval-failed', '');
+                  try { await submit('COMMENT'); submitOk = true; }
+                  catch (e2) { core.warning(`Fallback COMMENT also failed (${e2.status || ''} ${e2.message}); continuing.`); }
+                } else {
+                  core.warning(`Review submission failed (${e.status || ''} ${e.message}); continuing.`);
+                }
+              }
+            }
+
+            // inline-only policy: do NOT fall back to dumping findings into an
+            // issue comment — that would place finding evaluations in an issue-level
+            // comment (AC6). If createReview failed, the findings stay unposted and
+            // the failure is surfaced in the workflow log only.
+            if (!skipSubmit && !submitOk && inlineFindings.length > 0) {
+              core.warning(`createReview failed; ${inlineFindings.length} inline finding(s) could not be posted. Not dumping to an issue comment (inline-only policy); see logs.`);
+            }
+
+            // Resolve self inline threads on a finding-unit (fingerprint) basis.
+            // This runs on every review execution regardless of verdict — it is
+            // NOT gated on approve, and runs even when submission was skipped as a
+            // duplicate. Two tiers:
+            //   (1) primary  — fingerprints the model listed in resolved_threads;
+            //   (2) fallback — self threads whose fingerprint is absent from this
+            //                   round's findings set (no longer reported).
+            // A self thread whose fingerprint is still in the findings set (and not
+            // in resolved_threads) is left untouched. Only self-owned threads are
+            // touched; threads whose marker has no extractable fingerprint are left
+            // untouched.
+            const resolvedFingerprints = new Set(
+              (result.resolved_threads || [])
+                .map((r) => r && r.fingerprint)
+                .filter((fp) => typeof fp === 'string' && fp.length > 0));
+            // Deterministic fingerprints for this round's findings (workflow-computed,
+            // not model-supplied) — the fallback tier resolves any self thread whose
+            // fingerprint is absent from this set.
+            const findingFingerprints = new Set(findings.map((f) => computeFingerprint(f)));
+            try {
+              const threadResp = await github.graphql(`
+                query($owner:String!, $repo:String!, $pr:Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $pr) {
+                      reviewThreads(first: 100) {
+                        nodes {
+                          id
+                          isResolved
+                          comments(first: 1) {
+                            nodes { author { login } body }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }`, { owner, repo, pr: pull_number });
+              const threads = threadResp.repository?.pullRequest?.reviewThreads?.nodes || [];
+              // GraphQL Actor.login omits the REST "[bot]" suffix (returns
+              // "github-actions"), so the REST botLogin never matches here —
+              // accept both forms.
+              const botLoginGql = botLogin.replace(/\[bot\]$/, '');
+              const fpRe = /<!-- codex-review-inline fingerprint=([^\s]+) -->/;
+              for (const t of threads) {
+                if (t.isResolved) continue;
+                const author = t.comments?.nodes?.[0]?.author?.login;
+                if (author !== botLogin && author !== botLoginGql) continue;
+                const cbody = t.comments?.nodes?.[0]?.body || '';
+                if (!cbody.includes(inlineMarkerBase)) continue;
+                const m = cbody.match(fpRe);
+                const fp = m && m[1];
+                if (!fp) continue; // legacy/markerless thread — leave untouched
+                const byModel = resolvedFingerprints.has(fp);
+                const byFallback = !byModel && !findingFingerprints.has(fp);
+                if (!byModel && !byFallback) continue; // still reported — leave
+                try {
+                  await github.graphql(`
+                    mutation($id:ID!) {
+                      resolveReviewThread(input: {threadId: $id}) {
+                        thread { id isResolved }
+                      }
+                    }`, { id: t.id });
+                  core.info(`Resolved self inline thread ${t.id} (fingerprint=${fp}, via=${byModel ? 'resolved_threads' : 'fallback'}).`);
+                } catch (e) {
+                  core.warning(`Failed to resolve thread ${t.id}: ${e.message}`);
+                }
+              }
+            } catch (e) {
+              core.warning(`Failed to fetch review threads for resolve: ${e.message}`);
             }
