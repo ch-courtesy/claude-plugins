@@ -540,11 +540,17 @@ cmd_start() {
   done
 }
 
+# JSON 문자열 이스케이프(역슬래시·큰따옴표만 — 신호/경로용 최소 처리).
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
 # ----- status 한 줄 출력 헬퍼 -----
-# 인자: <spec_dir>. WT 는 <spec_dir>/.loop-wt 메타에서 자동 해석(없으면
-# <spec_dir>/.worktree 기본값). 상태는 spec_dir 내 로컬 파일에서만 도출.
+# 인자: <spec_dir> [<format>]. format=json 이면 기계 판독 JSON object 1줄,
+#       그 외(기본 table)면 사람용 정렬 1줄. WT 는 <spec_dir>/.loop-wt 메타에서
+#       자동 해석(없으면 <spec_dir>/.worktree 기본값). 상태는 spec_dir 내 로컬
+#       파일에서만 도출. signals 는 raw fact(파일명 그대로) — driver 는 의미 미파싱.
 print_run_status() {
   local spec_dir="$1"
+  local fmt="${2:-table}"
   local wt=""
   if [[ -f "$spec_dir/.loop-wt" ]]; then
     # 끝 개행만 제거(값 보존: read 는 EOF-without-newline 시 non-zero 라도 변수
@@ -556,11 +562,12 @@ print_run_status() {
   local spec key state iters last ref epoch
   spec="$(cat "$wt/.loop/SPEC_PATH" 2>/dev/null || echo "$spec_dir/?")"
   key="$(spec_key "$spec")"
-  # signals/ 내용물(ls 그대로) — driver 는 의미 파싱 안 함, 표시만.
-  local files="-"
+  # signals/ 내용물 — 줄단위 파일명 보존(table 은 콤마, json 은 배열로 가공).
+  local sig_lines="" files="-"
   if [[ -d "$wt/.loop/signals" ]]; then
+    sig_lines=$(ls -1 "$wt/.loop/signals" 2>/dev/null || true)
     local ls_out
-    ls_out=$(ls -1 "$wt/.loop/signals" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
+    ls_out=$(printf '%s' "$sig_lines" | tr '\n' ',' | sed 's/,$//')
     [[ -n "$ls_out" ]] && files="$ls_out"
   fi
   state="idle"
@@ -580,19 +587,63 @@ print_run_status() {
       [[ -n "$epoch" ]] && last=$(date -u -r "$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null || date -u -d "@$epoch" +%Y-%m-%dT%H:%MZ 2>/dev/null || echo "-")
     fi
   fi
+
+  if [[ "$fmt" == "json" ]]; then
+    # signals 를 JSON 배열로 — 빈 디렉토리·기록부재면 []. 의미 해석 없음(raw fact).
+    local sig_json="[]" sline first=1
+    if [[ -n "$sig_lines" ]]; then
+      sig_json="["
+      while IFS= read -r sline; do
+        [[ -z "$sline" ]] && continue
+        if (( first == 1 )); then first=0; else sig_json+=","; fi
+        sig_json+="\"$(json_escape "$sline")\""
+      done <<< "$sig_lines"
+      sig_json+="]"
+    fi
+    local iters_json="$iters"; [[ "$iters_json" =~ ^[0-9]+$ ]] || iters_json=0
+    printf '{"key":"%s","state":"%s","signals":%s,"iters":%s,"last":"%s","spec":"%s"}\n' \
+      "$(json_escape "$key")" "$(json_escape "$state")" "$sig_json" \
+      "$iters_json" "$(json_escape "$last")" "$(json_escape "$spec")"
+    return 0
+  fi
+
   printf "%-14s %-9s %-20s %-6s %-20s %s\n" "$key" "$state" "$files" "$iters" "$last" "$spec"
 }
 
 # ----- subcommand: status -----
+# status [--json] [<spec-path>]
+#   --json : 기계 판독 가능한 구조화 상태 출력. 단일 spec → JSON object,
+#            전체 스캔 → JSON array. dispatch 등 호출 레이어의 종료상태 판정용
+#            단일 출처(컬럼 위치·부분 문자열 일치 비의존). signals 는 raw fact
+#            배열이며 DONE/BLOCKED 의미 해석은 호출자 컨벤션(driver 미파싱).
 cmd_status() {
-  local input="${1:-}"
+  local json=0 input=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      *) input="$1"; shift ;;
+    esac
+  done
+
   if [[ -n "$input" ]]; then
     compute_paths "$input"
     # 영구 메타 (<SPEC_DIR>/.loop-wt) 가 있거나 lock 이 있으면 기록 존재.
-    [[ -f "$SPEC_DIR/.loop-wt" || -f "$LOCK_FILE" || -d "$WT" ]] \
-      || { echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"; return 0; }
-    printf "%-14s %-9s %-20s %-6s %-20s %s\n" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
-    print_run_status "$SPEC_DIR"
+    if [[ ! -f "$SPEC_DIR/.loop-wt" && ! -f "$LOCK_FILE" && ! -d "$WT" ]]; then
+      if (( json == 1 )); then
+        # 기록 부재도 기계 판독 가능하게 — state=absent.
+        printf '{"key":"%s","state":"absent","signals":[],"iters":0,"last":"-","spec":"%s"}\n' \
+          "$(json_escape "$(spec_key "$SPEC_PATH")")" "$(json_escape "$SPEC_PATH")"
+      else
+        echo "해당 스펙의 실행 기록이 없습니다: $SPEC_PATH"
+      fi
+      return 0
+    fi
+    if (( json == 1 )); then
+      print_run_status "$SPEC_DIR" json
+    else
+      printf "%-14s %-9s %-20s %-6s %-20s %s\n" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
+      print_run_status "$SPEC_DIR"
+    fi
     return 0
   fi
   # 전체: repo 작업트리를 스캔해 .loop-lock(실행 중) 또는 .worktree/.loop(이후 상태)을
@@ -607,11 +658,27 @@ cmd_status() {
       find "$top" -type d -name .git -prune -o -type d -path '*/.worktree/.loop' -print 2>/dev/null | sed 's#/.worktree/.loop$##'
     } | sort -u | grep -v '^$' || true )"
   if [[ -z "$dirs" ]]; then
-    echo "실행 기록이 없습니다. 새 실행: $0 start <spec-path>"
+    if (( json == 1 )); then echo "[]"; else
+      echo "실행 기록이 없습니다. 새 실행: $0 start <spec-path>"
+    fi
+    return 0
+  fi
+  local d
+  if (( json == 1 )); then
+    # JSON array — 각 run 을 object 로, 콤마 결합.
+    local arr="[" first=1
+    while IFS= read -r d; do
+      [[ -z "$d" ]] && continue
+      if (( first == 1 )); then first=0; else arr+=","; fi
+      arr+="$(print_run_status "$d" json)"
+    done <<< "$dirs"
+    arr+="]"
+    # print_run_status json 은 끝에 개행을 붙이므로 콤마 결합 시 개행이 섞인다 →
+    # 개행 제거 후 한 줄 JSON array 로 출력.
+    printf '%s\n' "$(printf '%s' "$arr" | tr -d '\n')"
     return 0
   fi
   printf "%-14s %-9s %-20s %-6s %-20s %s\n" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
-  local d
   while IFS= read -r d; do [[ -n "$d" ]] && print_run_status "$d"; done <<< "$dirs"
 }
 
@@ -860,7 +927,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   SUBCOMMAND="$1"; shift
   case "$SUBCOMMAND" in
     start)   cmd_start "$@" ;;
-    status)  cmd_status "${1:-}" ;;
+    status)  cmd_status "$@" ;;
     stop)    cmd_stop "${1:-}" ;;
     list)    cmd_list ;;
     cleanup) cmd_cleanup "$@" ;;
