@@ -387,7 +387,15 @@ grep -qF '!skipSubmit && !submitOk && inlineFindings.length > 0' "$WORKFLOW" \
 if grep -qE 'core\.warning\(`createReview failed' "$WORKFLOW"; then
   fail "createReview 실패가 여전히 core.warning 으로만 처리됨 — false-green 가드(setFailed) 회귀 (AC4)"
 fi
-ok "check 13: 공유 diff-only anchor 검증 + 제외 로그 + false-green setFailed 가드"
+# 공유 검증 모듈은 trusted-base 체크아웃에서 로드되므로, 모듈을 도입·수정하는
+# 워크플로 PR 에선 base 에 아직 없어 require 가 실패한다(self-bootstrap). 이때
+# unhandled crash 대신 unfiltered 로 graceful degrade 해야 한다 — require 를
+# try/catch 로 감싸고 기본값(findings)으로 fallback 한다.
+grep -qF 'let inlineFindings = findings;' "$WORKFLOW" \
+  || fail "validator 부재 시 fallback 기본값(let inlineFindings = findings) 부재 — self-bootstrap 시 unhandled crash 위험 (robustness)"
+grep -qF 'Shared diff-anchor validator unavailable' "$WORKFLOW" \
+  || fail "validator require 실패를 graceful degrade(경고+unfiltered fallback)로 처리하지 않음 (robustness)"
+ok "check 13: 공유 diff-only anchor 검증 + 제외 로그 + false-green setFailed 가드 + validator 부재 graceful degrade"
 
 echo ""
 echo "ALL CHECKS PASSED"

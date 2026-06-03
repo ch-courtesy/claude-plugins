@@ -363,15 +363,30 @@ jobs:
             // dropping valid findings too. Out-of-diff findings are excluded
             // BEFORE the submit batch is built and logged; they are never
             // relocated or force-posted.
-            const { filterFindingsAgainstPatch } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/diff-anchor-filter.js`);
-            let diffPatch = '';
+            //
+            // The shared validator is loaded from the trusted-base checkout
+            // ($GITHUB_WORKSPACE = base ref). On the very PR that introduces or
+            // modifies the validator the base predates it, so the require can
+            // fail — that is the expected "the workflow modifies itself, so it
+            // validates only post-merge" bootstrap. Degrade loudly (a clear
+            // warning, never an unhandled crash) to the pre-change unfiltered
+            // submission; the false-green guard below still fails the job on any
+            // genuine submit error.
+            let inlineFindings = findings;
+            let excludedFindings = [];
             try {
-              diffPatch = fs.readFileSync('.review-context/diff.patch', 'utf8');
+              const { filterFindingsAgainstPatch } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/diff-anchor-filter.js`);
+              let diffPatch = '';
+              try {
+                diffPatch = fs.readFileSync('.review-context/diff.patch', 'utf8');
+              } catch (e) {
+                core.warning(`Could not read .review-context/diff.patch (${e.message}); treating diff as empty — all findings will be excluded as off-diff.`);
+              }
+              ({ valid: inlineFindings, excluded: excludedFindings } =
+                filterFindingsAgainstPatch(findings, diffPatch));
             } catch (e) {
-              core.warning(`Could not read .review-context/diff.patch (${e.message}); treating diff as empty — all findings will be excluded as off-diff.`);
+              core.warning(`Shared diff-anchor validator unavailable in trusted-base checkout (${e.message}); expected on the PR that introduces or modifies it (validates post-merge). Falling back to unfiltered inline submission for this run.`);
             }
-            const { valid: inlineFindings, excluded: excludedFindings } =
-              filterFindingsAgainstPatch(findings, diffPatch);
             for (const x of excludedFindings) {
               core.warning(`Excluded out-of-diff finding ${x.file}:${x.line}${x.start_line ? ` (start ${x.start_line})` : ''} — "${x.title}" (${x.reason}).`);
             }
