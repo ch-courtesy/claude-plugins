@@ -70,22 +70,22 @@ on_create: |
 - 검증 계획은 DoD를 확인하는 방법입니다.
 - 진행 로그·결정은 issue body가 아니라 comments에 누적합니다. 시각·작성자는 GitHub 메타데이터를 사용합니다.
 
-## 설계 문서 본문 임베드 (spec-sync 영역)
+## 설계 문서 본문 임베드 (design-sync 영역)
 
 태스크가 설계 문서를 구현할 때는, 그 설계 문서 본문을 issue body 안의 동기화 영역에 **그대로 복사해 임베드**합니다(링크·cross-reference로 대체하지 않습니다). 본문 복사·재동기화·abort의 운영 절차는 `task-ops`를 따릅니다.
 
 issue body 안에서 동기화 영역은 다음 마커로만 식별합니다.
 
 ```markdown
-<!-- spec-sync:begin -->
+<!-- design-sync:begin -->
 ## 설계 문서 (auto-synced)
 
 <설계 문서 본문 그대로>
-<!-- spec-sync:end -->
+<!-- design-sync:end -->
 ```
 
 - 최초 동기화: 위 계획 섹션 아래에 이 영역을 append합니다.
-- 재동기화: `<!-- spec-sync:begin -->` / `<!-- spec-sync:end -->` 사이만 replace하고 마커 밖 사용자 내용은 보존합니다.
+- 재동기화: `<!-- design-sync:begin -->` / `<!-- design-sync:end -->` 사이만 replace하고 마커 밖 사용자 내용은 보존합니다.
 - issue body 한도를 초과하거나 마커가 비표준이면 abort합니다(`task-ops`).
 
 ## comments에 기록할 것
