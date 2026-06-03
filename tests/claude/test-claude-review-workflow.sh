@@ -133,7 +133,7 @@ grep -qE 'uses: actions/setup-node@[0-9a-f]{40}' "$WORKFLOW" \
 ok "check 5: Actions SHA 고정됨"
 
 echo ""
-echo "=== check 6: 단일 inline 리뷰 제출 — verdict/event + body summary + 멱등 (AC1/AC7) ==="
+echo "=== check 6: 단일 inline 리뷰 제출 — verdict/event + 승인 본문 + 멱등 (AC1/AC7) ==="
 grep -q 'name: Submit Claude inline review' "$WORKFLOW" \
   || fail "'Submit Claude inline review' 스텝 부재 (단일 inline 리뷰 게시 스텝 치환) (제약)"
 grep -qF 'github.rest.pulls.createReview' "$WORKFLOW" \
@@ -150,8 +150,13 @@ if grep -oE '[a-z_]*request_changes' "$WORKFLOW" | grep -qvE '^may_request_chang
 fi
 grep -qF '## Claude PR 리뷰' "$WORKFLOW" \
   || fail "리뷰 본문 헤더 '## Claude PR 리뷰' 부재 (제약: claude 라벨)"
-grep -qF 'result.summary' "$WORKFLOW" \
-  || fail "리뷰 본문에 result.summary 포함 부재 (제약: summary 를 본문에 실음)"
+# 리뷰 요약(summary) 작성 폐지 — 본문에 result.summary 를 싣지 않는다.
+if grep -qF 'result.summary' "$WORKFLOW"; then
+  fail "result.summary 잔존 — 리뷰 요약 본문 게시 폐지 위반 (제약: summary 미작성)"
+fi
+# approve(event === 'APPROVE')일 때만 본문에 단순 승인 문구를 싣는다.
+grep -qF '승인되었습니다.' "$WORKFLOW" \
+  || fail "승인 본문 문구('승인되었습니다.') 부재 (제약: approve 시 승인 사실만)"
 grep -qF 'CLAUDE_FORMAL_PREFIX: claude-formal-review' "$WORKFLOW" \
   || fail "formal review 마커 prefix(CLAUDE_FORMAL_PREFIX: claude-formal-review) 부재 (제약)"
 grep -qF '${prefix} head_sha=${head_sha} verdict=${verdict}' "$WORKFLOW" \
@@ -166,7 +171,7 @@ grep -qF "submit('COMMENT')" "$WORKFLOW" \
   || fail "APPROVE 실패 시 같은 inline 코멘트로 COMMENT 강등 제출 부재 (AC7)"
 grep -qF 'may_approve' "$WORKFLOW" \
   || fail "approve safety gate(may_approve) 부재"
-ok "check 6: 단일 inline 리뷰 제출 (APPROVE/COMMENT) + body summary + 멱등 + APPROVE fallback"
+ok "check 6: 단일 inline 리뷰 제출 (APPROVE/COMMENT) + 승인 본문(요약 미작성) + 멱등 + APPROVE fallback"
 
 echo ""
 echo "=== check 7: 별도 마커 관리형 이슈 레벨 코멘트 게시 경로 부재 (AC6) ==="
@@ -283,7 +288,7 @@ grep -qF "CLAUDE_REVIEW_LANG: \${{ vars.CLAUDE_REVIEW_LANG || 'Korean' }}" "$WOR
 # 명시적 출력 언어 지시: untrusted 입력 앞, 프롬프트 본문 뒤 (AC1)
 grep -qF '## 출력 언어' "$WORKFLOW" \
   || fail "명시적 출력 언어 지시 섹션(## 출력 언어) 부재 (AC1)"
-grep -qF '리뷰 산출물의 자연어 필드(summary, 각 finding의 title·body·suggestion)' "$WORKFLOW" \
+grep -qF '리뷰 산출물의 자연어 필드(각 finding의 title·body·suggestion)' "$WORKFLOW" \
   || fail "자연어 필드 대상 명시 지시 부재 (AC1)"
 # untrusted PR 입력(metadata·comments·diff) 뒤 재강조 (AC2)
 grep -qF '## 마지막 재강조 (절대 위반 금지)' "$WORKFLOW" \
