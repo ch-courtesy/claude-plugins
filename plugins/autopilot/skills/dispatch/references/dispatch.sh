@@ -278,7 +278,11 @@ child_terminal_state() {
   st="$(printf '%s' "$json" | yq -r '.state' 2>/dev/null)"
   case "$st" in
     terminal)
-      if printf '%s' "$json" | yq -r '.signals[]' 2>/dev/null | grep -Fxq 'BLOCKED'; then
+      # signals 를 먼저 변수로 받아 yq 의 비-0 종료가 pipefail 로 if 조건에
+      # 전파되지 않게 한다 — well-formed JSON 이면 동작 동일, 비정상 출력에도
+      # done/failed 오판(특히 BLOCKED 누락 → done 오분류)을 방지.
+      local sigs; sigs="$(printf '%s' "$json" | yq -r '.signals[]' 2>/dev/null || true)"
+      if printf '%s\n' "$sigs" | grep -Fxq 'BLOCKED'; then
         echo "failed"
       else
         echo "done"
