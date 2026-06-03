@@ -4,7 +4,7 @@
 # fsd 가 task backend(이슈 + 프로젝트 보드)와 상호작용하는 **단일 지점**이다.
 # 본 모듈은 다음 규칙의 실행자다(규칙 재정의 금지):
 #   - rules/context.md                          이슈=task, 상태 어휘, 본문 구조, 코멘트 접두 규약
-#   - rules/orchestration/task-state-alignment.md  4분기 상태 정합
+#   - task-state-alignment.md                   4분기 상태 정합 (같은 references 디렉터리 번들)
 #   - rules/orchestration/issue-sync.md         펜스 단방향 본문 동기화
 #
 # 수행하는 것:

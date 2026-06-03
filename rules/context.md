@@ -78,7 +78,7 @@ AI 에이전트 간에 작업 컨텍스트를 전달하기 위한 영속성 규�
 
 SPEC 문서(설계 문서)를 단일 출처로 두고 그 전문을 태스크 Issue body로 동기화합니다. spec 스킬은 더 이상 이 동기화를 하지 않으므로(SPEC 문서만 산출), 이 책임은 **SPEC 문서를 task에 반영하는 구현 스킬·오케스트레이터(loop/dispatch)**가 집니다.
 
-SPEC 문서 최초 작성, 자체 검토 재작성, 변경 재진입, `--resume` 재작성마다 단일 trigger로 Issue body를 sync합니다. body 머리말 placeholder는 `rules/orchestration/task-state-alignment.md`의 새 task body 표준과 일치해야 하며, 불일치 시 abort합니다.
+SPEC 문서 최초 작성, 자체 검토 재작성, 변경 재진입, `--resume` 재작성마다 단일 trigger로 Issue body를 sync합니다. body 머리말 placeholder는 `plugins/autopilot/skills/fsd/references/task-state-alignment.md`의 새 task body 표준과 일치해야 하며, 불일치 시 abort합니다.
 
 ### body 구조
 
