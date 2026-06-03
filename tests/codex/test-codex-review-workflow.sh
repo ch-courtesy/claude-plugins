@@ -184,10 +184,20 @@ grep -q 'github.event.review.author_association' "$WORKFLOW" \
   || fail "review 기반 @codex 트리거 author_association 제한 부재 (AC8)"
 grep -q "github.event.comment.user.login != 'github-actions\[bot\]'" "$WORKFLOW" \
   || fail "봇 self-trigger 차단 게이트 부재 (AC8)"
-if grep -q 'REVIEW_APP_BOT_LOGIN' "$WORKFLOW"; then
-  fail "REVIEW_APP_BOT_LOGIN App 봇 식별 분기 잔존 — Claude 구조에 없음 (제약)"
-fi
-ok "check 12: @codex + author association + 봇 차단 게이트, App 봇 분기 제거됨"
+# App 봇 자동 게시 self-trigger 차단(AC4): @codex 멘션 요구가 멘션 없는 App
+# 자동 게시(리뷰/인라인)를 이미 배제한다. comment/review 트리거 분기 모두
+# @codex 멘션을 요구하므로 App 봇 identity 게시 이벤트는 재트리거하지 않는다.
+mention_count="$(count "contains(github.event.comment.body, '@codex')" "$WORKFLOW")"
+review_mention_count="$(count "contains(github.event.review.body, '@codex')" "$WORKFLOW")"
+(( mention_count + review_mention_count >= 3 )) \
+  || fail "@codex 멘션 요구가 comment/review 트리거 3개 분기에 모두 있지 않음 — App 자동게시 self-trigger 배제 불가 (AC4)"
+# App 봇 identity(<slug>[bot])는 'github-actions[bot]' 리터럴 배제로는 걸러지지 않으므로,
+# 모든 봇 작성 comment/review 이벤트를 user.type 로 배제해 App 봇 self-trigger 루프를 막는다 (AC4).
+comment_bot_type="$(count "github.event.comment.user.type != 'Bot'" "$WORKFLOW")"
+review_bot_type="$(count "github.event.review.user.type != 'Bot'" "$WORKFLOW")"
+(( comment_bot_type >= 2 && review_bot_type >= 1 )) \
+  || fail "App 봇 포함 봇 작성 이벤트 배제(user.type != 'Bot')가 comment 2개·review 1개 분기에 없음 (AC4)"
+ok "check 12: @codex + author association + 봇 차단 + 멘션 요구 + user.type!=Bot 로 App 봇 self-trigger 배제"
 
 echo ""
 echo "=== check 13: 단일 inline 리뷰 제출 — verdict/event + body summary + 멱등 (AC1/AC7) ==="
@@ -302,26 +312,38 @@ grep -qF 'findings.map((f) => computeFingerprint(f))' "$WORKFLOW" \
 ok "check 16b: 결정론적 fingerprint(file+perspective+title), 줄번호 비의존"
 
 echo ""
-echo "=== check 17: GitHub App 설치 토큰 발급·App 토큰 approve 경로 부재 (AC5/제약) ==="
-if grep -qF 'create-github-app-token' "$WORKFLOW"; then
-  fail "create-github-app-token 잔존 — App 설치 토큰 발급 경로 제거되어야 함 (AC5)"
+echo "=== check 17: GitHub App 설치 토큰 발급 + 동적 봇 식별 + graceful degradation (AC1/AC2/AC3/AC5/제약) ==="
+# App 설치 토큰 발급 스텝이 SHA 고정 actions/create-github-app-token 으로 존재.
+grep -qE 'uses: actions/create-github-app-token@[0-9a-f]{40}' "$WORKFLOW" \
+  || fail "actions/create-github-app-token SHA 고정 발급 스텝 부재 (AC1/제약)"
+if grep -qE 'uses: actions/create-github-app-token@v[0-9.]+' "$WORKFLOW"; then
+  fail "create-github-app-token 이 mutable version tag — SHA 고정 필요 (제약)"
 fi
-if grep -qF 'app-token' "$WORKFLOW"; then
-  fail "app-token 스텝/출력 잔존 (AC5)"
-fi
-if grep -qF 'app-slug' "$WORKFLOW"; then
-  fail "app-slug 동적 봇 식별 잔존 (AC5)"
-fi
-if grep -qF 'REVIEW_APP_ID' "$WORKFLOW"; then
-  fail "REVIEW_APP_ID App 게이트 잔존 (AC5)"
-fi
-if grep -qF 'dismissReview' "$WORKFLOW"; then
-  fail "dismissReview 잔존 (AC5)"
-fi
-# 자기 트리거/식별은 기본 토큰 봇(github-actions[bot])만 사용.
+# App ID / private key 시크릿으로 단명 토큰 발급 (장기 PAT 단일 시크릿 금지).
+grep -qF 'app-id: ${{ secrets.REVIEW_APP_ID }}' "$WORKFLOW" \
+  || fail "create-github-app-token 에 app-id=secrets.REVIEW_APP_ID 입력 부재 (제약)"
+grep -qF 'private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}' "$WORKFLOW" \
+  || fail "create-github-app-token 에 private-key=secrets.REVIEW_APP_PRIVATE_KEY 입력 부재 (제약)"
+# 시크릿 부재 시 발급 스텝 skip — graceful degradation (AC5).
+grep -qF "if: \${{ env.REVIEW_APP_ID != '' }}" "$WORKFLOW" \
+  || fail "App 토큰 발급 스텝이 REVIEW_APP_ID 부재 시 skip 되도록 게이트되지 않음 (AC5)"
+grep -qF 'REVIEW_APP_ID: ${{ secrets.REVIEW_APP_ID }}' "$WORKFLOW" \
+  || fail "REVIEW_APP_ID 시크릿을 env 로 노출(게이트 판정용)하지 않음 (AC5/제약)"
+# 발급 실패가 리뷰를 중단시키지 않도록 continue-on-error (AC5: 발급 실패 graceful).
+grep -qF 'continue-on-error: true' "$WORKFLOW" \
+  || fail "App 토큰 발급 스텝 continue-on-error 부재 — 발급 실패 시 리뷰 전면 중단 (AC5)"
+# 게시 토큰: App 토큰 우선, 없으면 기본 토큰 (AC5 graceful).
+grep -qF 'steps.app-token.outputs.token || github.token' "$WORKFLOW" \
+  || fail "게시 토큰이 App 토큰 우선·기본 토큰 폴백(steps.app-token.outputs.token || github.token)으로 해석되지 않음 (AC5/제약)"
+# 봇 로그인 동적 해석: app-slug → <slug>[bot], 없으면 github-actions[bot] (AC3).
+grep -qF 'steps.app-token.outputs.app-slug' "$WORKFLOW" \
+  || fail "App 봇 로그인 동적 해석(app-slug 출력) 부재 (AC3)"
+grep -qF 'const botLogin = appSlug' "$WORKFLOW" \
+  || fail "botLogin 이 app-slug 기반 동적 해석으로 산정되지 않음 (AC3/AC5)"
+# 기본 토큰 사용 시 봇 식별은 기존 github-actions[bot] 유지.
 grep -qF "'github-actions[bot]'" "$WORKFLOW" \
-  || fail "기본 토큰 봇 식별(github-actions[bot]) 부재"
-ok "check 17: App 토큰 발급·App approve 경로 부재"
+  || fail "기본 토큰 봇 식별(github-actions[bot]) 폴백 부재 (AC5)"
+ok "check 17: App 토큰 발급(SHA 고정) + 동적 봇 식별 + graceful degradation"
 
 echo ""
 echo "=== check 18: 권한 범위 — 게시에 필요한 범위만, App/OIDC 전용 권한 없음 (제약) ==="

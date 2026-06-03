@@ -25,18 +25,27 @@ jobs:
           && github.event.issue.pull_request != null
           && contains(github.event.comment.body, '@codex')
           && github.event.comment.user.login != 'github-actions[bot]'
+          && github.event.comment.user.type != 'Bot'
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
       || (github.event_name == 'pull_request_review_comment'
           && contains(github.event.comment.body, '@codex')
           && github.event.comment.user.login != 'github-actions[bot]'
+          && github.event.comment.user.type != 'Bot'
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
       || (github.event_name == 'pull_request_review'
           && github.event.review.body != null
           && contains(github.event.review.body, '@codex')
           && github.event.review.user.login != 'github-actions[bot]'
+          && github.event.review.user.type != 'Bot'
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Expose the App ID secret as an env var so the App-token step can gate on
+    # its presence (secrets cannot be referenced directly in a step `if:`).
+    # Empty in forks / unconfigured repos → App-token step is skipped and the
+    # workflow degrades to the default github.token (graceful degradation).
+    env:
+      REVIEW_APP_ID: ${{ secrets.REVIEW_APP_ID }}
     steps:
       - name: Resolve pull request context
         id: pr
@@ -270,14 +279,39 @@ jobs:
           set -euo pipefail
           jq empty .codex-review/result.json
 
+      # Issue a short-lived GitHub App installation token so the review is
+      # posted, identified, resolved, and approved under a single App bot
+      # identity that — unlike the default workflow token — can resolve self
+      # inline review threads (GraphQL) and submit an official APPROVE review.
+      # Gated on REVIEW_APP_ID presence: when the App secrets are absent
+      # (forks / unconfigured repos) the step is skipped and posting falls back
+      # to the default github.token (graceful degradation, AC5).
+      - name: Generate GitHub App token
+        id: app-token
+        if: ${{ env.REVIEW_APP_ID != '' }}
+        # Token issuance must never abort the review: on failure the step is
+        # marked failed but the job continues, its `token` output stays empty,
+        # and posting falls back to the default github.token (graceful, AC5).
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+        with:
+          app-id: ${{ secrets.REVIEW_APP_ID }}
+          private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+
       - name: Submit Codex inline review
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b
         env:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           CODEX_FORMAL_PREFIX: codex-formal-review
+          # App bot slug (empty when the App-token step was skipped) → drives
+          # dynamic bot-login resolution below.
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         with:
-          github-token: ${{ github.token }}
+          # App token when available (can resolve threads + self-approve);
+          # otherwise the default token. Posting, identification, resolve, and
+          # approve all share this single token / identity (AC3).
+          github-token: ${{ steps.app-token.outputs.token || github.token }}
           script: |
             const fs = require('fs');
             const result = JSON.parse(fs.readFileSync('.codex-review/result.json', 'utf8'));
@@ -285,10 +319,13 @@ jobs:
             const pull_number = Number(process.env.PR_NUMBER);
             const head_sha = process.env.PR_HEAD_SHA;
             const prefix = process.env.CODEX_FORMAL_PREFIX;
-            // Posting identity is always the default-token bot — there is no
-            // GitHub App installation token path. Idempotency detection and self
-            // inline-thread identification track this fixed login.
-            const botLogin = 'github-actions[bot]';
+            // Posting identity is dynamically resolved. When an App installation
+            // token was issued the bot login is `<app-slug>[bot]`; with the
+            // default token it is the fixed `github-actions[bot]`. Idempotency
+            // detection and self inline-thread identification track whichever
+            // login actually posted (AC3) — never a hardcoded App login.
+            const appSlug = process.env.APP_SLUG;
+            const botLogin = appSlug ? `${appSlug}[bot]` : 'github-actions[bot]';
 
             // Deterministic finding fingerprint. Derived ONLY from the finding's
             // stable attributes — file path, review perspective, and a normalized
@@ -387,7 +424,9 @@ jobs:
               skipSubmit = true;
             }
 
-            // Submit. Workflow token cannot self-approve — fall back to COMMENT if APPROVE 403/422s.
+            // Submit. The App token can self-approve; the default workflow token
+            // cannot — so APPROVE may still 403/422 when degraded to the default
+            // token. Fall back to COMMENT in that case (AC5).
             const submit = (ev) => github.rest.pulls.createReview({
               owner, repo, pull_number,
               commit_id: head_sha,
