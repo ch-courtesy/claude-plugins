@@ -21,7 +21,7 @@
       "name": "autopilot",
       "source": "./plugins/autopilot",
       "description": "자율 수행 루프(랄프 루프) 운영 인터페이스. spec/loop/dispatch/fsd 4-skill family — spec으로 SPEC 작성, loop으로 스펙 파일 기반 로컬 자율 실행, dispatch로 spec-list-driven 다중 SPEC 오케스트레이션, fsd로 spec→dispatch 자동화 파이프라인의 forge 호출 레이어 오케스트레이션.",
-      "version": "0.16.1",
+      "version": "0.16.2",
       "category": "automation",
       "tags": ["autonomous", "ralph-loop", "agent-runtime", "self-directed"]
     }
