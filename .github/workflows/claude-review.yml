@@ -525,8 +525,16 @@ jobs:
               core.info(`Formal Claude review for ${head_sha} verdict=${verdict} already exists; skipping duplicate submission.`);
               skipSubmit = true;
             }
+            // Scope this fallback to THIS reviewer's own marker prefix. Claude and
+            // Codex both submit as the same App bot (courtesy-bot[bot]) once the
+            // App-token path is active, so a bare login+APPROVED+commit_id match
+            // would treat the other reviewer's approval as our own and skip — the
+            // late-finishing reviewer's approval would silently vanish. Every review
+            // body always carries `<!-- ${prefix} … -->`, so the prefix substring
+            // distinguishes our approvals from the peer reviewer's.
             if (!skipSubmit && event === 'APPROVE' && existingReviews.some((r) =>
-                r.user?.login === botLogin && r.state === 'APPROVED' && r.commit_id === head_sha)) {
+                r.user?.login === botLogin && r.state === 'APPROVED' && r.commit_id === head_sha
+                && (r.body || '').includes(`<!-- ${prefix}`))) {
               core.info(`Formal Claude approval already exists for ${head_sha}; skipping duplicate submission.`);
               skipSubmit = true;
             }
