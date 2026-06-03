@@ -276,4 +276,31 @@ model_action_line="$(awk '/uses: anthropics\/claude-code-action@/ { print NR; ex
 ok "check 10: 모델 action 전 checkout credential extraheader 제거"
 
 echo ""
+echo "=== check 11: 출력 언어 지시 + untrusted block 끝 재강조 + 구성 변수 (AC1/AC2/AC3/AC4/AC5) ==="
+# 구성 변수: 출력 언어는 리포지터리 변수로 구성 가능, 미지정 시 Korean 폴백 (AC3/AC4)
+grep -qF "CLAUDE_REVIEW_LANG: \${{ vars.CLAUDE_REVIEW_LANG || 'Korean' }}" "$WORKFLOW" \
+  || fail "출력 언어 구성 변수(CLAUDE_REVIEW_LANG, 기본 Korean) 부재 (AC3/AC4)"
+# 명시적 출력 언어 지시: untrusted 입력 앞, 프롬프트 본문 뒤 (AC1)
+grep -qF '## 출력 언어' "$WORKFLOW" \
+  || fail "명시적 출력 언어 지시 섹션(## 출력 언어) 부재 (AC1)"
+grep -qF '리뷰 산출물의 자연어 필드(summary, 각 finding의 title·body·suggestion)' "$WORKFLOW" \
+  || fail "자연어 필드 대상 명시 지시 부재 (AC1)"
+# untrusted PR 입력(metadata·comments·diff) 뒤 재강조 (AC2)
+grep -qF '## 마지막 재강조 (절대 위반 금지)' "$WORKFLOW" \
+  || fail "마지막 재강조 섹션 부재 — 모델이 untrusted PR diff 뒤에서 출력 언어 지시 흘릴 수 있음 (AC2)"
+grep -qF '영어 등 다른 언어로 작성하면 안 됩니다' "$WORKFLOW" \
+  || fail "출력 언어 명시적 강제(다른 언어 금지) 라인 부재 (AC2)"
+# 재강조가 모든 untrusted 입력(diff) 뒤에 위치하는지 정적 검증 (AC2 / 제약: 재강조 위치)
+lang_reiterate_line="$(awk 'index($0, "## 마지막 재강조 (절대 위반 금지)") { print NR; exit }' "$WORKFLOW")"
+diff_cat_line="$(awk 'index($0, "cat .review-context/diff.patch") { print NR; exit }' "$WORKFLOW")"
+[[ -n "$lang_reiterate_line" && -n "$diff_cat_line" ]] \
+  || fail "재강조/ diff cat 라인 탐지 실패 (AC2)"
+(( diff_cat_line < lang_reiterate_line )) \
+  || fail "재강조가 untrusted diff 출력보다 앞에 위치함 — 모든 untrusted 입력 뒤에 와야 함 (AC2 / 제약)"
+# 지시·재강조 양쪽이 구성 변수를 사용 (AC4)
+grep -qF '"$CLAUDE_REVIEW_LANG"' "$WORKFLOW" \
+  || fail "출력 언어 지시/재강조가 CLAUDE_REVIEW_LANG 변수를 사용하지 않음 (AC4)"
+ok "check 11: 출력 언어 지시 + untrusted block 끝 재강조 + 구성 변수(기본 Korean)"
+
+echo ""
 echo "ALL CHECKS PASSED"
