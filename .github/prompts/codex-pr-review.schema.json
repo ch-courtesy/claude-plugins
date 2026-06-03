@@ -5,7 +5,6 @@
   "required": [
     "eligibility",
     "verdict",
-    "summary",
     "confidence",
     "reviewed_context",
     "automation_safety",
@@ -32,7 +31,6 @@
       "type": "string",
       "enum": ["approve", "comment", "needs_context", "unavailable"]
     },
-    "summary": { "type": "string" },
     "confidence": {
       "type": "string",
       "enum": ["high", "medium", "low"]

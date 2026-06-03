@@ -136,7 +136,7 @@ jobs:
           cat "$REVIEW_PROMPT" > .claude-review/prompt.md
           {
             printf '\n\n## 출력 언어\n'
-            printf '리뷰 산출물의 자연어 필드(summary, 각 finding의 title·body·suggestion)는 모두 %s로 작성합니다. JSON 키·구조와 verdict·severity 등 enum 값은 schema 정의를 그대로 따릅니다.\n' "$CLAUDE_REVIEW_LANG"
+            printf '리뷰 산출물의 자연어 필드(각 finding의 title·body·suggestion)는 모두 %s로 작성합니다. JSON 키·구조와 verdict·severity 등 enum 값은 schema 정의를 그대로 따릅니다.\n' "$CLAUDE_REVIEW_LANG"
           } >> .claude-review/prompt.md
           {
             printf '\n\n---\n\n'
@@ -159,7 +159,7 @@ jobs:
             printf '\n\nUnified diff:\n'
             cat .review-context/diff.patch
             printf '\n\n## 마지막 재강조 (절대 위반 금지)\n'
-            printf '응답 객체의 모든 자연어 필드(summary, 각 finding의 title·body·suggestion)는 반드시 %s 로 작성합니다. 영어 등 다른 언어로 작성하면 안 됩니다. JSON 키·enum 값은 schema 정의 그대로 사용합니다.\n' "$CLAUDE_REVIEW_LANG"
+            printf '응답 객체의 모든 자연어 필드(각 finding의 title·body·suggestion)는 반드시 %s 로 작성합니다. 영어 등 다른 언어로 작성하면 안 됩니다. JSON 키·enum 값은 schema 정의 그대로 사용합니다.\n' "$CLAUDE_REVIEW_LANG"
             printf '\n'
           } >> .claude-review/prompt.md
 
@@ -477,15 +477,16 @@ jobs:
               event = 'COMMENT';
             }
 
-            // Review body: header + summary (when present) + an approval line when
-            // the verdict is approve + the hidden idempotency marker. Finding
-            // evaluations live as inline comments only (inline-only policy).
+            // Review body — built from the ACTUAL submit event, not the intended
+            // one. Only an APPROVE submission carries the single "승인되었습니다." line;
+            // every other submission (including the APPROVE→COMMENT degradation when
+            // the default token cannot self-approve) carries only the hidden
+            // idempotency marker, so findings live exclusively as inline comments
+            // (inline-only policy) and no review summary is ever written.
             const marker = `<!-- ${prefix} head_sha=${head_sha} verdict=${verdict} -->`;
-            const bodyLines = ['## Claude PR 리뷰', ''];
-            if (result.summary) bodyLines.push(String(result.summary), '');
-            if (verdict === 'approve') bodyLines.push('_승인 — 지적 사항은 인라인 코멘트 참조._', '');
-            bodyLines.push(marker);
-            const body = bodyLines.join('\n');
+            const buildBody = (ev) => ev === 'APPROVE'
+              ? ['## Claude PR 리뷰', '', '승인되었습니다.', '', marker].join('\n')
+              : marker;
 
             // Inline review comments — path/line/body (start_line for multi-line range).
             // The hidden marker lets us later identify self-owned threads so we can
@@ -546,7 +547,7 @@ jobs:
               owner, repo, pull_number,
               commit_id: head_sha,
               event: ev,
-              body,
+              body: buildBody(ev),
               comments: inlineComments,
             });
 

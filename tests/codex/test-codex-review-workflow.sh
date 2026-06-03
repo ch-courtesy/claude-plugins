@@ -200,7 +200,7 @@ review_bot_type="$(count "github.event.review.user.type != 'Bot'" "$WORKFLOW")"
 ok "check 12: @codex + author association + 봇 차단 + 멘션 요구 + user.type!=Bot 로 App 봇 self-trigger 배제"
 
 echo ""
-echo "=== check 13: 단일 inline 리뷰 제출 — verdict/event + body summary + 멱등 (AC1/AC7) ==="
+echo "=== check 13: 단일 inline 리뷰 제출 — verdict/event + 승인 본문 + 멱등 (AC1/AC7) ==="
 grep -q 'name: Submit Codex inline review' "$WORKFLOW" \
   || fail "'Submit Codex inline review' 스텝 부재 (단일 inline 리뷰 게시 스텝 치환) (제약)"
 # 단일 createReview(comments[]) 로 inline + 본문을 한 번에 제출. event 는 APPROVE/COMMENT 만.
@@ -217,11 +217,16 @@ fi
 if grep -oE '[a-z_]*request_changes' "$WORKFLOW" | grep -qvE '^may_request_changes$'; then
   fail "request_changes verdict 어휘 잔존 (may_request_changes 외) — 제거 필요 (제약)"
 fi
-# 리뷰 본문(body): 헤더 + summary(있으면) — 한국어 헤더.
+# 리뷰 본문(body): approve 시에만 헤더 + 승인 문구, 그 외엔 마커만 — 요약 미작성.
 grep -qF '## Codex PR 리뷰' "$WORKFLOW" \
   || fail "리뷰 본문 헤더 '## Codex PR 리뷰' 부재 (제약: codex 라벨)"
-grep -qF 'result.summary' "$WORKFLOW" \
-  || fail "리뷰 본문에 result.summary 포함 부재 (제약: summary 를 본문에 실음)"
+# 리뷰 요약(summary) 작성 폐지 — 본문에 result.summary 를 싣지 않는다.
+if grep -qF 'result.summary' "$WORKFLOW"; then
+  fail "result.summary 잔존 — 리뷰 요약 본문 게시 폐지 위반 (제약: summary 미작성)"
+fi
+# approve(event === 'APPROVE')일 때만 본문에 단순 승인 문구를 싣는다.
+grep -qF '승인되었습니다.' "$WORKFLOW" \
+  || fail "승인 본문 문구('승인되었습니다.') 부재 (제약: approve 시 승인 사실만)"
 # 멱등 마커 (head_sha, verdict) 기준 + listReviews 조회 + 중복 skip.
 grep -qF 'CODEX_FORMAL_PREFIX: codex-formal-review' "$WORKFLOW" \
   || fail "formal review 마커 prefix(CODEX_FORMAL_PREFIX: codex-formal-review) 부재 (제약)"
@@ -236,7 +241,7 @@ grep -qF "fs.writeFileSync('.codex-review/approval-failed'" "$WORKFLOW" \
   || fail "APPROVE 실패 시 approval-failed marker 기록 부재 (AC7)"
 grep -qF "submit('COMMENT')" "$WORKFLOW" \
   || fail "APPROVE 실패 시 같은 inline 코멘트로 COMMENT 강등 제출 부재 (AC7)"
-ok "check 13: 단일 inline 리뷰 제출 (APPROVE/COMMENT) + body summary + 멱등 + APPROVE fallback"
+ok "check 13: 단일 inline 리뷰 제출 (APPROVE/COMMENT) + 승인 본문(요약 미작성) + 멱등 + APPROVE fallback"
 
 echo ""
 echo "=== check 14: 별도 마커 관리형 이슈 레벨 코멘트 게시 경로 부재 (AC6) ==="

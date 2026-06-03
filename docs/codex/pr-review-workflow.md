@@ -2,7 +2,7 @@
 
 이 문서는 `codex review` 자연어 출력 대신 직접 프롬프팅한 structured JSON을 사용해 PR 리뷰를 자동화하는 계획과 경계를 정의한다.
 
-모델 호출은 셸에서 `codex exec`를 직접 실행하지 않고 공식 GitHub Action `openai/codex-action`(SHA 고정, codex CLI 버전은 action의 `codex-version` 입력으로 고정)을 통해 이뤄진다. 인증은 ChatGPT 계정 `auth.json`을 codex-home 디렉터리로 부트스트랩하는 방식을 쓰며 API 키 입력은 사용하지 않는다. 리뷰 결과 게시는 자매 워크플로(Claude PR 리뷰, `claude-review.yml`)와 **동일한 구조**다 — 발견사항(findings)을 코드 라인에 anchor된 inline review thread로, 요약(summary)을 리뷰 본문으로 담은 **단일 inline 리뷰** 제출 + 모델이 해소로 판정한 자기 소유 thread의 **fingerprint 기준 자동 resolve**. 별도의 마커 관리형 이슈 레벨 코멘트 게시 경로는 없으며, 게시·resolve는 워크플로 기본 토큰만 사용한다(GitHub App 설치 토큰 발급·App 토큰 정식 approve 경로 없음).
+모델 호출은 셸에서 `codex exec`를 직접 실행하지 않고 공식 GitHub Action `openai/codex-action`(SHA 고정, codex CLI 버전은 action의 `codex-version` 입력으로 고정)을 통해 이뤄진다. 인증은 ChatGPT 계정 `auth.json`을 codex-home 디렉터리로 부트스트랩하는 방식을 쓰며 API 키 입력은 사용하지 않는다. 리뷰 결과 게시는 자매 워크플로(Claude PR 리뷰, `claude-review.yml`)와 **동일한 구조**다 — 발견사항(findings)을 코드 라인에 anchor된 inline review thread로 담은 **단일 inline 리뷰** 제출(리뷰 요약은 작성하지 않고, 본문은 approve일 때만 승인 사실 한 줄을 담는다) + 모델이 해소로 판정한 자기 소유 thread의 **fingerprint 기준 자동 resolve**. 별도의 마커 관리형 이슈 레벨 코멘트 게시 경로는 없으며, 게시·resolve는 워크플로 기본 토큰만 사용한다(GitHub App 설치 토큰 발급·App 토큰 정식 approve 경로 없음).
 
 ## 목표
 
@@ -22,10 +22,10 @@
 6. 모델이 `needs_context`를 반환하면 요청 파일(최대 5개)을 PR head에서 수집해 2차 호출로 최종 verdict를 받는다(Claude 리뷰와 동일한 2-pass 흐름).
 7. 게시는 자매 Claude 워크플로와 **동일한 구조**인 단일 `Submit … inline review` 스텝(codex 라벨·마커로 치환)에서 이뤄진다.
    - **inline comment 조립**: 발견사항마다 파일과 변경 라인에 anchor된 inline comment(`side: 'RIGHT'`, multi-line이면 `start_line`/`start_side` 추가)를 만들고 본문 끝에 숨김 마커 `<!-- codex-review-inline fingerprint=<fp> -->`를 붙인다. `fingerprint`는 발견사항의 안정 속성(파일 경로 + 리뷰 관점 + 정규화한 제목)만으로 결정론적으로 계산되며 줄 번호에 의존하지 않는다(정규화·해시 규칙은 Claude 워크플로와 byte-identical).
-   - **단일 리뷰 제출**: `result.summary`(있으면)를 리뷰 본문에 담고 inline comment 배열과 함께 단일 `github.rest.pulls.createReview` 호출로 제출한다. review event는 findings가 없고 `automation_safety.may_approve=true`이며 diff가 truncate되지 않은 `approve`일 때 `APPROVE`, 그 외 `COMMENT`다(REQUEST_CHANGES는 폐지). 본문 헤더는 `## Codex PR 리뷰`이며 숨김 멱등 마커 `codex-formal-review head_sha=… verdict=…`를 담는다. 같은 마커의 봇 리뷰가 이미 있으면 제출만 건너뛴다(resolve 후처리는 계속). 워크플로 기본 토큰은 자기 PR을 정식 APPROVE하지 못하므로 `APPROVE`가 실패하면 같은 inline 코멘트를 담은 `COMMENT` 리뷰로 강등 제출하고 `.codex-review/approval-failed`로 기록한다.
+   - **단일 리뷰 제출**: inline comment 배열과 함께 단일 `github.rest.pulls.createReview` 호출로 제출한다. review event는 findings가 없고 `automation_safety.may_approve=true`이며 diff가 truncate되지 않은 `approve`일 때 `APPROVE`, 그 외 `COMMENT`다(REQUEST_CHANGES는 폐지). **리뷰 본문은 실제 `APPROVE` 이벤트일 때만 `## Codex PR 리뷰` 헤더 + `승인되었습니다.` 한 줄을 담고, 그 외(비-approve)에는 숨김 멱등 마커만 담는다 — 리뷰 요약(summary)은 작성하지 않는다.** 숨김 멱등 마커는 `codex-formal-review head_sha=… verdict=…`이며, 같은 마커의 봇 리뷰가 이미 있으면 제출만 건너뛴다(resolve 후처리는 계속). 워크플로 기본 토큰은 자기 PR을 정식 APPROVE하지 못하므로 `APPROVE`가 실패하면 같은 inline 코멘트와 본문을 담은 `COMMENT` 리뷰로 강등 제출하고 `.codex-review/approval-failed`로 기록한다.
    - **fingerprint 기준 self thread resolve**: 제출(또는 중복 skip) 후 verdict와 무관하게, GraphQL `reviewThreads`로 조회해 자기 소유 + fingerprint 추출 가능 + 미해결인 inline thread를 자동 resolve한다 — 모델이 `resolved_threads`에 올린 fingerprint(1차)이거나 이번 회차 findings의 fingerprint 집합에서 사라진 thread(2차 fallback)를 `resolveReviewThread`로 닫는다. 다른 리뷰어 thread나 fingerprint를 추출할 수 없는 thread는 건드리지 않는다.
 
-   별도의 마커 관리형 이슈 레벨 코멘트 게시 경로는 없다(발견사항은 inline 전용; 요약은 리뷰 본문에만 실린다). createReview가 라인 매핑 등으로 실패하면 그 회차 inline은 게시되지 않고 로그로만 남으며, 발견사항을 이슈 코멘트로 덤프하지 않는다.
+   별도의 마커 관리형 이슈 레벨 코멘트 게시 경로는 없다(발견사항은 inline 전용; 리뷰 요약은 작성하지 않고, 본문은 approve일 때만 승인 사실 한 줄을 담는다). createReview가 라인 매핑 등으로 실패하면 그 회차 inline은 게시되지 않고 로그로만 남으며, 발견사항을 이슈 코멘트로 덤프하지 않는다.
 
 ## 단계적 고도화 계획
 
