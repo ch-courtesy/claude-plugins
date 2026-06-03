@@ -214,13 +214,25 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: ${{ steps.prepare-claude-review.outputs.prompt }}
-          # Allow ONLY the Read tool so the model can read the untrusted context
-          # file (.claude-review/context.md) holding the diff. Everything else
-          # (Write/Bash/network/MCP) stays denied — the review is read-only and
-          # emits a single JSON object.
+          # Security: the model reads an UNTRUSTED diff, so a prompt-injection
+          # payload in that diff must not be able to read other runner files
+          # (Claude/GitHub creds, env) and exfiltrate them via a posted finding.
+          # Restore the pre-change "model can only see the diff" boundary:
+          #   - dontAsk: deny-by-default — anything not allow-listed is denied
+          #     without prompting (CI has no interactive approver).
+          #   - allowedTools scoped to the ONE absolute context file (// = root;
+          #     github.workspace already starts with /, so /<ws> yields //<ws>).
+          #   - disallowedTools removes file-search / exec / network tools from
+          #     the model's context entirely. Bash is critical: under dontAsk,
+          #     read-only Bash commands would otherwise still run (e.g. `cat`).
+          #   - setting-sources=user skips in-repo / plugin settings so no
+          #     project config can broaden the Read allow-list.
           claude_args: |
             --model ${{ vars.CLAUDE_REVIEW_MODEL || 'claude-sonnet-4-5-20250929' }}
-            --allowedTools Read
+            --permission-mode dontAsk
+            --setting-sources user
+            --allowedTools "Read(/${{ github.workspace }}/.claude-review/context.md)"
+            --disallowedTools Bash Edit Write WebFetch WebSearch Glob Grep
 
       - name: Save Claude review result
         env:
@@ -358,9 +370,13 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           prompt: ${{ steps.prepare-claude-follow-up.outputs.prompt }}
+          # Same read-only scoping as the first pass (see "Run Claude review").
           claude_args: |
             --model ${{ vars.CLAUDE_REVIEW_MODEL || 'claude-sonnet-4-5-20250929' }}
-            --allowedTools Read
+            --permission-mode dontAsk
+            --setting-sources user
+            --allowedTools "Read(/${{ github.workspace }}/.claude-review/context.md)"
+            --disallowedTools Bash Edit Write WebFetch WebSearch Glob Grep
 
       - name: Save Claude follow-up review result
         if: steps.prepare-claude-follow-up.outputs.has_extra_context == 'true'
