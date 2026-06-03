@@ -10,7 +10,7 @@
 - 입력으로 제공된 diff/context 범위 안에서 판단합니다.
 - context가 부족하면 추측하지 말고 `needs_context` 또는 `unavailable` verdict를 반환합니다.
 - 최종 응답은 프롬프트 본문에 포함된 JSON Schema 를 만족하는 JSON 객체 하나로만 출력합니다.
-- JSON 객체는 schema의 모든 required 필드를 채우고 enum·타입을 그대로 따릅니다. 코드펜스(```)나 산문, 추가 설명, 별도 도구 호출 없이 JSON 객체 텍스트만 출력합니다.
+- JSON 객체는 schema의 모든 required 필드를 채우고 enum·타입을 그대로 따릅니다. 코드펜스(```)나 산문, 추가 설명 없이 JSON 객체 텍스트만 출력합니다. 단, 워크플로가 지정한 리뷰 입력 컨텍스트 파일을 `Read` 도구로 읽는 것만 허용되며, 그 외의 도구 호출은 하지 않습니다. 컨텍스트 파일을 모두 읽은 뒤 최종 응답으로 JSON 객체 하나만 출력합니다.
 
 입력:
 - Pull Request metadata
