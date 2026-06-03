@@ -4,7 +4,7 @@ scope:
     - plugins/autopilot/skills/fsd/references/forge-integration.md
     - plugins/autopilot/skills/fsd/references/forge.sh
     - rules/orchestration/forge-integration.md
-    - rules/orchestration/approved-spec-merge.md
+    - rules/orchestration/approved-spec-merge.md # stale: 이후 docs/specs/2026-06-03-remove-approved-spec-merge-rule에서 제거됨
     - plugins/autopilot/.claude-plugin/plugin.json
     - .claude-plugin/marketplace.json
   exclude:
@@ -26,7 +26,7 @@ verify: "test -f plugins/autopilot/skills/fsd/references/forge-integration.md &&
 - 항상 저장소 루트의 `rules/orchestration/forge-integration.md`는 더 이상 존재하지 않는다.
 - 항상 저장소 전체에서 `forge-integration.md`라는 이름의 파일은 정확히 하나만 존재한다(위 fsd references 경로 아래).
 - 항상 `plugins/autopilot/skills/fsd/references/forge.sh`의 forge-integration 인용은 같은 references 디렉터리 안의 번들 상대경로를 가리키며, `rules/orchestration/forge-integration.md`라는 경로 문자열을 더 이상 포함하지 않는다.
-- 항상 `rules/orchestration/approved-spec-merge.md`의 forge-integration 교차참조는 새 번들 경로(`plugins/autopilot/skills/fsd/references/forge-integration.md`)를 가리킨다.
+- 항상 `rules/orchestration/approved-spec-merge.md`의 forge-integration 교차참조는 새 번들 경로(`plugins/autopilot/skills/fsd/references/forge-integration.md`)를 가리킨다. <!-- stale: 이 파일은 이후 docs/specs/2026-06-03-remove-approved-spec-merge-rule에서 통째로 제거됨(타이밍 정책은 spec step 7 기본 핸드오프로 회귀). 위 조건은 본 SPEC 작성 시점의 역사 기록이다. -->
 - 라이브 코드·규칙 영역(`plugins/`·`rules/`·`.claude-plugin/`)에서 `rules/orchestration/forge-integration` 문자열을 검색하는 동안 매치가 없다(역사 기록인 `docs/specs/`·`milestones/`는 제외).
 - 항상 autopilot 플러그인 버전은 `plugins/autopilot/.claude-plugin/plugin.json`(단일 출처)과 루트 `.claude-plugin/marketplace.json`의 autopilot 항목(미러) 둘 다에서 동일하게 `0.16.1`이다(이전 `0.16.0`에서 PATCH 범프).
 - `plugins/autopilot/skills/fsd/references/forge.sh`를 `--help`로 실행하면 오류 없이 usage를 출력한다(주석만 변경, 로직 무회귀).
@@ -35,7 +35,7 @@ verify: "test -f plugins/autopilot/skills/fsd/references/forge-integration.md &&
 포함:
 - forge-integration 계약 문서를 fsd references 디렉터리로 이전(신규 번들본 작성 + 루트 원본 삭제).
 - `forge.sh`의 forge-integration 인용 1줄을 번들 상대경로로 갱신.
-- `approved-spec-merge.md`의 forge-integration 교차참조 1줄을 새 번들 경로로 갱신.
+- `approved-spec-merge.md`의 forge-integration 교차참조 1줄을 새 번들 경로로 갱신. <!-- stale: approved-spec-merge.md는 이후 docs/specs/2026-06-03-remove-approved-spec-merge-rule에서 제거됨 -->
 - autopilot 플러그인 버전 PATCH 범프(plugin.json + marketplace.json 미러).
 
 비-목표 / 제외:
@@ -55,5 +55,5 @@ verify: "test -f plugins/autopilot/skills/fsd/references/forge-integration.md &&
 - git 반영(브랜치·commit·main 동기화)은 직접 main 편집 없이 프로젝트 규칙(`rules/engineering/branch-and-slug.md`)을 따른다.
 
 ## 위험 (있을 때만)
-- repo CLAUDE.md의 카테고리 룰 로딩은 `rules/orchestration/`를 디렉터리로 읽지만, forge-integration 제거 후에도 siblings(approved-spec-merge·issue-sync·task-state-alignment)가 남아 디렉터리·로딩은 유지된다 — 깨지지 않음.
+- repo CLAUDE.md의 카테고리 룰 로딩은 `rules/orchestration/`를 디렉터리로 읽지만, forge-integration 제거 후에도 siblings(approved-spec-merge·issue-sync·task-state-alignment)가 남아 디렉터리·로딩은 유지된다 — 깨지지 않음. <!-- stale: approved-spec-merge는 이후 docs/specs/2026-06-03-remove-approved-spec-merge-rule에서 제거됨. 그래도 task-state-alignment가 남아 디렉터리·로딩은 계속 유지된다. -->
 - 역사적 `docs/specs/`·`milestones/` 문서가 옛 경로를 언급하지만 이는 기록이므로 변경 대상이 아니며 dangling 판정에서 제외한다.

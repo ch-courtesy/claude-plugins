@@ -17,7 +17,7 @@ depends_on: ["workflow-rule-creator-spec-layout"]
 
 workflow-rule-creator의 `spec-layout` 템플릿 본문을 확장해, 타깃 프로젝트에 설치되는 `rules/workflow/spec-layout.md`가 SPEC 설계 문서의 **경로/레이아웃**에 더해 **머지 타이밍 게이트** — "SPEC 최종 승인 → 구현 착수 전 그 SPEC 문서를 `main`에 반영 → 그 뒤에야 구현 제안" 순서 — 를 함께 정의하도록 한다. 새 sub-룰 템플릿을 신설하지 않고 기존 spec-layout **한 템플릿의 본문만** 키운다.
 
-이 게이트는 **타이밍/순서만** 소유한다. 머지의 git 기계(브랜치 생성·SPEC 문서만 commit·`main` ff-merge·origin 동기화·force push 금지·실패 시 PR 전환)는 정의하지 않고 `version-control`·`engineering` 카테고리에 위임한다. 이는 이 레포가 이미 dogfood로 따르는 분리 — 타이밍은 `rules/orchestration/approved-spec-merge.md`, 기계는 `rules/engineering/branch-and-slug.md` — 를 타깃 프로젝트용 sub-룰로 미러링한 것이다.
+이 게이트는 **타이밍/순서만** 소유한다. 머지의 git 기계(브랜치 생성·SPEC 문서만 commit·`main` ff-merge·origin 동기화·force push 금지·실패 시 PR 전환)는 정의하지 않고 `version-control`·`engineering` 카테고리에 위임한다. 이는 이 레포가 이미 dogfood로 따르는 분리 — 타이밍은 `rules/orchestration/approved-spec-merge.md`, 기계는 `rules/engineering/branch-and-slug.md` — 를 타깃 프로젝트용 sub-룰로 미러링한 것이다. <!-- stale: 타이밍 출처 rules/orchestration/approved-spec-merge.md는 이후 docs/specs/2026-06-03-remove-approved-spec-merge-rule에서 제거됨(타이밍 정책은 spec step 7 기본 핸드오프로 회귀). 기계 출처 branch-and-slug.md는 그대로 유효. 위 서술은 본 SPEC 작성 시점의 역사 기록이다. -->
 
 ## 완료 조건
 <!-- 5문장 패턴(항상 / …할 때 / …인 동안 / …이면(오류) / …기능이 켜지면)과 언어 규칙은 references/ears-patterns.md. 각 조건은 관찰 가능하고 독립 검증 가능해야 함. -->
@@ -47,7 +47,7 @@ workflow-rule-creator의 `spec-layout` 템플릿 본문을 확장해, 타깃 프
 
 - 이 단위는 선행 spec-layout 단위(`workflow-rule-creator-spec-layout`)가 만든 `templates/spec-layout.md`가 존재함을 전제로 그 본문을 확장한다(`depends_on`). 선행 단위가 정의한 경로/레이아웃 절은 보존하고 머지 게이트 절을 덧붙인다.
 - **선행 spec-layout SPEC 제약의 명시적 개정.** 선행 SPEC은 "spec-layout은 산출물 경로/레이아웃에만 한정하고 머지는 version-control에 위임"(제약 + "책임 중복 위험")이라 못박았다. 본 단위는 이를 **이 지점에서 의도적으로 개정**한다 — spec-layout이 머지 *타이밍 게이트*는 소유하되 머지 *기계*는 여전히 위임한다. 이는 스파인 모델("게이트는 정의만, 기계는 축에 위임")과 정합하며 조용한 위반이 아니다.
-- 머지 절차를 새로 발명하지 않는다. 게이트 문구는 `rules/orchestration/approved-spec-merge.md`의 타이밍 vs 기계 분리를 미러링하고, 기계는 `rules/engineering/branch-and-slug.md`·`version-control` 카테고리를 참조한다.
+- 머지 절차를 새로 발명하지 않는다. 게이트 문구는 `rules/orchestration/approved-spec-merge.md`의 타이밍 vs 기계 분리를 미러링하고, 기계는 `rules/engineering/branch-and-slug.md`·`version-control` 카테고리를 참조한다. <!-- stale: 미러링 출처 rules/orchestration/approved-spec-merge.md는 이후 docs/specs/2026-06-03-remove-approved-spec-merge-rule에서 제거됨. 본 템플릿 산출물(생성기 template) 자체는 영향 없음 — 이 줄은 작성 시점 근거 기록이다. -->
 - 템플릿 frontmatter(`label`·`description`)와 디스패처가 본문을 그대로 복사하는 계약은 sibling 생성기 규약을 따른다 — SKILL.md에 본문별 로직을 넣지 않는다. `allowed-tools`는 변경하지 않는다.
 
 ## 위험 (있을 때만)
