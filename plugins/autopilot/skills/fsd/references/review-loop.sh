@@ -146,9 +146,11 @@ rl_is_bot() {
 rl_produce_extract() {
   local json="$1" key="$2" out="$3"
   : > "$out"
+  # title·body 가 모두 빈 항목은 공백 줄로 새지 않게 제외(무진전 가드·델타 무결성 보존).
   printf '%s' "$json" \
     | jq -r --arg k "$key" '(.rework_brief[$k] // [])[]
-        | ((.title // "") + (if (.body // "") != "" then " — " + .body else "" end))' \
+        | ((.title // "") + (if (.body // "") != "" then " — " + .body else "" end))
+        | select(. != "")' \
         2>/dev/null >> "$out" || true
 }
 
@@ -275,7 +277,11 @@ rl_round() {
       : # 아래에서 재작업 라운드 진행.
       ;;
     *)
-      rl_escalate "$id" "리뷰 판정 미상(verdict='$verdict') — 생산자 출력 파싱 실패"
+      if [[ -z "$produce" ]]; then
+        rl_escalate "$id" "리뷰 생산자 출력이 비었음(생산 실패 또는 미설정) — 자동수정 보류"
+      else
+        rl_escalate "$id" "리뷰 판정 미상(verdict='$verdict') — 생산자 출력 파싱 실패"
+      fi
       return 10
       ;;
   esac
@@ -499,8 +505,11 @@ rl_selftest() {
   grep -q '보안 검증' "$delta" && ok "AC5 must 델타 반영" || bad "AC5 must 델타 반영"
   if grep -q '리팩터' "$delta"; then bad "AC5 defer 현PR 미혼합"; else ok "AC5 defer 현PR 미혼합"; fi
 
-  # ---- AC7: force push 미사용 (mock git 은 force 인자 보면 exit99) ----
-  ok "AC7 force push 미사용(mock force→exit99 미발동)"
+  # ---- AC7: force push 미사용 (mock git 은 force 인자 보면 exit99 로 selftest 를 죽인다) ----
+  # 실증: 위 request_changes 라운드가 실제로 push 를 했고(PUSHLOG 비어있지 않음),
+  # 그 어떤 push 도 force/-f 인자를 쓰지 않았다(쓰였다면 mock_git exit99 로 여기 도달 못 함).
+  [[ -s "$PUSHLOG" ]] && ok "AC7 재작업 라운드가 실제 push 수행" || bad "AC7 재작업 라운드가 실제 push 수행"
+  if grep -qiE 'force|(^| )-f( |$)' "$PUSHLOG"; then bad "AC7 force push 미사용"; else ok "AC7 force push 미사용(push 인자에 force 없음)"; fi
 
   # ---- AC8: 라운드 상한(3) 초과 → 중지 + 에스컬레이션, Review 유지 ----
   setup_task tC 104
@@ -519,6 +528,16 @@ rl_selftest() {
   out="$(rl_round tN "$base" 105 "feat/tN-x")"; rc=$?
   chk "AC9 무진전 에스컬레이션(rc=10)" "$rc" "10"
   case "$out" in *무진전*) ok "AC9 무진전 사유";; *) bad "AC9 무진전 사유";; esac
+
+  # ---- AC9b: must_adopt 항목이 빈 title/body 뿐 → 공백줄로 무진전 우회 금지 ----
+  setup_task tE 109
+  forge_meta sha-E > "$RV/109.review"
+  jq -n '{pipeline_verdict:"request_changes", reviewed_context:{head_sha:"sha-E"},
+          rework_brief:{must_adopt:[{title:"",body:"",severity:"blocking"}], defer:[], wont_adopt:[]}}' > "$RV/tE.produce"
+  out="$(rl_round tE "$base" 109 "feat/tE-x")"; rc=$?
+  chk "AC9b 빈 must 항목=무진전(rc=10)" "$rc" "10"
+  delta="$(task_dir tE)/.review-delta-109.spec.md"
+  [[ ! -f "$delta" ]] && ok "AC9b 공백 델타 미생성" || bad "AC9b 공백 델타 미생성"
 
   # ---- AC10: 차단성(must_adopt) 집합 직전 라운드와 동일 → 핑퐁 에스컬레이션 ----
   setup_task tP 106
