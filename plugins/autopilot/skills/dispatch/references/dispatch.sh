@@ -39,6 +39,13 @@ WAVE_TIMEOUT_SECONDS="${DISPATCH_WAVE_TIMEOUT_SECONDS:-7200}"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
+# yq 는 loop 의 구조화 상태(status --json) 파싱의 단일 출처다. 부재 시 종료 상태를
+# 판정할 수 없으므로 명확히 정지한다(텍스트 컬럼으로 silent fallback 하지 않음).
+require_yq() {
+  command -v yq >/dev/null 2>&1 \
+    || die "'yq' 가 필요합니다 — loop 구조화 상태(status --json) 판정에 사용됩니다."
+}
+
 now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 require_git_root() {
@@ -236,39 +243,50 @@ loop_stop() {
   $LOOP_CMD stop "$spec" >/dev/null 2>&1 || true
 }
 
-# loop_status_state <spec> — loop.sh status 출력에서 STATE 컬럼만 추출.
-# 출력: idle|running|stale|terminal 또는 빈 줄.
+# loop_status_json <spec> — loop 의 구조화 상태(JSON object 1줄)를 반환.
+# loop 의 공개 인터페이스(`status --json <spec>`)만 사용한다 — dispatch 는 loop 내부
+# signals/·worktree 파일을 직접 읽지 않는다(불변식 보존). 빈 출력이면 미지원(레거시
+# loop)·기록 부재.
+loop_status_json() {
+  local spec="$1"
+  # shellcheck disable=SC2086
+  $LOOP_CMD status --json "$spec" 2>/dev/null
+}
+
+# loop_status_state <spec> — 구조화 상태의 .state 만 추출(상태 표시용).
+# 출력: idle|running|stale|terminal|absent 또는 빈 줄(미지원·부재).
 loop_status_state() {
-  local spec="$1"
-  # shellcheck disable=SC2086
-  $LOOP_CMD status "$spec" 2>/dev/null \
-    | awk 'NR==2 { print $2 }'
+  local spec="$1" json
+  json="$(loop_status_json "$spec")"
+  [[ -z "$json" ]] && return 0
+  printf '%s' "$json" | yq -r '.state' 2>/dev/null
 }
 
-# loop_status_files <spec> — FILES 컬럼 (signals/ 내 파일 목록 또는 "-").
-loop_status_files() {
-  local spec="$1"
-  # shellcheck disable=SC2086
-  $LOOP_CMD status "$spec" 2>/dev/null \
-    | awk 'NR==2 { print $3 }'
-}
-
-# child_terminal_state <spec> — pending|running|done|failed
-# done : STATE=terminal 이고 FILES 안에 BLOCKED 가 없음.
-# failed : STATE=terminal 이고 FILES 안에 BLOCKED 가 있음 (워커 컨벤션).
-# running : STATE=running 또는 stale.
-# pending : STATE=idle 또는 미실행.
+# child_terminal_state <spec> — pending|running|done|failed|unknown
+# 종료 상태를 loop 의 구조화 상태(status --json)로만 판정한다 — 출력 표의 컬럼 위치나
+# 자유 텍스트 부분 문자열 일치에 의존하지 않는다(구조화 핸드오프 단일 출처).
+#   done    : .state=terminal 이고 .signals 에 "BLOCKED" 가 정확 일치로 없음.
+#   failed  : .state=terminal 이고 .signals 에 "BLOCKED" 가 정확 일치로 있음(워커 컨벤션).
+#   running : .state=running 또는 stale.
+#   pending : .state=idle 또는 absent(미실행).
+#   unknown : 구조화 상태 부재(레거시 loop·yq 부재) — 텍스트 컬럼으로 폴백하지 않음.
+#             호출자(결과 판정·watch)가 unknown 을 failed 로 처리한다.
 child_terminal_state() {
-  local spec="$1"
-  local st files
-  st="$(loop_status_state "$spec")"
-  files="$(loop_status_files "$spec")"
+  local spec="$1" json st
+  json="$(loop_status_json "$spec")"
+  if [[ -z "$json" ]]; then echo "unknown"; return; fi
+  st="$(printf '%s' "$json" | yq -r '.state' 2>/dev/null)"
   case "$st" in
     terminal)
-      if echo "$files" | grep -q 'BLOCKED'; then echo "failed"; else echo "done"; fi
+      if printf '%s' "$json" | yq -r '.signals[]' 2>/dev/null | grep -Fxq 'BLOCKED'; then
+        echo "failed"
+      else
+        echo "done"
+      fi
       ;;
     running|stale) echo "running" ;;
-    *) echo "pending" ;;
+    idle|absent) echo "pending" ;;
+    *) echo "unknown" ;;
   esac
 }
 
@@ -349,6 +367,7 @@ build_dag() {
 
 cmd_start() {
   require_git_root
+  require_yq
   local resume=""
   local max_parallel=0
   local -a inputs=()
@@ -547,6 +566,7 @@ cmd_status() {
   local rid="${1:-}"
   [[ -z "$rid" ]] && die "사용: $0 status <run-id>"
   require_git_root
+  require_yq
   local rd; rd="$(run_dir "$rid")"
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
   echo "run-id: $rid"
@@ -570,6 +590,7 @@ cmd_stop() {
   local rid="${1:-}"
   [[ -z "$rid" ]] && die "사용: $0 stop <run-id>"
   require_git_root
+  require_yq
   local rd; rd="$(run_dir "$rid")"
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
   local any=0 sp
@@ -593,6 +614,7 @@ cmd_watch() {
   local rid="${1:-}"
   [[ -z "$rid" ]] && die "사용: $0 watch <run-id>"
   require_git_root
+  require_yq
   local rd; rd="$(run_dir "$rid")"
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
   local start; start=$(date +%s)

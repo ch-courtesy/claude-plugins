@@ -42,11 +42,25 @@ cat > "$MOCK_LOOP" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 sub="${1:-}"; shift || true
+json=0
+if [[ "${1:-}" == "--json" ]]; then json=1; shift; fi
 spec="${1:-}"
 ctl="${spec}.ctl"
 outcome_file="${spec}.outcome"
 header_fmt='%-14s %-9s %-20s %-6s %-20s %s\n'
 data_fmt='%-14s %-9s %-20s %-6s %-20s %s\n'
+# files(콤마 구분) → JSON 배열. "-"·빈 값은 [].
+sig_json() {
+  local f="$1" out="[" first=1 part
+  [[ -z "$f" || "$f" == "-" ]] && { echo "[]"; return; }
+  local IFS=','
+  for part in $f; do
+    [[ -z "$part" || "$part" == "-" ]] && continue
+    if (( first == 1 )); then first=0; else out+=","; fi
+    out+="\"$part\""
+  done
+  out+="]"; echo "$out"
+}
 case "$sub" in
   start)
     [[ -z "$spec" ]] && { echo "mock: start needs spec" >&2; exit 2; }
@@ -61,11 +75,16 @@ case "$sub" in
     if [[ -f "$ctl" ]]; then
       IFS='|' read -r state files < "$ctl"
     fi
-    key="mock$(printf '%s' "$spec" | shasum 2>/dev/null | cut -c1-7 || echo "abc1234")"
-    # shellcheck disable=SC2059
-    printf "$header_fmt" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
-    # shellcheck disable=SC2059
-    printf "$data_fmt" "$key" "$state" "$files" "0" "-" "$spec"
+    if (( json == 1 )); then
+      printf '{"key":"mock","state":"%s","signals":%s,"iters":0,"last":"-","spec":"%s"}\n' \
+        "$state" "$(sig_json "$files")" "$spec"
+    else
+      key="mock$(printf '%s' "$spec" | shasum 2>/dev/null | cut -c1-7 || echo "abc1234")"
+      # shellcheck disable=SC2059
+      printf "$header_fmt" "KEY" "STATE" "FILES" "ITERS" "LAST-UPDATE" "SPEC"
+      # shellcheck disable=SC2059
+      printf "$data_fmt" "$key" "$state" "$files" "0" "-" "$spec"
+    fi
     ;;
   stop)
     [[ -z "$spec" ]] && { echo "mock: stop needs spec" >&2; exit 2; }
@@ -288,17 +307,18 @@ seed_spec "$SPEC_DIR/2026-05-29-r1.md"
 seed_spec "$SPEC_DIR/2026-05-29-r2.md" '["r1"]'
 out=$(dispatch start "$SPEC_DIR/2026-05-29-r1.md" "$SPEC_DIR/2026-05-29-r2.md" 2>&1)
 run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+# 파일 mtime(초) — GNU(`stat -c %Y`) 우선, 실패 시 BSD/macOS(`stat -f %m`).
+# 주의: GNU 에서 `stat -f %m` 는 %m 를 파일명으로 보고 filesystem 모드로 빠져
+# 변동하는 free-block 정보를 출력하며 exit 0 이 된다 → BSD-우선 순서면 mtime 이
+# 아니라 휘발성 값을 잡아 비교가 비결정적이 된다. 따라서 GNU 를 먼저 시도한다.
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }
 # 모두 done 상태일 것. start 마커 시점 캡처.
-r1_started_time=$(stat -f %m "$SPEC_DIR/2026-05-29-r1.md.started" 2>/dev/null \
-                  || stat -c %Y "$SPEC_DIR/2026-05-29-r1.md.started" 2>/dev/null)
-r2_started_time=$(stat -f %m "$SPEC_DIR/2026-05-29-r2.md.started" 2>/dev/null \
-                  || stat -c %Y "$SPEC_DIR/2026-05-29-r2.md.started" 2>/dev/null)
+r1_started_time=$(mtime "$SPEC_DIR/2026-05-29-r1.md.started")
+r2_started_time=$(mtime "$SPEC_DIR/2026-05-29-r2.md.started")
 sleep 1
 dispatch start --resume "$run_id" >/dev/null 2>&1 || true
-r1_new=$(stat -f %m "$SPEC_DIR/2026-05-29-r1.md.started" 2>/dev/null \
-         || stat -c %Y "$SPEC_DIR/2026-05-29-r1.md.started" 2>/dev/null)
-r2_new=$(stat -f %m "$SPEC_DIR/2026-05-29-r2.md.started" 2>/dev/null \
-         || stat -c %Y "$SPEC_DIR/2026-05-29-r2.md.started" 2>/dev/null)
+r1_new=$(mtime "$SPEC_DIR/2026-05-29-r1.md.started")
+r2_new=$(mtime "$SPEC_DIR/2026-05-29-r2.md.started")
 [[ "$r1_started_time" == "$r1_new" ]] \
   || { echo "FAIL: --resume 인데 done r1 이 재시작됨"; exit 1; }
 [[ "$r2_started_time" == "$r2_new" ]] \
@@ -322,6 +342,8 @@ cat > "$SLOW_MOCK" <<'SLOW'
 #!/usr/bin/env bash
 set -euo pipefail
 sub="${1:-}"; shift || true
+json=0
+if [[ "${1:-}" == "--json" ]]; then json=1; shift; fi
 spec="${1:-}"
 case "$sub" in
   start)
@@ -331,11 +353,12 @@ case "$sub" in
     ;;
   status)
     [[ -z "$spec" ]] && exit 2
-    printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC
-    if [[ -f "${spec}.started" ]]; then
-      printf '%-14s %-9s %-20s %-6s %-20s %s\n' k running - 0 - "$spec"
+    state="idle"; [[ -f "${spec}.started" ]] && state="running"
+    if (( json == 1 )); then
+      printf '{"key":"k","state":"%s","signals":[],"iters":0,"last":"-","spec":"%s"}\n' "$state" "$spec"
     else
-      printf '%-14s %-9s %-20s %-6s %-20s %s\n' k idle - 0 - "$spec"
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' k "$state" - 0 - "$spec"
     fi
     ;;
   stop) touch "${spec}.stopped" ;;
@@ -404,6 +427,8 @@ cat > "$MIXED_MOCK" <<'MIXED'
 #!/usr/bin/env bash
 set -euo pipefail
 sub="${1:-}"; shift || true
+json=0
+if [[ "${1:-}" == "--json" ]]; then json=1; shift; fi
 spec="${1:-}"
 case "$sub" in
   start)
@@ -418,14 +443,19 @@ case "$sub" in
     ;;
   status)
     [[ -z "$spec" ]] && exit 2
-    printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC
     state="idle"; files="-"
     if [[ -f "${spec}.ctl" ]]; then
       IFS='|' read -r state files < "${spec}.ctl"
     elif [[ -f "${spec}.started" ]]; then
       state="running"
     fi
-    printf '%-14s %-9s %-20s %-6s %-20s %s\n' k "$state" "$files" 0 - "$spec"
+    if (( json == 1 )); then
+      sig="[]"; [[ "$files" != "-" && -n "$files" ]] && sig="[\"$files\"]"
+      printf '{"key":"k","state":"%s","signals":%s,"iters":0,"last":"-","spec":"%s"}\n' "$state" "$sig" "$spec"
+    else
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' k "$state" "$files" 0 - "$spec"
+    fi
     ;;
   stop) touch "${spec}.stopped" ;;
   list) printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC ;;
@@ -468,6 +498,61 @@ stragglers=$(pgrep -f "sleep 30" 2>/dev/null | wc -l | tr -d ' ')
 set -o pipefail
 [[ "$stragglers" == "0" ]] || { echo "FAIL: sleep 30 자식 $stragglers 잔존"; exit 1; }
 echo "OK (rc=$rc elapsed=${elapsed}s, fast=done 보존, hung=failed)"
+
+echo ""
+echo "=== TEST 18: 종료 상태 판정은 구조화(status --json) 단일 출처 — 텍스트 컬럼 비의존 ==="
+# 적대적 mock: 사람용 status 표 컬럼은 의도적으로 틀린 값(STATE=idle, FILES=-)을
+# 내고, status --json 만 올바른 종료 상태(terminal/DONE)를 낸다. dispatch 가
+# 컬럼이 아니라 구조화 상태로 판정한다면 child 는 done 으로 마킹되어야 한다.
+ADV_MOCK="$WORK_DIR/adv-mock-loop.sh"
+cat > "$ADV_MOCK" <<'ADV'
+#!/usr/bin/env bash
+set -euo pipefail
+sub="${1:-}"; shift || true
+json=0
+if [[ "${1:-}" == "--json" ]]; then json=1; shift; fi
+spec="${1:-}"
+ctl="${spec}.ctl"
+case "$sub" in
+  start)
+    [[ -z "$spec" ]] && exit 2
+    touch "${spec}.started"
+    printf 'terminal|DONE\n' > "$ctl"
+    ;;
+  status)
+    [[ -z "$spec" ]] && exit 2
+    state="idle"; files="-"
+    if [[ -f "$ctl" ]]; then IFS='|' read -r state files < "$ctl"; fi
+    if (( json == 1 )); then
+      # 구조화 상태만 진실을 말한다.
+      local_sig="[]"
+      if [[ "$files" != "-" && -n "$files" ]]; then local_sig="[\"$files\"]"; fi
+      printf '{"key":"k","state":"%s","signals":%s,"iters":0,"last":"-","spec":"%s"}\n' \
+        "$state" "$local_sig" "$spec"
+    else
+      # 사람용 표 — 적대적으로 항상 idle/-(틀린 값)을 낸다.
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC
+      printf '%-14s %-9s %-20s %-6s %-20s %s\n' k idle - 0 - "$spec"
+    fi
+    ;;
+  stop) touch "${spec}.stopped" ;;
+  list) printf '%-14s %-9s %-20s %-6s %-20s %s\n' KEY STATE FILES ITERS LAST-UPDATE SPEC ;;
+  *) exit 2 ;;
+esac
+ADV
+chmod +x "$ADV_MOCK"
+rm -rf "$PROJECT/.dispatch"
+rm -f "$SPEC_DIR"/*.started "$SPEC_DIR"/*.ctl "$SPEC_DIR"/*.outcome "$SPEC_DIR"/*.stopped 2>/dev/null || true
+seed_spec "$SPEC_DIR/2026-05-29-adv.md"
+set +e
+out=$(LOOP_CMD="bash $ADV_MOCK" dispatch start "$SPEC_DIR/2026-05-29-adv.md" 2>&1)
+set -e
+run_id=$(echo "$out" | sed -n 's/^run-id:[[:space:]]*//p' | head -1)
+[[ -n "$run_id" ]] || { echo "FAIL: run-id 파싱 실패. got: $out"; exit 1; }
+adv_state=$(cat "$PROJECT/.dispatch/runs/$run_id"/state.adv-* 2>/dev/null)
+[[ "$adv_state" == "done" ]] \
+  || { echo "FAIL: 구조화 판정 기대 done(컬럼은 idle 적대값), got '$adv_state' — 텍스트 컬럼에 의존 의심"; exit 1; }
+echo "OK"
 
 echo ""
 echo "=== 모든 dispatch 통합 테스트 통과 ==="
