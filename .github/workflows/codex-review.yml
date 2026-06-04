@@ -426,6 +426,9 @@ jobs:
             // appended fingerprint lets a later run map the model's resolved_threads
             // judgments back to this thread.
             const inlineMarkerBase = '<!-- codex-review-inline';
+            // 인라인 코멘트 작성 리뷰어 식별 — Claude·Codex 가 동일 App bot(courtesy-bot[bot])
+            // 신원으로 게시하므로 GitHub 작성자만으론 구분 불가. 본문 맨 위 헤더로 가시화한다.
+            const reviewerLabel = '🤖 **Codex 리뷰**';
             const inlineComments = inlineFindings.map((f) => {
               // Anchor to f.line; fall back to f.start_line so a finding is never
               // dropped (validation guarantees at least one is a positive int).
@@ -433,7 +436,7 @@ jobs:
               const fingerprintMarker = `${inlineMarkerBase} fingerprint=${computeFingerprint(f)} -->`;
               const c = {
                 path: f.file,
-                body: `**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}\n\n${fingerprintMarker}`,
+                body: `${reviewerLabel}\n\n**[${f.severity}/${f.confidence_score}] ${f.title}**\n\n${f.body}\n\n**Suggestion:** ${f.suggestion}\n\n${fingerprintMarker}`,
                 side: 'RIGHT',
                 line: anchor,
               };
