@@ -74,12 +74,17 @@ rl_produce_review_skill() {
 }
 
 # 기본: 자율 실행기(loop)에 SPEC 델타 위임. loop 는 --branch 미지원이므로 같은 PR 브랜치 위
-# 재구현은 그 브랜치를 체크아웃한 워크트리 안에서 loop 를 secondary 모드로 호출해 수행한다
-# (SPEC 위험 섹션). 이 기본 경로는 실제 실행이며 selftest 에선 mock 으로 대체된다.
+# 재구현은 그 브랜치가 체크아웃된 워크트리 안에서 loop 를 secondary 모드로 호출해 수행한다
+# (SPEC 위험 섹션). 그 작업 브랜치 워크트리를 찾지 못하면 **거짓 성공 대신 실패(비-0)** 를
+# 반환해 호출자가 에스컬레이션하게 한다 — 엉뚱한 체크아웃의 변경을 push 하지 않는다.
+# (selftest 에선 IMPLEMENT_CMD 가 mock 으로 대체되어 이 경로를 타지 않는다.)
 rl_implement_loop() {
-  local spec="$1" branch="$2"
+  local spec="$1" branch="$2" wt
+  wt="$(${GIT_CMD:-git} worktree list --porcelain 2>/dev/null \
+    | awk -v b="refs/heads/$branch" '$1=="worktree"{w=$2} $1=="branch"&&$2==b{print w; exit}')"
+  [[ -n "$wt" ]] || return 1
   # shellcheck disable=SC2086
-  ${LOOP_CMD:-true} start "$spec" >/dev/null 2>&1
+  ( cd "$wt" && ${LOOP_CMD:-true} start "$spec" >/dev/null 2>&1 )
 }
 
 # ===== 리뷰 메타 파싱 (사람/head 게이트 전용) =====
@@ -248,8 +253,12 @@ rl_round() {
   rl_spinoff_backlog "$rd" "$key" "$pr" "$deferfile"
 
   local delta; delta="$(rl_spec_delta "$rd" "$key" "$base" "$pr" "$mustfile")"
+  # 구현이 대상 브랜치에서 실패하면 거짓 성공·엉뚱한 push 대신 에스컬레이션(자동수정 보류).
   # shellcheck disable=SC2086
-  $IMPLEMENT_CMD "$delta" "$branch"
+  if ! $IMPLEMENT_CMD "$delta" "$branch"; then
+    rl_escalate "$rd" "$key" "재구현 실패 — 대상 브랜치($branch) 워크트리에서 구현 불가(자동수정 보류)"
+    return 10
+  fi
   in_push_branch "$branch"
   int_log "$rd" "$key" "라운드 $round: must 구현 → 같은 head 브랜치($branch) push(새 PR 미생성). 재리뷰는 다음 드레인."
   return 0
@@ -335,6 +344,13 @@ rl_selftest() {
   grep -q '보안 입력 검증' "$delta" && ok "AC3 must 델타 반영" || bad "AC3 must 델타 반영"
   # 같은 head 재호출 → no-op(rc=20).
   rl_round "$rd" "$kA" "$base" 101 "feat/run1-a"; chk "AC5 동일 head 미시작(rc=20)" "$?" "20"
+
+  # ---- 재구현 실패 → 거짓 성공·엉뚱한 push 대신 에스컬레이션 (Codex blocking 회귀 가드) ----
+  local kF="f-fff9"
+  forge_meta sha-FFF > "$RV/119.review"; prod_rc sha-FFF '구현 불가 항목' > "$RV/$kF.produce"
+  IMPLEMENT_CMD='false' rl_round "$rd" "$kF" "$base" 119 "feat/run1-f" >/dev/null 2>&1; rc=$?
+  chk "구현 실패 → 에스컬레이션(rc=10)" "$rc" "10"
+  if grep -q 'feat/run1-f' "$PUSHLOG"; then bad "구현 실패인데 push 함"; else ok "구현 실패 → push 안 함"; fi
 
   # ---- AC6: approve → 머지 진행가능, 추가 라운드 미시작 ----
   local kB="b-bbb2"; : > "$IMPLLOG"

@@ -99,15 +99,45 @@ mg_touches_watch_dir() {
 mg_changed_manifests() {
   mg_merge_changed_files "$1" | grep -E '(^|/)plugin\.json$' || true
 }
+# mg_json_version <ref> <path> — 해당 ref 의 plugin.json 에서 version 값(예 0.19.0) 추출.
+#   없으면 빈 문자열. diff 라인 존재가 아니라 실제 값을 본다.
+mg_json_version() {
+  # shellcheck disable=SC2086
+  $GIT_CMD show "$1:$2" 2>/dev/null \
+    | grep -m1 -E '"version"[[:space:]]*:' \
+    | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"?([0-9][0-9.]*)"?.*/\1/'
+}
+
+# mg_semver_gt <new> <old> — new 가 old 보다 큰 SemVer 면 0, 아니면 1.
+#   old 가 비었으면(신규 매니페스트) new 만 있으면 0(증가로 간주). major.minor.patch 를
+#   필드별 숫자 비교(bash 3.2, 외부 도구 없이).
+mg_semver_gt() {
+  local new="$1" old="$2"
+  [[ -n "$new" ]] || return 1
+  [[ -n "$old" ]] || return 0
+  local oldIFS="$IFS"; IFS=.
+  # shellcheck disable=SC2206
+  local -a na=($new) oa=($old); IFS="$oldIFS"
+  local i n o
+  for ((i=0; i<3; i++)); do
+    n="${na[i]:-0}"; o="${oa[i]:-0}"
+    n="${n//[!0-9]/}"; o="${o//[!0-9]/}"
+    [[ -n "$n" ]] || n=0; [[ -n "$o" ]] || o=0
+    if (( 10#$n > 10#$o )); then return 0; fi
+    if (( 10#$n < 10#$o )); then return 1; fi
+  done
+  return 1   # 모든 필드 동일 → 증가 아님(같은 값 재기입·재정렬 차단).
+}
+
+# mg_manifest_version_bumped <branch> — 변경된 plugin.json 중 하나라도 base 대비
+#   실제 SemVer 가 증가했으면 0. 추가된 "version" 라인 존재가 아니라 old/new 값 비교.
 mg_manifest_version_bumped() {
-  local branch="$1" m
+  local branch="$1" m oldv newv
   while IFS= read -r m; do
     [[ -n "$m" ]] || continue
-    # shellcheck disable=SC2086
-    if $GIT_CMD diff "origin/$DEFAULT_BRANCH...$branch" -- "$m" 2>/dev/null \
-        | grep -qE '^\+[[:space:]]*"version"'; then
-      return 0
-    fi
+    oldv="$(mg_json_version "origin/$DEFAULT_BRANCH" "$m")"
+    newv="$(mg_json_version "$branch" "$m")"
+    if mg_semver_gt "$newv" "$oldv"; then return 0; fi
   done < <(mg_changed_manifests "$branch")
   return 1
 }
@@ -239,7 +269,15 @@ mg_selftest() {
     case "$1" in
       diff)
         if [[ "$*" == *"--name-only"* ]]; then printf '%s\n' ${MOCK_FILES:-}; return 0; fi
-        [[ -n "${MOCK_BUMP:-}" ]] && echo '+  "version": "9.9.9"'
+        ;;
+      show)
+        # git show <ref>:<path> — plugin.json version 값 시뮬(실제 값 비교 경로).
+        #   base(origin/*)=1.0.0. branch: MOCK_BUMP=1 → 1.1.0(증가), MOCK_BUMP=same →
+        #   1.0.0(동일, 차단되어야 함), 그 외 → 1.0.0.
+        case "$2" in
+          origin/*) echo '  "version": "1.0.0"' ;;
+          *) if [[ "${MOCK_BUMP:-}" == "1" ]]; then echo '  "version": "1.1.0"'; else echo '  "version": "1.0.0"'; fi ;;
+        esac
         ;;
     esac
     return 0
@@ -302,6 +340,13 @@ mg_selftest() {
     mg_merge_finish "$spec" "$rd" k5 >/dev/null 2>&1; rc=$?
   chk "AC7 워치+범프있음 rc=0" "$rc" "0"
   has 'git merge --ff-only' && ok "AC7 범프시 머지" || bad "AC7 범프시 머지"
+
+  # ---- 같은 version 값 재기입(라인은 추가되나 값 동일) → 차단 (Codex blocking 회귀 가드) ----
+  reset; setup k6
+  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="same" \
+    mg_merge_finish "$spec" "$rd" k6 >/dev/null 2>&1; rc=$?
+  chk "동일 버전 재기입 rc=1(차단)" "$rc" "1"
+  if has 'git merge --ff-only'; then bad "동일 버전인데 머지함"; else ok "동일 버전 → 머지 안 함"; fi
 
   # ---- AC6: approver 신원으로 승인 제출(approve action) ----
   reset

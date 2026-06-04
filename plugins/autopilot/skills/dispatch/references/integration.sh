@@ -130,6 +130,18 @@ in_base_sync() {
   $GIT_CMD fetch origin "$DEFAULT_BRANCH" || { in_die "fetch 실패: origin/$DEFAULT_BRANCH"; return 1; }
   # shellcheck disable=SC2086
   $GIT_CMD checkout "$branch" || { in_die "checkout 실패: $branch"; return 1; }
+  # origin/main 이 이미 브랜치 조상이면 동기화 불필요 — 재작성 없이 push 는 fast-forward.
+  # shellcheck disable=SC2086
+  if $GIT_CMD merge-base --is-ancestor "origin/$DEFAULT_BRANCH" "$branch" 2>/dev/null; then
+    return 0
+  fi
+  # base 가 전진했고 원격 브랜치(open PR)가 이미 있으면, rebase 재작성은 SHA 를 바꿔
+  # force 없는 push 를 non-fast-forward 로 실패시킨다(force 금지). 따라서 재작성하지 않고
+  # 그대로 둔다 — base 정합은 머지 단계의 ff-only 게이트가 별도로 강제한다(여기서 force·
+  # 재작성하지 않는다). 최초 통합(원격 브랜치 미존재)에서만 rebase 후 새 브랜치 push(ff-safe).
+  if [[ -n "$(in_existing_open_pr "$branch")" ]]; then
+    return 0
+  fi
   # shellcheck disable=SC2086
   if ! $GIT_CMD rebase "origin/$DEFAULT_BRANCH"; then
     # shellcheck disable=SC2086
@@ -275,6 +287,8 @@ in_selftest() {
     printf '%s\n' "$*" >> "$GITLOG"
     case "$1" in
       push) printf '%s\n' "$*" >> "$PUSHLOG" ;;
+      # merge-base --is-ancestor: MOCK_ANCESTOR=1 이면 조상(0), 기본 비조상(1).
+      merge-base) [[ "${MOCK_ANCESTOR:-0}" == "1" ]] && return 0 || return 1 ;;
       rebase|fetch|checkout) : ;;
     esac
     return 0
@@ -316,12 +330,14 @@ in_selftest() {
   grep -q 'pr create' "$PRLOG" && ok "AC2 PR 생성" || bad "AC2 PR 생성"
   grep -q 'rebase' "$GITLOG" && ok "AC2 base sync rebase" || bad "AC2 base sync rebase"
 
-  # ---- AC: open PR 존재 → 재사용(새 PR 미생성) ----
-  local kR="x-rrr2222"; : > "$PRLOG"
+  # ---- AC: open PR 존재 → 재사용(새 PR 미생성) + 기존 브랜치 rebase 재작성 안 함 ----
+  #   (Codex blocking 회귀 가드: base 전진+원격 브랜치 존재 시 rebase 는 non-ff push 를 부른다.)
+  local kR="x-rrr2222"; : > "$PRLOG"; : > "$GITLOG"
   MOCK_EXISTING_PR="55" in_integrate "$spec" "$rd" "$kR" >/dev/null; rc=$?
   chk "AC2 재사용 rc=0" "$rc" "0"
   chk "AC2 재사용 pr=55" "$(int_get_pr "$rd" "$kR")" "55"
   [[ ! -s "$PRLOG" ]] && ok "AC2 open PR 재사용(새 PR 미생성)" || bad "AC2 open PR 재사용(새 PR 미생성)"
+  if grep -q 'rebase' "$GITLOG"; then bad "기존 PR 재통합 시 rebase 재작성(non-ff 위험)"; else ok "기존 PR 재통합 시 rebase 재작성 안 함(non-ff 회피)"; fi
 
   # ---- AC9: spec-gap BLOCKED → push·PR 없이 blocked-spec-gap ----
   local kS="x-sss3333"; : > "$PUSHLOG"; : > "$PRLOG"
