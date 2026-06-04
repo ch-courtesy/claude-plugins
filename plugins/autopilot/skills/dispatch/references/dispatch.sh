@@ -6,10 +6,16 @@
 #     wave 단위로 자율 실행기(loop.sh)에 위임 호출.
 #   - run-id 단위로 진행 상태를 <project_root>/.dispatch/runs/<run-id>/ 에 보관.
 #   - list / status / stop / watch / --resume 운영 인터페이스 제공.
+#   - (통합 모드 활성 시) per-SPEC 통합→리뷰→머지 파이프라인을 소유: loop DONE 을 곧
+#     done 으로 보지 않고 push→PR→리뷰→ff-only 머지에 성공한 SPEC 만 done 으로 전이해
+#     의존자 해제를 머지 뒤로 미룬다. 통합 모듈(integration/review-loop/merge.sh)은
+#     서브프로세스로 격리 호출하고 per-SPEC 통합 상태는 lib-integration.sh 로 보관한다.
 #
 # **하지 않는 일**:
 #   - 입력 SPEC 의 frontmatter 형식·내용 검증 (자율 실행기 책임).
-#   - forge(PR/issue/label)·task 저장소 연동 (호출 레이어 책임).
+#   - forge(PR/issue/label) 연동 — **기본(비통합) 모드에서는** 호출 레이어 책임이다.
+#     통합 모드가 활성이면 dispatch 가 통합·리뷰·머지를 직접 소유한다(위 책임 참조).
+#     어느 모드에서도 force(강제) push·rebase·merge 는 쓰지 않는다.
 #   - 자율 실행기 내부 신호 파일 포맷·iteration·worktree 결정 (loop.sh 책임).
 #
 # 사용:
