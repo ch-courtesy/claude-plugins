@@ -127,20 +127,24 @@ grep -q 'effort: medium' "$WORKFLOW" \
   || fail "reasoning effort medium 입력 부재 (제약)"
 grep -q 'output-schema-file: \.github/prompts/codex-pr-review\.schema\.json' "$WORKFLOW" \
   || fail "공유 schema 를 output-schema-file 입력으로 전달하지 않음 (AC6/제약)"
-grep -q 'output-file: \.codex-review/result\.json' "$WORKFLOW" \
-  || fail "결과 JSON 을 output-file 입력으로 수신하지 않음 (제약)"
-grep -q 'prompt-file: \.codex-review/prompt\.md' "$WORKFLOW" \
-  || fail "1차 프롬프트 파일을 prompt-file 입력으로 전달하지 않음 (제약)"
-grep -q 'prompt-file: \.codex-review/prompt\.follow-up\.md' "$WORKFLOW" \
-  || fail "2차(follow-up) 프롬프트 파일을 prompt-file 입력으로 전달하지 않음 (제약)"
-ok "check 8: schema-file·prompt-file·sandbox·effort·output-file 입력 매핑"
+# Phase 4: per-chunk naming — the model step runs under strategy.matrix so the
+# result/prompt files are indexed by the matrix chunk. The input mappings
+# (output-file / prompt-file) are still asserted; only the file names gained the
+# `.chunk-<i>` suffix.
+grep -q 'output-file: \.codex-review/result\.chunk-' "$WORKFLOW" \
+  || fail "결과 JSON 을 (청크별) output-file 입력으로 수신하지 않음 (제약)"
+grep -q 'prompt-file: \.codex-review/prompt\.chunk-' "$WORKFLOW" \
+  || fail "1차 (청크별) 프롬프트 파일을 prompt-file 입력으로 전달하지 않음 (제약)"
+grep -q 'prompt-file: \.codex-review/prompt\.follow-up\.chunk-' "$WORKFLOW" \
+  || fail "2차(follow-up) (청크별) 프롬프트 파일을 prompt-file 입력으로 전달하지 않음 (제약)"
+ok "check 8: schema-file·prompt-file·sandbox·effort·output-file 입력 매핑 (청크별)"
 
 echo ""
 echo "=== check 9: 결과 JSON 유효성 가드 (AC6/위험) ==="
-jq_empty_count="$(count 'jq empty .codex-review/result.json' "$WORKFLOW")"
+jq_empty_count="$(count 'jq empty ".codex-review/result.chunk-' "$WORKFLOW")"
 [[ "$jq_empty_count" == "2" ]] \
-  || fail "결과 JSON 유효성 가드(jq empty)가 1차/2차 저장 직후 양쪽에 없음 (현재 $jq_empty_count) (위험)"
-ok "check 9: 1차/2차 결과 저장 직후 jq empty 검증"
+  || fail "결과 JSON 유효성 가드(jq empty)가 1차/2차(청크별) 저장 직후 양쪽에 없음 (현재 $jq_empty_count) (위험)"
+ok "check 9: 1차/2차 결과 저장 직후 jq empty 검증 (청크별)"
 
 echo ""
 echo "=== check 10: 공유 review context helper 사용 (보존) ==="
@@ -472,6 +476,50 @@ grep -qF 'let inlineFindings = findings;' "$WORKFLOW" \
 grep -qF 'Shared diff-anchor validator unavailable' "$WORKFLOW" \
   || fail "validator require 실패를 graceful degrade(경고+unfiltered fallback)로 처리하지 않음 (robustness)"
 ok "check 26: 공유 diff-only anchor 검증 + 제외 로그 + false-green setFailed 가드 + validator 부재 graceful degrade"
+
+echo ""
+echo "=== check 27: Phase 4 토큰 예산 청크링 — 3-잡 matrix 파이프라인 (prep→review→merge) ==="
+# 3개 잡(prep/review/merge)으로 재구성: 큰 diff 를 토큰 예산 청크로 나눠
+# 병렬 리뷰하고 단일 리뷰로 병합한다. 작은 diff 는 단일 청크(matrix-of-1)로
+# 기존 단일 패스와 동치 — 회귀 없음.
+for job in prep review merge; do
+  grep -qE "^  $job:" "$WORKFLOW" \
+    || fail "Phase 4 잡 '$job:' 부재 — 3-잡 matrix 파이프라인 미구성 (AC)"
+done
+# review 잡은 prep 가 내보낸 청크 목록을 strategy.matrix 로 fan-out 한다.
+grep -qF 'matrix:' "$WORKFLOW" \
+  || fail "review 잡의 strategy.matrix 부재 — 청크별 모델 호출 fan-out 불가 (AC)"
+grep -qF 'chunk: ${{ fromJSON(needs.prep.outputs.chunks) }}' "$WORKFLOW" \
+  || fail "matrix 가 prep.outputs.chunks 로 청크 fan-out 되지 않음 (AC)"
+grep -qF 'chunks: ${{ steps.plan.outputs.chunks }}' "$WORKFLOW" \
+  || fail "prep 잡이 청크 목록(chunks)을 출력하지 않음 (AC)"
+# 청크링·분류·병합 로직은 단일 공유 모듈에서 require — 인라인 복제 없음.
+grep -qF '.github/scripts/pr-review-chunking.js' "$WORKFLOW" \
+  || fail "공유 청크링 모듈(.github/scripts/pr-review-chunking.js) require 부재 (AC: 단일 공유 단위)"
+for fn in splitUnifiedDiffByFile selectFilesWithinBudget groupIntoChunks needsChunking mergeFindings; do
+  grep -qF "$fn" "$WORKFLOW" \
+    || fail "공유 청크링 단위 '$fn' 사용 부재 (AC)"
+done
+# 청크 간 데이터는 아티팩트로 전달(잡은 파일시스템을 공유하지 않음).
+grep -qE 'uses: actions/upload-artifact@[0-9a-f]{40}' "$WORKFLOW" \
+  || fail "청크 prep/결과 아티팩트 upload(SHA 고정) 부재 (AC)"
+grep -qE 'uses: actions/download-artifact@[0-9a-f]{40}' "$WORKFLOW" \
+  || fail "merge 잡의 아티팩트 download(SHA 고정) 부재 (AC)"
+grep -qF 'codex-review-prep' "$WORKFLOW" \
+  || fail "prep context 아티팩트(codex-review-prep) 부재 (AC)"
+grep -qF 'codex-review-result-' "$WORKFLOW" \
+  || fail "청크별 결과 아티팩트(codex-review-result-<i>) 부재 (AC)"
+# merge 잡은 모든 청크 결과를 fingerprint 기준 병합해 단일 createReview 로 제출.
+grep -qF 'mergeFindings' "$WORKFLOW" \
+  || fail "청크 findings 병합(mergeFindings) 부재 (AC)"
+# 저우선 강등: 총 예산 초과 시 저우선 파일 제외 + 로그.
+grep -qF 'Excluded low-priority file from review' "$WORKFLOW" \
+  || fail "저우선 파일 예산 초과 제외 로그 부재 (AC)"
+# 회귀 없음 가드: 청크 임계 이하 + 제외 없음이면 단일 청크에 원본 diff 그대로.
+grep -qF 'no regression' "$WORKFLOW" \
+  || fail "단일 패스 회귀 없음 보장 주석/경로 부재 (AC)"
+# 모델 action 소스 라인 수는 matrix 런타임 확장과 무관하게 불변(check 1 의 ==2 유지).
+ok "check 27: 3-잡 matrix(prep→review→merge) + 공유 청크링 모듈 + 아티팩트 전달 + 병합 단일제출 + 저우선 강등"
 
 echo ""
 echo "ALL CHECKS PASSED"
