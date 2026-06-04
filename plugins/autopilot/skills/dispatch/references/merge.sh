@@ -191,21 +191,25 @@ mg_cleanup_workspace() {
 }
 
 # ===== 7) 메인 진입 — 승인·버전 게이트 통과 시 머지하고 phase=merged =====
-# mg_merge_finish <spec> <run_dir> <key> [pr]
+# mg_merge_finish <spec> <run_dir> <key> [pr] [skip_approval]
+#   skip_approval=1 이면 승인 게이트만 우회한다(forge 미구성 직접 머지 서브모드: 승인 요청·
+#   리뷰·승인 없이 머지). version 범프 게이트·ff-only·작업공간 정리는 그대로 유지한다.
 #   반환: 0=머지 완료(phase=merged) / 1=버전게이트 차단(phase=blocked, 비완료 종착) /
 #         2=미승인(대기, phase 불변).
 mg_merge_finish() {
-  local spec="$1" rd="$2" key="$3" pr="${4:-}"
-  [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { mg_die "사용: merge.sh finish <spec> <run_dir> <key> [pr]"; return 1; }
+  local spec="$1" rd="$2" key="$3" pr="${4:-}" skip_approval="${5:-}"
+  [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { mg_die "사용: merge.sh finish <spec> <run_dir> <key> [pr] [skip_approval]"; return 1; }
   mkdir -p "$rd"
 
   local branch; branch="$(int_get_branch "$rd" "$key")"
   [[ -n "$branch" ]] || { mg_die "작업 브랜치 미설정(통합 선행 필요): key=$key"; return 1; }
   [[ -n "$pr" ]] || pr="$(int_get_pr "$rd" "$key")"
-  int_log "$rd" "$key" "merge_finish spec=$spec branch=$branch pr=$pr"
+  int_log "$rd" "$key" "merge_finish spec=$spec branch=$branch pr=$pr skip_approval=${skip_approval:-0}"
 
-  # 1) 승인 게이트.
-  if ! mg_approval_ok "$pr"; then
+  # 1) 승인 게이트(직접 머지 서브모드면 우회).
+  if [[ "$skip_approval" == "1" ]]; then
+    int_log "$rd" "$key" "직접 머지 서브모드: 승인 게이트 우회(version·ff-only 게이트는 유지)"
+  elif ! mg_approval_ok "$pr"; then
     int_log "$rd" "$key" "승인 게이트 차단: approver 신원 APPROVED 없음(pr=$pr) — 머지 안 함(대기)"
     echo "key:     $key"
     echo "blocked: approval — approver 신원의 '승인됨' 리뷰가 없습니다(pr=$pr)."
@@ -347,6 +351,22 @@ mg_selftest() {
     mg_merge_finish "$spec" "$rd" k6 >/dev/null 2>&1; rc=$?
   chk "동일 버전 재기입 rc=1(차단)" "$rc" "1"
   if has 'git merge --ff-only'; then bad "동일 버전인데 머지함"; else ok "동일 버전 → 머지 안 함"; fi
+
+  # ---- AC3/AC6: skip_approval=1 → 승인 게이트만 우회(직접 머지 서브모드) ----
+  #   forge 미구성 직접 머지는 승인 요청·리뷰·승인 없이 머지하되 version gate·ff-only 는 유지.
+  reset; setup kd1
+  MOCK_REVIEWS=$'COMMENTED\tsomeone' MOCK_FILES="README.md" \
+    mg_merge_finish "$spec" "$rd" kd1 "" 1 >/dev/null 2>&1; rc=$?
+  chk "AC3 직접머지 skip-approval rc=0" "$rc" "0"
+  has 'git merge --ff-only' && ok "AC3 직접머지 ff-only 머지" || bad "AC3 직접머지 ff-only 머지"
+  chk "AC3 직접머지 phase=merged" "$(int_get_phase "$rd" kd1)" "merged"
+
+  # ---- AC5: skip_approval=1 이어도 version gate 는 유지(차단) ----
+  reset; setup kd2
+  MOCK_REVIEWS="" MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="" \
+    mg_merge_finish "$spec" "$rd" kd2 "" 1 >/dev/null 2>&1; rc=$?
+  chk "AC5 직접머지 version gate 차단 rc=1" "$rc" "1"
+  if has 'git merge --ff-only'; then bad "AC5 직접머지 범프없음 머지 안 함"; else ok "AC5 직접머지 범프없음 머지 안 함"; fi
 
   # ---- AC6: approver 신원으로 승인 제출(approve action) ----
   reset

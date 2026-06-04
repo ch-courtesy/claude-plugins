@@ -1,6 +1,6 @@
 ---
 name: dispatch
-description: "하나 이상의 SPEC 파일을 구현 단계로 넘기고 싶을 때 사용 — 의존성(depends_on)을 풀어 각 SPEC 을 준비되는 즉시 자율 실행기에 스트리밍 위임하고 결과를 취합. 옵트인 통합 모드(--integrate)면 SPEC별 push→PR→리뷰→머지 게이트로 완료를 '머지됨'으로 재정의해 의존자 해제를 머지 뒤로 미룬다. 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch)."
+description: "하나 이상의 SPEC 파일을 구현 단계로 넘기고 싶을 때 사용 — 의존성(depends_on)을 풀어 각 SPEC 을 준비되는 즉시 자율 실행기에 스트리밍 위임하고 결과를 취합. 통합(리뷰·머지) 모드가 기본 활성이라 구현 완료 SPEC 을 대상 브랜치로 머지한다(forge 구성이면 push→PR→리뷰→ff-only 머지, 미구성이면 리뷰·승인 없이 ff-only 직접 머지). --no-integrate 로 끄면 레거시(loop DONE=done). 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch)."
 allowed-tools:
   - Read
   - Bash(bash * dispatch.sh start:*)
@@ -30,24 +30,28 @@ allowed-tools:
 - 호출마다 결정성 있는 `run-id`(타임스탬프 + 입력 SPEC 집합 sha7)를 만들고 진행 상태를 `<project_root>/.dispatch/runs/<run-id>/` 아래에 보관한다.
 - 기존 `run-id` 로 재호출되면 보관된 상태를 읽어 이미 `done` 인 SPEC 은 재실행하지 않고, 미완 SPEC 만 스트리밍 스케줄에 따라 이어 수행한다.
 
-## 통합(리뷰·머지) 모드 — 옵트인
+## 통합(리뷰·머지) 모드 — 기본 활성
 
-기본 모드에서 dispatch 는 loop 가 DONE 으로 끝나면 그 SPEC 을 `done` 으로 본다. 그러나 그 시점의 코드는 격리 워크트리에만 있고 main 에 머지되지 않았으므로, 그 SPEC 에 의존하는 SPEC 의 loop 가 갱신되지 않은 HEAD 에서 분기해 의존 결과 위에서 빌드할 수 없다. **통합 모드**는 한 SPEC 의 **완료를 "main 에 머지됨"으로 재정의**해 이 갭을 닫는다.
+기본 활성인 통합 모드에서 dispatch 는 loop 가 DONE 으로 끝나면 그 결과를 대상 브랜치(main)로 머지하고, 그 SPEC 의 **완료를 "main 에 머지됨"으로 재정의**한다. 이전엔 loop DONE 시점의 코드가 격리 워크트리에만 있어 의존 SPEC 이 갱신되지 않은 HEAD 에서 분기했지만, 통합이 기본 켜짐이 되어 의존자는 의존성이 main 에 머지된 뒤에만 실행된다.
 
-- **활성 조건(opt-in)**: `dispatch start --integrate` 플래그가 주어지거나 forge 구성(`APPROVER` 신원 환경변수)이 설정되면 활성화된다. 비활성이면 기존 동작(loop DONE = `done`)을 **완전한 하위 호환**으로 보존한다.
-- **per-SPEC 파이프라인**: loop 가 DONE 으로 끝나면 그 SPEC 은 `done` 이 아니라 중간 상태 `integrating` 으로 두고, 폴링 틱당 한 스텝씩 다음을 멱등 전진(드레인)시킨다:
-  1. **통합**(`integration.sh`): base sync(rebase, ff 가능 시) → 작업 브랜치(`feat/<run-id>-<slug>`) push → 같은 head 의 open PR 재사용/생성. `spec-gap` BLOCKED 면 push·PR 없이 스펙 보강 재개 안내, 하드 BLOCKED 면 push·PR 없이 사람 에스컬레이션(둘 다 비완료 종착).
-  2. **리뷰**(`review-loop.sh`): `autopilot:review` 생산자를 1회 호출해 단일 판정(approve/request_changes/unavailable). `request_changes` 면 `must_adopt` 를 run-dir 하위 SPEC 델타로 만들어 **같은 head 브랜치 위에서** 재구현·재푸시(새 PR 미생성). `defer` 는 현 PR 에 섞지 않고 별도 기록. 세 가드(라운드 상한 기본 3·무진전·핑퐁)와 사람/head 게이트로 무한루프를 막는다.
-  3. **승인+머지**(`merge.sh`): 분리된 자율 approver 신원으로 PR 승인 제출·확인(리뷰 봇 self-approve 무효) → 버전 범프 게이트(`plugins/` 변경 시 `plugin.json` 범프 강제) → `--ff-only` 머지(+base push) → `merged`.
+- **활성 조건(기본 ON)**: `dispatch start` 는 별도 플래그 없이 통합 모드로 시작한다. `--no-integrate` 로만 끄며, 끄면 기존 동작(loop DONE = `done`, 머지·PR 없음)을 **완전한 하위 호환**으로 복원한다. (`--integrate` 는 기본 ON 이므로 하위호환 no-op 으로 수용된다.)
+- **서브모드(forge / direct)**: forge 구성 여부로 갈린다 — 분리 승인 신원(`APPROVER`)이 설정되고 forge CLI 가 사용 가능하면 **forge**(풀 파이프라인), 아니면 **direct**(승인 요청·리뷰·승인 의례 없이 대상 브랜치로 직접 머지). 두 서브모드 모두 fast-forward 전용 머지와 버전 범프 게이트를 통과해야 한다.
+- **per-SPEC 파이프라인**: loop 가 DONE 으로 끝나면 그 SPEC 은 `done` 이 아니라 중간 상태 `integrating` 으로 두고, 폴링 틱당 한 스텝씩 다음을 멱등 전진(드레인)시킨다.
+  - **forge 서브모드**:
+    1. **통합**(`integration.sh`): base sync(rebase, ff 가능 시) → 작업 브랜치(`feat/<run-id>-<slug>`) push → 같은 head 의 open PR 재사용/생성. `spec-gap` BLOCKED 면 push·PR 없이 스펙 보강 재개 안내, 하드 BLOCKED 면 push·PR 없이 사람 에스컬레이션(둘 다 비완료 종착).
+    2. **리뷰**(`review-loop.sh`): `autopilot:review` 생산자를 1회 호출해 단일 판정(approve/request_changes/unavailable). `request_changes` 면 `must_adopt` 를 run-dir 하위 SPEC 델타로 만들어 **같은 head 브랜치 위에서** 재구현·재푸시(새 PR 미생성). `defer` 는 현 PR 에 섞지 않고 별도 기록. 세 가드(라운드 상한 기본 3·무진전·핑퐁)와 사람/head 게이트로 무한루프를 막는다.
+    3. **승인+머지**(`merge.sh`): 분리된 자율 approver 신원으로 PR 승인 제출·확인(리뷰 봇 self-approve 무효) → 버전 범프 게이트(`plugins/` 변경 시 `plugin.json` 범프 강제) → `--ff-only` 머지(+base push) → `merged`.
+  - **direct 서브모드**: `integration.sh integrate-direct` 로 작업 브랜치(`feat/<run-id>-<slug>`)만 식별하고(push·PR·리뷰·승인 우회) 바로 `merge.sh finish`(승인 게이트만 우회) 로 넘긴다 — **버전 범프 게이트와 `--ff-only` 머지·작업 공간 정리는 forge 서브모드와 동일하게 적용**된다. BLOCKED 분기(spec-gap/하드)는 forge 서브모드와 동일 헬퍼를 공유한다. 리뷰 부재의 완화(적대적 리뷰 삽입)는 후속 작업으로 분리되어 있다.
 - **머지 게이트**: `merged` 에 도달한 SPEC 만 `done` 으로 전이한다. 따라서 **의존자는 의존성이 main 에 머지된 뒤에만** 실행 큐에 풀리고, 갱신된 main 위에서 분기한다. 통합이 비완료 종착(`blocked`/`escalated`)이면 그 SPEC 은 `failed` 이고 그 **이행적 의존자만** `skipped` 된다.
-- **불변식**: 어떤 경로에서도 force(강제) push·rebase·merge 를 쓰지 않는다(머지는 `git merge --ff-only` 만). main 체크아웃+머지 구간은 run-dir 락으로 **직렬화**되어 동시 머지 레이스가 없다.
-- **주입 가능한 인터페이스(mock 검증)**: `LOOP_CMD` `GIT_CMD` `FORGE_CMD`(기본 gh) `DEFAULT_BRANCH`(main) `APPROVER` `REVIEW_BOT` `APPROVE_CMD` `REVIEW_ROUNDS_MAX`(3) `WATCH_DIRS`(plugins/) `REVIEW_PRODUCE_CMD` `INTEGRATION_CMD` `REVIEW_CMD` `MERGE_CMD`. 모든 외부 인터페이스가 주입 가능해 각 모듈을 mock 으로 독립 검증한다(실제 PR·머지 미수행).
+- **모드·서브모드 sticky**: 최초 시작 때 결정된 모드(켜짐/`--no-integrate` 꺼짐)와 서브모드(forge/direct)는 run-dir 마커(`INTEGRATE` 내용=서브모드 / `NO_INTEGRATE`)로 보존되어 `--resume` 에서 동일하게 재개된다(재개 시 현재 env·플래그보다 마커 우선).
+- **불변식**: 어떤 경로(forge·direct)에서도 force(강제) push·rebase·merge 를 쓰지 않는다(머지는 `git merge --ff-only` 만). main 체크아웃+머지 구간은 run-dir 락으로 **직렬화**되어 동시 머지 레이스가 없다.
+- **주입 가능한 인터페이스(mock 검증)**: `LOOP_CMD` `GIT_CMD` `FORGE_CMD`(기본 gh) `FORGE_BIN`(서브모드 판정용 forge CLI, 기본 gh) `DEFAULT_BRANCH`(main) `APPROVER` `REVIEW_BOT` `APPROVE_CMD` `REVIEW_ROUNDS_MAX`(3) `WATCH_DIRS`(plugins/) `REVIEW_PRODUCE_CMD` `INTEGRATION_CMD` `REVIEW_CMD` `MERGE_CMD`. 모든 외부 인터페이스가 주입 가능해 각 모듈을 mock 으로 독립 검증한다(실제 PR·머지 미수행).
 
 ## Subcommands
 
-### dispatch start `<spec...>` [--max-parallel N] [--resume `<run-id>`] [--integrate]
+### dispatch start `<spec...>` [--max-parallel N] [--resume `<run-id>`] [--no-integrate]
 
-1 개 이상의 SPEC 파일 경로를 받아 새 run 을 시작한다. `--integrate`(또는 `APPROVER` 환경변수)면 통합(리뷰·머지) 모드로 동작한다(위 "통합 모드" 절). 통합 모드에서는 state 에 중간 상태 `integrating` 이 추가되고 `done` 은 "머지됨"을 뜻한다.
+1 개 이상의 SPEC 파일 경로를 받아 새 run 을 시작한다. 통합(리뷰·머지) 모드가 **기본 활성**이며(위 "통합 모드" 절), forge 구성 여부로 forge/direct 서브모드가 갈린다. 통합 모드에서는 state 에 중간 상태 `integrating` 이 추가되고 `done` 은 "머지됨"을 뜻한다. `--no-integrate` 면 통합을 꺼 기존 동작(loop DONE = `done`, 머지·PR 없음)으로 돌아간다.
 
 - 입력 검증: 각 경로가 파일로 존재하고 읽을 수 있어야 한다. 하나라도 누락이면 보고 후 즉시 abort.
 - DAG 구성: 각 SPEC frontmatter 의 `depends_on` 을 읽어 의존 인덱스를 만든다. cycle 이면 abort. 진단용 `WAVES.txt` 도 함께 기록(실행 스케줄은 준비도 기반).
@@ -87,13 +91,13 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 
 ## 의존성
 
-`git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `autopilot:loop` 스킬, `yq`(mikefarah). `yq` 는 depends_on 파싱(없으면 awk 폴백)뿐 아니라 **loop 구조화 상태(`status --json`) 판정의 단일 출처**이므로 `start`/`status`/`stop`/`watch` 에서 필수다(부재 시 명확히 정지 — 텍스트 컬럼으로 silent fallback 하지 않음). 통합 모드는 추가로 `jq`(리뷰 판정 JSON 파싱)와 forge CLI(`gh`, 주입 가능)·리뷰 생산자(`autopilot:review`)를 쓴다(비활성 모드에는 불필요).
+`git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `autopilot:loop` 스킬, `yq`(mikefarah). `yq` 는 depends_on 파싱(없으면 awk 폴백)뿐 아니라 **loop 구조화 상태(`status --json`) 판정의 단일 출처**이므로 `start`/`status`/`stop`/`watch` 에서 필수다(부재 시 명확히 정지 — 텍스트 컬럼으로 silent fallback 하지 않음). 통합 모드 **forge 서브모드**는 추가로 `jq`(리뷰 판정 JSON 파싱)와 forge CLI(`gh`, 주입 가능)·리뷰 생산자(`autopilot:review`)를 쓴다. **direct 서브모드**(forge 미구성)는 forge CLI·리뷰 생산자 없이 git 만으로 ff-only 직접 머지하므로 이들이 불필요하다. `--no-integrate` 레거시 모드에는 통합 관련 의존성이 모두 불필요하다.
 
 ## 규칙
 
 - 자체 작성·갱신하는 영역은 `<project_root>/.dispatch/runs/<run-id>/` 디렉토리 안의 파일들(통합 모드의 SPEC 델타·백로그·통합 상태 포함)과 본 스킬의 정의 파일뿐이다. 작업 브랜치·PR·머지 같은 forge 부수효과를 제외하면 이 외 경로를 만들지 않는다.
 - 자율 실행기 인터페이스(`loop.sh start|status|stop|cleanup|logs`) 외 child 워크트리·신호 파일을 직접 들여다보지 않는다.
-- **forge 연동 소유권**: 기본(비통합) 모드에서 forge(PR/머지) 연동은 호출 레이어 책임이고 dispatch 는 위임만 한다. **통합 모드가 활성이면 dispatch 가 통합·리뷰·머지를 직접 소유**한다 — 머지가 의존자를 푸는 게이트는 본질적으로 dispatch 의 웨이브 스케줄링에 속하기 때문이다. 이때도 모든 forge·git·loop·리뷰 인터페이스는 주입 가능한 명령으로 두어 mock 검증되며, force 는 어떤 경로에서도 쓰지 않는다.
+- **통합·머지 소유권**: 통합 모드가 기본 활성이므로 **dispatch 가 통합·(forge 서브모드에서) 리뷰·머지를 직접 소유**한다 — 머지가 의존자를 푸는 게이트는 본질적으로 dispatch 의 웨이브 스케줄링에 속하기 때문이다. `--no-integrate` 레거시 모드에서만 forge(PR/머지) 연동이 호출 레이어 책임이고 dispatch 는 위임만 한다. 어느 모드에서도 모든 forge·git·loop·리뷰 인터페이스는 주입 가능한 명령으로 두어 mock 검증되며, force 는 어떤 경로(forge·direct)에서도 쓰지 않는다.
 - 분해(여러 SPEC 작성) 책임은 SPEC 작성 도구(`autopilot:spec` 등)에 있고, dispatch 는 이미 만들어진 SPEC 들만 받는다.
 - child 의 종료 의도(완료/차단)는 자율 실행기가 신호로 표현하고, dispatch 는 그 공개 인터페이스가 제공하는 **구조화된 상태**(`loop.sh status --json` 의 `.state`·`.signals[]`)로만 읽는다 — 표 컬럼 위치·부분 문자열 일치에 의존하지 않는다. `signals` 의 의미(`DONE`/`BLOCKED`)는 워커 컨벤션이며 dispatch 는 정확 일치 멤버십으로 판정한다.
 - run 디렉토리는 git 추적에서 제외한다(`.gitignore` 처리 권장).
