@@ -1,12 +1,11 @@
 ---
 name: fsd
-description: "자연어 의도 → SPEC → 구현 → 통합(PR) → [외부 승인] → 머지 파이프라인을 task 단위로 끝까지 자동으로 닫고 싶을 때 사용 — SPEC 작성(spec)·구현 위임(dispatch)을 forge/task backend 위에서 엔드투엔드로 오케스트레이션. 리뷰는 외부 CI(GitHub PR)와 사람에게 위임한다. 호출 'Skill(skill=\"fsd\", args=\"<subcommand> [<args>]\")' (intake/start/merge/poll/status/list/stop)."
+description: "자연어 의도 → SPEC → 구현 → 머지 파이프라인을 task 단위로 끝까지 **완전자율**로 닫고 싶을 때 사용 — SPEC 작성(spec)·구현 위임(dispatch)을 엔드투엔드로 오케스트레이션. 리뷰·머지는 dispatch 통합 모드(기본 ON)에 완전위임하며 fsd 내부엔 리뷰·머지·승인 게이트가 없다(외부 승인 보류·사람 개입 없음). 호출 'Skill(skill=\"fsd\", args=\"<subcommand> [<args>]\")' (intake/start/poll/status/list/stop)."
 allowed-tools:
   - Read
   - Skill
   - Bash(bash * fsd.sh intake:*)
   - Bash(bash * fsd.sh start:*)
-  - Bash(bash * fsd.sh merge:*)
   - Bash(bash * fsd.sh poll)
   - Bash(bash * fsd.sh status:*)
   - Bash(bash * fsd.sh list)
@@ -16,7 +15,7 @@ allowed-tools:
 
 # fsd
 
-`fsd` 는 `spec`·`loop`·`dispatch` 가 의도적으로 비워둔 **forge 호출 레이어**를 구현하는 오케스트레이터다. spec-first 자동화 파이프라인을 엔드투엔드로 닫는 컴포넌트로, "자연어 의도 → SPEC 작성(spec) → 구현(dispatch) → 통합(PR) → [외부 승인] → 머지" 흐름을 task 단위로 운영한다. 리뷰는 외부 CI(GitHub PR 워크플로)와 사람에게 위임한다 — fsd 내부에는 자동 리뷰·재구현 고리가 없다.
+`fsd` 는 spec-first 자동화 파이프라인을 **완전자율**로 닫는 task 오케스트레이터다. "자연어 의도 → SPEC 작성(spec) → 구현 위임(dispatch) → (dispatch가 소유하는) 리뷰·머지" 흐름을 task 단위로 운영한다. **리뷰·머지·통합(PR)은 fsd 가 직접 하지 않고 `dispatch` 의 통합 모드(기본 ON)에 완전위임**한다 — fsd 내부에는 리뷰·머지·승인 게이트가 없고, 외부 승인 보류나 사람 개입 지점도 없다. `dispatch start` 가 implement→통합→(forge 미구성이면 direct 서브모드의 ff-only)머지까지 자기 파이프라인에서 수행하고, fsd 는 `intake`(task 등록)·`start`(dispatch 위임)·`poll`(dispatch run 관측)만 책임진다.
 
 fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합한다. 그들의 내부 신호 파일·워크트리·run 디렉토리를 직접 들여다보지 않으며, 자기 상태 디렉토리(`.fsd/`) 밖의 경로를 만들지 않는다(자기 스킬 정의 파일 제외).
 
@@ -30,18 +29,18 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 
 `fsd` 는 두 가지 입력으로 진입한다:
 
-- **자연어 의도로 호출되면** (예: `Skill(skill: "fsd", args: "<자연어 task 설명>")`) — 먼저 `Skill(skill: "spec", args: "<자연어 task 설명>")` 로 SPEC 을 산출하고, 그 결과 SPEC 경로(들)로 `intake` → `start` 를 이어 구현까지 자동으로 닫는다. spec 의 명확화 인터뷰·최종 단일 승인은 그대로 수행되어 자기완결 SPEC 을 보장하며, 승인된 SPEC 으로 task 등록·dispatch 위임이 자동으로 흐른다. SPEC 에 `[NEEDS CLARIFICATION` 미해결 마커가 남으면 자동 진행을 멈추고 `--resume` 해결을 안내한다.
+- **자연어 의도로 호출되면** (예: `Skill(skill: "fsd", args: "<자연어 task 설명>")`) — 먼저 `Skill(skill: "spec", args: "<자연어 task 설명>")` 로 SPEC 을 산출하고, 그 결과 SPEC 경로(들)로 `intake` → `start` 를 이어 구현까지 자동으로 닫는다. spec 의 명확화 인터뷰·미해결 마커 가드·최종 SPEC 산출은 그대로 수행되지만, **fsd 가 spec 을 호출하는 맥락에서는 spec 의 step-7 옵트인 핸드오프 프롬프트("구현까지 자동 진행할까요?")를 띄우지 않는다** — fsd 는 항상 자율이므로 진행 결정을 fsd 가 소유하며 그 확인은 중복이다. 별도의 신호 인자는 필요 없다(같은 오케스트레이터가 fsd→spec 를 연달아 실행하므로 호출 맥락만으로 생략이 성립한다). **이 맥락에서 spec 은 dispatch 를 직접 호출하지 않고 SPEC 경로만 반환하며, dispatch 기동은 fsd 의 `start` 가 단독으로 수행한다** — spec 의 handoff 와 fsd 의 `start` 가 같은 SPEC 에 dispatch 를 이중 기동하지 않도록 시작 책임을 fsd 한쪽에만 둔다. 산출된 SPEC 으로 task 등록(intake)·dispatch 위임(start)이 사람 개입 없이 자동으로 흐른다. SPEC 에 `[NEEDS CLARIFICATION` 미해결 마커가 남으면 자동 진행을 멈추고 `--resume` 해결을 안내한다.
 - **이미 SPEC 경로(들)가 주어지면** — spec 호출을 건너뛰고 바로 `intake <spec...>` → `start <spec...>` 를 수행한다.
 
-어느 모드든 SPEC 산출은 `spec` 스킬의 책임(외부 상태 안 만듦)이고, task 등록·run 소유·forge 연동은 `fsd` 의 책임이다 — 이 역할 분리는 불변이다. 현재 실효 자동 범위는 `intake → start`(dispatch 위임)에 더해 `poll`(드레인 전이)까지이며, `merge`(C4) 만 미구현 핸들러다(아래 Subcommands 참조). 통합으로 열린 PR 의 승인은 외부 CI·사람이 수행하고, `poll` 은 미승인 PR 을 외부 승인 대기 no-op 로 둔다.
+어느 모드든 SPEC 산출은 `spec` 스킬의 책임(외부 상태 안 만듦)이고, task 등록·run 소유·dispatch 위임은 `fsd` 의 책임이며, 리뷰·머지·통합은 `dispatch` 통합 모드의 책임이다 — 이 역할 분리는 불변이다. 실효 자동 범위는 `intake → start`(dispatch 위임) → `poll`(dispatch run 관측 전이)까지 **완전자율**로 닫힌다. dispatch 가 통합·머지를 소유하므로 fsd 에는 별도의 `merge` 서브커맨드나 외부 승인 보류 게이트가 없다 — `poll` 은 dispatch run 의 모든 SPEC 이 머지 종착에 도달하면 task 를 `done` 으로 전이할 뿐이다.
 
 ## 모델
 
 - **단위**: task. 하나의 task 는 한 작업 의도(보통 SPEC 한 묶음)에 대응하며, 진행 상태를 `<project_root>/.fsd/tasks/<task-id>/` 아래 격리 디렉토리에 보관한다.
 - **task-id**: 첫 SPEC 의 slug + 입력 SPEC 집합 sha7. 같은 SPEC 집합으로 재진입하면 같은 task-id 를 얻어 idempotent 하다.
-- **위임**: SPEC 작성은 `spec` 스킬의 공개 호출(`Skill(skill: "spec", ...)`)로, 구현은 `dispatch` 의 공개 서브커맨드(`dispatch start <spec...>`)로만 한다.
-- **상태 저장소**: task 별 디렉토리에 상태 미러·SPEC 경로·브랜치·PR 번호·소유한 dispatch run-id·append-only 로그·마지막 head 식별자를 담는다. 이 디렉토리는 git 추적에서 제외한다(`.gitignore` 의 `.fsd/`).
-- **골격 범위(C0)**: 본 단위는 정의 문서·서브커맨드 라우터·상태 저장소 헬퍼까지만 만든다. `intake`·`start` 는 spec·dispatch 조합까지만 수행하고, forge·task backend 동작(이슈 생성·PR·머지·상태 전이)은 후속 단위의 자리(미구현 핸들러)로 남긴다.
+- **위임**: SPEC 작성은 `spec` 스킬의 공개 호출(`Skill(skill: "spec", ...)`)로, 구현·리뷰·머지는 `dispatch` 의 공개 서브커맨드(`dispatch start <spec...>` — 통합 모드 기본 ON)로만 한다. fsd 는 dispatch run 상태를 `dispatch status` 공개 인터페이스로 관측한다.
+- **상태 저장소**: task 별 디렉토리에 상태 미러·SPEC 경로·소유한 dispatch run-id·origin·append-only 로그를 담는다. 리뷰·머지·통합은 dispatch 가 소유하므로 forge 부수효과(브랜치·PR·head)는 fsd 상태에 보관하지 않는다. 이 디렉토리는 git 추적에서 제외한다(`.gitignore` 의 `.fsd/`).
+- **완전자율**: fsd 는 외부 승인 보류·사람 개입 지점 없이 `intake → start → poll` 로 task 를 done 까지 전진시킨다. 리뷰·머지의 자율성은 dispatch 통합 모드(direct 서브모드: 분리 승인 신원 없이 ff-only 머지)가 제공한다.
 
 ## 상태 저장소 레이아웃
 
@@ -49,19 +48,16 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 <project_root>/.fsd/
 └── tasks/
     └── <task-id>/
-        ├── state          # 상태 로컬 미러 (intake|dispatching|dispatched|stopped|...|done|failed)
+        ├── state          # 상태 로컬 미러 (intake|dispatching|dispatched|stopped|done|dispatch-failed)
         ├── SPECS.txt       # 이 task 의 SPEC 경로 목록 (append-only, 한 줄에 하나)
-        ├── branch          # 작업 브랜치 이름            (forge 연동은 후속 단위)
-        ├── pr              # PR 번호                      (forge 연동은 후속 단위)
         ├── run-id          # 이 task 가 소유한 dispatch run 식별자
-        ├── head            # 마지막으로 관측한 head 식별자
         ├── origin          # 이 task 를 촉발한 원본 task 식별자 (버그 분리 연결, 선택)
         └── LOG.md          # append-only 이벤트 로그
 ```
 
 ## Subcommands
 
-본 골격(C0)이 5 서브커맨드(`intake`·`start`·`merge`·`poll`·`status`/`list`/`stop`)의 책임과 입출력 계약을 **완전판**으로 고정한다. 후속 단위(C1~C5)는 이 계약을 입력 컨텍스트로 차용하며 SKILL.md 는 C0 단독 소유로 둔다(병렬 wave 충돌 방지). 리뷰 단계는 외부 CI·사람에게 위임하므로 fsd 서브커맨드에 포함되지 않는다.
+fsd 는 4 서브커맨드(`intake`·`start`·`poll`·`status`/`list`/`stop`)를 갖는다. 리뷰·머지·통합은 `dispatch` 통합 모드가 소유하므로 fsd 서브커맨드에 포함되지 않는다(별도 `merge` 서브커맨드 없음).
 
 ### fsd intake `[--origin <task-id>]` `<spec...>`
 
@@ -71,7 +67,6 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 - 옵션 `--origin <task-id>`: 이 task 를 촉발한 **원본 task** 와의 연결을 `origin` 필드에 기록한다(진행 중 버그 분리에서 사용). 생략하면 origin 기록 없이 기존과 동일하게 등록한다(하위 호환).
 - 동작: task-id 를 도출하고 `.fsd/tasks/<task-id>/` 를 생성, SPEC 경로를 `SPECS.txt` 에 기록, `state=intake` 로 설정, `--origin` 이 주어지면 `origin` 에 기록, `LOG.md` 에 이벤트를 남긴다.
 - 출력: `task-id: <task-id>`.
-- **후속(C1)**: task backend(Issue/Project) 항목 생성·연결.
 
 ### fsd start `<spec...>`
 
@@ -82,25 +77,18 @@ task 의 SPEC(들)을 자율 실행기 오케스트레이터(`dispatch`)에 위�
 - 동작(마커 없을 때): task-id 도출 후 디렉토리를 보장하고(미등록이면 `SPECS.txt` 기록), `state=dispatching` → `dispatch start <spec...>` 공개 서브커맨드로 위임 → 그 출력에서 run 식별자를 추출해 `run-id` 에 기록 → `state=dispatched`.
 - 출력: `task-id: <task-id>` 와 `run-id: <run-id>`.
 - 실패: dispatch 출력에서 run-id 를 얻지 못하면 `state=dispatch-failed` 로 기록하고 dispatch 출력과 함께 abort.
-- **후속(C2)**: DONE→push→PR forge 통합.
-
-### fsd merge `<task-id>`
-
-외부 승인을 받은 task 를 머지하고 Done 처리·cleanup 한다.
-
-- 본 골격(C0): **미구현**. 호출 시 미구현 안내를 출력하고 비-0(2) 으로 종료.
-- **후속(C4)**: 머지·task backend Done 전이·브랜치/워크트리 cleanup.
+- **리뷰·머지**: `dispatch start` 는 통합 모드(기본 ON)로 위임되므로(`--no-integrate` 미전달), dispatch 가 loop 구현 후 통합(PR)→리뷰→(direct 서브모드)ff-only 머지까지 자기 run 안에서 수행한다. fsd 는 이를 다시 하지 않는다.
 
 ### fsd poll
 
-진행 중인 모든 task 를 한 바퀴 드레인하며 각 task 를 가능한 다음 한 스텝으로 전진시킨다(멱등, 상시 호스트 운영 진입점).
+진행 중인 모든 task 의 dispatch run 을 관측해 done 까지 전진시킨다(멱등, 상시 호스트 운영 진입점, 완전자율).
 
-- 동작: `poll.sh poll` 로 위임한다(주입 가능 `FSD_POLL_CMD`). 미시작 task 는 start, 구현 완료 task 는 integrate(PR), 승인된 PR 은 merge 경로를 전이적으로 적용한다. 호출 단위 무상태·멱등이라 재실행이 안전하다.
-- 외부 승인 대기: 열린 PR 이 미승인이면 어떤 자동 재구현도 하지 않고 "외부 승인 대기" no-op 로 상태를 바꾸지 않는다(같은 상태 재드레인 멱등). 외부 CI 봇·사람이 PR 을 승인하면 다음 드레인에서 머지 경로로 닫힌다.
+- 동작: `poll.sh poll` 로 위임한다(주입 가능 `FSD_POLL_CMD`). run-id 를 가진 task 마다 `dispatch status <run-id>` 공개 인터페이스로 per-SPEC state 를 관측해, **모든 SPEC 이 머지 종착(`done`)이면 task 를 `done` 으로 전이**하고, 아직 진행 중이면 상태를 바꾸지 않는다. 호출 단위 무상태·멱등이라 재실행이 안전하다.
+- **사람 개입·외부 승인 보류 없음**: poll 은 PR 생성·리뷰·승인 조회·머지를 호출하지 않는다 — 그 책임은 dispatch 통합 모드에 있다. dispatch 가 머지하지 못하는 환경에서는 task 가 done 에 이르지 못한 채 멈추지 않고 멱등 재드레인하며 상태를 바꾸지 않는다.
 
 ### fsd status `<task-id>`
 
-task 단위로 상태 미러·origin(원본 task 연결)·소유 run-id·브랜치·PR·head·SPEC 목록을 표 형태로 출력한다. origin 이 없으면 빈 값으로 표시한다.
+task 단위로 상태 미러·origin(원본 task 연결)·소유 run-id·SPEC 목록을 표 형태로 출력한다. origin 이 없으면 빈 값으로 표시한다.
 
 ### fsd list
 
@@ -133,18 +121,22 @@ task 가 소유한 dispatch run 을 `dispatch` 의 공개 `stop` 서브커맨드
 
 | 파일 | 역할 |
 |---|---|
-| `fsd.sh` | 서브커맨드 라우터 + 프로젝트 루트 탐지 + intake/start 의 spec·dispatch 블랙박스 조합(forge 없음) |
+| `fsd.sh` | 서브커맨드 라우터 + 프로젝트 루트 탐지 + intake/start 의 spec·dispatch 블랙박스 조합 |
+| `poll.sh` | dispatch run 관측 드레인(`dispatch status` 공개 인터페이스로 done 전이, 멱등) |
 | `lib-state.sh` | `.fsd/tasks/<task-id>/` 상태 저장소 헬퍼(set/get 필드·log_event·run-id 기록·list 등) |
+| `operational-guide.md` | 상시 호스트 무인 운영 가이드(토큰 스코프·실행기 권한 격리·폴링 주기) |
+| `forge-integration.md` | loop 코어 신호 계약과 forge 통합(리뷰·머지) 책임이 dispatch 에 있음을 명시 |
 
 ## 의존성
 
-`git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `autopilot:spec`·`autopilot:dispatch` 스킬. forge(`gh` 등)·task backend 연동은 본 골격 의존성이 아니며 후속 단위 references 모듈의 책임이다.
+`git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `autopilot:spec`·`autopilot:dispatch` 스킬. 리뷰·머지·forge(`gh` 등) 연동은 fsd 의 직접 의존성이 아니라 `dispatch` 통합 모드의 책임이다.
 
 ## 불변식 / 규칙
 
 - fsd 는 `.fsd/` 디렉토리 밖 경로를 만들지 않는다(자기 스킬 정의 파일 제외).
 - `spec`·`loop`·`dispatch` 의 정의 파일을 수정하지 않고, 공개 인터페이스만 소비한다.
-- 구현 위임은 `dispatch start <spec...>` 공개 서브커맨드로만 하고, dispatch·loop 의 내부 신호 파일·워크트리를 직접 들여다보지 않는다.
-- 본 골격은 forge CLI 를 직접 호출하지 않는다(forge 연동은 후속 단위 references 모듈 책임).
+- 구현·리뷰·머지 위임은 `dispatch start <spec...>`(통합 모드 ON) 공개 서브커맨드로만 하고, dispatch run 관측은 `dispatch status` 로만 한다 — dispatch·loop 의 내부 신호 파일·run 디렉토리·워크트리를 직접 들여다보지 않는다.
+- fsd 는 리뷰·머지·통합(PR)을 직접 하지 않고 forge CLI 를 호출하지 않는다 — 그 책임은 dispatch 통합 모드에 있다.
+- 완전자율: fsd 파이프라인에는 외부 승인 보류·사람 개입 게이트가 없다.
 - 상태 디렉토리(`.fsd/`)는 git 추적에서 제외한다.
 - 라우터는 bash 3.2+ 호환으로 작성한다.

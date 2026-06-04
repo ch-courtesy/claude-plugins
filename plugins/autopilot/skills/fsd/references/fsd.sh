@@ -8,19 +8,19 @@
 #       intake  — SPEC 경로(들)로 task 를 등록 (상태 저장소에 기록).
 #       start   — task 의 SPEC(들)을 dispatch 의 공개 서브커맨드로 위임하고
 #                 그 run 식별자를 task 상태 디렉토리에 기록.
+#       poll    — 진행 중 task 의 dispatch run 을 관측해 done 까지 전진(poll.sh).
 #
-# **하지 않는 일** (후속 단위 references 모듈이 채운다):
-#   - forge(이슈/PR/머지/라벨)·task backend 연동.   → C1·C2·C4
-#   - 리뷰 피드백 루프.                              → C3
-#   - poll 드레인·상시 호스트 운영.                  → C5
-#   fsd 는 본 골격에서 forge CLI 를 직접 호출하지 않는다. dispatch·spec 의
-#   공개 인터페이스만 소비한다.
+# **하지 않는 일**:
+#   - 리뷰·머지·통합(PR)·forge CLI 호출. → dispatch 통합 모드(기본 ON)가 소유한다.
+#     fsd 는 `dispatch start` 로 구현을 위임하면 dispatch 가 implement→통합→
+#     (direct 서브모드)머지를 수행하고, fsd 는 dispatch 의 공개 인터페이스만 소비한다.
+#   - task backend(이슈/Project) 연동.  (휴면 모듈 task-backend.sh; poll 미사용)
+#   완전자율: 외부 승인 보류·사람 개입 지점이 없다.
 #
 # 사용:
 #   bash fsd.sh intake <spec...>
 #   bash fsd.sh start  <spec...>
-#   bash fsd.sh merge  <task-id>     (미구현 — C4)
-#   bash fsd.sh poll                 (미구현 — C5)
+#   bash fsd.sh poll
 #   bash fsd.sh status <task-id>
 #   bash fsd.sh list
 #   bash fsd.sh stop   <task-id>
@@ -199,15 +199,10 @@ $out"
   fi
 }
 
-# ----- subcommand: merge (미구현 — C4) -----
-cmd_merge() {
-  echo "fsd merge: 미구현 — 머지·Done·cleanup 은 후속 단위(C4)가 채웁니다." >&2
-  exit 2
-}
-
 # ----- subcommand: poll -----
-# 진행 중인 모든 task 를 한 바퀴 드레인하며 가능한 다음 한 스텝으로 전진(멱등).
-# 열린 승인 요청(PR)은 외부 승인 대기 no-op, 그 외는 start·integrate·merge 경로를 전이적으로 적용한다.
+# 진행 중인 모든 task 의 dispatch run 을 관측해 done 까지 전진(멱등).
+# 리뷰·머지는 dispatch 통합 모드가 소유하므로 poll 은 dispatch 공개 인터페이스로
+# run 상태만 관측한다 — PR 생성·리뷰·승인 조회·머지를 하지 않는다(완전자율).
 cmd_poll() {
   require_git_root
   # shellcheck disable=SC2086
@@ -225,9 +220,6 @@ cmd_status() {
   echo "state:    $(get_state "$id")"
   echo "origin:   $(get_origin "$id")"
   echo "run-id:   $(get_run_id "$id")"
-  echo "branch:   $(get_branch "$id")"
-  echo "pr:       $(get_pr "$id")"
-  echo "head:     $(get_head "$id")"
   echo "specs:"
   get_specs "$id" | sed 's/^/  - /'
 }
@@ -361,8 +353,8 @@ Subcommands:
                      SPEC 경로(들)로 task 를 등록(상태 저장소에 기록).
                      --origin: 이 task 를 촉발한 원본 task 와의 연결을 기록(버그 분리).
   start  <spec...>   task 의 SPEC(들)을 dispatch 에 위임하고 run-id 를 기록.
-  merge  <task-id>   머지·Done·cleanup (미구현 — C4).
-  poll               진행 중 task 한 바퀴 드레인·전이(멱등).
+                     (리뷰·머지는 dispatch 통합 모드가 소유한다.)
+  poll               진행 중 task 의 dispatch run 관측·전이(멱등, 완전자율).
   status <task-id>   task 단위 상태 출력.
   list               모든 task 와 요약(빈 상태면 0 exit).
   stop   <task-id>   task 가 소유한 dispatch run 정지 위임.
@@ -379,7 +371,6 @@ SUB="$1"; shift
 case "$SUB" in
   intake) cmd_intake "$@" ;;
   start)  cmd_start  "$@" ;;
-  merge)  cmd_merge  "$@" ;;
   poll)   cmd_poll   "$@" ;;
   status) cmd_status "$@" ;;
   list)   cmd_list   "$@" ;;
