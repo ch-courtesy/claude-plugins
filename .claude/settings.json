@@ -16,5 +16,10 @@
         "repo": "ch-courtesy/claude-plugins"
       }
     }
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git fetch *)"
+    ]
   }
 }

@@ -114,7 +114,7 @@ GitHub, GitLab, Bitbucket에 공통으로 재사용 가능한 영역:
 - duplicate detection policy
 - token budget policy
 - findings merge policy
-- `approve | request_changes | comment | needs_context | unavailable` verdict model
+- `approve | comment | needs_context | unavailable` verdict model (REQUEST_CHANGES는 폐지)
 
 공통 입력 모델:
 
