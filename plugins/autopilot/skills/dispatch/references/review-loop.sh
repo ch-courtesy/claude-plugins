@@ -285,6 +285,127 @@ rl_review_loop() {
 }
 
 # =====================================================================
+# direct 서브모드 리뷰 — forge 미구성(PR 없음) 환경의 적대적 리뷰 게이트.
+#   forge 리뷰 루프 기계(생산자 1회 호출·must 재구현·세 가드·defer 분리·SPEC 델타)를
+#   그대로 재사용하되, PR 의존(사람/PR 메타 게이트·원격 push)을 제거한다:
+#     - 판정: 리뷰 생산자(REVIEW_PRODUCE_CMD)를 키 기준 1회 호출(로컬 작업 브랜치 diff 리뷰).
+#     - 멱등 head 게이트: 원격/PR 메타가 아니라 로컬 작업 브랜치 HEAD 로 본다.
+#     - request_changes: must 를 SPEC 델타로 로컬 작업 브랜치 위 재구현(원격 push 없음).
+#     - approve: 머지 진행가능(호출자가 phase=merging 으로 전이).
+#   세 가드(라운드 상한·무진전·핑퐁)는 forge 경로와 동일 헬퍼로 공유한다.
+# =====================================================================
+
+# rl_local_head <branch> — 로컬 작업 브랜치 HEAD(원격·PR 조회 없음). 없으면 빈값.
+rl_local_head() {
+  # shellcheck disable=SC2086
+  $GIT_CMD rev-parse --verify --quiet "refs/heads/$1" 2>/dev/null
+}
+
+# rl_round_direct <run_dir> <key> <base-spec> <branch>
+#   반환: 0=재작업(로컬 재구현), 10=에스컬레이션, 20=대기(새 커밋 없음), 30=approve.
+rl_round_direct() {
+  local rd="$1" key="$2" base="$3" branch="$4"
+  mkdir -p "$rd"
+  local pr="local"   # PR 없음 — 파일 네이밍용 고정 토큰(원격 PR 미참조).
+
+  # --- 멱등 head 게이트 — 로컬 작업 브랜치 HEAD(사람/PR 메타 게이트는 PR 없으므로 미적용) ---
+  local head last
+  head="$(rl_local_head "$branch")"
+  last="$(int_get_head "$rd" "$key")"
+  if [[ -n "$head" && "$head" == "$last" ]]; then
+    int_log "$rd" "$key" "head 동일($head) — 새 커밋 없음, 라운드 미시작(direct)"
+    return 20
+  fi
+
+  # --- 리뷰 생산자 1회 호출 → 단일 판정(PR 없이 키 기준, 로컬 diff 리뷰) ---
+  local produce verdict
+  # shellcheck disable=SC2086
+  produce="$($REVIEW_PRODUCE_CMD "$key" 2>/dev/null)"
+  verdict="$(printf '%s' "$produce" | jq -r '.pipeline_verdict // ""' 2>/dev/null)"
+
+  case "$verdict" in
+    unavailable)
+      rl_escalate "$rd" "$key" "리뷰 판정 unavailable(diff 잘림·컨텍스트 불완전) — 자동수정 보류(direct)"
+      return 10 ;;
+    approve)
+      int_set_verdict "$rd" "$key" approve
+      int_set_head "$rd" "$key" "$head"
+      int_log "$rd" "$key" "리뷰 판정 approve(direct) — 머지 진행가능(추가 라운드 미시작)"
+      return 30 ;;
+    request_changes) : ;;
+    *)
+      if [[ -z "$produce" ]]; then
+        rl_escalate "$rd" "$key" "리뷰 생산자 출력 비었음(생산 실패·미설정) — 자동수정 보류(direct)"
+      else
+        rl_escalate "$rd" "$key" "리뷰 판정 미상(verdict='$verdict') — 생산자 출력 파싱 실패(direct)"
+      fi
+      return 10 ;;
+  esac
+
+  # --- request_changes: 재작업 라운드(세 가드 공유) ---
+  int_set_verdict "$rd" "$key" request_changes
+  local round; round="$(int_bump_review_round "$rd" "$key")"
+  int_log "$rd" "$key" "재작업 라운드 $round 시작(direct, verdict=request_changes head=$head)"
+  if [[ "$round" -gt "$REVIEW_ROUNDS_MAX" ]]; then
+    rl_escalate "$rd" "$key" "라운드 상한($REVIEW_ROUNDS_MAX) 초과 — 자동수정 중지(direct)"
+    return 10
+  fi
+  int_set_head "$rd" "$key" "$head"
+
+  local mustfile deferfile
+  mustfile="$rd/must.$key.$pr"; deferfile="$rd/defer.$key.$pr"
+  rl_produce_extract "$produce" must_adopt "$mustfile"
+  rl_produce_extract "$produce" defer      "$deferfile"
+
+  if [[ ! -s "$mustfile" ]]; then
+    rl_escalate "$rd" "$key" "must_adopt 0 인데 여전히 request_changes — 무진전(direct)"
+    return 10
+  fi
+
+  local bh prev
+  bh="$(rl_blocking_hash "$mustfile")"
+  prev="$(int_get_blocking_hash "$rd" "$key")"
+  if [[ -n "$prev" && "$bh" == "$prev" ]]; then
+    rl_escalate "$rd" "$key" "차단성 지적 집합이 직전 라운드와 동일(핑퐁) — 무한루프 차단(direct)"
+    return 10
+  fi
+  int_set_blocking_hash "$rd" "$key" "$bh"
+
+  rl_spinoff_backlog "$rd" "$key" "$pr" "$deferfile"
+
+  local delta; delta="$(rl_spec_delta "$rd" "$key" "$base" "$pr" "$mustfile")"
+  # 로컬 작업 브랜치 워크트리에서 재구현(원격 push 없음). 실패 시 거짓 성공 대신 에스컬레이션.
+  # shellcheck disable=SC2086
+  if ! $IMPLEMENT_CMD "$delta" "$branch"; then
+    rl_escalate "$rd" "$key" "재구현 실패 — 작업 브랜치($branch) 워크트리에서 구현 불가(direct, 자동수정 보류)"
+    return 10
+  fi
+  int_log "$rd" "$key" "라운드 $round: must 로컬 재구현(원격 push·PR 없음, 작업 브랜치=$branch). 재리뷰는 다음 드레인."
+  return 0
+}
+
+# rl_review_loop_direct <run_dir> <key> <base-spec> [branch] — direct 단일 라운드 진입.
+#   approve 면 phase=merging 으로 전이(승인 의례 없이 머지 헬퍼가 skip_approval 로 머지).
+rl_review_loop_direct() {
+  local rd="$1" key="$2" base="$3" branch="${4:-}"
+  [[ -n "$rd" && -n "$key" && -n "$base" ]] \
+    || { rl_die "사용: review-loop.sh run-direct <run_dir> <key> <spec> [branch]"; return 1; }
+  mkdir -p "$rd"
+  [[ -n "$branch" ]] || branch="$(int_get_branch "$rd" "$key")"
+  [[ -n "$branch" ]] || branch="$(in_work_branch "$(basename "$rd")" "$base")"
+  int_set_branch "$rd" "$key" "$branch"
+
+  rl_round_direct "$rd" "$key" "$base" "$branch"
+  case "$?" in
+    30) int_set_phase "$rd" "$key" merging
+        echo "review-loop(direct): approve — 머지 진행가능 (key=$key branch=$branch)"; return 0 ;;
+    0)  echo "review-loop(direct): 재작업 라운드 — 로컬 재구현 (key=$key branch=$branch)"; return 0 ;;
+    20) echo "review-loop(direct): 대기 — 새 커밋 없음 (key=$key branch=$branch)"; return 0 ;;
+    *)  echo "review-loop(direct): 에스컬레이션으로 종료 (key=$key branch=$branch)"; return 0 ;;
+  esac
+}
+
+# =====================================================================
 # selftest — mock 인터페이스로 판정 분기·세 가드·사람/head 게이트·force 미사용 검증.
 # =====================================================================
 rl_selftest() {
@@ -295,7 +416,10 @@ rl_selftest() {
   local PUSHLOG="$TMP/pushlog"; : > "$PUSHLOG"
   mock_git() {
     local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
-    case "$1" in push) printf '%s\n' "$*" >> "$PUSHLOG" ;; esac
+    case "$1" in
+      push)      printf '%s\n' "$*" >> "$PUSHLOG" ;;
+      rev-parse) printf '%s\n' "${MOCK_HEAD:-}" ;;   # direct 로컬 작업 브랜치 HEAD 모사.
+    esac
     return 0
   }
   GIT_CMD=mock_git; FORGE_CMD=:; DEFAULT_BRANCH=main
@@ -423,6 +547,65 @@ rl_selftest() {
   chk "AC4 핑퐁 에스컬레이션(rc=10)" "$rc" "10"
   case "$out" in *핑퐁*) ok "AC4 핑퐁 사유";; *) bad "AC4 핑퐁 사유";; esac
 
+  # =====================================================================
+  # direct 서브모드 리뷰 게이트 — PR 없는 로컬 작업 브랜치 리뷰(원격 push 없음).
+  #   approve/request_changes/세 가드/unavailable 를 mock 으로 검증.
+  # =====================================================================
+
+  # ---- AC7: direct approve → phase=merging(승인 의례 없이 머지 진행가능), push 없음 ----
+  local kDA="da-aaaa1" bp ap
+  prod_simple sha-DA approve > "$RV/$kDA.produce"
+  bp=$(wc -l < "$PUSHLOG")
+  MOCK_HEAD=sha-DA rl_review_loop_direct "$rd" "$kDA" "$base" "feat/run1-da" >/dev/null; rc=$?
+  chk "AC7 direct approve rc=0" "$rc" "0"
+  chk "AC7 direct approve→phase=merging" "$(int_get_phase "$rd" "$kDA")" "merging"
+  chk "AC7 direct verdict=approve" "$(int_get_verdict "$rd" "$kDA")" "approve"
+  ap=$(wc -l < "$PUSHLOG")
+  [[ "$bp" == "$ap" ]] && ok "AC9 direct approve 원격 push 없음" || bad "AC9 direct approve 원격 push 없음"
+
+  # ---- AC8/AC9: direct request_changes → 로컬 재구현(push 없음), 라운드 카운터·델타 ----
+  local kDR="dr-rrrr2"; : > "$IMPLLOG"
+  prod_rc sha-DR '로컬 보안 검증 추가' > "$RV/$kDR.produce"
+  bp=$(wc -l < "$PUSHLOG")
+  MOCK_HEAD=sha-DR rl_round_direct "$rd" "$kDR" "$base" "feat/run1-dr"; rc=$?
+  chk "AC8 direct request_changes 라운드 수행(rc=0)" "$rc" "0"
+  chk "AC8 direct 라운드 카운터=1" "$(int_review_round "$rd" "$kDR")" "1"
+  [[ -s "$IMPLLOG" ]] && ok "AC8 direct 로컬 재구현 실행" || bad "AC8 direct 로컬 재구현 실행"
+  ap=$(wc -l < "$PUSHLOG")
+  [[ "$bp" == "$ap" ]] && ok "AC9 direct 재구현 원격 push 없음" || bad "AC9 direct 재구현 원격 push 없음"
+  delta="$rd/delta.$kDR.local.spec.md"
+  grep -q '로컬 보안 검증' "$delta" && ok "AC8 direct must 델타 반영" || bad "AC8 direct must 델타 반영"
+  # 같은 head 재호출 → no-op(rc=20).
+  MOCK_HEAD=sha-DR rl_round_direct "$rd" "$kDR" "$base" "feat/run1-dr"; chk "AC8 direct 동일 head 미시작(rc=20)" "$?" "20"
+
+  # ---- AC10 가드: direct 라운드 상한(3) 초과 → 에스컬레이션(머지 안 함) ----
+  local kDC="dc-cccc3"
+  int_set "$rd" "$kDC" review-round 3
+  prod_rc sha-DC '또 수정' > "$RV/$kDC.produce"
+  out="$(MOCK_HEAD=sha-DC rl_round_direct "$rd" "$kDC" "$base" "feat/run1-dc")"; rc=$?
+  chk "AC10 direct 상한 초과 에스컬레이션(rc=10)" "$rc" "10"
+  chk "AC10 direct phase=escalated" "$(int_get_phase "$rd" "$kDC")" "escalated"
+
+  # ---- AC10 가드: direct must 0 인데 request_changes → 무진전 에스컬레이션 ----
+  local kDN="dn-nnnn4"
+  prod_rc_empty sha-DN > "$RV/$kDN.produce"
+  out="$(MOCK_HEAD=sha-DN rl_round_direct "$rd" "$kDN" "$base" "feat/run1-dn")"; rc=$?
+  chk "AC10 direct 무진전 에스컬레이션(rc=10)" "$rc" "10"
+
+  # ---- AC10 가드: direct 핑퐁(차단성 집합 직전과 동일) → 에스컬레이션 ----
+  local kDP="dp-pppp5"
+  prod_rc sha-DP1 '같은 차단 지적' > "$RV/$kDP.produce"
+  MOCK_HEAD=sha-DP1 rl_round_direct "$rd" "$kDP" "$base" "feat/run1-dp" >/dev/null; chk "AC10 direct 핑퐁 1R 수행" "$?" "0"
+  prod_rc sha-DP2 '같은 차단 지적' > "$RV/$kDP.produce"
+  out="$(MOCK_HEAD=sha-DP2 rl_round_direct "$rd" "$kDP" "$base" "feat/run1-dp")"; rc=$?
+  chk "AC10 direct 핑퐁 에스컬레이션(rc=10)" "$rc" "10"
+
+  # ---- AC7: direct unavailable → 에스컬레이션 ----
+  local kDU="du-uuuu6"
+  prod_simple sha-DU unavailable > "$RV/$kDU.produce"
+  MOCK_HEAD=sha-DU rl_round_direct "$rd" "$kDU" "$base" "feat/run1-du" >/dev/null; rc=$?
+  chk "AC7 direct unavailable 에스컬레이션(rc=10)" "$rc" "10"
+
   # ---- force 미사용 (mock_git force 보면 exit99; 여기 도달했으면 미사용) ----
   [[ -s "$PUSHLOG" ]] && ok "재작업 라운드 실제 push 수행" || bad "재작업 라운드 실제 push 수행"
   if grep -qiE 'force|(^| )-f( |$)' "$PUSHLOG"; then bad "force push 미사용"; else ok "force push 미사용(push 인자에 force 없음)"; fi
@@ -435,9 +618,11 @@ rl_selftest() {
 # ===== CLI 진입 (source 시 미실행) =====
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   case "${1:-}" in
-    run)      shift; rl_review_loop "$@" ;;
-    round)    shift; rl_round "$@" ;;
+    run)         shift; rl_review_loop "$@" ;;
+    run-direct)  shift; rl_review_loop_direct "$@" ;;
+    round)       shift; rl_round "$@" ;;
+    round-direct) shift; rl_round_direct "$@" ;;
     selftest) rl_selftest ;;
-    *) echo "usage: review-loop.sh {run <run_dir> <key> <spec> <pr> [branch]|round <run_dir> <key> <spec> <pr> <branch>|selftest}" >&2; exit 1 ;;
+    *) echo "usage: review-loop.sh {run <run_dir> <key> <spec> <pr> [branch]|run-direct <run_dir> <key> <spec> [branch]|round ...|round-direct <run_dir> <key> <spec> <branch>|selftest}" >&2; exit 1 ;;
   esac
 fi

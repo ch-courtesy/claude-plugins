@@ -299,10 +299,11 @@ in_handle_blocked() {
 }
 
 # in_integrate_direct <spec> <run_dir> <key> — forge 미구성 직접 머지 서브모드.
-#   승인 요청(PR)·리뷰·승인 의례 없이, 종료신호 판정·작업 브랜치 식별만 기존 헬퍼로 재사용해
-#   바로 머지 단계(phase=merging)로 넘긴다. push·PR 을 수행하지 않는다(머지는 호출자의 머지
-#   헬퍼가 ff-only + version 게이트로 직접 수행). BLOCKED 분기는 in_integrate 와 동일(공유 헬퍼).
-#   반환: 0=직접 머지 준비(phase=merging) / 3=spec-gap 차단 / 4=하드 차단 / 20=미종료(대기).
+#   승인 요청(PR) 없이, 종료신호 판정·작업 브랜치 식별만 기존 헬퍼로 재사용해 **적대적 리뷰
+#   게이트(phase=review)** 로 넘긴다. push·PR 을 수행하지 않는다(리뷰는 로컬 작업 브랜치 diff
+#   로 수행하고, approve 후 머지는 호출자의 머지 헬퍼가 ff-only + version 게이트로 직접 수행).
+#   BLOCKED 분기는 in_integrate 와 동일(공유 헬퍼).
+#   반환: 0=리뷰 게이트 진입(phase=review) / 3=spec-gap 차단 / 4=하드 차단 / 20=미종료(대기).
 in_integrate_direct() {
   local spec="$1" rd="$2" key="$3"
   [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { in_die "사용: integration.sh integrate-direct <spec> <run_dir> <key>"; return 1; }
@@ -318,10 +319,10 @@ in_integrate_direct() {
       int_set_branch "$rd" "$key" "$branch"
       # 다리: 머지 대상으로 쓰기 전에 작업 브랜치가 없으면 loop 결과 커밋에서 생성(멱등·공통 헬퍼).
       in_ensure_work_branch "$branch" "$spec" || { int_set_phase "$rd" "$key" blocked; return 4; }
-      int_set_phase "$rd" "$key" merging
-      int_log "$rd" "$key" "직접 머지 준비(승인 요청·PR·리뷰 우회): branch=$branch → merging"
+      int_set_phase "$rd" "$key" review
+      int_log "$rd" "$key" "직접 통합(승인 요청·PR·push 우회) → 적대적 리뷰 게이트: branch=$branch → review"
       echo "key:    $key"
-      echo "phase:  merging"
+      echo "phase:  review"
       echo "branch: $branch"
       return 0
       ;;
@@ -351,8 +352,9 @@ Commands:
                                         DONE→push→PR(phase=review) /
                                         spec-gap→blocked-spec-gap / 하드 BLOCKED→blocked.
   integrate-direct <spec> <run_dir> <key>
-                                     forge 미구성 직접 머지: 승인·PR·리뷰 없이 작업 브랜치만
-                                        식별(phase=merging) / BLOCKED 분기는 integrate 와 동일.
+                                     forge 미구성 직접 통합: 승인·PR·push 없이 작업 브랜치만
+                                        식별해 적대적 리뷰 게이트로(phase=review) / BLOCKED
+                                        분기는 integrate 와 동일.
   terminal  <spec>                   child 종료 상태(done|failed|running|pending|unknown).
   category  <spec>                   BLOCKED 범주(spec-gap|...|other).
 
@@ -496,13 +498,15 @@ in_selftest() {
   chk "running rc=20(보류)" "$rc" "20"
   chk "running phase 미설정" "$(int_get_phase "$rd" "$kP")" ""
 
-  # ---- AC3: integrate-direct DONE → branch 세팅·phase=merging, push·PR 미수행 ----
+  # ---- AC3/AC7: integrate-direct DONE → branch 세팅·phase=review(적대적 리뷰 게이트 진입),
+  #   push·PR 미수행. (direct 서브모드도 머지 직전 리뷰 한 단계를 거치므로 merging 이 아니라
+  #   review 로 떨어진다 — 머지는 리뷰 approve 뒤.)
   #   (GITLOG 은 비우지 않는다 — 아래 'git/push 실제 수행됨' 위생 단언이 누적 GITLOG 를 본다.)
   local kD="x-ddd6666"; : > "$PUSHLOG"; : > "$PRLOG"
   st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
   in_integrate_direct "$spec" "$rd" "$kD" >/dev/null; rc=$?
   chk "AC3 integrate-direct rc=0" "$rc" "0"
-  chk "AC3 direct phase=merging" "$(int_get_phase "$rd" "$kD")" "merging"
+  chk "AC7 direct phase=review(리뷰 게이트)" "$(int_get_phase "$rd" "$kD")" "review"
   chk "AC3 direct branch=feat/<rid>-<slug>" "$(int_get_branch "$rd" "$kD")" "feat/20260604T000000-abc1234-x"
   [[ ! -s "$PUSHLOG" && ! -s "$PRLOG" ]] && ok "AC3 direct push·PR 미수행" || bad "AC3 direct push·PR 미수행"
 
