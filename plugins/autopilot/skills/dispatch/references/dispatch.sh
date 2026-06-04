@@ -362,7 +362,10 @@ drain_integration() {
   fi
 
   case "$phase" in
-    ""|loop-done)
+    ""|loop-done|integrating)
+      # integrating 은 in_integrate 가 push 직전 잠깐 두는 전이 상태. 그 사이 서브프로세스가
+      # 죽으면 phase 가 integrating 으로 남는데, integrate 재호출은 멱등(같은 head 의 open PR
+      # 재사용)이므로 그대로 재시도해 드레인 정체를 피한다.
       # shellcheck disable=SC2086
       $INTEGRATION_CMD integrate "$spec" "$rd" "$key" >/dev/null 2>&1 || true
       ;;
