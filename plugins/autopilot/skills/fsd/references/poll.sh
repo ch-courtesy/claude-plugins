@@ -14,9 +14,10 @@
 # 멱등성(같은 상태에서 두 번 실행해도 같은 결과, 부작용 없음):
 #   - 상태는 fsd 상태 저장소(C0)에 두고, 드레인 호출은 **호출 단위 무상태**여서
 #     크래시 후 재시작이 안전하다. 로컬 종착(done/stopped/dispatch-failed) task 는
-#     재드레인해도 no-op 이고, run 미완 task 는 상태를 바꾸지 않아 같은 상태 재드레인이
-#     멱등이다. dispatch 가 머지하지 못하는 환경에서는 task 가 done 에 이르지 못한 채
-#     멈추지 않고 멱등 재드레인하며 상태를 바꾸지 않는다.
+#     재드레인해도 no-op 이고, run 에 비종착(pending/running/integrating) SPEC 이 남으면
+#     상태를 바꾸지 않아 같은 상태 재드레인이 멱등이다. run 의 모든 SPEC 이 종착하면
+#     전부 done 일 때 task done, 일부 failed/skipped 면 task dispatch-failed 로 전이해
+#     실패를 드러낸다(이후 재드레인은 로컬 종착 no-op).
 #
 # 무거운 동작(implement·통합·머지)은 모두 dispatch 가 자기 run 안에서 수행하므로,
 #   poll 은 가벼운 관측 한 스텝만 한다. dispatch 호출은 주입 가능한 명령으로 두어
@@ -91,7 +92,12 @@ poll_task() {
   fi
 
   # --- 3) dispatch 공개 인터페이스로 per-SPEC state 관측. ---
-  local states n_total n_done
+  # dispatch 의 per-SPEC 종착 상태는 done|failed|skipped 이며, 그 외(pending|running|
+  # integrating 등)는 비종착이다. 종착 분포로 task 상태를 전이한다:
+  #   · 비종착이 하나라도 남음 → 진행 중(상태 불변, 멱등 재드레인).
+  #   · 전부 종착 + 전부 done → task done.
+  #   · 전부 종착 + 일부 failed/skipped → task dispatch-failed(운영자가 실패 감지·재시작).
+  local states n_total n_done n_term
   states="$(dispatch_states "$run_id")"
   if [[ -z "$states" ]]; then
     pl_log "$id" "dispatch run 상태 미관측(run=$run_id) — 전진 없음"
@@ -99,13 +105,16 @@ poll_task() {
   fi
   n_total="$(printf '%s\n' "$states" | grep -c .)"
   n_done="$(printf '%s\n' "$states" | grep -c '^done$')"
+  n_term="$(printf '%s\n' "$states" | grep -cE '^(done|failed|skipped)$')"
 
-  # 모든 SPEC 이 머지 종착(done) → task done 전이. 아니면 상태 불변(멱등 재드레인).
-  if [[ "$n_done" == "$n_total" ]]; then
+  if [[ "$n_term" != "$n_total" ]]; then
+    pl_log "$id" "dispatch run 진행 중($n_done/$n_total done, 종착 $n_term/$n_total) — 전진 없음(상태 불변)"
+  elif [[ "$n_done" == "$n_total" ]]; then
     set_state "$id" "done"
     pl_log "$id" "dispatch run 전체 머지 종착($n_done/$n_total) → task done"
   else
-    pl_log "$id" "dispatch run 진행 중($n_done/$n_total done) — 전진 없음(상태 불변)"
+    set_state "$id" "dispatch-failed"
+    pl_log "$id" "dispatch run 종착하나 일부 실패($n_done/$n_total done) → task dispatch-failed"
   fi
   return 0
 }
@@ -181,12 +190,25 @@ EOF
   poll_task n1 >/dev/null
   chk "dispatch run 없음 → 전진 없음" "$(get_state n1)" "intake"
 
-  # ---- 일부 failed·미완 → 상태 불변(멱등 재드레인) ----
+  # ---- 전부 종착 + 일부 failed → task dispatch-failed (실패 감지) ----
   ensure_task_dir f1; set_run_id f1 "run-f1"; set_state f1 "dispatched"; add_spec f1 "$spec"
   MOCK_STATES="done failed" poll_task f1 >/dev/null
-  chk "일부 failed·미완 → 전진 없음·상태 불변" "$(get_state f1)" "dispatched"
+  chk "전부 종착·일부 failed → dispatch-failed" "$(get_state f1)" "dispatch-failed"
+  # 멱등: dispatch-failed 는 로컬 종착 → 재드레인 no-op, dispatch status 미조회
+  : > "$TRACE"
   MOCK_STATES="done failed" poll_task f1 >/dev/null
-  chk "멱등: failed 섞인 미완 재드레인 상태 불변" "$(get_state f1)" "dispatched"
+  chk "멱등: dispatch-failed 재드레인 상태 불변" "$(get_state f1)" "dispatch-failed"
+  chk "멱등: dispatch-failed 는 dispatch status 미조회" "$(tcount 'dispatch status')" "0"
+
+  # ---- 전부 종착 + 일부 skipped → task dispatch-failed ----
+  ensure_task_dir k1; set_run_id k1 "run-k1"; set_state k1 "dispatched"; add_spec k1 "$spec"
+  MOCK_STATES="done skipped" poll_task k1 >/dev/null
+  chk "전부 종착·일부 skipped → dispatch-failed" "$(get_state k1)" "dispatch-failed"
+
+  # ---- 비종착(integrating) 남으면 실패로 단정 않고 상태 유지 ----
+  ensure_task_dir p1; set_run_id p1 "run-p1"; set_state p1 "dispatched"; add_spec p1 "$spec"
+  MOCK_STATES="failed integrating" poll_task p1 >/dev/null
+  chk "비종착(integrating) 남음 → 전진 없음·상태 불변" "$(get_state p1)" "dispatched"
 
   # ---- poll_drain 이 모든 task 를 한 바퀴 훑는다 ----
   : > "$TRACE"
