@@ -30,7 +30,7 @@
 
 ## 단계적 고도화 계획
 
-> 진행 상황: Phase 1~3은 "현재 1차 워크플로"로 구현 완료, Phase 4는 부분, Phase 5·플랫폼 공통화는 계획이다(각 헤더 표기 참조).
+> 진행 상황: Phase 1~4는 구현 완료, Phase 5·플랫폼 공통화는 계획이다(각 헤더 표기 참조). Phase 4는 두 워크플로(codex·claude)를 `prep → review(matrix) → merge` 3-잡 파이프라인으로 재구성해 구현했다.
 
 ### Phase 1: Structured Review MVP — ✅ 구현됨
 
@@ -67,14 +67,19 @@
 - fingerprint를 추출할 수 없는 thread는 건드리지 않는다.
 - resolve는 verdict와 무관하게, 중복으로 제출을 건너뛴 경우에도 실행된다.
 
-### Phase 4: Token Optimized Review — ⚠️ 부분 구현 (needs_context 재시도·요청 파일 5개 제한만; chunking·우선순위 강등·partial 병합은 미구현)
+### Phase 4: Token Optimized Review — ✅ 구현됨 (3-잡 matrix 파이프라인, codex·claude 대칭)
 
-- diff token budget을 넘으면 파일 그룹별로 나눠 리뷰한다.
-- docs-only, lockfile-only, generated-only 변경은 낮은 우선순위로 처리한다.
-- `needs_context`가 반환되면 요청된 파일/symbol만 추가해 재시도한다.
-- partial findings를 fingerprint 기준으로 병합한다.
+GHA `uses:` 스텝은 루프할 수 없어 가변 횟수 모델 호출이 불가능하므로, 두 워크플로를 **`prep → review(matrix) → merge` 3-잡 파이프라인**으로 재구성해 청크링을 구현한다. 모델 action `uses:` 소스 라인 수는 런타임 matrix 확장과 무관하게 불변이라 모델-호출 카운트 계약(`codex_action_count` 등)을 깨지 않는다.
 
-권장 기본값:
+- **diff token budget 초과 시 청크링**: `prep` 잡이 diff를 파일 단위로 쪼개 토큰 예산(기본 80k) 이하의 청크로 묶고, 청크 인덱스를 `strategy.matrix`로 내보낸다. `review` 잡이 청크별로 모델 action을 호출(청크당 `needs_context` follow-up 1회 포함)하고 결과를 아티팩트로 올린다. `merge` 잡이 전 청크 결과를 합쳐 단일 리뷰로 제출한다. diff가 임계 이하면 단일 청크(matrix-of-1)로 기존 단일 패스와 동치다(회귀 없음).
+- **저우선 강등**: docs-only·lockfile-only·generated-only 변경은 낮은 우선순위로 분류해, 추정 총 입력이 총 예산(기본 250k)을 넘을 때 리뷰 대상에서 먼저 제외하고 제외 사실·파일 목록을 로그로 남긴다.
+- **needs_context 재시도**: 각 청크가 `needs_context`를 반환하면 그 청크에 한해 요청 파일(최대 5개)을 붙여 follow-up 패스를 한 번 수행한다.
+- **partial findings 병합**: 청크별 findings를 fingerprint 기준으로 중복 제거·병합해 단일 `createReview`로 제출한다. self thread-resolve의 fallback은 청크별이 아니라 **병합된 findings 집합** 기준으로 판정한다.
+- **공유 단위**: 청크링·분류·병합 순수 로직은 `.github/scripts/pr-review-chunking.js` 단일 공유 모듈에 두고 두 워크플로가 `require`로 소비한다(`diff-anchor-filter.js`와 동일 패턴; 인라인 복제 없음). 토큰 추정은 토크나이저 부재로 **문자수/4** 휴리스틱을 쓴다. 청크 간 데이터는 잡이 파일시스템을 공유하지 않으므로 아티팩트로 전달한다.
+- **App 토큰·anchor 검증·false-green 가드·thread-resolve**는 동작·권한을 보존한 채 `merge` 잡으로 이전했다(잡 경계만 이동).
+- **자기 검증 부트스트랩**: 공유 모듈은 trusted base 체크아웃에서 `require`하므로, 모듈을 도입·수정하는 PR에선 base에 아직 없어 단일 패스로 loud degrade한다(청크링은 머지 후부터 효력).
+
+권장 기본값(공유 모듈 `LIMITS` 상수):
 - max total input: 250k tokens
 - max diff input before chunking: 80k tokens
 - max single file content: 30k tokens
