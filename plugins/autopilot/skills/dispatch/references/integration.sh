@@ -121,6 +121,50 @@ in_work_branch() {
 }
 
 # =====================================================================
+# 2b) loop 결과 → 작업 브랜치 이식 다리 (forge·direct 공통 헬퍼).
+#   loop 은 결과를 자기 워크트리에만 커밋하고 dispatch run-id 브랜치를 만들지 않는다.
+#   통합이 push·머지 대상으로 쓰기 전에, 작업 브랜치가 없으면 loop 결과 커밋에서 만든다.
+#   결과 위치는 loop 의 공개 인터페이스(`loop paths`)로만 얻는다 — 내부 신호·메타 파일을
+#   직접 열지 않는다(공개 경로에서 결과 커밋을 읽는 것까지가 소비 경계). force 금지·멱등.
+# =====================================================================
+
+# in_loop_worktree <spec> — loop 공개 `paths` 출력에서 작업 트리(WT) 경로.
+#   값 내부 공백을 보존한다(loop 은 경로 공백을 보존하므로 첫 토큰만 취하지 않는다).
+in_loop_worktree() {
+  # shellcheck disable=SC2086
+  $LOOP_CMD paths "$1" 2>/dev/null \
+    | awk '/^WT[[:space:]]/ { sub(/^WT[[:space:]]+/, ""); print; exit }'
+}
+
+# in_loop_result_commit <spec> — loop 결과 커밋(작업 트리 HEAD).
+#   공개 경로(WT)에서 결과 커밋을 읽는다(loop 내부 신호·메타 파일 미열람).
+in_loop_result_commit() {
+  local wt; wt="$(in_loop_worktree "$1")"
+  [[ -n "$wt" ]] || { in_die "loop 작업 트리 경로를 얻을 수 없음(loop paths): $1"; return 1; }
+  local sha
+  # shellcheck disable=SC2086
+  sha="$($GIT_CMD -C "$wt" rev-parse HEAD 2>/dev/null)" \
+    || { in_die "loop 결과 커밋(HEAD) 읽기 실패: $wt"; return 1; }
+  [[ -n "$sha" ]] || { in_die "loop 결과 커밋이 비어 있음: $wt"; return 1; }
+  printf '%s\n' "$sha"
+}
+
+# in_ensure_work_branch <branch> <spec> — 작업 브랜치 보장(없으면 loop 결과 커밋에서 생성).
+#   이미 있으면 그대로 사용(재실행 멱등). 어떤 경로에서도 force 로 옮기지 않는다.
+#   forge·direct 서브모드가 공유하는 단일 진입(브랜치 이식 중복 방지).
+in_ensure_work_branch() {
+  local branch="$1" spec="$2"
+  # shellcheck disable=SC2086
+  if $GIT_CMD rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
+    return 0   # 이미 존재 — 멱등, force 재배치 안 함.
+  fi
+  local commit; commit="$(in_loop_result_commit "$spec")" || return 1
+  # shellcheck disable=SC2086
+  $GIT_CMD branch "$branch" "$commit" \
+    || { in_die "작업 브랜치 생성 실패: $branch ← $commit"; return 1; }
+}
+
+# =====================================================================
 # 3) git 통합 — base sync(rebase, ff 가능 시) → push. force 금지.
 # =====================================================================
 
@@ -197,6 +241,8 @@ in_integrate() {
       local branch; branch="$(in_work_branch "$rid" "$spec")" || { int_set_phase "$rd" "$key" blocked; return 4; }
       int_set_branch "$rd" "$key" "$branch"
       int_set_phase "$rd" "$key" integrating
+      # 다리: push 대상으로 쓰기 전에 작업 브랜치가 없으면 loop 결과 커밋에서 생성(멱등).
+      in_ensure_work_branch "$branch" "$spec" || { int_set_phase "$rd" "$key" blocked; return 4; }
       int_log "$rd" "$key" "base sync → push → PR (branch=$branch)"
       in_base_sync   "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       in_push_branch "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
@@ -270,6 +316,8 @@ in_integrate_direct() {
     done)
       local branch; branch="$(in_work_branch "$rid" "$spec")" || { int_set_phase "$rd" "$key" blocked; return 4; }
       int_set_branch "$rd" "$key" "$branch"
+      # 다리: 머지 대상으로 쓰기 전에 작업 브랜치가 없으면 loop 결과 커밋에서 생성(멱등·공통 헬퍼).
+      in_ensure_work_branch "$branch" "$spec" || { int_set_phase "$rd" "$key" blocked; return 4; }
       int_set_phase "$rd" "$key" merging
       int_log "$rd" "$key" "직접 머지 준비(승인 요청·PR·리뷰 우회): branch=$branch → merging"
       echo "key:    $key"
@@ -320,27 +368,47 @@ in_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
   local rd="$TMP/.dispatch/runs/20260604T000000-abc1234"; mkdir -p "$rd"
 
-  # mock loop: status --json / logs 를 spec 별 파일로 흉내.
+  # mock loop: status --json / logs / paths 를 spec 별 파일로 흉내.
+  #   paths: loop 공개 인터페이스 — 작업 트리(WT) 경로를 알려준다(브랜치 이식 다리 입력).
   local LP="$TMP/loop"; mkdir -p "$LP"
+  local LOOPWT="$TMP/loopwt"; mkdir -p "$LOOPWT"   # mock loop 결과 워크트리 경로.
   mock_loop() {
     case "$1" in
       status) shift; [[ "$1" == "--json" ]] && shift; cat "$LP/$(basename "$1").json" 2>/dev/null || true ;;
       logs)   cat "$LP/$(basename "$2").logs" 2>/dev/null || true ;;
+      paths)  printf 'SPEC_PATH   %s\nWT          %s\nLOOP_DIR    %s\n' "$2" "$LOOPWT" "$LOOPWT/.loop" ;;
     esac
   }
   export -f mock_loop 2>/dev/null || true
   LOOP_CMD=mock_loop
 
   # mock git: force 인자 보면 exit99(selftest 즉사). push/fetch/checkout/rebase 기록.
-  local PUSHLOG="$TMP/pushlog" GITLOG="$TMP/gitlog"; : > "$PUSHLOG"; : > "$GITLOG"
+  #   브랜치 존재를 실제로 모사한다(BRANCHES 파일) — checkout 을 무조건 성공시키지 않는다(AC5).
+  #   rev-parse --verify refs/heads/<b> = 브랜치 존재 검사, rev-parse HEAD = 결과 커밋,
+  #   branch <name> [<commit>] = 브랜치 생성(force 금지 보장됨).
+  local PUSHLOG="$TMP/pushlog" GITLOG="$TMP/gitlog" BRANCHES="$TMP/branches"
+  : > "$PUSHLOG"; : > "$GITLOG"; : > "$BRANCHES"
   mock_git() {
+    # 선행 -C <dir> 흡수(loop 결과 워크트리에서 결과 커밋을 읽을 때 사용).
+    if [[ "$1" == "-C" ]]; then shift 2; fi
     local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
     printf '%s\n' "$*" >> "$GITLOG"
     case "$1" in
       push) printf '%s\n' "$*" >> "$PUSHLOG" ;;
       # merge-base --is-ancestor: MOCK_ANCESTOR=1 이면 조상(0), 기본 비조상(1).
       merge-base) [[ "${MOCK_ANCESTOR:-0}" == "1" ]] && return 0 || return 1 ;;
-      rebase|fetch|checkout) : ;;
+      rev-parse)
+        case "$*" in
+          *--verify*refs/heads/*)
+            local b="${*##*refs/heads/}"; b="${b%% *}"
+            grep -Fxq "$b" "$BRANCHES" 2>/dev/null && return 0 || return 1 ;;
+          *HEAD*) echo "resultcommitsha7"; return 0 ;;
+        esac ;;
+      branch) printf '%s\n' "$2" >> "$BRANCHES" ;;   # branch <name> [<commit>]
+      checkout)
+        # 실제처럼: 존재하지 않는 브랜치 checkout 은 실패한다(무조건 성공 금지).
+        grep -Fxq "$2" "$BRANCHES" 2>/dev/null || { echo "error: pathspec '$2' did not match" >&2; return 1; } ;;
+      rebase|fetch) : ;;
     esac
     return 0
   }
@@ -369,6 +437,19 @@ in_selftest() {
   st_done()    { printf '{"state":"terminal","signals":["DONE"]}\n'; }
   st_blocked() { printf '{"state":"terminal","signals":["BLOCKED"]}\n'; }
   st_running() { printf '{"state":"running","signals":[]}\n'; }
+
+  # ---- AC1/AC4/AC5: 대상 작업 브랜치 부재 → loop 결과 커밋에서 생성되어 통합 전진 ----
+  #   브랜치가 처음부터 없는 상태(BRANCHES 비어 checkout 이 실패하는 조건)에서, 다리가 loop
+  #   결과 커밋으로 브랜치를 만들어 phase=blocked 로 떨어지지 않고 push·PR 까지 전진하는지.
+  local kN="x-nnn0000" wbN="feat/20260604T000000-abc1234-x"
+  st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
+  : > "$BRANCHES"; : > "$PUSHLOG"; : > "$PRLOG"
+  grep -Fxq "$wbN" "$BRANCHES" 2>/dev/null && bad "AC5 사전조건: 브랜치가 미리 존재" || ok "AC5 사전조건: 작업 브랜치 부재"
+  MOCK_EXISTING_PR="" in_integrate "$spec" "$rd" "$kN" >/dev/null; rc=$?
+  chk "AC4 브랜치 부재서 통합 전진 rc=0(blocked 아님)" "$rc" "0"
+  chk "AC4 phase=review(blocked 아님)" "$(int_get_phase "$rd" "$kN")" "review"
+  grep -Fxq "$wbN" "$BRANCHES" && ok "AC1 작업 브랜치가 loop 결과 커밋에서 생성됨" || bad "AC1 작업 브랜치가 loop 결과 커밋에서 생성됨"
+  grep -q "$wbN" "$PUSHLOG" && ok "AC4 생성된 브랜치 push 전진" || bad "AC4 생성된 브랜치 push 전진"
 
   # ---- AC: DONE → base sync→push→PR, phase=review, branch/pr 기록 ----
   local kA="x-aaa1111"
@@ -432,6 +513,12 @@ in_selftest() {
   chk "AC3 direct spec-gap rc=3" "$rc" "3"
   chk "AC3 direct phase=blocked-spec-gap" "$(int_get_phase "$rd" "$kDS")" "blocked-spec-gap"
   [[ ! -s "$PUSHLOG" && ! -s "$PRLOG" ]] && ok "AC3 direct spec-gap push·PR 미수행" || bad "AC3 direct spec-gap push·PR 미수행"
+
+  # ---- AC2: loop 공개 paths 의 WT 값에 공백이 있어도 경로를 통째로 읽는다(첫 토큰 절단 금지) ----
+  mock_loop_spaced() { [[ "$1" == "paths" ]] && printf 'WT          /tmp/my work/.worktree\n'; }
+  ( LOOP_CMD=mock_loop_spaced
+    [[ "$(in_loop_worktree "$spec")" == "/tmp/my work/.worktree" ]] ) \
+    && ok "AC2 WT 공백 경로 보존" || bad "AC2 WT 공백 경로 보존"
 
   # ---- AC: force 미사용 (mock_git 은 force 보면 exit99; 여기 도달했으면 미사용) ----
   [[ -s "$PUSHLOG" || -s "$GITLOG" ]] && ok "git/push 실제 수행됨" || bad "git/push 실제 수행됨"
