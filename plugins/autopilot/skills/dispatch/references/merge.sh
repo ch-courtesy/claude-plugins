@@ -203,7 +203,9 @@ mg_merge_finish() {
 
   local branch; branch="$(int_get_branch "$rd" "$key")"
   [[ -n "$branch" ]] || { mg_die "작업 브랜치 미설정(통합 선행 필요): key=$key"; return 1; }
-  [[ -n "$pr" ]] || pr="$(int_get_pr "$rd" "$key")"
+  # direct 서브모드(skip_approval=1)는 PR 없이 동작하는 계약 — PR 보강을 건너뛴다
+  # (같은 key 가 이전 forge 경로·재개에서 가졌을 수 있는 stale PR 을 끌어오지 않음).
+  [[ "$skip_approval" == "1" ]] || { [[ -n "$pr" ]] || pr="$(int_get_pr "$rd" "$key")"; }
   int_log "$rd" "$key" "merge_finish spec=$spec branch=$branch pr=$pr skip_approval=${skip_approval:-0}"
 
   # 1) 승인 게이트(직접 머지 서브모드면 우회).
@@ -237,7 +239,8 @@ mg_merge_finish() {
   echo "key:     $key"
   echo "phase:   merged"
   echo "branch:  $branch → $DEFAULT_BRANCH (ff-only)"
-  echo "pr:      $pr"
+  # direct 서브모드는 PR 없이 동작 — PR 필드 생략(stale PR 출력 방지).
+  [[ "$skip_approval" == "1" ]] || echo "pr:      $pr"
   return 0
 }
 
@@ -354,12 +357,13 @@ mg_selftest() {
 
   # ---- AC3/AC6: skip_approval=1 → 승인 게이트만 우회(직접 머지 서브모드) ----
   #   forge 미구성 직접 머지는 승인 요청·리뷰·승인 없이 머지하되 version gate·ff-only 는 유지.
-  reset; setup kd1
-  MOCK_REVIEWS=$'COMMENTED\tsomeone' MOCK_FILES="README.md" \
-    mg_merge_finish "$spec" "$rd" kd1 "" 1 >/dev/null 2>&1; rc=$?
+  reset; setup kd1   # setup 은 int_set_pr 77 을 심는다 — direct 경로가 이 stale PR 을 끌어오면 안 된다.
+  out="$(MOCK_REVIEWS=$'COMMENTED\tsomeone' MOCK_FILES="README.md" \
+    mg_merge_finish "$spec" "$rd" kd1 "" 1 2>/dev/null)"; rc=$?
   chk "AC3 직접머지 skip-approval rc=0" "$rc" "0"
   has 'git merge --ff-only' && ok "AC3 직접머지 ff-only 머지" || bad "AC3 직접머지 ff-only 머지"
   chk "AC3 직접머지 phase=merged" "$(int_get_phase "$rd" kd1)" "merged"
+  case "$out" in *77*) bad "AC3 직접머지 stale PR(77) 미출력 — skip_approval 시 보강 안 함";; *) ok "AC3 직접머지 stale PR(77) 미출력 — skip_approval 시 보강 안 함";; esac
 
   # ---- AC5: skip_approval=1 이어도 version gate 는 유지(차단) ----
   reset; setup kd2
