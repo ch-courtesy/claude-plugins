@@ -182,6 +182,48 @@ function mergeFindings(findingsArrays, keyFn) {
   return merged;
 }
 
+// 통합(unified) diff 텍스트를 파일 단위 세그먼트로 분할한다. 각 세그먼트는
+// 한 파일의 `diff --git ...` 헤더부터 다음 파일 헤더 직전까지를 그대로 보존하며
+// (모델에 그대로 다시 먹일 수 있도록), 파일 경로와 추정 토큰을 함께 돌려준다.
+// 경로는 `+++ b/<path>` 우선, 없으면(삭제 파일) `--- a/<path>`, 그것도 없으면
+// `diff --git a/<path> b/<path>` 헤더에서 도출한다. diff 가 비면 빈 배열.
+// 반환: [{ path, segment, tokens }] (입력 파일 순서 보존).
+function splitUnifiedDiffByFile(diffText) {
+  const text = typeof diffText === 'string' ? diffText : '';
+  if (text.length === 0) return [];
+  const lines = text.split('\n');
+  const segments = [];
+  let cur = null;
+  const pushCur = () => {
+    if (!cur) return;
+    const segment = cur.lines.join('\n');
+    segments.push({ path: cur.path, segment, tokens: estimateTokens(segment) });
+  };
+  const pathFromGitHeader = (line) => {
+    // diff --git a/<p> b/<p>
+    const m = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+    return m ? m[2] : '';
+  };
+  for (const line of lines) {
+    if (line.startsWith('diff --git ')) {
+      pushCur();
+      cur = { path: pathFromGitHeader(line), lines: [line] };
+      continue;
+    }
+    if (!cur) continue; // preamble before first file header — ignore
+    cur.lines.push(line);
+    if (line.startsWith('+++ ')) {
+      const m = line.match(/^\+\+\+ b\/(.*)$/);
+      if (m && m[1] && m[1] !== '/dev/null') cur.path = m[1];
+    } else if (line.startsWith('--- ') && !cur.path) {
+      const m = line.match(/^--- a\/(.*)$/);
+      if (m && m[1] && m[1] !== '/dev/null') cur.path = m[1];
+    }
+  }
+  pushCur();
+  return segments;
+}
+
 // 청크 임계 초과 여부. estimatedDiffTokens 가 maxDiffBeforeChunking 를
 // 초과할 때만 청크링을 발동(이하면 기존 단일 패스 유지 — 회귀 없음).
 function needsChunking(estimatedDiffTokens, opts) {
@@ -211,6 +253,7 @@ module.exports = {
   normalizeTitle,
   computeFingerprint,
   mergeFindings,
+  splitUnifiedDiffByFile,
   needsChunking,
   decideReviewEvent,
 };

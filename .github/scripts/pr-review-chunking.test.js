@@ -266,4 +266,71 @@ test('needsChunking: true only above the chunk threshold', () => {
   assert.strictEqual(M.needsChunking(1, { maxDiffBeforeChunking: 80000 }), false);
 });
 
+// ---- splitUnifiedDiffByFile ----
+
+const SAMPLE_DIFF = [
+  'diff --git a/src/a.js b/src/a.js',
+  'index 111..222 100644',
+  '--- a/src/a.js',
+  '+++ b/src/a.js',
+  '@@ -1,2 +1,3 @@',
+  ' ctx',
+  '+added line',
+  ' ctx2',
+  'diff --git a/docs/readme.md b/docs/readme.md',
+  'index 333..444 100644',
+  '--- a/docs/readme.md',
+  '+++ b/docs/readme.md',
+  '@@ -1 +1 @@',
+  '-old',
+  '+new',
+].join('\n');
+
+test('split: separates a unified diff into per-file segments with paths', () => {
+  const segs = M.splitUnifiedDiffByFile(SAMPLE_DIFF);
+  assert.strictEqual(segs.length, 2);
+  assert.deepStrictEqual(segs.map((s) => s.path), ['src/a.js', 'docs/readme.md']);
+  // each segment starts at its own `diff --git` header and is self-contained
+  assert.ok(segs[0].segment.startsWith('diff --git a/src/a.js'));
+  assert.ok(segs[0].segment.includes('+added line'));
+  assert.ok(!segs[0].segment.includes('docs/readme.md'), 'segment 0 does not bleed into file 2');
+  assert.ok(segs[1].segment.startsWith('diff --git a/docs/readme.md'));
+});
+
+test('split: reports estimated tokens per segment (chars/4)', () => {
+  const segs = M.splitUnifiedDiffByFile(SAMPLE_DIFF);
+  for (const s of segs) {
+    assert.strictEqual(s.tokens, M.estimateTokens(s.segment));
+    assert.ok(s.tokens > 0);
+  }
+});
+
+test('split: derives path of a deleted file from the --- a/ header', () => {
+  const del = [
+    'diff --git a/gone.js b/gone.js',
+    'deleted file mode 100644',
+    '--- a/gone.js',
+    '+++ /dev/null',
+    '@@ -1 +0,0 @@',
+    '-x',
+  ].join('\n');
+  const segs = M.splitUnifiedDiffByFile(del);
+  assert.strictEqual(segs.length, 1);
+  assert.strictEqual(segs[0].path, 'gone.js');
+});
+
+test('split: empty / whitespace diff yields no segments', () => {
+  assert.deepStrictEqual(M.splitUnifiedDiffByFile(''), []);
+  assert.deepStrictEqual(M.splitUnifiedDiffByFile(null), []);
+  assert.deepStrictEqual(M.splitUnifiedDiffByFile('no headers here\njust text'), []);
+});
+
+test('split → chunk: segments feed straight into the budget/chunk pipeline', () => {
+  const segs = M.splitUnifiedDiffByFile(SAMPLE_DIFF);
+  const { included } = M.selectFilesWithinBudget(segs, { maxTotalInput: 1000000 });
+  const chunks = M.groupIntoChunks(included, { maxChunkTokens: 1000000 });
+  assert.strictEqual(chunks.length, 1, 'small diff stays a single chunk (no regression)');
+  assert.deepStrictEqual(chunks[0].files.map((f) => f.path), ['src/a.js', 'docs/readme.md']);
+});
+
 console.log(`\nALL ${passed} CHECKS PASSED`);

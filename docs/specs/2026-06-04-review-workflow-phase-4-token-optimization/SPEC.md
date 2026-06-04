@@ -4,6 +4,8 @@ scope:
     - .github/workflows/codex-review.yml
     - .github/workflows/claude-review.yml
     - .github/scripts/**
+    - tests/codex/**
+    - tests/claude/**
     - docs/codex/pr-review-workflow.md
   exclude:
     - rules/**
@@ -62,6 +64,9 @@ Codex/Claude PR 리뷰 자동화의 Phase 4(Token Optimized Review)를 완성한
 - **토큰 추정**: 셸/Actions 런타임에 토크나이저가 없으므로 추정 토큰은 **문자수 / 4** 휴리스틱으로 계산한다(조립된 프롬프트·diff 텍스트 기준).
 - **권장 기본값(상수)**: max total input 250k, max diff before chunking 80k, max single file content 30k, max related files per changed file 5, max unchanged context expansion depth 2, max output 16k 토큰. 이 값들은 권장 기본값으로 워크플로/공유 모듈에 상수로 둔다.
 - **공유 방식**: 신규 로직은 `.github/scripts` 아래 CommonJS 모듈(`module.exports` + `require`)로 두고, 두 워크플로의 `github-script` 인라인 단계에서 `require`로 소비한다(`diff-anchor-filter.js`와 동일 패턴). 두 워크플로의 동작은 대칭이어야 한다.
+- **청크링 메커니즘(결정됨): dynamic-matrix 멀티잡 파이프라인**. GHA `uses:` 스텝은 루프 불가하므로 가변 횟수 모델 호출은 잡을 세 단계로 재구성해 구현한다: (1) **prep 잡** — 컨텍스트 수집·저우선 강등·청크 그룹핑을 수행하고 청크 목록을 `strategy.matrix`용 출력으로 내보낸다(청크 없음/단일 청크면 matrix-of-1 → 기존 단일 패스와 동치). (2) **review 잡(matrix)** — 청크별로 모델 action(+청크당 needs_context follow-up 1회)을 호출해 청크별 결과를 아티팩트로 올린다. (3) **merge+submit 잡** — 모든 청크 결과를 fingerprint 기준 병합하고 단일 `createReview`로 제출한다. **모델 action `uses:` 소스 라인 수는 런타임 matrix 확장과 무관하게 불변**이므로 기존 카운트 계약(`codex_action_count` 등)을 깨지 않는다.
+- **보안·권한 로직 재배치(승인됨)**: App 토큰 발급·anchor 검증·false-green 가드·idempotency·self thread-resolve를 merge+submit 잡으로 이전한다. **로직·동작은 보존하고 잡 경계만 이동**하며, 토큰 권한 범위·승인 게이트·degrade 경로는 기존과 동일하게 유지한다(권한 확대 금지).
+- **계약 테스트(scope 내 tests/\*\*)**: 멀티잡 구조를 검증하는 계약 테스트를 `tests/codex`·`tests/claude`에 **추가**한다(prep/review-matrix/merge 잡 존재, 모델 action 소스 카운트 불변, 병합-단일제출, 보안 로직의 merge 잡 소재). 기존 계약 테스트는 **약화·삭제하지 않으며**, 구조 변경으로 갱신이 불가피한 단언은 새 구조의 동치 보장을 유지하는 방향으로만 수정한다(안전 의도 보존).
 - **저우선 파일 분류 기준(기본 집합)**: 문서 전용(`*.md`, `docs/**`), lockfile 전용(`package-lock.json`·`yarn.lock`·`pnpm-lock.yaml`·`Cargo.lock`·`poetry.lock`·`go.sum`·`composer.lock` 등), 생성물 전용(`.gitattributes`의 `linguist-generated`, `*.min.js`, `dist/**` 등). 한 PR이 저우선 분류 파일만 바꾼 경우에도 분류가 동작해야 한다.
 - **청크 그룹핑**: 변경 파일을 추정 토큰 기준 greedy 묶기로 각 청크가 청크 임계 이하가 되도록 그룹화한다. 단일 파일이 임계를 단독으로 넘으면 자체 청크에 두되 max single file content(30k) 한도로 내용을 truncate하고 truncate 플래그를 세운다.
 - **공유 단위 불변**: `diff-anchor-filter.js`·`pr-review-context.sh`·fingerprint 정규화는 byte-identical로 유지하고, 청크링은 이들의 입력(diff.patch / anchor.patch)·anchor 검증을 우회하지 않는다 — anchor 검증과 false-green 가드는 병합·제출 직전 기존 위치에서 그대로 적용된다(anchor 검증은 청크별이 아니라 전체 PR 정본 anchor.patch 기준 그대로).
