@@ -5,7 +5,7 @@
 #   - 종료 신호 판정: loop 의 공개 구조화 상태(`status --json`)로만 child 종료 의도를
 #     읽어 통합 분기로 매핑한다(dispatch.sh 의 child_terminal_state 와 동일 산식).
 #       DONE(차단 없음)            → base sync → push(feat/<run-id>-<slug>) → PR 생성/재사용,
-#                                     int-phase=awaiting-approval(외부 승인 대기).
+#                                     int-phase=review.
 #       BLOCKED category=spec-gap  → push·PR 없이 스펙 보강 재개 안내, int-phase=blocked-spec-gap.
 #       BLOCKED 그 외 하드 범주     → push·PR 없이 사람 에스컬레이션, int-phase=blocked.
 #   - base sync: 작업 브랜치를 default branch(main)에 rebase(fast-forward 가능할 때만).
@@ -182,7 +182,7 @@ in_ensure_pr() {
 # =====================================================================
 
 # in_integrate <spec> <run_dir> <key>
-#   반환: 0=통합 성공(int-phase=awaiting-approval) / 3=spec-gap 차단 / 4=하드 차단 / 20=미종료(대기).
+#   반환: 0=통합 성공(int-phase=review) / 3=spec-gap 차단 / 4=하드 차단 / 20=미종료(대기).
 in_integrate() {
   local spec="$1" rd="$2" key="$3"
   [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { in_die "사용: integration.sh integrate <spec> <run_dir> <key>"; return 1; }
@@ -204,37 +204,85 @@ in_integrate() {
       title="$(in_spec_title "$spec")"
       pr="$(in_ensure_pr "$branch" "$title")" || { int_set_phase "$rd" "$key" blocked; return 4; }
       [[ -n "$pr" ]] && int_set_pr "$rd" "$key" "$pr"
-      int_set_phase "$rd" "$key" awaiting-approval
-      int_log "$rd" "$key" "PR=$pr 인계 — 외부 승인 대기(내부 리뷰 제거; 외부 CI 봇·사람이 승인)"
+      int_set_phase "$rd" "$key" review
+      int_log "$rd" "$key" "PR=$pr 인계 — review 대기"
       echo "key:    $key"
-      echo "phase:  awaiting-approval"
+      echo "phase:  review"
       echo "branch: $branch"
       echo "pr:     $pr"
       return 0
       ;;
     failed)
-      local cat; cat="$(in_blocked_category "$spec")"
-      if [[ "$cat" == "spec-gap" ]]; then
-        int_set_phase "$rd" "$key" blocked-spec-gap
-        int_log "$rd" "$key" "BLOCKED spec-gap → 스펙 보강 재개 경로 안내(push·PR 안 함)"
-        echo "key:      $key"
-        echo "phase:    blocked-spec-gap"
-        echo "category: spec-gap"
-        echo "resume:   스펙 강화 후 dispatch --resume 로 재개하세요(push·PR 미수행)."
-        return 3
-      else
-        int_set_phase "$rd" "$key" blocked
-        int_log "$rd" "$key" "하드 차단($cat) → 사람 에스컬레이션(push·PR 안 함)"
-        echo "key:      $key"
-        echo "phase:    blocked"
-        echo "category: $cat"
-        echo "escalate: 사람 판단 필요(push·PR 미수행)."
-        return 4
-      fi
+      in_handle_blocked "$spec" "$rd" "$key"; return $?
       ;;
     running|pending)
       echo "key:      $key"
       echo "terminal: $term (아직 종료 신호 없음 — 통합 보류)"
+      return 20
+      ;;
+    *)
+      int_set_phase "$rd" "$key" blocked
+      in_die "알 수 없는 terminal state: $term (보수적으로 하드 차단 처리)"
+      return 4
+      ;;
+  esac
+}
+
+# in_handle_blocked <spec> <run_dir> <key> — failed(BLOCKED) 종료를 범주별로 매핑한다
+#   (push·PR 미수행). in_integrate(풀 파이프라인)와 in_integrate_direct(직접 머지)가 공유해
+#   범주 분기 산식 중복을 막는다. 반환 3=spec-gap, 4=하드 차단.
+in_handle_blocked() {
+  local spec="$1" rd="$2" key="$3" cat
+  cat="$(in_blocked_category "$spec")"
+  if [[ "$cat" == "spec-gap" ]]; then
+    int_set_phase "$rd" "$key" blocked-spec-gap
+    int_log "$rd" "$key" "BLOCKED spec-gap → 스펙 보강 재개 경로 안내(push·PR 안 함)"
+    echo "key:      $key"
+    echo "phase:    blocked-spec-gap"
+    echo "category: spec-gap"
+    echo "resume:   스펙 강화 후 dispatch --resume 로 재개하세요(push·PR 미수행)."
+    return 3
+  fi
+  int_set_phase "$rd" "$key" blocked
+  int_log "$rd" "$key" "하드 차단($cat) → 사람 에스컬레이션(push·PR 안 함)"
+  echo "key:      $key"
+  echo "phase:    blocked"
+  echo "category: $cat"
+  echo "escalate: 사람 판단 필요(push·PR 미수행)."
+  return 4
+}
+
+# in_integrate_direct <spec> <run_dir> <key> — forge 미구성 직접 머지 서브모드.
+#   승인 요청(PR)·리뷰·승인 의례 없이, 종료신호 판정·작업 브랜치 식별만 기존 헬퍼로 재사용해
+#   바로 머지 단계(phase=merging)로 넘긴다. push·PR 을 수행하지 않는다(머지는 호출자의 머지
+#   헬퍼가 ff-only + version 게이트로 직접 수행). BLOCKED 분기는 in_integrate 와 동일(공유 헬퍼).
+#   반환: 0=직접 머지 준비(phase=merging) / 3=spec-gap 차단 / 4=하드 차단 / 20=미종료(대기).
+in_integrate_direct() {
+  local spec="$1" rd="$2" key="$3"
+  [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { in_die "사용: integration.sh integrate-direct <spec> <run_dir> <key>"; return 1; }
+  mkdir -p "$rd"
+  local rid; rid="$(basename "$rd")"
+
+  local term; term="$(in_child_terminal_state "$spec")"
+  int_log "$rd" "$key" "integrate-direct spec=$spec terminal=$term"
+
+  case "$term" in
+    done)
+      local branch; branch="$(in_work_branch "$rid" "$spec")" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      int_set_branch "$rd" "$key" "$branch"
+      int_set_phase "$rd" "$key" merging
+      int_log "$rd" "$key" "직접 머지 준비(승인 요청·PR·리뷰 우회): branch=$branch → merging"
+      echo "key:    $key"
+      echo "phase:  merging"
+      echo "branch: $branch"
+      return 0
+      ;;
+    failed)
+      in_handle_blocked "$spec" "$rd" "$key"; return $?
+      ;;
+    running|pending)
+      echo "key:      $key"
+      echo "terminal: $term (아직 종료 신호 없음 — 직접 머지 보류)"
       return 20
       ;;
     *)
@@ -251,9 +299,12 @@ in_usage() {
 usage: integration.sh <command> [args]
 
 Commands:
-  integrate <spec> <run_dir> <key>   종료 신호를 읽어 매핑·통합:
-                                        DONE→push→PR(phase=awaiting-approval) /
+  integrate <spec> <run_dir> <key>   종료 신호를 읽어 매핑·통합(풀 파이프라인):
+                                        DONE→push→PR(phase=review) /
                                         spec-gap→blocked-spec-gap / 하드 BLOCKED→blocked.
+  integrate-direct <spec> <run_dir> <key>
+                                     forge 미구성 직접 머지: 승인·PR·리뷰 없이 작업 브랜치만
+                                        식별(phase=merging) / BLOCKED 분기는 integrate 와 동일.
   terminal  <spec>                   child 종료 상태(done|failed|running|pending|unknown).
   category  <spec>                   BLOCKED 범주(spec-gap|...|other).
 
@@ -319,12 +370,12 @@ in_selftest() {
   st_blocked() { printf '{"state":"terminal","signals":["BLOCKED"]}\n'; }
   st_running() { printf '{"state":"running","signals":[]}\n'; }
 
-  # ---- AC: DONE → base sync→push→PR, phase=awaiting-approval, branch/pr 기록 ----
+  # ---- AC: DONE → base sync→push→PR, phase=review, branch/pr 기록 ----
   local kA="x-aaa1111"
   st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
   MOCK_EXISTING_PR="" out="$(in_integrate "$spec" "$rd" "$kA")"; rc=$?
   chk "AC2 DONE 통합 rc=0" "$rc" "0"
-  chk "AC2 phase=awaiting-approval" "$(int_get_phase "$rd" "$kA")" "awaiting-approval"
+  chk "AC2 phase=review" "$(int_get_phase "$rd" "$kA")" "review"
   chk "AC2 branch=feat/<rid>-<slug>" "$(int_get_branch "$rd" "$kA")" "feat/20260604T000000-abc1234-x"
   grep -q 'feat/20260604T000000-abc1234-x' "$PUSHLOG" && ok "AC2 작업 브랜치 push" || bad "AC2 작업 브랜치 push"
   grep -q 'pr create' "$PRLOG" && ok "AC2 PR 생성" || bad "AC2 PR 생성"
@@ -364,6 +415,24 @@ in_selftest() {
   chk "running rc=20(보류)" "$rc" "20"
   chk "running phase 미설정" "$(int_get_phase "$rd" "$kP")" ""
 
+  # ---- AC3: integrate-direct DONE → branch 세팅·phase=merging, push·PR 미수행 ----
+  #   (GITLOG 은 비우지 않는다 — 아래 'git/push 실제 수행됨' 위생 단언이 누적 GITLOG 를 본다.)
+  local kD="x-ddd6666"; : > "$PUSHLOG"; : > "$PRLOG"
+  st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
+  in_integrate_direct "$spec" "$rd" "$kD" >/dev/null; rc=$?
+  chk "AC3 integrate-direct rc=0" "$rc" "0"
+  chk "AC3 direct phase=merging" "$(int_get_phase "$rd" "$kD")" "merging"
+  chk "AC3 direct branch=feat/<rid>-<slug>" "$(int_get_branch "$rd" "$kD")" "feat/20260604T000000-abc1234-x"
+  [[ ! -s "$PUSHLOG" && ! -s "$PRLOG" ]] && ok "AC3 direct push·PR 미수행" || bad "AC3 direct push·PR 미수행"
+
+  # ---- AC3: integrate-direct BLOCKED spec-gap → blocked-spec-gap(push·PR 없음) ----
+  local kDS="x-ddd7777"; : > "$PUSHLOG"; : > "$PRLOG"
+  st_blocked > "$LP/SPEC.md.json"; printf 'category: spec-gap\n' > "$LP/SPEC.md.logs"
+  in_integrate_direct "$spec" "$rd" "$kDS" >/dev/null; rc=$?
+  chk "AC3 direct spec-gap rc=3" "$rc" "3"
+  chk "AC3 direct phase=blocked-spec-gap" "$(int_get_phase "$rd" "$kDS")" "blocked-spec-gap"
+  [[ ! -s "$PUSHLOG" && ! -s "$PRLOG" ]] && ok "AC3 direct spec-gap push·PR 미수행" || bad "AC3 direct spec-gap push·PR 미수행"
+
   # ---- AC: force 미사용 (mock_git 은 force 보면 exit99; 여기 도달했으면 미사용) ----
   [[ -s "$PUSHLOG" || -s "$GITLOG" ]] && ok "git/push 실제 수행됨" || bad "git/push 실제 수행됨"
   if grep -qiE 'force|(^| )-f( |$)' "$GITLOG"; then bad "force 미사용"; else ok "force 미사용(git 인자에 force 없음)"; fi
@@ -377,7 +446,8 @@ in_selftest() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   SUB="${1:-}"; shift || true
   case "$SUB" in
-    integrate) in_integrate "$@" ;;
+    integrate)        in_integrate "$@" ;;
+    integrate-direct) in_integrate_direct "$@" ;;
     terminal)  [[ $# -ge 1 ]] || in_usage; in_child_terminal_state "$1" ;;
     category)  [[ $# -ge 1 ]] || in_usage; in_blocked_category "$1" ;;
     selftest)  in_selftest ;;

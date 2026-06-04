@@ -2,9 +2,10 @@
 # lib-integration.sh — autopilot:dispatch per-SPEC 통합 상태 헬퍼 (M1)
 #
 # 책임:
-#   - 한 SPEC 의 통합(push→PR)·승인·머지 라이프사이클 상태를 dispatch 의 기존 run
+#   - 한 SPEC 의 통합(push→PR)·리뷰·머지 라이프사이클 상태를 dispatch 의 기존 run
 #     디렉토리(<project_root>/.dispatch/runs/<run-id>/) 하위에 per-SPEC 키로 보관·조회.
-#     보관 필드(파일): branch / pr / head / int-phase.
+#     보관 필드(파일): branch / pr / head / review-round / review-verdict /
+#                      review-blocking-hash / int-phase.
 #   - 키는 호출자가 계산해 넘긴다(dispatch.sh 의 spec_slug+hash7 산식과 일치하는
 #     `<slug>-<hash7>`). 이 헬퍼는 키를 불투명 문자열로만 다뤄 독립 검증 가능하다.
 #
@@ -50,10 +51,25 @@ int_get_pr()      { int_get "$1" "$2" pr ""; }
 int_set_head()    { int_set "$1" "$2" head "$3"; }
 int_get_head()    { int_get "$1" "$2" head ""; }
 
+int_set_verdict() { int_set "$1" "$2" review-verdict "$3"; }
+int_get_verdict() { int_get "$1" "$2" review-verdict ""; }
+
+int_set_blocking_hash() { int_set "$1" "$2" review-blocking-hash "$3"; }
+int_get_blocking_hash() { int_get "$1" "$2" review-blocking-hash ""; }
+
 # int-phase — per-SPEC 통합 라이프사이클 단계(스케줄러가 읽는 sub-state).
-#   loop-done|integrating|awaiting-approval|merging|merged|escalated|blocked
+#   loop-done|integrating|review|approved|merging|merged|escalated|blocked
 int_set_phase()   { int_set "$1" "$2" int-phase "$3"; }
 int_get_phase()   { int_get "$1" "$2" int-phase ""; }
+
+# review-round 카운터.
+int_review_round() { int_get "$1" "$2" review-round "0"; }
+int_bump_review_round() {
+  local rd="$1" key="$2" n
+  n=$(( $(int_review_round "$rd" "$key") + 1 ))
+  int_set "$rd" "$key" review-round "$n"
+  echo "$n"
+}
 
 # int_log <run_dir> <key> <message...> — run-dir LOG.md 에 키 prefix 로 append.
 int_log() {
@@ -76,6 +92,7 @@ li_selftest() {
 
   # 기본값: 미설정 필드는 default 반환.
   chk "기본 branch 빈값"      "$(int_get_branch "$rd" "$k")" ""
+  chk "기본 review-round 0"   "$(int_review_round "$rd" "$k")" "0"
   chk "기본 phase 빈값"       "$(int_get_phase "$rd" "$k")" ""
   chk "기본 default 적용"     "$(int_get "$rd" "$k" nope fallback)" "fallback"
 
@@ -86,8 +103,17 @@ li_selftest() {
   chk "pr 왕복"               "$(int_get_pr "$rd" "$k")" "42"
   int_set_head "$rd" "$k" "sha-AAA"
   chk "head 왕복"             "$(int_get_head "$rd" "$k")" "sha-AAA"
-  int_set_phase "$rd" "$k" "awaiting-approval"
-  chk "phase 왕복"            "$(int_get_phase "$rd" "$k")" "awaiting-approval"
+  int_set_verdict "$rd" "$k" "approve"
+  chk "verdict 왕복"          "$(int_get_verdict "$rd" "$k")" "approve"
+  int_set_blocking_hash "$rd" "$k" "deadbeef"
+  chk "blocking-hash 왕복"    "$(int_get_blocking_hash "$rd" "$k")" "deadbeef"
+  int_set_phase "$rd" "$k" "review"
+  chk "phase 왕복"            "$(int_get_phase "$rd" "$k")" "review"
+
+  # round 증가.
+  chk "bump→1"                "$(int_bump_review_round "$rd" "$k")" "1"
+  chk "bump→2"                "$(int_bump_review_round "$rd" "$k")" "2"
+  chk "round 영속=2"          "$(int_review_round "$rd" "$k")" "2"
 
   # 키 격리: 다른 키는 서로 영향 없음.
   local k2="feat-y-def5678"

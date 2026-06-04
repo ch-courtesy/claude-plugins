@@ -3,6 +3,29 @@ sub_rule: review-approval
 backend: github
 label: 변경 제안 심사·승인 (GitHub)
 description: GitHub Pull Request의 승인 상태·스레드 해소·필수 체크·소유권 경계·머지 방식·Draft 규율을 백엔드 용어로 정의합니다.
+inputs:
+  - name: merge_method
+    multi_select: false
+    header: "머지 방식"
+    question: "리뷰가 끝난 PR을 머지할 때 이 프로젝트가 쓰는 방식을 하나 고르세요."
+    options:
+      - label: "저장소 설정을 따름"
+        default: true
+        description: "방식을 룰로 못 박지 않고 GitHub 저장소에 설정된 머지 방식을 그대로 따릅니다. 안전한 기본값입니다."
+        value: |-
+          - 이 저장소가 정한 머지 방식(merge commit / squash / rebase)을 따릅니다. 방식이 명시돼 있지 않으면 임의로 바꾸지 말고 저장소 관례·설정을 따릅니다.
+      - label: "merge commit"
+        description: "PR마다 머지 커밋을 만들어 토픽 브랜치 history를 base에 보존합니다."
+        value: |-
+          - 이 저장소의 머지 방식은 **merge commit**입니다. PR을 머지할 때 머지 커밋을 만들어 토픽 브랜치 history를 base 브랜치에 보존합니다. squash·rebase 방식으로 바꿔 머지하지 않습니다.
+      - label: "squash"
+        description: "PR의 커밋들을 하나로 합쳐 base에 단일 커밋으로 올립니다(선형 history)."
+        value: |-
+          - 이 저장소의 머지 방식은 **squash**입니다. PR을 머지할 때 커밋들을 하나로 합쳐(squash) base 브랜치에 단일 커밋으로 올립니다. merge commit·rebase 방식으로 바꿔 머지하지 않습니다.
+      - label: "rebase"
+        description: "PR 커밋들을 base 위에 rebase해 머지 커밋 없이 올립니다."
+        value: |-
+          - 이 저장소의 머지 방식은 **rebase**입니다. PR을 머지할 때 커밋들을 base 브랜치 위에 rebase해 머지 커밋 없이 올립니다. merge commit·squash 방식으로 바꿔 머지하지 않습니다.
 ---
 
 # 변경 제안 심사·승인 지침 — GitHub
@@ -41,7 +64,8 @@ GitHub 리뷰는 세 가지 상태로 제출되며, 각 상태의 의미를 다�
 
 ## 머지 방식
 
-- 이 저장소가 정한 머지 방식(merge commit / squash / rebase)을 따릅니다. 방식이 명시돼 있지 않으면 임의로 바꾸지 말고 저장소 관례·설정을 따릅니다.
+{{merge_method}}
+
 - 머지 직전 base 브랜치와의 충돌이 해소됐는지, 필수 체크가 최신 커밋 기준으로 green인지 확인합니다.
 
 ## Draft 상태

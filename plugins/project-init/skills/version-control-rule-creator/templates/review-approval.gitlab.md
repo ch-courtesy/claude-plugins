@@ -3,6 +3,29 @@ sub_rule: review-approval
 backend: gitlab
 label: 변경 제안 심사·승인 (GitLab)
 description: GitLab Merge Request의 승인 규칙·스레드 해소·MR 파이프라인·소유권 경계·머지 방식·Draft 규율을 백엔드 용어로 정의합니다.
+inputs:
+  - name: merge_method
+    multi_select: false
+    header: "머지 방식"
+    question: "리뷰가 끝난 MR을 머지할 때 이 프로젝트가 쓰는 방식을 하나 고르세요."
+    options:
+      - label: "저장소 설정을 따름"
+        default: true
+        description: "방식을 룰로 못 박지 않고 GitLab 프로젝트에 설정된 머지 방식을 그대로 따릅니다. 안전한 기본값입니다."
+        value: |-
+          - 이 저장소가 정한 머지 방식(merge commit / squash / fast-forward)을 따릅니다. 방식이 명시돼 있지 않으면 임의로 바꾸지 말고 저장소 관례·설정을 따릅니다.
+      - label: "merge commit"
+        description: "MR마다 머지 커밋을 만들어 소스 브랜치 history를 타깃에 보존합니다."
+        value: |-
+          - 이 저장소의 머지 방식은 **merge commit**입니다. MR을 머지할 때 머지 커밋을 만들어 소스 브랜치 history를 타깃 브랜치에 보존합니다. squash·fast-forward 방식으로 바꿔 머지하지 않습니다.
+      - label: "squash"
+        description: "MR의 커밋들을 하나로 합쳐 타깃에 단일 커밋으로 올립니다."
+        value: |-
+          - 이 저장소의 머지 방식은 **squash**입니다. MR을 머지할 때 커밋들을 하나로 합쳐(squash) 타깃 브랜치에 단일 커밋으로 올립니다. merge commit·fast-forward 방식으로 바꿔 머지하지 않습니다.
+      - label: "fast-forward"
+        description: "머지 커밋 없이 타깃 브랜치를 소스 커밋으로 fast-forward합니다(선형 history)."
+        value: |-
+          - 이 저장소의 머지 방식은 **fast-forward**입니다. MR을 머지할 때 머지 커밋 없이 타깃 브랜치를 소스 커밋으로 fast-forward합니다(머지 전 소스 브랜치가 타깃 위에 선형으로 올라가 있어야 합니다). merge commit·squash 방식으로 바꿔 머지하지 않습니다.
 ---
 
 # 변경 제안 심사·승인 지침 — GitLab
@@ -39,7 +62,8 @@ description: GitLab Merge Request의 승인 규칙·스레드 해소·MR 파이�
 
 ## 머지 방식
 
-- 이 저장소가 정한 머지 방식(merge commit / squash / fast-forward)을 따릅니다. 방식이 명시돼 있지 않으면 임의로 바꾸지 말고 저장소 관례·설정을 따릅니다.
+{{merge_method}}
+
 - 머지 직전 타깃 브랜치와의 충돌이 해소됐는지, MR 파이프라인이 최신 커밋 기준으로 green인지 확인합니다.
 
 ## Draft 상태
