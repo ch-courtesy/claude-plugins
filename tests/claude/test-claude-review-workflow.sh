@@ -65,11 +65,13 @@ fi
 if grep -q 'https://api\.anthropic\.com/v1/messages' "$WORKFLOW"; then
   fail "Claude API 직접 호출이 남아 있음"
 fi
-grep -q '\.claude-review/result\.json' "$WORKFLOW" \
-  || fail "Claude 최종 JSON 출력 파일 지정 부재"
-grep -q 'jq empty \.claude-review/result\.json' "$WORKFLOW" \
-  || fail "Claude 최종 JSON jq 검증 부재"
-ok "check 2: pinned claude-code-action + prompt schema + shared context 로 review 실행 (강제 구조화 출력 채널 미사용)"
+# Phase 4: per-chunk naming — the model step runs under strategy.matrix, so the
+# result file is indexed by the matrix chunk (.claude-review/result.chunk-<i>.json).
+grep -q '\.claude-review/result\.chunk-' "$WORKFLOW" \
+  || fail "Claude 최종 JSON (청크별) 출력 파일 지정 부재"
+grep -q 'jq empty "\.claude-review/result\.chunk-' "$WORKFLOW" \
+  || fail "Claude 최종 JSON jq 검증 (청크별) 부재"
+ok "check 2: pinned claude-code-action + prompt schema + shared context 로 review 실행 (강제 구조화 출력 채널 미사용, 청크별)"
 
 echo ""
 echo "=== check 2c: model result text is parsed into JSON with core-field validation ==="
@@ -297,13 +299,16 @@ grep -qF '## 마지막 재강조 (절대 위반 금지)' "$WORKFLOW" \
   || fail "마지막 재강조 섹션 부재 — 모델이 untrusted PR diff 뒤에서 출력 언어 지시 흘릴 수 있음 (AC2)"
 grep -qF '영어 등 다른 언어로 작성하면 안 됩니다' "$WORKFLOW" \
   || fail "출력 언어 명시적 강제(다른 언어 금지) 라인 부재 (AC2)"
-# 재강조가 모든 untrusted 입력(diff) 뒤에 위치하는지 정적 검증 (AC2 / 제약: 재강조 위치)
+# 재강조가 모든 untrusted 입력(diff) 뒤에 위치하는지 정적 검증 (AC2 / 제약: 재강조 위치).
+# Phase 4: 청크별로 diff 를 주입하므로 `cat diff.patch` 대신 context 헤더의
+# 'Unified diff:' 라벨(여기서부터 untrusted diff 시작)을 untrusted-입력 경계로 본다.
+# 재강조는 prompt-template 의 끝에 있어 이 라벨 printf 보다 소스 순서상 뒤에 온다.
 lang_reiterate_line="$(awk 'index($0, "## 마지막 재강조 (절대 위반 금지)") { print NR; exit }' "$WORKFLOW")"
-diff_cat_line="$(awk 'index($0, "cat .review-context/diff.patch") { print NR; exit }' "$WORKFLOW")"
-[[ -n "$lang_reiterate_line" && -n "$diff_cat_line" ]] \
-  || fail "재강조/ diff cat 라인 탐지 실패 (AC2)"
-(( diff_cat_line < lang_reiterate_line )) \
-  || fail "재강조가 untrusted diff 출력보다 앞에 위치함 — 모든 untrusted 입력 뒤에 와야 함 (AC2 / 제약)"
+diff_marker_line="$(awk 'index($0, "Unified diff:") { print NR; exit }' "$WORKFLOW")"
+[[ -n "$lang_reiterate_line" && -n "$diff_marker_line" ]] \
+  || fail "재강조/ untrusted diff 라벨(Unified diff:) 라인 탐지 실패 (AC2)"
+(( diff_marker_line < lang_reiterate_line )) \
+  || fail "재강조가 untrusted diff 경계(Unified diff:)보다 앞에 위치함 — 모든 untrusted 입력 뒤에 와야 함 (AC2 / 제약)"
 # 지시·재강조 양쪽이 구성 변수를 사용 (AC4)
 grep -qF '"$CLAUDE_REVIEW_LANG"' "$WORKFLOW" \
   || fail "출력 언어 지시/재강조가 CLAUDE_REVIEW_LANG 변수를 사용하지 않음 (AC4)"
@@ -398,6 +403,49 @@ grep -qF 'let inlineFindings = findings;' "$WORKFLOW" \
 grep -qF 'Shared diff-anchor validator unavailable' "$WORKFLOW" \
   || fail "validator require 실패를 graceful degrade(경고+unfiltered fallback)로 처리하지 않음 (robustness)"
 ok "check 13: 공유 diff-only anchor 검증 + 제외 로그 + false-green setFailed 가드 + validator 부재 graceful degrade"
+
+echo ""
+echo "=== check 14: Phase 4 토큰 예산 청크링 — 3-잡 matrix 파이프라인 (prep→review→merge), codex 대칭 ==="
+# 3개 잡(prep/review/merge)으로 재구성: 큰 diff 를 토큰 예산 청크로 나눠
+# 병렬 리뷰하고 단일 리뷰로 병합한다. 작은 diff 는 단일 청크(matrix-of-1)로
+# 기존 단일 패스와 동치 — 회귀 없음. codex-review.yml 과 대칭.
+for job in prep review merge; do
+  grep -qE "^  $job:" "$WORKFLOW" \
+    || fail "Phase 4 잡 '$job:' 부재 — 3-잡 matrix 파이프라인 미구성 (AC)"
+done
+# review 잡은 prep 가 내보낸 청크 목록을 strategy.matrix 로 fan-out 한다.
+grep -qF 'matrix:' "$WORKFLOW" \
+  || fail "review 잡의 strategy.matrix 부재 — 청크별 모델 호출 fan-out 불가 (AC)"
+grep -qF 'chunk: ${{ fromJSON(needs.prep.outputs.chunks) }}' "$WORKFLOW" \
+  || fail "matrix 가 prep.outputs.chunks 로 청크 fan-out 되지 않음 (AC)"
+grep -qF 'chunks: ${{ steps.plan.outputs.chunks }}' "$WORKFLOW" \
+  || fail "prep 잡이 청크 목록(chunks)을 출력하지 않음 (AC)"
+# 각 청크는 자기 context 파일만 Read 하도록 allowedTools 가 청크별로 좁혀진다.
+grep -qF 'Read(/${{ github.workspace }}/.claude-review/context.chunk-${{ matrix.chunk }}.md)' "$WORKFLOW" \
+  || fail "allowedTools Read 범위가 청크별 context 파일로 좁혀지지 않음 (보안/AC)"
+# 청크링·분류·병합 로직은 단일 공유 모듈에서 require — 인라인 복제 없음.
+grep -qF '.github/scripts/pr-review-chunking.js' "$WORKFLOW" \
+  || fail "공유 청크링 모듈(.github/scripts/pr-review-chunking.js) require 부재 (AC: 단일 공유 단위)"
+for fn in splitUnifiedDiffByFile selectFilesWithinBudget groupIntoChunks needsChunking mergeFindings; do
+  grep -qF "$fn" "$WORKFLOW" \
+    || fail "공유 청크링 단위 '$fn' 사용 부재 (AC)"
+done
+# 청크 간 데이터는 아티팩트로 전달(잡은 파일시스템을 공유하지 않음).
+grep -qE 'uses: actions/upload-artifact@[0-9a-f]{40}' "$WORKFLOW" \
+  || fail "청크 prep/결과 아티팩트 upload(SHA 고정) 부재 (AC)"
+grep -qE 'uses: actions/download-artifact@[0-9a-f]{40}' "$WORKFLOW" \
+  || fail "merge 잡의 아티팩트 download(SHA 고정) 부재 (AC)"
+grep -qF 'claude-review-prep' "$WORKFLOW" \
+  || fail "prep context 아티팩트(claude-review-prep) 부재 (AC)"
+grep -qF 'claude-review-result-' "$WORKFLOW" \
+  || fail "청크별 결과 아티팩트(claude-review-result-<i>) 부재 (AC)"
+# 저우선 강등: 총 예산 초과 시 저우선 파일 제외 + 로그.
+grep -qF 'Excluded low-priority file from review' "$WORKFLOW" \
+  || fail "저우선 파일 예산 초과 제외 로그 부재 (AC)"
+# 회귀 없음 가드: 청크 임계 이하 + 제외 없음이면 단일 청크에 원본 diff 그대로.
+grep -qF 'no regression' "$WORKFLOW" \
+  || fail "단일 패스 회귀 없음 보장 주석/경로 부재 (AC)"
+ok "check 14: 3-잡 matrix(prep→review→merge) + 공유 청크링 모듈 + 청크별 allowedTools + 아티팩트 전달 + 병합 단일제출 + 저우선 강등"
 
 echo ""
 echo "ALL CHECKS PASSED"
