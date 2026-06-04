@@ -10,7 +10,6 @@
 #       branch         작업 브랜치 이름                  (forge 연동은 후속 단위)
 #       pr             PR 번호                            (forge 연동은 후속 단위)
 #       run-id         이 task 가 소유한 dispatch run 식별자
-#       review-round   리뷰 라운드 카운터                (review 루프는 후속 단위)
 #       head           마지막으로 관측한 head 식별자
 #       LOG.md         append-only 이벤트 로그
 #
@@ -77,15 +76,6 @@ get_pr()      { get_field "$1" "pr" ""; }
 
 set_head()    { set_field "$1" "head" "$2"; }
 get_head()    { get_field "$1" "head" ""; }
-
-# review round counter — 후속 단위(review 루프)가 라운드마다 증가시킨다.
-review_round() { get_field "$1" "review-round" "0"; }
-bump_review_round() {
-  local id="$1" n
-  n=$(( $(review_round "$id") + 1 ))
-  set_field "$id" "review-round" "$n"
-  echo "$n"
-}
 
 # ----- SPEC 경로 집합 (append-only) -----
 
