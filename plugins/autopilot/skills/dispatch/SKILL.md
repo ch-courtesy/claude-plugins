@@ -1,6 +1,14 @@
 ---
 name: dispatch
 description: "하나 이상의 SPEC 파일을 구현 단계로 넘기고 싶을 때 사용 — 의존성(depends_on)을 풀어 각 SPEC 을 준비되는 즉시 자율 실행기에 스트리밍 위임하고 결과를 취합. 옵트인 통합 모드(--integrate)면 SPEC별 push→PR→리뷰→머지 게이트로 완료를 '머지됨'으로 재정의해 의존자 해제를 머지 뒤로 미룬다. 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch)."
+allowed-tools:
+  - Read
+  - Bash(bash * dispatch.sh start:*)
+  - Bash(bash * dispatch.sh list)
+  - Bash(bash * dispatch.sh status:*)
+  - Bash(bash * dispatch.sh stop:*)
+  - Bash(bash * dispatch.sh watch:*)
+  - Bash(bash * dispatch.sh selftest:*)
 ---
 
 # dispatch
