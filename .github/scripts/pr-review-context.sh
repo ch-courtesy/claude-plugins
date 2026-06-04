@@ -64,6 +64,19 @@ case "$mode" in
     ;;
 esac
 
+# Anchor-validation patch — ALWAYS the canonical PR-vs-base diff that GitHub's
+# createReview validates inline-comment anchors against. The mode-specific
+# diff.patch above is for the MODEL (incremental on synchronize). Using that
+# incremental diff for anchor validation mis-classifies base-merged lines as
+# in-diff: a file absent in the previous-reviewed SHA (event.before) shows as
+# fully-added, so its unchanged-vs-base lines pass the off-diff filter and then
+# get 422 "Line could not be resolved" from createReview — which the inline-only
+# false-green guard turns into a failed job. `gh pr diff` is exactly the diff
+# GitHub resolves anchors against, so validate against it in every mode.
+gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch \
+  > "$REVIEW_OUTPUT_DIR/anchor.patch" \
+  || cp "$REVIEW_OUTPUT_DIR/diff.patch" "$REVIEW_OUTPUT_DIR/anchor.patch"
+
 {
   printf 'REVIEW_CONTEXT_MODE=%s\n' "$mode"
   printf 'REVIEW_INCREMENTAL_BASE=%s\n' "$incremental_base"

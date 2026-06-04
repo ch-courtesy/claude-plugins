@@ -78,6 +78,18 @@ grep -q '+incremental' "$out/diff.patch" \
   || fail "incremental mode should use before..head diff"
 ok "synchronize event uses incremental diff"
 
+# Regression: anchor.patch must be the canonical PR-vs-base diff (gh pr diff,
+# here '+full') even in incremental mode — NOT the incremental diff.patch.
+# Validating anchors against the incremental diff mis-marks base-merged lines
+# as in-diff → createReview 422 + false-green job failure.
+[[ -f "$out/anchor.patch" ]] \
+  || fail "anchor.patch must always be produced for createReview anchor validation"
+grep -q '+full' "$out/anchor.patch" \
+  || fail "incremental mode anchor.patch must be canonical gh pr diff, not the incremental diff"
+grep -q '+incremental' "$out/anchor.patch" \
+  && fail "anchor.patch must NOT be the incremental diff (would 422 on base-merged lines)"
+ok "incremental mode anchor.patch = canonical PR-vs-base diff (createReview-safe)"
+
 out="$tmp/incremental-fallback-out"
 mkdir -p "$out"
 GITHUB_EVENT_NAME=pull_request \
