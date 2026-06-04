@@ -7,15 +7,16 @@
 #     task 별로 격리된 디렉토리를 갖고 다음을 담는다:
 #       state          상태 로컬 미러 (intake|dispatching|dispatched|...|done|failed)
 #       SPECS.txt      이 task 가 다루는 SPEC 경로 목록 (append-only)
-#       branch         작업 브랜치 이름                  (forge 연동은 후속 단위)
-#       pr             PR 번호                            (forge 연동은 후속 단위)
 #       run-id         이 task 가 소유한 dispatch run 식별자
-#       head           마지막으로 관측한 head 식별자
 #       origin         이 task 를 촉발한 원본 task 식별자  (버그 분리 연결, 선택)
 #       LOG.md         append-only 이벤트 로그
 #
+# 리뷰·머지·통합(PR)은 dispatch 통합 모드가 소유하므로, fsd 상태에는 forge 부수효과
+# (branch·pr·head)를 더 이상 보관하지 않는다 — dispatch run 상태는 dispatch 의 공개
+# 인터페이스로 관측한다(poll.sh).
+#
 # **하지 않는 일**:
-#   - forge(PR/issue/label)·task backend 연동 (후속 단위 references 모듈 책임).
+#   - forge(PR/issue/label)·task backend 연동.
 #   - dispatch / loop 의 내부 상태 디렉토리·신호 파일 해석.
 #
 # 이 헬퍼는 sourcing 으로 사용한다. <project_root>/.fsd/ 디렉토리 밖 경로는
@@ -68,15 +69,6 @@ get_state()   { get_field "$1" "state" "unknown"; }
 
 set_run_id()  { set_field "$1" "run-id" "$2"; }
 get_run_id()  { get_field "$1" "run-id" ""; }
-
-set_branch()  { set_field "$1" "branch" "$2"; }
-get_branch()  { get_field "$1" "branch" ""; }
-
-set_pr()      { set_field "$1" "pr" "$2"; }
-get_pr()      { get_field "$1" "pr" ""; }
-
-set_head()    { set_field "$1" "head" "$2"; }
-get_head()    { get_field "$1" "head" ""; }
 
 # origin — 이 task 를 촉발한 원본 task 의 식별자(버그 분리 연결). 없으면 빈 값.
 set_origin()  { set_field "$1" "origin" "$2"; }

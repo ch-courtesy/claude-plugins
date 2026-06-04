@@ -1,65 +1,52 @@
 #!/usr/bin/env bash
-# poll.sh — autopilot:fsd 멱등 드레인 + 상시 호스트 운영 진입점 (C5)
+# poll.sh — autopilot:fsd 멱등 상태 드레인 (dispatch 공개 인터페이스 관측 전용)
 #
-# 책임 (파이프라인을 하나의 반복 가능한 단위로 닫는다):
-#   - 멱등 드레인(poll): 진행 중인 모든 task 를 한 바퀴 훑어, 백엔드(task backend·승인
-#     요청)의 실제 진실과 로컬 미러를 **정합(reconcile)**시키고, 각 task 를 그 시점에
-#     가능한 **다음 한 스텝**으로 전진시킨다:
-#       · 미시작 백로그 task           → 구현 시작(start → dispatch 위임)
-#       · 구현 완료(loop DONE) task     → 통합(C2 forge: base sync→push→PR, Review 전이)
-#       · 미승인 열린 승인요청          → 외부 승인 대기(no-op·상태 불변; 외부 CI/사람이 승인)
-#       · 승인된 승인요청               → 머지(C4: ff-only, Done 전이)
-#   - 백엔드 우선 정합: 로컬 미러와 백엔드가 불일치하면 백엔드를 진실의 원천으로
-#     채택해 미러를 갱신한다(tb_reconcile, C1 공개 계약).
+# 책임:
+#   - 진행 중인 모든 task 의 dispatch run 상태를 dispatch 의 **공개 인터페이스**
+#     (`dispatch status <run-id>`)로 관측해, 그 run 의 모든 SPEC 이 머지 종착(done)에
+#     도달했으면 task 를 `done` 으로 전이한다. 아직 진행 중이면 상태를 바꾸지 않는다.
+#
+# fsd 는 리뷰·머지를 직접 하지 않는다 — `dispatch start`(통합 모드 기본 ON)가
+#   implement→통합(PR)→(direct 서브모드)머지를 **소유**하며, poll 은 그 결과를
+#   관측만 한다. 사람 개입·외부 승인 보류 지점이 없다(완전자율). poll 자체는 PR 생성·
+#   리뷰·승인 조회·머지를 호출하지 않으며 forge·task backend 를 건드리지 않는다.
 #
 # 멱등성(같은 상태에서 두 번 실행해도 같은 결과, 부작용 없음):
 #   - 상태는 fsd 상태 저장소(C0)에 두고, 드레인 호출은 **호출 단위 무상태**여서
-#     크래시 후 재시작이 안전하다. 각 전이 전 현재 상태를 재확인해 이미 처리한 전이를
-#     중복 수행하거나 중복 승인 요청(PR)을 만들지 않는다:
-#       · start   는 run-id 가 비었을 때만 (1회 dispatch 후 run-id 가 차서 재시작 안 함).
-#       · integrate 는 PR 미생성 상태에서만 (PR 이 차면 다음 드레인은 머지/승인대기 경로로).
-#         또한 C2 ensure_pr 이 같은 head 의 open PR 을 재사용해 중복 PR 을 만들지 않는다.
-#       · 미승인 PR 은 외부 승인 대기 no-op 이라 상태를 바꾸지 않아 재드레인이 안전하다.
-#       · merge   는 Done 전이 후 종착 no-op (재머지 안 함).
+#     크래시 후 재시작이 안전하다. 로컬 종착(done/stopped/dispatch-failed) task 는
+#     재드레인해도 no-op 이고, run 미완 task 는 상태를 바꾸지 않아 같은 상태 재드레인이
+#     멱등이다. dispatch 가 머지하지 못하는 환경에서는 task 가 done 에 이르지 못한 채
+#     멈추지 않고 멱등 재드레인하며 상태를 바꾸지 않는다.
 #
-# 이 단위는 C1~C4 의 공개 동작을 **조합**할 뿐, 각 스텝의 동작을 정의하지 않는다.
-# 무거운 액션(start·integrate·merge)은 주입 가능한 명령으로 **서브프로세스**
-# 격리 호출하여(각 모듈의 die→exit 가 드레인 전체를 죽이지 않게), 한 task 의 실패가
-# 다른 task 의 전진을 막지 않도록 한다. 상태 IO·정합 헬퍼만 sourcing 한다.
+# 무거운 동작(implement·통합·머지)은 모두 dispatch 가 자기 run 안에서 수행하므로,
+#   poll 은 가벼운 관측 한 스텝만 한다. dispatch 호출은 주입 가능한 명령으로 두어
+#   mock 검증된다.
 #
 # 환경 변수 (테스트에서 mock 으로 치환 가능):
-#   POLL_FSD_CMD  fsd.sh 호출 (start). 기본: 형제 fsd.sh.
-#   POLL_FORGE_CMD      forge.sh 호출 (terminal/integrate). 기본: 형제 forge.sh.
-#   POLL_MERGE_CMD      merge.sh 호출 (approval/finish). 기본: 형제 merge.sh.
-#   TASK_BACKEND_CMD    task backend 호출 (tb_reconcile 가 소비; C1, mock 가능).
-#   FSD_STATE_ROOT 상태 루트 (기본 <project_root>/.fsd). lib-state.sh 참조.
+#   POLL_DISPATCH_CMD  dispatch.sh 호출 (status). 기본: 형제 dispatch.sh.
+#   FSD_STATE_ROOT     상태 루트 (기본 <project_root>/.fsd). lib-state.sh 참조.
 #
-# 상시 호스트 무인 운영(토큰 스코프·approver 신원 분리·실행기 권한 격리·폴링 주기)은
+# 상시 호스트 무인 운영(토큰 스코프·실행기 권한 격리·폴링 주기)은
 # operational-guide.md 가 문서화한다.
 #
-# self-referential: 검증은 mock 인터페이스로만 하며 runtime artifact(실제 보드·승인
-# 요청)를 직접 검사하지 않는다(`bash poll.sh selftest`). bash 3.2+ 호환.
+# self-referential: 검증은 mock 인터페이스로만 하며 runtime artifact(실제 run·PR)를
+# 직접 검사하지 않는다(`bash poll.sh selftest`). bash 3.2+ 호환.
 
 set -uo pipefail
 
 PL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 상태 저장소(C0) + task backend 정합 헬퍼(C1) 만 sourcing — 가볍고 exit 하지 않는다.
+# 상태 저장소(C0) 헬퍼만 sourcing — 가볍고 exit 하지 않는다.
 # shellcheck source=lib-state.sh
 . "$PL_SCRIPT_DIR/lib-state.sh"
-# task-backend.sh 는 top-level 에서 `set -uo pipefail` 을 재설정한다(우리와 동일).
-# shellcheck source=task-backend.sh
-. "$PL_SCRIPT_DIR/task-backend.sh"
 # 우리 자신의 옵션을 복원: -e 없이(부분 실패 격리) -u·pipefail 만.
 set +e
 set -uo pipefail
 
-# ----- 주입 가능한 액션 명령(기본: 형제 모듈, 서브프로세스 격리) -----
-POLL_FSD_CMD="${POLL_FSD_CMD:-bash $PL_SCRIPT_DIR/fsd.sh}"
-POLL_FORGE_CMD="${POLL_FORGE_CMD:-bash $PL_SCRIPT_DIR/forge.sh}"
-POLL_MERGE_CMD="${POLL_MERGE_CMD:-bash $PL_SCRIPT_DIR/merge.sh}"
-
-pl_die() { echo "poll: $*" >&2; return 1; }
+# ----- 주입 가능한 dispatch 명령(기본: 형제 dispatch.sh) -----
+# fsd 는 dispatch 의 공개 인터페이스만 소비한다(내부 run 디렉토리·신호 파일·워크트리는
+# 직접 들여다보지 않는다).
+POLL_DISPATCH_CMD="${POLL_DISPATCH_CMD:-bash $PL_SCRIPT_DIR/../../dispatch/references/dispatch.sh}"
 
 # pl_log <task-id> <message...> — 상태 저장소 로그 + 운영자용 stdout 한 줄.
 pl_log() {
@@ -68,80 +55,58 @@ pl_log() {
   echo "[poll] $id: $*"
 }
 
+# dispatch_states <run-id> — dispatch status 출력에서 per-SPEC state 들을 한 줄에 하나씩.
+#   `wave=<n>  <state>  <loop>  <spec>` 행의 2번째 필드(state)를 뽑는다.
+#   공개 인터페이스 출력 파싱이며 내부 파일을 읽지 않는다.
+dispatch_states() {
+  # shellcheck disable=SC2086
+  $POLL_DISPATCH_CMD status "$1" 2>/dev/null \
+    | awk '/^wave=/ { print $2 }'
+}
+
 # =====================================================================
-# poll_task <task-id> — 한 task 를 그 시점 가능한 다음 한 스텝으로 전진(멱등).
+# poll_task <task-id> — 한 task 의 dispatch run 을 관측해 한 스텝 전진(멱등).
+#   완전자율: 사람 개입·외부 승인 보류 분기가 없다.
 # =====================================================================
 poll_task() {
   local id="$1"
   task_exists "$id" || { echo "[poll] $id: task 디렉토리 없음 — 건너뜀"; return 0; }
   ensure_task_dir "$id"
-  # 주입된 액션 명령이 task 컨텍스트를 알 수 있도록 노출(실제 모듈은 무시).
-  export POLL_CUR_TASK="$id"
 
-  local spec pr run_id cstate bstat
-  spec="$(get_specs "$id" | head -1)"
-  pr="$(get_pr "$id")"
+  local run_id cstate
   run_id="$(get_run_id "$id")"
   cstate="$(get_state "$id")"
 
-  # --- AC4: 백엔드 우선 정합 — 미러를 백엔드 진실로 갱신하고 현재 상태 채택. ---
-  bstat="$(tb_reconcile "$id" 2>/dev/null)"
-
-  # --- 1) 종착 상태 → 전진 없음(멱등 no-op). ---
-  case "$bstat" in
-    Done|Cancelled|Blocked) pl_log "$id" "종착(backend=$bstat) — 전진 없음"; return 0 ;;
-  esac
+  # --- 1) 로컬 종착 → 전진 없음(멱등 no-op). ---
   case "$cstate" in
-    done|stopped|merged|dispatch-failed)
+    done|stopped|dispatch-failed)
       pl_log "$id" "로컬 종착(state=$cstate) — 전진 없음"; return 0 ;;
   esac
 
-  # --- 2) 열린 승인 요청(PR) 보유 → 승인되면 머지(C4), 아니면 외부 승인 대기 no-op. ---
-  # 내부 자동 리뷰·재구현 고리는 제거됨. 미승인 PR 의 승인은 외부 CI 봇·사람에게 위임한다.
-  # 미승인 분기는 어떤 전이도 하지 않아(상태 불변) 같은 상태 재드레인이 멱등이다.
-  if [[ -n "$pr" ]]; then
-    if $POLL_MERGE_CMD approval "$pr" >/dev/null 2>&1; then
-      pl_log "$id" "승인됨 → merge(C4) pr=$pr"
-      $POLL_MERGE_CMD finish "$spec" "$id" "$pr" \
-        || pl_log "$id" "merge 보류/게이트 차단 pr=$pr"
-    else
-      pl_log "$id" "PR 열림·미승인 → 외부 승인 대기(전진 없음·상태 불변) pr=$pr"
-    fi
+  # --- 2) dispatch run 없음 → 관측 대상 없음(멱등 no-op). ---
+  # 구현 기동은 fsd start 가 dispatch 에 위임한다(poll 은 관측만).
+  if [[ -z "$run_id" ]]; then
+    pl_log "$id" "dispatch run 없음 — 전진 없음(fsd start 로 기동)"
     return 0
   fi
 
-  # --- 3) PR 미생성 + dispatch run 보유 → 종료신호 정합 후 통합(C2). ---
-  if [[ -n "$run_id" ]]; then
-    local term
-    term="$($POLL_FORGE_CMD terminal "$spec" 2>/dev/null)"
-    case "$term" in
-      done|failed)
-        pl_log "$id" "loop 종료($term) → forge integrate(C2)"
-        $POLL_FORGE_CMD integrate "$spec" "$id" \
-          || pl_log "$id" "integrate 보류 spec=$spec"
-        ;;
-      *)
-        pl_log "$id" "구현 진행 중($term) — 전진 없음"
-        ;;
-    esac
+  # --- 3) dispatch 공개 인터페이스로 per-SPEC state 관측. ---
+  local states n_total n_done
+  states="$(dispatch_states "$run_id")"
+  if [[ -z "$states" ]]; then
+    pl_log "$id" "dispatch run 상태 미관측(run=$run_id) — 전진 없음"
     return 0
   fi
+  n_total="$(printf '%s\n' "$states" | grep -c .)"
+  n_done="$(printf '%s\n' "$states" | grep -c '^done$')"
 
-  # --- 4) 미시작(run 없음) + 백로그류 → 구현 시작(dispatch 위임). ---
-  case "$bstat" in
-    ""|Backlog|"In Design"|intake|unknown)
-      if [[ -n "$spec" ]]; then
-        pl_log "$id" "미시작(backend=${bstat:-none}) → 구현 시작 start"
-        $POLL_FSD_CMD start "$spec" \
-          || pl_log "$id" "start 위임 실패 spec=$spec"
-      else
-        pl_log "$id" "미시작이나 SPEC 경로 없음 — 전진 없음"
-      fi
-      ;;
-    *)
-      pl_log "$id" "전진 가능한 스텝 없음(backend=$bstat run=$run_id)"
-      ;;
-  esac
+  # 모든 SPEC 이 머지 종착(done) → task done 전이. 아니면 상태 불변(멱등 재드레인).
+  if [[ "$n_done" == "$n_total" ]]; then
+    set_state "$id" "done"
+    pl_log "$id" "dispatch run 전체 머지 종착($n_done/$n_total) → task done"
+  else
+    pl_log "$id" "dispatch run 진행 중($n_done/$n_total done) — 전진 없음(상태 불변)"
+  fi
   return 0
 }
 
@@ -160,67 +125,35 @@ poll_drain() {
     n=$((n+1))
     poll_task "$id"
   done <<< "$ids"
-  echo "poll: 드레인 완료 — $n task 정합·전진(호출 단위 무상태·멱등)."
+  echo "poll: 드레인 완료 — $n task 관측·전진(호출 단위 무상태·멱등)."
 }
 
 # =====================================================================
-# selftest — mock 인터페이스로 AC2~4 동작·멱등을 독립 검증(self-referential).
-#   runtime artifact(실제 보드·승인 요청)는 검사하지 않는다.
+# selftest — mock dispatch 로 관측·전이·멱등을 독립 검증(self-referential).
+#   runtime artifact(실제 run·PR)는 검사하지 않는다. 외부 승인 보류 케이스는 없다.
 # =====================================================================
 pl_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
   export FSD_STATE_ROOT="$TMP/.fsd"
   export PROJECT_ROOT="$TMP"
-  export PL_REF="$PL_SCRIPT_DIR"
   local TRACE="$TMP/trace"; : > "$TRACE"; export TRACE
-  local BK="$TMP/backend"; mkdir -p "$BK"; export BK
 
-  # --- mock task backend (tb_reconcile 소비; 이슈별 .status 파일) ---
-  mock_backend() {
-    case "$1" in
-      get-status) cat "$BK/$2.status" 2>/dev/null || true ;;
-      *) : ;;
-    esac
-  }
-  export -f mock_backend
-  export TASK_BACKEND_CMD=mock_backend
-
-  # --- mock 액션 명령(서브프로세스) — 호출 기록 + 현실적 상태 시뮬 ---
-  cat > "$TMP/m-fsd.sh" <<'EOF'
+  # --- mock dispatch: status 출력 시뮬. MOCK_STATES(공백 구분 state 목록)을 wave 행으로. ---
+  cat > "$TMP/m-dispatch.sh" <<'EOF'
 #!/usr/bin/env bash
-. "$PL_REF/lib-state.sh"
-echo "fsd $*" >> "$TRACE"
-[[ "$1" == "start" ]] && set_field "$POLL_CUR_TASK" run-id "run-$POLL_CUR_TASK"
+echo "dispatch $*" >> "$TRACE"
+if [[ "$1" == "status" ]]; then
+  i=0
+  for s in ${MOCK_STATES:-}; do
+    i=$((i+1))
+    echo "wave=$i  $s  idle  /tmp/SPEC-$i.md"
+  done
+fi
 exit 0
 EOF
-  cat > "$TMP/m-forge.sh" <<'EOF'
-#!/usr/bin/env bash
-. "$PL_REF/lib-state.sh"
-echo "forge $*" >> "$TRACE"
-case "$1" in
-  terminal)  echo "${MOCK_TERM:-pending}" ;;
-  integrate) # integrate <spec> <id> — Review 전이 + PR 생성 시뮬(1회만).
-             set_field "$3" pr "PR-$3"
-             set_field "$3" backend-status "Review"
-             set_field "$3" state "Review" ;;
-esac
-exit 0
-EOF
-  cat > "$TMP/m-merge.sh" <<'EOF'
-#!/usr/bin/env bash
-. "$PL_REF/lib-state.sh"
-echo "merge $*" >> "$TRACE"
-case "$1" in
-  approval) [[ "${MOCK_APPROVED:-0}" == "1" ]] && exit 0 || exit 1 ;;
-  finish)   set_field "$3" backend-status "Done"; set_field "$3" state "Done" ;; # finish <spec> <id> <pr>
-esac
-exit 0
-EOF
-  export POLL_FSD_CMD="bash $TMP/m-fsd.sh"
-  export POLL_FORGE_CMD="bash $TMP/m-forge.sh"
-  export POLL_MERGE_CMD="bash $TMP/m-merge.sh"
+  export POLL_DISPATCH_CMD="bash $TMP/m-dispatch.sh"
 
-  local spec="$TMP/SPEC.md"; printf '# T\n## 수용 기준\n1. X.\n' > "$spec"
+  local spec="$TMP/SPEC.md"; printf '# T\n## 완료 조건\n1. X.\n' > "$spec"
 
   local fail=0
   ok()  { echo "PASS  $1"; }
@@ -228,59 +161,34 @@ EOF
   chk() { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (want '$3' got '$2')"; fi; }
   tcount() { grep -c "$1" "$TRACE" 2>/dev/null | tr -d '[:space:]'; }
 
-  # ---- AC4: 백엔드 우선 정합 — 미러≠백엔드면 백엔드 채택 ----
-  ensure_task_dir r1; set_field r1 issue 1; printf 'Review' > "$BK/1.status"
-  set_field r1 backend-status "In Progress"; set_run_id r1 "run-r1"; add_spec r1 "$spec"
-  MOCK_TERM=running poll_task r1 >/dev/null
-  chk "AC4 백엔드 우선(미러 갱신)" "$(get_field r1 backend-status)" "Review"
+  # ---- dispatch run 미완(running 섞임) → 상태 불변 ----
+  ensure_task_dir d1; set_run_id d1 "run-d1"; set_state d1 "dispatched"; add_spec d1 "$spec"
+  MOCK_STATES="done running" poll_task d1 >/dev/null
+  chk "dispatch run 미완 → 전진 없음·상태 불변" "$(get_state d1)" "dispatched"
 
-  # ---- AC2-a: 미시작(run 없음, Backlog) → 구현 시작 start ----
+  # ---- dispatch run 전체 머지 종착 → task done 전이 ----
+  MOCK_STATES="done done" poll_task d1 >/dev/null
+  chk "dispatch run 전체 머지 종착 → task done" "$(get_state d1)" "done"
+
+  # ---- 멱등: 로컬 종착(done) 재드레인 → 상태 불변, dispatch status 미조회 ----
   : > "$TRACE"
-  ensure_task_dir s1; set_field s1 issue 10; printf 'Backlog' > "$BK/10.status"
-  set_field s1 backend-status "Backlog"; add_spec s1 "$spec"
-  poll_task s1 >/dev/null
-  [[ "$(tcount '^fsd start')" == "1" ]] && ok "AC2-a 미시작→start 위임" || bad "AC2-a 미시작→start 위임"
-  [[ -n "$(get_run_id s1)" ]] && ok "AC2-a run-id 기록됨" || bad "AC2-a run-id 기록됨"
-  # AC3 멱등: 같은 상태(이제 run-id 참) 재드레인 → 중복 start 없음.
-  MOCK_TERM=running poll_task s1 >/dev/null
-  chk "AC3 멱등: start 중복 없음(총 1회)" "$(tcount '^fsd start')" "1"
+  MOCK_STATES="done done" poll_task d1 >/dev/null
+  chk "멱등: 로컬 종착 재드레인 상태 불변" "$(get_state d1)" "done"
+  chk "멱등: 종착 task 는 dispatch status 미조회" "$(tcount 'dispatch status')" "0"
 
-  # ---- AC2-b: 구현 완료(loop done) + PR 없음 → 통합 integrate(C2) ----
-  : > "$TRACE"
-  ensure_task_dir g1; set_field g1 backend-status "In Progress"; set_run_id g1 "run-g1"; add_spec g1 "$spec"
-  MOCK_TERM=done poll_task g1 >/dev/null
-  chk "AC2-b loop done→integrate(1회)" "$(tcount 'forge integrate')" "1"
-  [[ -n "$(get_pr g1)" ]] && ok "AC2-b PR 기록됨" || bad "AC2-b PR 기록됨"
-  # AC3 멱등: PR 이 찼으니 재드레인은 integrate 재호출/중복 PR 없이 외부 승인 대기 no-op.
-  MOCK_TERM=done MOCK_APPROVED=0 poll_task g1 >/dev/null
-  chk "AC3 멱등: integrate 중복 없음(총 1회)" "$(tcount 'forge integrate')" "1"
-  chk "AC3 재드레인은 외부 승인 대기 no-op(상태 불변)" "$(get_field g1 backend-status)" "Review"
+  # ---- dispatch run 없음 → 전진 없음(done 아님) ----
+  ensure_task_dir n1; set_state n1 "intake"; add_spec n1 "$spec"
+  poll_task n1 >/dev/null
+  chk "dispatch run 없음 → 전진 없음" "$(get_state n1)" "intake"
 
-  # ---- AC2-c: PR 열림·미승인 → 외부 승인 대기(전진 없음·상태 불변) ----
-  # 내부 자동 리뷰 고리 제거 후 미승인 PR 은 어떤 모듈도 호출하지 않고 상태를 바꾸지 않는다.
-  : > "$TRACE"
-  ensure_task_dir v1; set_field v1 backend-status "Review"; set_pr v1 "PR-v1"
-  set_branch v1 "feat/v1-x"; add_spec v1 "$spec"
-  MOCK_APPROVED=0 poll_task v1 >/dev/null
-  [[ "$(tcount 'merge finish')" == "0" ]] && ok "AC2-c 미승인→머지 안 함" || bad "AC2-c 미승인→머지 안 함"
-  chk "AC2-c 미승인→상태 불변(전진 없음)" "$(get_field v1 backend-status)" "Review"
-  # AC3 멱등: 동일 상태 재드레인 → 결과 동일, 상태 불변·머지 전이 없음.
-  MOCK_APPROVED=0 poll_task v1 >/dev/null
-  chk "AC3 멱등: 미승인 상태 불변" "$(get_field v1 backend-status)" "Review"
-  chk "AC3 멱등: 머지 전이 없음" "$(tcount 'merge finish')" "0"
+  # ---- 일부 failed·미완 → 상태 불변(멱등 재드레인) ----
+  ensure_task_dir f1; set_run_id f1 "run-f1"; set_state f1 "dispatched"; add_spec f1 "$spec"
+  MOCK_STATES="done failed" poll_task f1 >/dev/null
+  chk "일부 failed·미완 → 전진 없음·상태 불변" "$(get_state f1)" "dispatched"
+  MOCK_STATES="done failed" poll_task f1 >/dev/null
+  chk "멱등: failed 섞인 미완 재드레인 상태 불변" "$(get_state f1)" "dispatched"
 
-  # ---- AC2-d: PR 승인됨 → 머지(C4) → Done ----
-  : > "$TRACE"
-  ensure_task_dir m1; set_field m1 backend-status "Review"; set_pr m1 "PR-m1"
-  set_branch m1 "feat/m1-x"; add_spec m1 "$spec"
-  MOCK_APPROVED=1 poll_task m1 >/dev/null
-  chk "AC2-d 승인→merge finish(1회)" "$(tcount 'merge finish')" "1"
-  chk "AC2-d Done 전이" "$(get_field m1 backend-status)" "Done"
-  # AC3 멱등: Done 은 종착 — 재드레인 시 머지 재호출 없음.
-  MOCK_APPROVED=1 poll_task m1 >/dev/null
-  chk "AC3 멱등: Done 재머지 없음(총 1회)" "$(tcount 'merge finish')" "1"
-
-  # ---- AC2 전체: poll_drain 이 모든 task 를 한 바퀴 훑는다 ----
+  # ---- poll_drain 이 모든 task 를 한 바퀴 훑는다 ----
   : > "$TRACE"
   out="$(poll_drain)"
   case "$out" in *"드레인 완료"*) ok "드레인 전체 순회 + 완료 보고";; *) bad "드레인 전체 순회 + 완료 보고";; esac
@@ -296,12 +204,11 @@ usage() {
 usage: poll.sh <command> [args]
 
 Commands:
-  poll              모든 진행 중 task 를 한 바퀴 정합·전진(멱등 드레인).
-  task <task-id>    한 task 만 정합·전진.
-  selftest          mock 인터페이스로 AC2~4·멱등 검증.
+  poll              모든 진행 중 task 의 dispatch run 을 관측·전진(멱등 드레인).
+  task <task-id>    한 task 만 관측·전진.
+  selftest          mock dispatch 로 관측·전이·멱등 검증.
 
-환경 변수: POLL_FSD_CMD, POLL_FORGE_CMD, POLL_MERGE_CMD,
-          TASK_BACKEND_CMD, FSD_STATE_ROOT
+환경 변수: POLL_DISPATCH_CMD, FSD_STATE_ROOT
 EOF
   exit 1
 }

@@ -22,7 +22,7 @@ ears_language: ko
 
 동시에 fsd를 **완전자율운행**으로 만든다 — 파이프라인에서 사람 개입/외부 승인 대기 지점을 제거한다. fsd가 위임하는 dispatch는 **direct 서브모드**(분리 승인 신원 없이 ff-only 자율 직접 머지)로 돌아 task가 done까지 사람 손 없이 전진한다. 기존 poll의 "미승인 PR → 외부 승인 대기 no-op" 게이트는 제거된다.
 
-또한 fsd가 자연어 의도 진입 모드에서 spec 스킬을 호출할 수 있도록 **spec 스킬 호출 권한을 보장**하고, **fsd가 spec을 호출할 때는 spec의 step-7 옵트인 핸드오프 프롬프트("구현까지 자동 진행할까요?")가 뜨지 않도록** 한다 — fsd가 진행 결정을 소유하는 자율 오케스트레이터이므로 그 확인은 중복이다. fsd는 spec을 자율 모드 신호와 함께 호출하고, spec은 그 신호를 받으면 step-7 핸드오프 프롬프트를 생략하고 진행한다(명확화 인터뷰·미해결 마커 가드·최종 SPEC 산출은 그대로 유지 — 품질 게이트는 보존).
+또한 fsd가 자연어 의도 진입 모드에서 spec 스킬을 호출할 수 있도록 **spec 스킬 호출 권한을 보장**하고, **fsd가 spec을 호출하는 맥락에서는 spec의 step-7 옵트인 핸드오프 프롬프트("구현까지 자동 진행할까요?")가 뜨지 않도록** 한다 — fsd는 항상 자율이라 진행 결정을 소유하므로 그 확인은 중복이다. **별도의 신호 인자(`--autonomous` 등)는 두지 않는다** — 같은 오케스트레이터가 fsd→spec를 연달아 실행하므로 호출 맥락만으로 억제가 성립한다. spec은 자율 오케스트레이터 호출 맥락에서 step-7 사용자 대면 프롬프트를 생략하고 진행한다(명확화 인터뷰·미해결 마커 가드·최종 SPEC 산출은 그대로 유지 — 품질 게이트는 보존). 사람 단독 호출(문서-only 검토 경로)이면 기존 프롬프트를 유지한다.
 
 구체 변경:
 
@@ -45,8 +45,8 @@ ears_language: ko
 5. `poll`의 `poll_task`는 진행 중 task에 대해 dispatch의 공개 인터페이스(`dispatch status` 또는 `dispatch watch`)로 run 상태만 드레인하며, 자체 PR 생성·리뷰·승인 조회·머지를 호출하지 않는다. dispatch run의 모든 SPEC이 머지 종착에 도달하면 task를 `done`으로 전이하고, 아직 진행 중이면 상태를 바꾸지 않는다(같은 상태 재드레인 멱등). 미승인 PR을 기다리는 "외부 승인 대기" 분기는 없다.
 6. `poll`/start 경로 어디에도 사람 개입을 요구하거나 외부 승인을 기다리며 멈추는 지점이 없다 — 진행 중 task는 dispatch가 종착(머지/실패/skip)시킬 때까지 자율 전진하며, 사람 입력을 차단 조건으로 두지 않는다.
 7. `fsd/SKILL.md`의 `allowed-tools`에 `Skill`이 포함되어 fsd가 `spec`·`dispatch` 스킬을 호출할 수 있다. SKILL.md 본문은 자연어 의도 진입 모드에서 `Skill(skill: "spec", ...)`로 SPEC을 산출함을 명시한다.
-7a. fsd가 자연어 의도 진입 모드에서 spec을 호출할 때는 **자율 모드 신호**(예: args의 `--autonomous`)를 함께 전달하고, `fsd/SKILL.md`가 이 호출 규약을 명시한다.
-7b. `spec/SKILL.md`는 자율 모드 신호가 주어지면 step-7 옵트인 핸드오프 프롬프트("구현까지 자동 진행할까요?")를 **생략하고** 진행함을 명시한다 — 명확화 인터뷰·미해결 마커 가드·최종 SPEC 산출은 그대로 수행한다(미해결 마커가 남으면 자율 모드여도 진행을 멈추고 `--resume`를 안내). 신호가 없으면(사람 단독 호출) 기존 step-7 핸드오프 프롬프트 동작을 유지한다(하위 호환).
+7a. fsd가 자연어 의도 진입 모드에서 spec을 호출할 때 **별도의 자율 모드 인자(`--autonomous` 등)를 전달하지 않는다** — `fsd/SKILL.md`는 fsd가 항상 자율이므로 호출 맥락만으로 spec의 step-7 프롬프트가 생략됨을 명시한다.
+7b. `spec/SKILL.md`는 **자율 오케스트레이터(`autopilot:fsd` 등)가 호출하는 맥락에서** step-7 옵트인 핸드오프 프롬프트("구현까지 자동 진행할까요?")를 **생략하고** 진행함을 명시한다(별도 인자 불필요) — 명확화 인터뷰·미해결 마커 가드·최종 SPEC 산출은 그대로 수행한다(미해결 마커가 남으면 자율 맥락이어도 진행을 멈추고 `--resume`를 안내). 사람 단독 호출(문서-only 검토 경로)이면 기존 step-7 핸드오프 프롬프트 동작을 유지한다(하위 호환). 어느 문서에도 `--autonomous` 같은 신호 인자가 남지 않는다.
 7c. 항상 `spec/SKILL.md` 외 `skills/spec/` 의 다른 파일(references 등)은 변경되지 않는다.
 8. `fsd/SKILL.md`·`fsd.sh` usage·`plugin.json`·`marketplace.json`의 fsd 서브커맨드 집합과 설명에 `merge`가 없고 `intake·start·poll`(및 status/list/stop)만 남으며, 리뷰·머지를 dispatch가 소유함과 fsd가 완전자율(외부 승인 대기 없음)임을 반영한다.
 9. `operational-guide.md`에 approver 신원 분리(`APPROVER`≠`REVIEW_BOT`)·self-approve 무효화·승인 게이트·"승인된 PR만 머지" 서술이 남지 않고, 무인 토큰 스코프 최소화·자율 실행기 자식 권한 격리(머지·base push 권한 미상속)·폴링 주기 안내는 보존된다. 완전자율 direct 머지 모델과 정합한다.
@@ -64,8 +64,8 @@ ears_language: ko
 - `fsd.sh`: `merge` 서브커맨드·`cmd_merge`·usage 줄 제거, start의 dispatch 통합위임 보존(--no-integrate 미전달)
 - `poll.sh`: 자체 forge/머지/승인-대기 배선 제거, dispatch 공개 인터페이스 상태 드레인으로 재작성, 외부 승인 대기 no-op 제거, selftest 갱신
 - `lib-state.sh`: 제거된 레이어 전용 헬퍼·잔여 참조 정리(필요 시)
-- `fsd/SKILL.md`: 서브커맨드 집합·진입 모드·불변식·description 갱신(merge 제거, dispatch 위임·완전자율 명시), allowed-tools의 `Skill` 보장, spec을 자율 모드 신호와 함께 호출하는 규약 명시
-- `spec/SKILL.md`: 자율 모드 신호 수신 시 step-7 옵트인 핸드오프 프롬프트 생략 규약 추가(신호 없으면 기존 동작 유지)
+- `fsd/SKILL.md`: 서브커맨드 집합·진입 모드·불변식·description 갱신(merge 제거, dispatch 위임·완전자율 명시), allowed-tools의 `Skill` 보장, spec을 별도 인자 없이 호출하되 fsd 맥락에서 step-7 프롬프트가 생략됨을 명시
+- `spec/SKILL.md`: 자율 오케스트레이터 호출 맥락에서 step-7 옵트인 핸드오프 프롬프트 생략 규약 추가(별도 인자 불필요, 사람 단독 호출이면 기존 동작 유지)
 - `operational-guide.md`: approver 분리·승인 게이트 절 제거, 토큰 스코프·자식 권한 격리·폴링 주기 보존
 - `forge-integration.md`: 리뷰·머지·통합 책임이 dispatch에 있음으로 정합
 - `plugin.json`(단일 출처)·`marketplace.json`(미러): fsd 괄호·설명·version 0.24.0 갱신

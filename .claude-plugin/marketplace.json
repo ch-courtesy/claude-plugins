@@ -20,8 +20,8 @@
     {
       "name": "autopilot",
       "source": "./plugins/autopilot",
-      "description": "자율 수행 루프(랄프 루프) 운영 인터페이스. spec/loop/dispatch/fsd/review 5-skill family — spec으로 SPEC 작성, loop으로 스펙 파일 기반 로컬 자율 실행, dispatch로 spec-list-driven 다중 SPEC 오케스트레이션(통합 모드 기본 활성: forge 구성이면 push→PR→리뷰→ff-only 머지, 미구성이면 ff-only 직접 머지 게이트 소유), fsd로 spec→dispatch 자동화 파이프라인의 forge 호출 레이어 오케스트레이션, review로 변경을 다관점 리뷰해 머신리더블 판정·재작업 브리프 생산.",
-      "version": "0.23.0",
+      "description": "자율 수행 루프(랄프 루프) 운영 인터페이스. spec/loop/dispatch/fsd/review 5-skill family — spec으로 SPEC 작성, loop으로 스펙 파일 기반 로컬 자율 실행, dispatch로 spec-list-driven 다중 SPEC 오케스트레이션(통합 모드 기본 활성: forge 구성이면 push→PR→리뷰→ff-only 머지, 미구성이면 ff-only 직접 머지 게이트 소유), fsd로 spec→dispatch 자동화 파이프라인을 완전자율(리뷰·머지는 dispatch 위임, 외부 승인 대기 없음)로 닫는 task 오케스트레이션(intake·start·poll), review로 변경을 다관점 리뷰해 머신리더블 판정·재작업 브리프 생산.",
+      "version": "0.24.0",
       "category": "automation",
       "tags": ["autonomous", "ralph-loop", "agent-runtime", "self-directed"]
     }
