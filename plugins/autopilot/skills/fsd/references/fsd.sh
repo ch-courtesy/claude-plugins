@@ -119,18 +119,34 @@ extract_run_id() {
   sed -n 's/^run-id: //p' | tail -1
 }
 
+# spec_has_marker <spec> — 미해결 사용자-결정 마커(`[NEEDS CLARIFICATION` prefix) 포함 여부.
+#   spec 스킬 관례와 일치(닫는 괄호에 의존하지 않음). 매치 시 0, 아니면 1.
+spec_has_marker() {
+  grep -qF '[NEEDS CLARIFICATION' "$1"
+}
+
 # ----- subcommand: intake -----
 # SPEC 경로(들)로 task 를 등록한다. (backend 이슈 생성은 후속 C1.)
 cmd_intake() {
   require_git_root
-  [[ $# -ge 1 ]] || die "사용: fsd intake <spec...>"
+  # 선택적 --origin <task-id>: 이 task 를 촉발한 원본 task 와의 연결을 기록.
+  local origin=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --origin)   origin="${2:-}"; [[ -n "$origin" ]] || die "사용: --origin <task-id>"; shift 2 ;;
+      --origin=*) origin="${1#--origin=}"; shift ;;
+      *) break ;;
+    esac
+  done
+  [[ $# -ge 1 ]] || die "사용: fsd intake [--origin <task-id>] <spec...>"
   validate_specs "$@"
   local id
   id="$(derive_task_id "${ABS_SPECS[@]}")"
   ensure_task_dir "$id"
   add_spec "$id" "${ABS_SPECS[@]}"
   set_state "$id" "intake"
-  log_event "$id" "intake specs=${#ABS_SPECS[@]}"
+  [[ -n "$origin" ]] && set_origin "$id" "$origin"
+  log_event "$id" "intake specs=${#ABS_SPECS[@]}${origin:+ origin=$origin}"
   echo "task-id: $id"
 }
 
@@ -145,6 +161,23 @@ cmd_start() {
   ensure_task_dir "$id"
   # 아직 등록되지 않은 SPEC 이면 함께 기록(start 단독 호출 허용).
   [[ -f "$(task_dir "$id")/SPECS.txt" ]] || add_spec "$id" "${ABS_SPECS[@]}"
+
+  # 미해결 사용자-결정 마커 가드: 마커 보유 SPEC 이 하나라도 있으면 dispatch 를 막는다.
+  #   spec --resume 로 빈 칸을 채운 뒤에야 구현이 시작된다(버그 분리 흐름).
+  local marked=() p
+  for p in "${ABS_SPECS[@]}"; do
+    if spec_has_marker "$p"; then marked+=("$p"); fi
+  done
+  if [[ ${#marked[@]} -gt 0 ]]; then
+    set_state "$id" "needs-clarification"
+    log_event "$id" "start 차단 — 미해결 마커 SPEC=${#marked[@]} (spec --resume 필요)"
+    echo "task-id: $id"
+    for p in "${marked[@]}"; do
+      echo "needs-resume: $p"
+    done
+    exit 1
+  fi
+
   set_state "$id" "dispatching"
   log_event "$id" "start → dispatch 위임 specs=${#ABS_SPECS[@]}"
 
@@ -216,6 +249,7 @@ cmd_status() {
   echo "task-id:  $id"
   echo "path:     $(task_dir "$id")"
   echo "state:    $(get_state "$id")"
+  echo "origin:   $(get_origin "$id")"
   echo "run-id:   $(get_run_id "$id")"
   echo "branch:   $(get_branch "$id")"
   echo "pr:       $(get_pr "$id")"
@@ -307,6 +341,56 @@ EOF
   [[ "$rc" == "0" ]] && ok "poll 위임 0 exit(미구현 아님)" || bad "poll 위임 0 exit (rc=$rc)"
   grep -q "^poll poll" "$TRACE" && ok "poll→poll 드레인 위임" || bad "poll→poll 드레인 위임"
 
+  # ----- 버그 분리 계약: origin 기록 / 마커 가드 / 회귀 -----
+  # 별도 SPEC 들(서로 다른 task-id 도출용): clean / 마커보유.
+  local spec_clean="$TMP/SPEC-clean.md"
+  printf '# Clean\n## 수용 기준\n1. Y.\n' > "$spec_clean"
+  local spec_mark="$TMP/SPEC-mark.md"
+  printf '# Marked\n## 수용 기준\n1. Z [NEEDS CLARIFICATION: 무엇을?]\n' > "$spec_mark"
+  local spec_reg="$TMP/SPEC-reg.md"
+  printf '# Reg\n## 수용 기준\n1. W.\n' > "$spec_reg"
+
+  # dispatch mock: run-id 발급 + TRACE 기록.
+  cat > "$TMP/m-dispatch.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "dispatch $*" >> "$TRACE"
+echo "run-id: RUN-MOCK"
+EOF
+  export DISPATCH_CMD="bash $TMP/m-dispatch.sh"
+
+  # (a) intake --origin: origin 기록 + status 노출.
+  local oid
+  oid="$(cmd_intake --origin parent-task "$spec_clean" 2>/dev/null | sed -n 's/^task-id: //p')"
+  [[ "$(get_origin "$oid")" == "parent-task" ]] && ok "intake --origin 기록" || bad "intake --origin 기록"
+  # 파일로 캡처 후 grep: 함수→grep -q 파이프는 pipefail+SIGPIPE 로 거짓 실패한다.
+  cmd_status "$oid" > "$TMP/status.out" 2>/dev/null
+  grep -q "^origin: *parent-task" "$TMP/status.out" \
+    && ok "status origin 노출" || bad "status origin 노출"
+
+  # (a') 하위호환: --origin 없으면 origin 비어있음(기존 동작 불변).
+  local nid
+  nid="$(cmd_intake "$spec_reg" 2>/dev/null | sed -n 's/^task-id: //p')"
+  [[ -z "$(get_origin "$nid")" ]] && ok "intake origin 없음 하위호환" || bad "intake origin 없음 하위호환"
+
+  # (b) 마커 보유 SPEC: start 차단·미-dispatch·needs-resume 출력·state.
+  : > "$TRACE"
+  ( cmd_start "$spec_mark" ) > "$TMP/start-mark.out" 2>&1; rc=$?
+  [[ "$rc" != "0" ]] && ok "마커 start 비-0 종료" || bad "마커 start 비-0 종료 (rc=$rc)"
+  grep -q "^needs-resume: .*SPEC-mark.md" "$TMP/start-mark.out" \
+    && ok "마커 needs-resume 출력" || bad "마커 needs-resume 출력"
+  grep -q "^dispatch start" "$TRACE" && bad "마커 SPEC dispatch 미위임" || ok "마커 SPEC dispatch 미위임"
+  local mid; mid="$(derive_task_id "$(abspath "$spec_mark")")"
+  [[ "$(get_state "$mid")" == "needs-clarification" ]] \
+    && ok "마커 state=needs-clarification" || bad "마커 state=needs-clarification"
+
+  # (c) 마커 없는 SPEC: 정상 dispatch 회귀.
+  : > "$TRACE"
+  ( cmd_start "$spec_clean" ) > "$TMP/start-clean.out" 2>&1; rc=$?
+  [[ "$rc" == "0" ]] && ok "마커없는 start 0 exit" || bad "마커없는 start 0 exit (rc=$rc)"
+  grep -q "^dispatch start" "$TRACE" && ok "마커없는 SPEC dispatch 위임" || bad "마커없는 SPEC dispatch 위임"
+  grep -q "^run-id: RUN-MOCK" "$TMP/start-clean.out" && ok "마커없는 run-id 기록" || bad "마커없는 run-id 기록"
+  [[ "$(get_state "$oid")" == "dispatched" ]] && ok "마커없는 state=dispatched" || bad "마커없는 state=dispatched"
+
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
   return $fail
@@ -318,7 +402,9 @@ usage() {
 usage: fsd.sh <subcommand> [args]
 
 Subcommands:
-  intake <spec...>   SPEC 경로(들)로 task 를 등록(상태 저장소에 기록).
+  intake [--origin <task-id>] <spec...>
+                     SPEC 경로(들)로 task 를 등록(상태 저장소에 기록).
+                     --origin: 이 task 를 촉발한 원본 task 와의 연결을 기록(버그 분리).
   start  <spec...>   task 의 SPEC(들)을 dispatch 에 위임하고 run-id 를 기록.
   review <task-id>   리뷰 생산자 1회 호출 → 판정 분기(재구현·재푸시 / 머지진행가능 / 에스컬레이션).
   merge  <task-id>   머지·Done·cleanup (미구현 — C4).

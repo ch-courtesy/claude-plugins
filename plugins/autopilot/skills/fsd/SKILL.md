@@ -45,6 +45,7 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
         ├── run-id          # 이 task 가 소유한 dispatch run 식별자
         ├── review-round    # 리뷰 라운드 카운터          (review 오케스트레이션이 누적)
         ├── head            # 마지막으로 관측한 head 식별자
+        ├── origin          # 이 task 를 촉발한 원본 task 식별자 (버그 분리 연결, 선택)
         └── LOG.md          # append-only 이벤트 로그
 ```
 
@@ -52,12 +53,13 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 
 본 골격(C0)이 6 서브커맨드(`intake`·`start`·`review`·`merge`·`poll`·`status`/`list`/`stop`)의 책임과 입출력 계약을 **완전판**으로 고정한다. 후속 단위(C1~C5)는 이 계약을 입력 컨텍스트로 차용하며 SKILL.md 는 C0 단독 소유로 둔다(병렬 wave 충돌 방지).
 
-### fsd intake `<spec...>`
+### fsd intake `[--origin <task-id>]` `<spec...>`
 
 자연어 의도를 SPEC 으로 떠서(상위 spec 스킬 위임 결과) 얻은 SPEC 경로(들)로 새 task 를 등록한다.
 
 - 입력: 1 개 이상의 SPEC 파일 경로. 각 경로는 파일로 존재하고 읽을 수 있어야 한다(아니면 abort).
-- 동작: task-id 를 도출하고 `.fsd/tasks/<task-id>/` 를 생성, SPEC 경로를 `SPECS.txt` 에 기록, `state=intake` 로 설정, `LOG.md` 에 이벤트를 남긴다.
+- 옵션 `--origin <task-id>`: 이 task 를 촉발한 **원본 task** 와의 연결을 `origin` 필드에 기록한다(진행 중 버그 분리에서 사용). 생략하면 origin 기록 없이 기존과 동일하게 등록한다(하위 호환).
+- 동작: task-id 를 도출하고 `.fsd/tasks/<task-id>/` 를 생성, SPEC 경로를 `SPECS.txt` 에 기록, `state=intake` 로 설정, `--origin` 이 주어지면 `origin` 에 기록, `LOG.md` 에 이벤트를 남긴다.
 - 출력: `task-id: <task-id>`.
 - **후속(C1)**: task backend(Issue/Project) 항목 생성·연결.
 
@@ -66,7 +68,8 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 task 의 SPEC(들)을 자율 실행기 오케스트레이터(`dispatch`)에 위임해 구현을 시작한다.
 
 - 입력: 1 개 이상의 SPEC 파일 경로(검증·절대경로화).
-- 동작: task-id 도출 후 디렉토리를 보장하고(미등록이면 `SPECS.txt` 기록), `state=dispatching` → `dispatch start <spec...>` 공개 서브커맨드로 위임 → 그 출력에서 run 식별자를 추출해 `run-id` 에 기록 → `state=dispatched`.
+- **미해결 마커 가드**: 입력 SPEC 중 하나라도 미해결 사용자-결정 마커(`[NEEDS CLARIFICATION` 로 시작)를 포함하면 dispatch 위임을 하지 않는다 — `state=needs-clarification` 으로 기록하고, 마커를 가진 SPEC 마다 `needs-resume: <SPEC-경로>` 를 출력한 뒤 비-0 으로 종료한다. 빈 칸은 `spec --resume <SPEC-경로>` 로 채운 뒤 다시 `start` 한다.
+- 동작(마커 없을 때): task-id 도출 후 디렉토리를 보장하고(미등록이면 `SPECS.txt` 기록), `state=dispatching` → `dispatch start <spec...>` 공개 서브커맨드로 위임 → 그 출력에서 run 식별자를 추출해 `run-id` 에 기록 → `state=dispatched`.
 - 출력: `task-id: <task-id>` 와 `run-id: <run-id>`.
 - 실패: dispatch 출력에서 run-id 를 얻지 못하면 `state=dispatch-failed` 로 기록하고 dispatch 출력과 함께 abort.
 - **후속(C2)**: DONE→push→PR forge 통합.
@@ -99,7 +102,7 @@ task 의 SPEC(들)을 자율 실행기 오케스트레이터(`dispatch`)에 위�
 
 ### fsd status `<task-id>`
 
-task 단위로 상태 미러·소유 run-id·브랜치·PR·리뷰 라운드·head·SPEC 목록을 표 형태로 출력한다.
+task 단위로 상태 미러·origin(원본 task 연결)·소유 run-id·브랜치·PR·리뷰 라운드·head·SPEC 목록을 표 형태로 출력한다. origin 이 없으면 빈 값으로 표시한다.
 
 ### fsd list
 
@@ -108,6 +111,25 @@ task 단위로 상태 미러·소유 run-id·브랜치·PR·리뷰 라운드·he
 ### fsd stop `<task-id>`
 
 task 가 소유한 dispatch run 을 `dispatch` 의 공개 `stop` 서브커맨드로 정지 위임하고 `state=stopped` 로 기록한다. 연결된 run 이 없으면 안내만 출력하고 0 exit.
+
+## 진행 중 버그 분리 (start 중 관찰한 버그를 큐잉 task 로)
+
+`fsd start` 로 한 task 를 진행하는 도중 오케스트레이터가 **작업과 별개의 버그**를 관찰하면, 현재 task 를 중단하지 않고 그 버그를 별도의 **큐잉 버그-수정 task** 로 분리한다. 사용자 결정은 그 버그 task 를 실제로 진행하는 시점까지 미룬다.
+
+절차:
+
+1. **버그 관찰** — 현재 task 진행 중 부수 버그를 발견한다(현재 task 는 계속 진행).
+2. **버그 SPEC 작성** — `spec` 스킬로 버그 SPEC 을 작성하되, **사용자 결정이 필요한 지점은 비워둔다** — spec 의 기존 `[NEEDS CLARIFICATION]` 마커로 표시한다(새 메커니즘 도입 없음). SPEC 저작은 spec 스킬의 책임이다.
+3. **큐잉** — `fsd intake --origin <현재-task-id> <버그-SPEC>` 로 버그 task 를 등록한다. `origin` 에 원본 task 연결이 기록된다.
+4. **현재 task 계속** — 버그 task 는 큐에 남고, 현재 task 의 의도를 흐리지 않는다. 발견 즉시 사람을 붙잡지 않는다.
+5. **나중 진행** — 버그 task 를 `fsd start <버그-SPEC>` 로 진행하면 미해결 마커 가드가 마커를 감지해 dispatch 를 막고 `needs-resume: <SPEC-경로>` 를 알린다. `spec --resume <SPEC-경로>` 로 빈 칸(사용자 결정)을 채운 뒤 다시 `start` 하면 마커가 사라져 dispatch 가 시작된다.
+
+계약 요약:
+- intake 의 `--origin <task-id>` — 분리 task 의 출처를 origin 필드로 기록(선택).
+- start 의 마커 가드 — `[NEEDS CLARIFICATION` 보유 SPEC 은 dispatch 전 차단, `state=needs-clarification`, SPEC 마다 `needs-resume:` 출력, 비-0 종료.
+- 상태 레이아웃의 `origin` 필드 — `fsd status` 에 노출.
+
+이 분리는 `fsd bug` 같은 신규 서브커맨드 없이 **start 절차 + 기존 intake 재사용**으로 이뤄지며, loop 시그널 계약(`signals/DONE`·`BLOCKED`)에 새 시그널을 추가하지 않는다. 빈 칸 표현·진행 시 채움은 spec 의 기존 `[NEEDS CLARIFICATION]` 마커 + `spec --resume` 관례를 그대로 쓴다.
 
 ## references
 
