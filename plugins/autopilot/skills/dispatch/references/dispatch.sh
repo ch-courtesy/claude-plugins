@@ -35,6 +35,26 @@ LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 POLL_SECONDS="${DISPATCH_POLL_SECONDS:-2}"
 WAVE_TIMEOUT_SECONDS="${DISPATCH_WAVE_TIMEOUT_SECONDS:-7200}"
 
+# ----- 통합(리뷰·머지) 모드 -----
+# 통합 모드가 활성이면 loop DONE 을 곧 done 으로 보지 않고, per-SPEC 통합→리뷰→머지
+# 파이프라인을 한 폴링 틱당 한 스텝씩 전진시켜(드레인) 머지에 성공한 SPEC 만 done 으로
+# 전이한다(=의존자 해제). done 의 의미가 "머지됨"으로 재정의되며, 기존 ready 검사
+# (dep==done)·skip 전파가 그대로 머지 게이트가 된다. 비활성이면 기존 동작(loop DONE=done).
+#
+# 통합 모듈은 **서브프로세스로 격리** 호출한다 — 모듈의 set +e·die→exit 가 본 스케줄러의
+# set -euo pipefail·드레인 루프를 오염·중단시키지 않게 한다. 순수 상태 헬퍼(lib-integration)
+# 만 sourcing 한다(top-level set 변경 없음 → 안전).
+INTEGRATION_CMD="${INTEGRATION_CMD:-bash $SCRIPT_DIR/integration.sh}"
+REVIEW_CMD="${REVIEW_CMD:-bash $SCRIPT_DIR/review-loop.sh}"
+MERGE_CMD="${MERGE_CMD:-bash $SCRIPT_DIR/merge.sh}"
+INTEGRATE_MODE=0
+# shellcheck source=lib-integration.sh
+. "$SCRIPT_DIR/lib-integration.sh"
+
+# int_key <spec> — per-SPEC 통합 키. dispatch 실행 상태 키(state.<slug>-<hash7>)와 동일
+# 산식이라, 스케줄러가 통합 모듈에 넘기는 키와 실행 상태 키가 일관된다.
+int_key() { echo "$(spec_slug "$1")-$(hash7 "$1")"; }
+
 # ----- helpers -----
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -294,6 +314,80 @@ child_terminal_state() {
   esac
 }
 
+# ----- 통합 모드: loop 종료 매핑 + per-SPEC 드레인 -----
+
+# mark_loop_terminal <run_dir> <spec> <term> — loop 가 종료(done/failed/그외)했을 때
+# 스케줄러 상태로 매핑한다. 통합 모드면 done/failed 를 곧장 done/failed 로 보지 않고
+# `integrating` 으로 두어 통합→리뷰→머지 드레인이 분류·전진하게 한다(spec-gap 여부 포함).
+# 비활성이면 기존 동작과 동일(done→done, 그 외→failed).
+mark_loop_terminal() {
+  local rd="$1" spec="$2" term="$3"
+  if (( INTEGRATE_MODE == 1 )) && { [[ "$term" == "done" ]] || [[ "$term" == "failed" ]]; }; then
+    set_state "$rd" "$spec" "integrating"
+    int_set_phase "$rd" "$(int_key "$spec")" "loop-done"
+    int_set "$rd" "$(int_key "$spec")" integ-start "$(date +%s)"
+    log_event "$rd" "integrate-enter $(spec_slug "$spec") loop-terminal=$term"
+  else
+    case "$term" in
+      done) set_state "$rd" "$spec" "done";   log_event "$rd" "done $(spec_slug "$spec")" ;;
+      *)    set_state "$rd" "$spec" "failed"; log_event "$rd" "failed $(spec_slug "$spec") (term=$term)" ;;
+    esac
+  fi
+}
+
+# drain_integration <run_dir> <spec> — integrating SPEC 을 그 시점 가능한 다음 한 스텝으로
+# 전진(멱등). 통합 모듈은 서브프로세스 격리 호출(die→exit 가 스케줄러를 죽이지 않게 || true).
+# 종착 통합 phase 를 스케줄러 상태로 매핑: merged→done, blocked|blocked-spec-gap|escalated→failed.
+drain_integration() {
+  local rd="$1" spec="$2" key phase pr branch started now
+  key="$(int_key "$spec")"
+  phase="$(int_get_phase "$rd" "$key")"
+  pr="$(int_get_pr "$rd" "$key")"
+  branch="$(int_get_branch "$rd" "$key")"
+
+  # 통합 단계 runtime cap — 통합/리뷰/머지가 무한 대기(예: approver 승인 미반영)로 폴링
+  # 루프를 영원히 막지 않도록 WAVE_TIMEOUT_SECONDS 초과 시 비완료 종착(failed)으로 회수.
+  started="$(int_get "$rd" "$key" integ-start "0")"
+  now="$(date +%s)"
+  if [[ "$started" != "0" ]] && (( now - started >= WAVE_TIMEOUT_SECONDS )); then
+    set_state "$rd" "$spec" "failed"
+    log_event "$rd" "integrate-timeout $(spec_slug "$spec") elapsed=$((now - started))s phase=$phase"
+    return 0
+  fi
+
+  case "$phase" in
+    ""|loop-done)
+      # shellcheck disable=SC2086
+      $INTEGRATION_CMD integrate "$spec" "$rd" "$key" >/dev/null 2>&1 || true
+      ;;
+    review)
+      # shellcheck disable=SC2086
+      $REVIEW_CMD run "$rd" "$key" "$spec" "$pr" "$branch" >/dev/null 2>&1 || true
+      ;;
+    approved)
+      # 분리 approver 신원 승인 1회 제출 후 머지 시도(멱등: 제출 표시).
+      if [[ "$(int_get "$rd" "$key" approval-submitted "")" != "1" ]]; then
+        # shellcheck disable=SC2086
+        $MERGE_CMD approve "$pr" >/dev/null 2>&1 || true
+        int_set "$rd" "$key" approval-submitted 1
+      fi
+      # shellcheck disable=SC2086
+      $MERGE_CMD finish "$spec" "$rd" "$key" "$pr" >/dev/null 2>&1 || true
+      ;;
+    merging)
+      # shellcheck disable=SC2086
+      $MERGE_CMD finish "$spec" "$rd" "$key" "$pr" >/dev/null 2>&1 || true
+      ;;
+  esac
+
+  phase="$(int_get_phase "$rd" "$key")"
+  case "$phase" in
+    merged) set_state "$rd" "$spec" "done";   log_event "$rd" "merged→done $(spec_slug "$spec")" ;;
+    blocked|blocked-spec-gap|escalated)
+            set_state "$rd" "$spec" "failed"; log_event "$rd" "integrate-failed $(spec_slug "$spec") phase=$phase" ;;
+  esac
+}
+
 # ----- DAG / wave 구성 -----
 
 # build_dag <spec1> <spec2> ... → stdout 에 "wave=N\t<abspath>" 줄.
@@ -398,11 +492,13 @@ cmd_start() {
   require_yq
   local resume=""
   local max_parallel=0
+  local integrate_opt=0
   local -a inputs=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --resume) resume="$2"; shift 2 ;;
       --max-parallel) max_parallel="$2"; shift 2 ;;
+      --integrate) integrate_opt=1; shift ;;
       --) shift; while [[ $# -gt 0 ]]; do inputs+=("$1"); shift; done ;;
       -*) die "알 수 없는 옵션: $1" ;;
       *) inputs+=("$1"); shift ;;
@@ -448,6 +544,16 @@ cmd_start() {
     # 초기 상태 = pending
     local s
     for s in "${specs_abs[@]}"; do set_state "$rd" "$s" "pending"; done
+  fi
+
+  # ----- 통합 모드 활성 판정 (opt-in) -----
+  # 트리거: --integrate 플래그 또는 forge 구성(APPROVER 신원 설정). 활성이면 run-dir 에
+  # 마커를 남겨 --resume 에서도 동일 모드로 재개한다. 비활성이면 기존 동작(loop DONE=done).
+  if (( integrate_opt == 1 )) || [[ -n "${APPROVER:-}" ]]; then INTEGRATE_MODE=1; fi
+  if [[ -f "$rd/INTEGRATE" ]]; then INTEGRATE_MODE=1; fi
+  if (( INTEGRATE_MODE == 1 )); then
+    : > "$rd/INTEGRATE"
+    log_event "$rd" "integration mode ON (review→merge 게이트; done=머지됨)"
   fi
 
   # ----- 스트리밍 스케줄러 (SPEC별 준비도 기반) -----
@@ -528,28 +634,28 @@ cmd_start() {
           kill_tree "${PIDS[i]}" TERM; sleep 1
           kill -0 "${PIDS[i]}" 2>/dev/null && kill_tree "${PIDS[i]}" KILL
           wait "${PIDS[i]}" 2>/dev/null || true
-          # timeout 직전 이미 done 인 child 는 done 보존, 아니면 failed.
+          # timeout 직전 이미 done 인 child 는 done(통합 모드면 integrating 진입), 아니면 failed.
           term="$(child_terminal_state "${specs_abs[i]}")"
-          if [[ "$term" == "done" ]]; then
-            set_state "$rd" "${specs_abs[i]}" "done"
-            log_event "$rd" "done $(spec_slug "${specs_abs[i]}") (완료 후 timeout 회수)"
-          else
-            set_state "$rd" "${specs_abs[i]}" "failed"
-            log_event "$rd" "timeout-failed $(spec_slug "${specs_abs[i]}") state=$term"
-          fi
+          mark_loop_terminal "$rd" "${specs_abs[i]}" "$term"
           PIDS[i]=""
         fi
         continue
       fi
-      # PID 종료 — loop 구조화 상태로 종료 상태 판정.
+      # PID 종료 — loop 구조화 상태로 종료 상태 판정. 통합 모드면 done/failed 를
+      # integrating 으로 두고(아래 드레인이 분류·전진), 비활성이면 기존대로 done/failed.
       term="$(child_terminal_state "${specs_abs[i]}")"
-      case "$term" in
-        done)   set_state "$rd" "${specs_abs[i]}" "done";   log_event "$rd" "done $(spec_slug "${specs_abs[i]}")" ;;
-        failed) set_state "$rd" "${specs_abs[i]}" "failed"; log_event "$rd" "failed $(spec_slug "${specs_abs[i]}")" ;;
-        *)      set_state "$rd" "${specs_abs[i]}" "failed"; log_event "$rd" "unknown-terminal $(spec_slug "${specs_abs[i]}") state=$term" ;;
-      esac
+      mark_loop_terminal "$rd" "${specs_abs[i]}" "$term"
       PIDS[i]=""
     done
+
+    # 3.5) 통합 모드 드레인 — integrating SPEC 을 틱당 한 스텝씩 멱등 전진.
+    #   integrate→review→(approve)→merge. merged→done(=의존자 해제), 비완료 종착→failed.
+    if (( INTEGRATE_MODE == 1 )); then
+      for ((i=0; i<n; i++)); do
+        [[ "$(get_state "$rd" "${specs_abs[i]}")" == "integrating" ]] || continue
+        drain_integration "$rd" "${specs_abs[i]}"
+      done
+    fi
 
     # 4) 종료 판정 — 모든 SPEC 이 done/failed/skipped 이면 끝.
     local pending_or_running=0
@@ -666,6 +772,10 @@ cmd_watch() {
         done)    ;;
         failed)  any_fail=1 ;;
         skipped) any_fail=1 ;;  # 이행적 실패로 차단된 SPEC — terminal(비완료).
+        integrating)
+          # 통합 모드: loop 는 끝났지만 통합→리뷰→머지 진행 중. 머지(=done) 전까지 비완료.
+          # watch 는 통합을 전진시키지 않으므로(스케줄러 cmd_start 소유) 미완으로만 보고한다.
+          all_terminal=0 ;;
         *)
           # 미완 — loop 공개 IF 로 현 상태 재확인.
           local term; term="$(child_terminal_state "$sp")"
@@ -685,6 +795,135 @@ cmd_watch() {
     if (( now - start >= WAVE_TIMEOUT_SECONDS )); then return 2; fi
     sleep "${POLL_SECONDS:-1}"
   done
+}
+
+# =====================================================================
+# selftest — 스케줄러 통합 검증(mock loop/integration/review/merge).
+#   AC1/AC8: 의존자는 의존성이 머지(done)된 뒤에만 launch.
+#   AC9: 비완료 종착(통합 차단)이면 이행적 의존자만 skipped.
+#   AC10: 머지 직렬화는 merge.sh 락 selftest 가 단언(여기선 머지 위임 경로 확인).
+#   회귀: 통합 모드 비활성이면 loop DONE=done(통합 모듈 미호출).
+#   self-referential: 실제 PR·머지 미수행(모두 mock).
+# =====================================================================
+cmd_selftest() {
+  local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
+  local LIBINT="$SCRIPT_DIR/lib-integration.sh"
+  local DSP="$SCRIPT_DIR/dispatch.sh"
+
+  # mock loop: start→launch 이벤트 + 즉시 종료, status --json→terminal/DONE.
+  cat > "$TMP/m-loop.sh" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  start)  shift; [[ "$1" == --* ]] && shift; printf 'launch:%s\n' "$(basename "$1")" >> "$EVENTLOG"; exit 0 ;;
+  status) printf '{"state":"terminal","signals":["DONE"]}\n' ;;
+  logs|stop|cleanup) : ;;
+esac
+exit 0
+EOF
+  # mock integration: integrate <spec> <rd> <key>. MOCK_INT_BLOCK 이면 그 spec 을 blocked.
+  cat > "$TMP/m-int.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$LIBINT"
+spec="$2"; rd="$3"; key="$4"
+printf 'integrate:%s\n' "$(basename "$spec")" >> "$EVENTLOG"
+if [[ -n "${MOCK_INT_BLOCK:-}" && "$(basename "$spec")" == "$MOCK_INT_BLOCK" ]]; then
+  int_set_phase "$rd" "$key" blocked
+else
+  int_set_branch "$rd" "$key" "feat/x-$key"; int_set_pr "$rd" "$key" 100
+  int_set_phase "$rd" "$key" review
+fi
+exit 0
+EOF
+  # mock review: run <rd> <key> <spec> <pr> <branch> → approved.
+  cat > "$TMP/m-review.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$LIBINT"
+rd="$2"; key="$3"; spec="$4"
+printf 'review:%s\n' "$(basename "$spec")" >> "$EVENTLOG"
+int_set_phase "$rd" "$key" approved
+exit 0
+EOF
+  # mock merge: approve <pr> / finish <spec> <rd> <key> <pr> → merged.
+  cat > "$TMP/m-merge.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$LIBINT"
+case "$1" in
+  approve) printf 'approve:%s\n' "$2" >> "$EVENTLOG" ;;
+  finish)  spec="$2"; rd="$3"; key="$4"
+           printf 'merge:%s\n' "$(basename "$spec")" >> "$EVENTLOG"
+           int_set_phase "$rd" "$key" merged ;;
+esac
+exit 0
+EOF
+
+  # 격리 git 저장소 + SPEC 2개(B depends_on A).
+  local REPO="$TMP/repo"; mkdir -p "$REPO"
+  ( cd "$REPO" && git init -q )
+  printf -- '---\n---\n# Feature A\n' > "$REPO/feature-a.md"
+  printf -- '---\ndepends_on: [feature-a]\n---\n# Feature B\n' > "$REPO/feature-b.md"
+
+  local fail=0
+  ok()  { echo "PASS  $1"; }
+  bad() { echo "FAIL  $1"; fail=1; }
+  before() { # <eventlog> <pat-A> <pat-B> : A 줄번호 < B 줄번호 (둘 다 존재)
+    local lg="$1" a b
+    a="$(grep -n "$2" "$lg" | head -1 | cut -d: -f1)"
+    b="$(grep -n "$3" "$lg" | head -1 | cut -d: -f1)"
+    [[ -n "$a" && -n "$b" && "$a" -lt "$b" ]]
+  }
+  run_state() { # <run_dir> <spec-basename> — state_path 산식(state.<slug>-<hash7>) 재현.
+    local rd="$1" sp key; sp="$REPO/$2"
+    key="$(spec_slug "$sp")-$(hash7 "$sp")"
+    cat "$rd/state.$key" 2>/dev/null || echo "MISSING"
+  }
+  latest_run() { ls -1dt "$REPO"/.dispatch/runs/*/ 2>/dev/null | head -1 | sed 's:/$::'; }
+
+  # ---- 시나리오 1: 통합 모드 — 머지 게이트로 의존자 해제 ----
+  rm -rf "$REPO/.dispatch"
+  local EVENTLOG="$TMP/ev1.log"; : > "$EVENTLOG"
+  ( cd "$REPO" && env EVENTLOG="$EVENTLOG" LOOP_CMD="bash $TMP/m-loop.sh" \
+      INTEGRATION_CMD="bash $TMP/m-int.sh" REVIEW_CMD="bash $TMP/m-review.sh" MERGE_CMD="bash $TMP/m-merge.sh" \
+      LIBINT="$LIBINT" DISPATCH_POLL_SECONDS=0 DISPATCH_WAVE_TIMEOUT_SECONDS=120 \
+      bash "$DSP" start --integrate feature-a.md feature-b.md ) >/dev/null 2>&1 || true
+  local rd1; rd1="$(latest_run)"
+  [[ "$(run_state "$rd1" feature-a.md)" == "done" ]] && ok "S1 A 머지(done)" || bad "S1 A 머지(done) got=$(run_state "$rd1" feature-a.md)"
+  [[ "$(run_state "$rd1" feature-b.md)" == "done" ]] && ok "S1 B 머지(done)" || bad "S1 B 머지(done) got=$(run_state "$rd1" feature-b.md)"
+  before "$EVENTLOG" 'merge:feature-a.md' 'launch:feature-b.md' \
+    && ok "AC1/AC8 A 머지 후에만 B launch" || bad "AC1/AC8 A 머지 후에만 B launch"
+  before "$EVENTLOG" 'integrate:feature-a.md' 'merge:feature-a.md' \
+    && ok "S1 A integrate→review→merge 순서" || bad "S1 A integrate→merge 순서"
+  [[ -f "$rd1/INTEGRATE" ]] && ok "S1 통합 모드 마커" || bad "S1 통합 모드 마커"
+
+  # ---- 시나리오 2: 통합 차단(A) → 이행적 의존자 B skipped ----
+  rm -rf "$REPO/.dispatch"
+  local EVENTLOG2="$TMP/ev2.log"; : > "$EVENTLOG2"
+  ( cd "$REPO" && env EVENTLOG="$EVENTLOG2" MOCK_INT_BLOCK="feature-a.md" LOOP_CMD="bash $TMP/m-loop.sh" \
+      INTEGRATION_CMD="bash $TMP/m-int.sh" REVIEW_CMD="bash $TMP/m-review.sh" MERGE_CMD="bash $TMP/m-merge.sh" \
+      LIBINT="$LIBINT" DISPATCH_POLL_SECONDS=0 DISPATCH_WAVE_TIMEOUT_SECONDS=120 \
+      bash "$DSP" start --integrate feature-a.md feature-b.md ) >/dev/null 2>&1 || true
+  local rd2; rd2="$(latest_run)"
+  [[ "$(run_state "$rd2" feature-a.md)" == "failed" ]] && ok "AC9 A 비완료 종착(failed)" || bad "AC9 A failed got=$(run_state "$rd2" feature-a.md)"
+  [[ "$(run_state "$rd2" feature-b.md)" == "skipped" ]] && ok "AC9 B 이행적 skipped" || bad "AC9 B skipped got=$(run_state "$rd2" feature-b.md)"
+  if grep -q 'launch:feature-b.md' "$EVENTLOG2"; then bad "AC9 B 미launch"; else ok "AC9 B 미launch(차단 전파)"; fi
+
+  # ---- 시나리오 3: 회귀 — 통합 모드 비활성이면 loop DONE=done, 통합 모듈 미호출 ----
+  rm -rf "$REPO/.dispatch"
+  local EVENTLOG3="$TMP/ev3.log"; : > "$EVENTLOG3"
+  ( cd "$REPO" && env EVENTLOG="$EVENTLOG3" LOOP_CMD="bash $TMP/m-loop.sh" \
+      INTEGRATION_CMD="bash $TMP/m-int.sh" REVIEW_CMD="bash $TMP/m-review.sh" MERGE_CMD="bash $TMP/m-merge.sh" \
+      LIBINT="$LIBINT" DISPATCH_POLL_SECONDS=0 DISPATCH_WAVE_TIMEOUT_SECONDS=120 \
+      bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
+  local rd3; rd3="$(latest_run)"
+  [[ "$(run_state "$rd3" feature-a.md)" == "done" ]] && ok "회귀 A loop DONE=done" || bad "회귀 A done got=$(run_state "$rd3" feature-a.md)"
+  [[ "$(run_state "$rd3" feature-b.md)" == "done" ]] && ok "회귀 B loop DONE=done" || bad "회귀 B done got=$(run_state "$rd3" feature-b.md)"
+  if grep -qE 'integrate:|review:|merge:' "$EVENTLOG3"; then bad "회귀 통합 모듈 미호출"; else ok "회귀 통합 모듈 미호출(비활성)"; fi
+  before "$EVENTLOG3" 'launch:feature-a.md' 'launch:feature-b.md' \
+    && ok "회귀 A done 후 B launch(기존 게이트)" || bad "회귀 A done 후 B launch"
+  [[ ! -f "$rd3/INTEGRATE" ]] && ok "회귀 통합 마커 없음" || bad "회귀 통합 마커 없음"
+
+  echo "----"
+  [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
+  return $fail
 }
 
 # ----- 사용법 -----
@@ -726,6 +965,7 @@ case "$SUB" in
   status) cmd_status "$@" ;;
   stop)   cmd_stop   "$@" ;;
   watch)  cmd_watch  "$@" ;;
+  selftest) cmd_selftest ;;
   -h|--help|help) usage ;;
   *) echo "알 수 없는 subcommand: $SUB" >&2; usage ;;
 esac
