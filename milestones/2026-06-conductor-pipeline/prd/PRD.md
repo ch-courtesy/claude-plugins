@@ -79,7 +79,7 @@ autopilot의 spec·loop·dispatch는 의도적으로 forge(GitHub PR·머지)와
 ## 위험
 
 - **self-referential**: conductor가 autopilot 자체를 소재로 동작하면 자기 구현을 다룬다. 각 child SPEC에 `feedback_no_self_apply_during_spec`·`feedback_self_referential_verification`를 명시해, 검증은 verify·worktree source만 보고 runtime artifact(`.conductor/`·`.dispatch/`·워크트리) 직접 검사를 금지한다.
-- **무한 리뷰 루프**: 봇 리뷰 ↔ conductor 자동수정 핑퐁. REVIEW_ROUNDS 캡=3 + 동일지적 해시 + 무진전 가드로 차단하고 초과 시 사람에게 에스컬레이션(C3).
+- **무한 리뷰 루프** — ⛔ **해당 없음(C3 폐기)**: 내부 봇 리뷰 ↔ 자동수정 핑퐁 위험은 C3 리뷰 피드백 루프를 폐기(제거·외부 위임)하면서 사라졌다. 리뷰는 외부 CI(GitHub PR)와 사람에게 위임하고, 통합으로 열린 미승인 PR 은 `poll` 이 "외부 승인 대기" no-op 로 둔다(자동 재구현 없음).
 - **무인 자동머지의 룰 위반**: 버전 범프 누락이 가장 무거운 룰(versioning.md)을 조용히 위반할 위험. C4 머지 게이트가 `plugins/**` 변경 시 `plugin.json` 범프를 강제하고 없으면 머지를 차단한다.
 - **무인 gh 권한**: 전용 상시 호스트가 신뢰 경계. 스코프된 토큰, approver-bot 신원 분리, loop 서브프로세스가 머지/push 권한을 상속하지 않도록 격리(C5 운영 가이드).
 - **scope 충돌**: C1~C5가 SKILL.md를 동시 수정하면 wave 병렬 충돌. SKILL.md는 C0가 전체 인터페이스를 완전판으로 작성하고, C1~C5는 각자 `references/*.sh`만 소유해 격리한다.

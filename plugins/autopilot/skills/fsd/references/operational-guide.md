@@ -1,9 +1,10 @@
 # fsd 상시 호스트 무인 운영 가이드 (C5)
 
 `fsd poll`(→ `references/poll.sh`)을 **전용 상시 호스트(dedicated always-on host)**에서
-무인으로 주기 실행해 spec→dispatch→리뷰→머지 파이프라인을 사람 개입 없이 닫기 위한
-운영·보안 경계 문서다. 본 가이드는 호스트별 설정 산출물(systemd 유닛 등)을 만들지 않고
-**문서로만** 안내한다(SPEC 비-목표).
+무인으로 주기 실행해 spec→dispatch→통합(PR)→[외부 승인]→머지 파이프라인을 사람 개입을
+승인 지점으로만 좁혀 닫기 위한 운영·보안 경계 문서다. 리뷰는 외부 CI(GitHub PR 워크플로)와
+사람에게 위임하며 fsd 내부 자동 리뷰·재구현 고리는 없다. 본 가이드는 호스트별 설정
+산출물(systemd 유닛 등)을 만들지 않고 **문서로만** 안내한다(SPEC 비-목표).
 
 > 사용자 확정 결정: **런타임은 전용 상시 호스트.** 이 호스트가 무인 `gh` 자격증명의
 > 신뢰 경계(trust boundary)다. 개발자 노트북·공용 CI 러너가 아닌, 이 자동화 전용으로
@@ -18,9 +19,8 @@
 ├── 스케줄러 (cron / /schedule / /loop)
 │      └── fsd poll          ← 무인 자격증명을 쓰는 유일 지점
 │             ├── start  (dispatch → 자율 실행기 서브프로세스)   ※ push/merge 권한 미상속
-│             ├── integrate (C2)   push (작업 브랜치 한정 토큰)
-│             ├── review    (C3)   같은 head 브랜치 push (force 금지)
-│             └── merge     (C4)   base 머지   ← 별도 approver 신원의 승인 후에만
+│             ├── integrate (C2)   push (작업 브랜치 한정 토큰) → PR (외부 CI 리뷰가 검사)
+│             └── merge     (C4)   base 머지   ← 별도 approver 신원의 외부 승인 후에만
 └── 자격증명
        ├── BOT_TOKEN       범위 최소화된 자동화 토큰 (push·PR·이슈)
        └── APPROVER_TOKEN  분리된 승인 권한 신원 (승인 전용)   ← BOT 와 절대 공유 금지
@@ -41,9 +41,9 @@
 | 동작 (호출 단위) | 필요한 권한 스코프 |
 |---|---|
 | 이슈=task 생성·상태·코멘트 (C1) | `issues: write` (Projects 사용 시 `repository-projects: write`) |
-| 작업 브랜치 push (C2/C3) | `contents: write` — **단, 작업 브랜치 네임스페이스로 제한** |
+| 작업 브랜치 push (C2) | `contents: write` — **단, 작업 브랜치 네임스페이스로 제한** |
 | PR 생성/조회 (C2) | `pull_requests: write` |
-| 리뷰/승인 조회 (C3/C4) | `pull_requests: read` |
+| 승인 조회 (C4) | `pull_requests: read` |
 
 - Fine-grained PAT 또는 GitHub App 설치 토큰을 권장한다(classic `repo` 광역 스코프 지양).
 - **대상 저장소를 이 레포 하나로 한정**한다(조직 전체 토큰 금지).
@@ -87,7 +87,7 @@
 
 ## 4. 자율 실행기 서브프로세스 권한 격리 (AC6)
 
-poll 의 `start`/`integrate`/`review` 는 구현을 **자율 실행기(loop/dispatch) 서브프로세스**에
+poll 의 `start`/`integrate` 는 구현을 **자율 실행기(loop/dispatch) 서브프로세스**에
 위임한다. 이 서브프로세스는 **머지·base push 권한을 상속해서는 안 된다** — 사고 반경을
 구현 작업 공간으로 가둔다.
 

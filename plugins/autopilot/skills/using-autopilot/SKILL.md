@@ -79,4 +79,4 @@ milestone 규모(다중 독립 서브시스템)는 spec의 **범위 분해 게�
         └─ autopilot:fsd  → spec 산출 → intake(task 등록) → start(dispatch 구현) … 끝까지 자동
 ```
 
-spec은 외부 상태(이슈·브랜치·원격)를 만들지 않고 SPEC 문서만 산출한다. fsd는 task 단위로 spec→dispatch를 묶어 구현까지 자동으로 닫는다(현재 실효 자동 범위는 intake→start이며, 이후 review·merge·poll은 미구현 핸들러다).
+spec은 외부 상태(이슈·브랜치·원격)를 만들지 않고 SPEC 문서만 산출한다. fsd는 task 단위로 spec→dispatch를 묶어 구현까지 자동으로 닫는다(현재 실효 자동 범위는 intake→start이며, poll 드레인이 통합·머지로 전진시킨다). 리뷰는 외부 CI(GitHub PR)와 사람에게 위임하므로 fsd 내부 리뷰 단계는 없다.
