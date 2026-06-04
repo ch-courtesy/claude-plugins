@@ -11,6 +11,7 @@
 #       pr             PR 번호                            (forge 연동은 후속 단위)
 #       run-id         이 task 가 소유한 dispatch run 식별자
 #       head           마지막으로 관측한 head 식별자
+#       origin         이 task 를 촉발한 원본 task 식별자  (버그 분리 연결, 선택)
 #       LOG.md         append-only 이벤트 로그
 #
 # **하지 않는 일**:
@@ -76,6 +77,10 @@ get_pr()      { get_field "$1" "pr" ""; }
 
 set_head()    { set_field "$1" "head" "$2"; }
 get_head()    { get_field "$1" "head" ""; }
+
+# origin — 이 task 를 촉발한 원본 task 의 식별자(버그 분리 연결). 없으면 빈 값.
+set_origin()  { set_field "$1" "origin" "$2"; }
+get_origin()  { get_field "$1" "origin" ""; }
 
 # ----- SPEC 경로 집합 (append-only) -----
 

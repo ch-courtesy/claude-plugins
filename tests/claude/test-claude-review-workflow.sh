@@ -198,6 +198,8 @@ grep -qF "side: 'RIGHT'" "$WORKFLOW" \
   || fail "inline comment side='RIGHT' 지정 부재 (AC1)"
 grep -qF 'start_line' "$WORKFLOW" \
   || fail "multi-line inline comment 의 start_line 처리 부재 (AC1)"
+grep -qF '🤖 **Claude 리뷰**' "$WORKFLOW" \
+  || fail "인라인 코멘트 본문에 리뷰어 식별 헤더(🤖 **Claude 리뷰**) 부재 — 동일 App bot 신원이라 본문 라벨로 구분"
 if grep -qF 'inlineFallback' "$WORKFLOW"; then
   fail "inlineFallback 경로 잔존 — createReview 실패 시 이슈 코멘트 덤프 금지 (AC6)"
 fi
