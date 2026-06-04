@@ -6,22 +6,22 @@
 #     wave 단위로 자율 실행기(loop.sh)에 위임 호출.
 #   - run-id 단위로 진행 상태를 <project_root>/.dispatch/runs/<run-id>/ 에 보관.
 #   - list / status / stop / watch / --resume 운영 인터페이스 제공.
-#   - (통합 모드는 기본 활성) per-SPEC 통합→(forge 서브모드)리뷰→머지 파이프라인을 소유:
+#   - (통합은 항상 활성 — 토글 없음) per-SPEC 통합→리뷰→머지 파이프라인을 소유:
 #     loop DONE 을 곧 done 으로 보지 않고 ff-only 머지에 성공한 SPEC 만 done 으로 전이해
 #     의존자 해제를 머지 뒤로 미룬다. forge 구성이면 풀 파이프라인(push→PR→리뷰→ff-only
-#     머지), forge 미구성이면 리뷰·승인 없이 ff-only 직접 머지(direct 서브모드).
-#     `--no-integrate` 면 통합을 꺼 loop DONE=done(레거시). 통합 모듈(integration/
-#     review-loop/merge.sh)은 서브프로세스로 격리 호출하고 상태는 lib-integration.sh 로 보관.
+#     머지), forge 미구성이면 PR 없는 로컬 적대적 리뷰 게이트 후 ff-only 직접 머지(direct
+#     서브모드). 통합 모듈(integration/review-loop/merge.sh)은 서브프로세스로 격리 호출하고
+#     상태는 lib-integration.sh 로 보관. 머지·동기화 대상 브랜치는 --target-branch 로 지정
+#     (미지정 시 기본 브랜치)하고 run-dir 마커로 영속(재개 sticky).
 #
 # **하지 않는 일**:
 #   - 입력 SPEC 의 frontmatter 형식·내용 검증 (자율 실행기 책임).
-#   - forge(PR/issue/label) 연동 — **`--no-integrate` 레거시 모드에서만** 호출 레이어 책임이다.
-#     통합 모드(기본)가 활성이면 dispatch 가 통합·리뷰·머지를 직접 소유한다(위 책임 참조).
-#     어느 모드·서브모드(forge·direct)에서도 force(강제) push·rebase·merge 는 쓰지 않는다.
+#   - 통합은 dispatch 가 직접 소유한다(통합·리뷰·머지). 어느 서브모드(forge·direct)에서도
+#     force(강제) push·rebase·merge 는 쓰지 않는다(머지는 ff-only).
 #   - 자율 실행기 내부 신호 파일 포맷·iteration·worktree 결정 (loop.sh 책임).
 #
 # 사용:
-#   bash dispatch.sh start <spec...> [--max-parallel N] [--resume <run-id>]
+#   bash dispatch.sh start <spec...> [--max-parallel N] [--resume <run-id>] [--target-branch <b>]
 #   bash dispatch.sh list
 #   bash dispatch.sh status <run-id>
 #   bash dispatch.sh stop <run-id>
@@ -55,9 +55,12 @@ WAVE_TIMEOUT_SECONDS="${DISPATCH_WAVE_TIMEOUT_SECONDS:-7200}"
 INTEGRATION_CMD="${INTEGRATION_CMD:-bash $SCRIPT_DIR/integration.sh}"
 REVIEW_CMD="${REVIEW_CMD:-bash $SCRIPT_DIR/review-loop.sh}"
 MERGE_CMD="${MERGE_CMD:-bash $SCRIPT_DIR/merge.sh}"
-INTEGRATE_MODE=0
-# 통합 서브모드: forge(풀 파이프라인) | direct(forge 미구성 직접 머지). cmd_start 가 결정.
+# 통합 서브모드: forge(풀 파이프라인) | direct(forge 미구성 — 적대적 리뷰 게이트 후 직접 머지).
+# cmd_start 가 결정·영속(INTEGRATE 마커). 통합 자체는 항상 활성(토글 없음).
 INTEGRATE_SUBMODE=""
+# 머지·동기화 대상 브랜치(--target-branch 로 지정, 미지정 시 기본 브랜치). cmd_start 가
+# run-dir 마커(TARGET_BRANCH)로 영속하고 통합 모듈에 DEFAULT_BRANCH 로 export 한다.
+TARGET_BRANCH=""
 # forge CLI 바이너리(서브모드 판정용). FORGE_CMD 와 별개로 '사용 가능' 판정에만 쓴다.
 FORGE_BIN="${FORGE_BIN:-gh}"
 # shellcheck source=lib-integration.sh
@@ -336,21 +339,18 @@ child_terminal_state() {
 # ----- 통합 모드: loop 종료 매핑 + per-SPEC 드레인 -----
 
 # mark_loop_terminal <run_dir> <spec> <term> — loop 가 종료(done/failed/그외)했을 때
-# 스케줄러 상태로 매핑한다. 통합 모드면 done/failed 를 곧장 done/failed 로 보지 않고
-# `integrating` 으로 두어 통합→리뷰→머지 드레인이 분류·전진하게 한다(spec-gap 여부 포함).
-# 비활성이면 기존 동작과 동일(done→done, 그 외→failed).
+# 스케줄러 상태로 매핑한다. 통합은 항상 활성이므로 깨끗한 loop 종착(done/failed)은 곧장
+# done/failed 로 보지 않고 `integrating` 으로 두어 통합→리뷰→머지 드레인이 분류·전진하게
+# 한다(spec-gap 여부 포함). 그 외(running/unknown 등 비깨끗 종착)는 보수적으로 failed.
 mark_loop_terminal() {
   local rd="$1" spec="$2" term="$3"
-  if (( INTEGRATE_MODE == 1 )) && { [[ "$term" == "done" ]] || [[ "$term" == "failed" ]]; }; then
+  if [[ "$term" == "done" ]] || [[ "$term" == "failed" ]]; then
     set_state "$rd" "$spec" "integrating"
     int_set_phase "$rd" "$(int_key "$spec")" "loop-done"
     int_set "$rd" "$(int_key "$spec")" integ-start "$(date +%s)"
     log_event "$rd" "integrate-enter $(spec_slug "$spec") loop-terminal=$term"
   else
-    case "$term" in
-      done) set_state "$rd" "$spec" "done";   log_event "$rd" "done $(spec_slug "$spec")" ;;
-      *)    set_state "$rd" "$spec" "failed"; log_event "$rd" "failed $(spec_slug "$spec") (term=$term)" ;;
-    esac
+    set_state "$rd" "$spec" "failed"; log_event "$rd" "failed $(spec_slug "$spec") (term=$term)"
   fi
 }
 
@@ -389,8 +389,15 @@ drain_integration() {
       fi
       ;;
     review)
-      # shellcheck disable=SC2086
-      $REVIEW_CMD run "$rd" "$key" "$spec" "$pr" "$branch" >/dev/null 2>&1 || true
+      if [[ "$INTEGRATE_SUBMODE" == "direct" ]]; then
+        # direct 서브모드: PR 없는 로컬 작업 브랜치 적대적 리뷰 게이트(원격 push·PR 미사용).
+        #   approve→phase=merging, request_changes→로컬 재구현(다음 틱 재리뷰), 가드→escalated.
+        # shellcheck disable=SC2086
+        $REVIEW_CMD run-direct "$rd" "$key" "$spec" "$branch" >/dev/null 2>&1 || true
+      else
+        # shellcheck disable=SC2086
+        $REVIEW_CMD run "$rd" "$key" "$spec" "$pr" "$branch" >/dev/null 2>&1 || true
+      fi
       ;;
     approved)
       # 분리 approver 신원 승인 1회 제출 후 머지 시도(멱등: 제출 표시).
@@ -526,14 +533,15 @@ cmd_start() {
   require_yq
   local resume=""
   local max_parallel=0
-  local no_integrate_opt=0
+  local target_branch_opt=""
   local -a inputs=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --resume) resume="$2"; shift 2 ;;
       --max-parallel) max_parallel="$2"; shift 2 ;;
-      --integrate) shift ;;                        # 기본 ON 이므로 하위호환 no-op.
-      --no-integrate) no_integrate_opt=1; shift ;;
+      --target-branch) target_branch_opt="$2"; shift 2 ;;
+      # 통합은 항상 활성(토글 제거). 하위호환을 위해 두 플래그를 받되 아무 효과 없이 무시한다.
+      --integrate|--no-integrate) shift ;;
       --) shift; while [[ $# -gt 0 ]]; do inputs+=("$1"); shift; done ;;
       -*) die "알 수 없는 옵션: $1" ;;
       *) inputs+=("$1"); shift ;;
@@ -581,32 +589,33 @@ cmd_start() {
     for s in "${specs_abs[@]}"; do set_state "$rd" "$s" "pending"; done
   fi
 
-  # ----- 통합 모드·서브모드 활성 판정 (기본 ON; --no-integrate 로 OFF) -----
-  # 기본값은 통합 켜짐이고 `--no-integrate` 로만 끈다. 모드(on/off)와 서브모드(forge/direct)는
-  # run-dir 마커로 보존해 --resume 에서 sticky 하다(최초 시작 결정을 그대로 재개):
-  #   $rd/NO_INTEGRATE 존재 → OFF(레거시).  $rd/INTEGRATE 존재 → ON(내용=서브모드).
-  # 마커가 있으면(=재개) 현재 env/플래그보다 마커가 우선한다.
-  if [[ -f "$rd/NO_INTEGRATE" ]]; then
-    INTEGRATE_MODE=0
-  elif [[ -f "$rd/INTEGRATE" ]]; then
-    INTEGRATE_MODE=1
+  # ----- 통합 서브모드 판정 (통합은 항상 활성 — 토글 없음) -----
+  # 서브모드(forge/direct)는 run-dir 마커($rd/INTEGRATE, 내용=서브모드)로 보존해 --resume 에서
+  # sticky 하다(최초 시작 결정을 그대로 재개). 마커가 있으면(=재개) 현재 env/플래그보다 우선.
+  if [[ -f "$rd/INTEGRATE" ]]; then
     INTEGRATE_SUBMODE="$(cat "$rd/INTEGRATE" 2>/dev/null || true)"
-  elif (( no_integrate_opt == 1 )); then
-    INTEGRATE_MODE=0
-    : > "$rd/NO_INTEGRATE"
-  else
-    INTEGRATE_MODE=1
   fi
-  if (( INTEGRATE_MODE == 1 )); then
-    # 서브모드 미정(최초 시작 또는 빈 마커)이면 forge 구성 여부로 결정.
-    if [[ -z "$INTEGRATE_SUBMODE" ]]; then
-      if forge_configured; then INTEGRATE_SUBMODE=forge; else INTEGRATE_SUBMODE=direct; fi
-    fi
-    printf '%s\n' "$INTEGRATE_SUBMODE" > "$rd/INTEGRATE"
-    log_event "$rd" "integration mode ON submode=$INTEGRATE_SUBMODE (done=머지됨)"
-  else
-    log_event "$rd" "integration mode OFF (--no-integrate; loop DONE=done)"
+  # 서브모드 미정(최초 시작 또는 빈 마커)이면 forge 구성 여부로 결정.
+  if [[ -z "$INTEGRATE_SUBMODE" ]]; then
+    if forge_configured; then INTEGRATE_SUBMODE=forge; else INTEGRATE_SUBMODE=direct; fi
   fi
+  printf '%s\n' "$INTEGRATE_SUBMODE" > "$rd/INTEGRATE"
+
+  # ----- 대상 브랜치 판정 (--target-branch, 미지정 시 기본 브랜치) -----
+  # run-dir 마커($rd/TARGET_BRANCH)로 영속해 --resume 에서 sticky 하다. 마커가 있으면(=재개)
+  # 현재 env(DEFAULT_BRANCH)·--target-branch 플래그보다 마커가 우선한다. 결정된 대상은 모든
+  # 통합 모듈(base sync·승인 요청 base·ff 머지·base push)에 DEFAULT_BRANCH 로 export 된다.
+  if [[ -f "$rd/TARGET_BRANCH" ]]; then
+    TARGET_BRANCH="$(cat "$rd/TARGET_BRANCH" 2>/dev/null || true)"
+  elif [[ -n "$target_branch_opt" ]]; then
+    TARGET_BRANCH="$target_branch_opt"
+  else
+    TARGET_BRANCH="${DEFAULT_BRANCH:-main}"
+  fi
+  [[ -n "$TARGET_BRANCH" ]] || TARGET_BRANCH="${DEFAULT_BRANCH:-main}"
+  printf '%s\n' "$TARGET_BRANCH" > "$rd/TARGET_BRANCH"
+  export DEFAULT_BRANCH="$TARGET_BRANCH"
+  log_event "$rd" "integration submode=$INTEGRATE_SUBMODE target-branch=$TARGET_BRANCH (done=머지됨)"
 
   # ----- 스트리밍 스케줄러 (SPEC별 준비도 기반) -----
   # WAVES.txt 는 진단용으로 보존하되, 실제 실행은 wave 배리어가 아니라 각 SPEC 의
@@ -700,14 +709,12 @@ cmd_start() {
       PIDS[i]=""
     done
 
-    # 3.5) 통합 모드 드레인 — integrating SPEC 을 틱당 한 스텝씩 멱등 전진.
+    # 3.5) 통합 드레인 — integrating SPEC 을 틱당 한 스텝씩 멱등 전진(통합은 항상 활성).
     #   integrate→review→(approve)→merge. merged→done(=의존자 해제), 비완료 종착→failed.
-    if (( INTEGRATE_MODE == 1 )); then
-      for ((i=0; i<n; i++)); do
-        [[ "$(get_state "$rd" "${specs_abs[i]}")" == "integrating" ]] || continue
-        drain_integration "$rd" "${specs_abs[i]}"
-      done
-    fi
+    for ((i=0; i<n; i++)); do
+      [[ "$(get_state "$rd" "${specs_abs[i]}")" == "integrating" ]] || continue
+      drain_integration "$rd" "${specs_abs[i]}"
+    done
 
     # 4) 종료 판정 — 모든 SPEC 이 done/failed/skipped 이면 끝.
     local pending_or_running=0
@@ -851,12 +858,14 @@ cmd_watch() {
 
 # =====================================================================
 # selftest — 스케줄러 통합 검증(mock loop/integration/review/merge).
-#   AC1: 기본 ON(플래그 없이 통합 활성). 의존자는 의존성이 머지(done)된 뒤에만 launch.
-#   AC2: forge 구성 시 풀 파이프라인(integrate→review→merge) 순서.
-#   AC3: forge 미구성 시 직접 머지(integrate-direct→merge, 리뷰·승인 우회).
-#   AC4: --no-integrate → 레거시(loop DONE=done, 통합 모듈 미호출, NO_INTEGRATE 마커).
-#   AC7: --resume 에서 모드(on/off)·서브모드(forge/direct) sticky(run-dir 마커).
-#   비완료 종착(통합 차단)이면 이행적 의존자만 skipped.
+#   AC1: 통합 항상 활성(플래그 없이). 의존자는 의존성이 머지(done)된 뒤에만 launch.
+#   AC2: --no-integrate/--integrate 플래그 no-op(받되 무시, 통합 동작).
+#   AC3: 비통합(레거시) 경로 부재 — NO_INTEGRATE 마커·loop DONE=done 분기 없음.
+#   AC4/AC5: --target-branch 지정/미지정(기본 브랜치) → 통합 모듈에 DEFAULT_BRANCH export.
+#   AC6: --resume 에서 서브모드(forge/direct)·대상 브랜치 sticky(run-dir 마커).
+#   AC7/AC8/AC10: direct 서브모드 적대적 리뷰 게이트(integrate-direct→review→merge),
+#                 리뷰 가드 소진(escalated)→failed + 이행적 의존자만 skipped.
+#   forge 풀 파이프라인(integrate→review→merge) 순서·차단 전파.
 #   self-referential: 실제 PR·머지 미수행(모두 mock).
 # =====================================================================
 cmd_selftest() {
@@ -875,7 +884,7 @@ esac
 exit 0
 EOF
   # mock integration: integrate / integrate-direct <spec> <rd> <key>.
-  #   integrate(풀)→phase=review(+pr). integrate-direct(직접)→phase=merging(승인·PR 없음).
+  #   integrate(풀)→phase=review(+pr). integrate-direct(direct)→phase=review(리뷰 게이트, PR 없음).
   #   MOCK_INT_BLOCK 이면 그 spec 을 blocked.
   cat > "$TMP/m-int.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -885,31 +894,42 @@ printf '%s:%s\n' "$sub" "$(basename "$spec")" >> "$EVENTLOG"
 if [[ -n "${MOCK_INT_BLOCK:-}" && "$(basename "$spec")" == "$MOCK_INT_BLOCK" ]]; then
   int_set_phase "$rd" "$key" blocked
 elif [[ "$sub" == "integrate-direct" ]]; then
-  int_set_branch "$rd" "$key" "feat/x-$key"
-  int_set_phase "$rd" "$key" merging
+  int_set_branch "$rd" "$key" "feat/x-$key"   # PR 없음 — 리뷰 게이트로.
+  int_set_phase "$rd" "$key" review
 else
   int_set_branch "$rd" "$key" "feat/x-$key"; int_set_pr "$rd" "$key" 100
   int_set_phase "$rd" "$key" review
 fi
 exit 0
 EOF
-  # mock review: run <rd> <key> <spec> <pr> <branch> → approved.
+  # mock review: run(forge)→approved / run-direct(direct)→merging(approve, 승인 의례 없음).
+  #   MOCK_REVIEW_BLOCK 이면 direct 리뷰가 가드 소진처럼 escalated 로 종료(머지 안 함).
   cat > "$TMP/m-review.sh" <<'EOF'
 #!/usr/bin/env bash
 . "$LIBINT"
-rd="$2"; key="$3"; spec="$4"
-printf 'review:%s\n' "$(basename "$spec")" >> "$EVENTLOG"
-int_set_phase "$rd" "$key" approved
+sub="$1"; rd="$2"; key="$3"; spec="$4"
+if [[ "$sub" == "run-direct" ]]; then
+  printf 'review-direct:%s\n' "$(basename "$spec")" >> "$EVENTLOG"
+  if [[ -n "${MOCK_REVIEW_BLOCK:-}" && "$(basename "$spec")" == "$MOCK_REVIEW_BLOCK" ]]; then
+    int_set_phase "$rd" "$key" escalated
+  else
+    int_set_phase "$rd" "$key" merging
+  fi
+else
+  printf 'review:%s\n' "$(basename "$spec")" >> "$EVENTLOG"
+  int_set_phase "$rd" "$key" approved
+fi
 exit 0
 EOF
-  # mock merge: approve <pr> / finish <spec> <rd> <key> <pr> → merged.
+  # mock merge: approve <pr> / finish <spec> <rd> <key> [pr] [skip_approval] → merged.
+  #   merge 로그에 대상 브랜치(DEFAULT_BRANCH)를 함께 적어 --target-branch export 를 검증.
   cat > "$TMP/m-merge.sh" <<'EOF'
 #!/usr/bin/env bash
 . "$LIBINT"
 case "$1" in
   approve) printf 'approve:%s\n' "$2" >> "$EVENTLOG" ;;
   finish)  spec="$2"; rd="$3"; key="$4"
-           printf 'merge:%s\n' "$(basename "$spec")" >> "$EVENTLOG"
+           printf 'merge:%s:%s\n' "$(basename "$spec")" "${DEFAULT_BRANCH:-main}" >> "$EVENTLOG"
            int_set_phase "$rd" "$key" merged ;;
 esac
 exit 0
@@ -936,44 +956,60 @@ EOF
     cat "$rd/state.$key" 2>/dev/null || echo "MISSING"
   }
   latest_run() { ls -1dt "$REPO"/.dispatch/runs/*/ 2>/dev/null | head -1 | sed 's:/$::'; }
-  marker() { cat "$1/INTEGRATE" 2>/dev/null; }
+  marker()  { cat "$1/INTEGRATE" 2>/dev/null; }
+  tmarker() { cat "$1/TARGET_BRANCH" 2>/dev/null; }
   # 공통 주입 env(서브모듈 mock + 결정성). 호출자가 APPROVER/FORGE_BIN 으로 서브모드 제어.
   dsp_env() { env EVENTLOG="$1" LOOP_CMD="bash $TMP/m-loop.sh" \
       INTEGRATION_CMD="bash $TMP/m-int.sh" REVIEW_CMD="bash $TMP/m-review.sh" MERGE_CMD="bash $TMP/m-merge.sh" \
       LIBINT="$LIBINT" DISPATCH_POLL_SECONDS=0 DISPATCH_WAVE_TIMEOUT_SECONDS=120 "${@:2}"; }
 
-  # ---- S1: AC1/AC2 기본 ON + forge 구성 → 풀 파이프라인(integrate→review→merge) ----
-  #   플래그 없이 시작해도 통합 모드 활성(AC1). APPROVER+forge CLI(FORGE_BIN=bash) → submode=forge.
+  # ---- S1: AC1 통합 항상 활성 + forge 구성 → 풀 파이프라인(integrate→review→merge) ----
+  #   플래그 없이 시작해도 통합 활성(AC1). APPROVER+forge CLI(FORGE_BIN=bash) → submode=forge.
   rm -rf "$REPO/.dispatch"
   local EVENTLOG="$TMP/ev1.log"; : > "$EVENTLOG"
   ( cd "$REPO" && dsp_env "$EVENTLOG" APPROVER=approver-bot FORGE_BIN=bash \
       bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
   local rd1; rd1="$(latest_run)"
-  [[ "$(run_state "$rd1" feature-a.md)" == "done" ]] && ok "AC1 기본 ON A 머지(done)" || bad "AC1 기본 ON A 머지(done) got=$(run_state "$rd1" feature-a.md)"
-  [[ "$(run_state "$rd1" feature-b.md)" == "done" ]] && ok "AC1 기본 ON B 머지(done)" || bad "AC1 기본 ON B 머지(done) got=$(run_state "$rd1" feature-b.md)"
+  [[ "$(run_state "$rd1" feature-a.md)" == "done" ]] && ok "AC1 통합 활성 A 머지(done)" || bad "AC1 통합 활성 A 머지(done) got=$(run_state "$rd1" feature-a.md)"
+  [[ "$(run_state "$rd1" feature-b.md)" == "done" ]] && ok "AC1 통합 활성 B 머지(done)" || bad "AC1 통합 활성 B 머지(done) got=$(run_state "$rd1" feature-b.md)"
   before "$EVENTLOG" 'merge:feature-a.md' 'launch:feature-b.md' \
-    && ok "AC2 A 머지 후에만 B launch" || bad "AC2 A 머지 후에만 B launch"
+    && ok "AC1 A 머지 후에만 B launch" || bad "AC1 A 머지 후에만 B launch"
   before "$EVENTLOG" 'integrate:feature-a.md' 'review:feature-a.md' \
-    && ok "AC2 forge integrate→review 순서" || bad "AC2 forge integrate→review 순서"
+    && ok "forge integrate→review 순서" || bad "forge integrate→review 순서"
   before "$EVENTLOG" 'review:feature-a.md' 'merge:feature-a.md' \
-    && ok "AC2 forge review→merge 순서" || bad "AC2 forge review→merge 순서"
-  [[ "$(marker "$rd1")" == "forge" ]] && ok "AC1/AC7 마커 submode=forge" || bad "AC1/AC7 마커 submode=forge got=$(marker "$rd1")"
-  [[ ! -f "$rd1/NO_INTEGRATE" ]] && ok "AC1 NO_INTEGRATE 마커 없음" || bad "AC1 NO_INTEGRATE 마커 없음"
+    && ok "forge review→merge 순서" || bad "forge review→merge 순서"
+  [[ "$(marker "$rd1")" == "forge" ]] && ok "AC6 마커 submode=forge" || bad "AC6 마커 submode=forge got=$(marker "$rd1")"
+  [[ ! -f "$rd1/NO_INTEGRATE" ]] && ok "AC3 NO_INTEGRATE 마커 부재(레거시 경로 없음)" || bad "AC3 NO_INTEGRATE 마커 부재"
+  # AC5: --target-branch 미지정 → 대상 = 기본 브랜치(main). 머지 모듈에 export 됨.
+  [[ "$(tmarker "$rd1")" == "main" ]] && ok "AC5 기본 대상 브랜치=main 마커" || bad "AC5 기본 대상=main 마커 got=$(tmarker "$rd1")"
+  grep -q 'merge:feature-a.md:main' "$EVENTLOG" && ok "AC5 기본 대상 main 이 머지 모듈에 export" || bad "AC5 기본 대상 main export"
 
-  # ---- S1b: AC3 기본 ON + forge 미구성 → 직접 머지(리뷰·승인 우회) ----
-  #   APPROVER 미설정 → submode=direct. integrate-direct→merge 만(review·approve 없음).
+  # ---- S1b: AC7 forge 미구성(direct) → 적대적 리뷰 게이트(integrate-direct→review-direct→merge) ----
+  #   APPROVER 미설정 → submode=direct. 머지 직전 PR 없는 로컬 리뷰 한 단계(run-direct)를 거친다.
   rm -rf "$REPO/.dispatch"
   local EVENTLOGD="$TMP/ev1b.log"; : > "$EVENTLOGD"
   ( cd "$REPO" && dsp_env "$EVENTLOGD" \
       bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
   local rdD; rdD="$(latest_run)"
-  [[ "$(run_state "$rdD" feature-a.md)" == "done" ]] && ok "AC3 direct A 머지(done)" || bad "AC3 direct A 머지(done) got=$(run_state "$rdD" feature-a.md)"
-  [[ "$(run_state "$rdD" feature-b.md)" == "done" ]] && ok "AC3 direct B 머지(done)" || bad "AC3 direct B 머지(done) got=$(run_state "$rdD" feature-b.md)"
-  before "$EVENTLOGD" 'integrate-direct:feature-a.md' 'merge:feature-a.md' \
-    && ok "AC3 direct integrate-direct→merge 순서" || bad "AC3 direct integrate-direct→merge 순서"
-  if grep -qE 'review:|approve:' "$EVENTLOGD"; then bad "AC3 direct 리뷰·승인 우회"; else ok "AC3 direct 리뷰·승인 우회(미호출)"; fi
-  if grep -q '^integrate:' "$EVENTLOGD"; then bad "AC3 direct 풀-integrate 미호출"; else ok "AC3 direct 풀-integrate 미호출"; fi
-  [[ "$(marker "$rdD")" == "direct" ]] && ok "AC3/AC7 마커 submode=direct" || bad "AC3/AC7 마커 submode=direct got=$(marker "$rdD")"
+  [[ "$(run_state "$rdD" feature-a.md)" == "done" ]] && ok "AC7 direct A 머지(done)" || bad "AC7 direct A 머지(done) got=$(run_state "$rdD" feature-a.md)"
+  [[ "$(run_state "$rdD" feature-b.md)" == "done" ]] && ok "AC7 direct B 머지(done)" || bad "AC7 direct B 머지(done) got=$(run_state "$rdD" feature-b.md)"
+  before "$EVENTLOGD" 'integrate-direct:feature-a.md' 'review-direct:feature-a.md' \
+    && ok "AC7 direct integrate-direct→리뷰 게이트 순서" || bad "AC7 direct integrate-direct→리뷰 게이트 순서"
+  before "$EVENTLOGD" 'review-direct:feature-a.md' 'merge:feature-a.md' \
+    && ok "AC7 direct 리뷰 게이트→merge 순서(approve 후 머지)" || bad "AC7 direct 리뷰 게이트→merge 순서"
+  if grep -q '^integrate:' "$EVENTLOGD"; then bad "AC7 direct 풀-integrate 미호출"; else ok "AC7 direct 풀-integrate 미호출"; fi
+  if grep -q '^approve:' "$EVENTLOGD"; then bad "AC7 direct 분리승인 의례 미호출"; else ok "AC7 direct 분리승인 의례 미호출(승인 게이트 우회)"; fi
+  [[ "$(marker "$rdD")" == "direct" ]] && ok "AC6 마커 submode=direct" || bad "AC6 마커 submode=direct got=$(marker "$rdD")"
+
+  # ---- S1c: AC10 direct 리뷰 가드 소진(escalated) → A failed, 이행적 의존자 B skipped(머지 안 함) ----
+  rm -rf "$REPO/.dispatch"
+  local EVENTLOGDB="$TMP/ev1c.log"; : > "$EVENTLOGDB"
+  ( cd "$REPO" && dsp_env "$EVENTLOGDB" MOCK_REVIEW_BLOCK="feature-a.md" \
+      bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
+  local rdDB; rdDB="$(latest_run)"
+  [[ "$(run_state "$rdDB" feature-a.md)" == "failed" ]] && ok "AC10 direct 리뷰 가드소진 A failed" || bad "AC10 direct A failed got=$(run_state "$rdDB" feature-a.md)"
+  [[ "$(run_state "$rdDB" feature-b.md)" == "skipped" ]] && ok "AC10 direct 리뷰 차단 B 이행적 skipped" || bad "AC10 direct B skipped got=$(run_state "$rdDB" feature-b.md)"
+  if grep -q '^merge:feature-a.md' "$EVENTLOGDB"; then bad "AC10 direct 리뷰 차단 시 머지 안 함"; else ok "AC10 direct 리뷰 차단 시 머지 안 함"; fi
 
   # ---- S2: AC: 통합 차단(A, forge) → 이행적 의존자 B skipped ----
   rm -rf "$REPO/.dispatch"
@@ -985,41 +1021,47 @@ EOF
   [[ "$(run_state "$rd2" feature-b.md)" == "skipped" ]] && ok "차단 B 이행적 skipped" || bad "차단 B skipped got=$(run_state "$rd2" feature-b.md)"
   if grep -q 'launch:feature-b.md' "$EVENTLOG2"; then bad "차단 B 미launch"; else ok "차단 B 미launch(차단 전파)"; fi
 
-  # ---- S3: AC4 --no-integrate → 레거시(loop DONE=done, 통합 모듈 미호출) ----
+  # ---- S3: AC2 --no-integrate/--integrate 플래그 no-op → 통합 그대로 동작(레거시 경로 없음) ----
   rm -rf "$REPO/.dispatch"
   local EVENTLOG3="$TMP/ev3.log"; : > "$EVENTLOG3"
   ( cd "$REPO" && dsp_env "$EVENTLOG3" APPROVER=approver-bot FORGE_BIN=bash \
-      bash "$DSP" start --no-integrate feature-a.md feature-b.md ) >/dev/null 2>&1 || true
+      bash "$DSP" start --no-integrate --integrate feature-a.md feature-b.md ) >/dev/null 2>&1 || true
   local rd3; rd3="$(latest_run)"
-  [[ "$(run_state "$rd3" feature-a.md)" == "done" ]] && ok "AC4 레거시 A loop DONE=done" || bad "AC4 레거시 A done got=$(run_state "$rd3" feature-a.md)"
-  [[ "$(run_state "$rd3" feature-b.md)" == "done" ]] && ok "AC4 레거시 B loop DONE=done" || bad "AC4 레거시 B done got=$(run_state "$rd3" feature-b.md)"
-  if grep -qE 'integrate:|integrate-direct:|review:|merge:' "$EVENTLOG3"; then bad "AC4 레거시 통합 모듈 미호출"; else ok "AC4 레거시 통합 모듈 미호출(--no-integrate)"; fi
-  before "$EVENTLOG3" 'launch:feature-a.md' 'launch:feature-b.md' \
-    && ok "AC4 A done 후 B launch(기존 게이트)" || bad "AC4 A done 후 B launch"
-  [[ -f "$rd3/NO_INTEGRATE" ]] && ok "AC4 NO_INTEGRATE 마커" || bad "AC4 NO_INTEGRATE 마커"
-  [[ ! -f "$rd3/INTEGRATE" ]] && ok "AC4 INTEGRATE 마커 없음" || bad "AC4 INTEGRATE 마커 없음"
+  [[ "$(run_state "$rd3" feature-a.md)" == "done" ]] && ok "AC2 플래그 no-op A 머지(done)" || bad "AC2 플래그 no-op A done got=$(run_state "$rd3" feature-a.md)"
+  grep -qE 'integrate:|review:|merge:' "$EVENTLOG3" && ok "AC2 플래그 no-op 통합 모듈 호출됨(통합 동작)" || bad "AC2 플래그 no-op 통합 동작"
+  [[ ! -f "$rd3/NO_INTEGRATE" ]] && ok "AC3 --no-integrate 줘도 NO_INTEGRATE 마커 없음" || bad "AC3 NO_INTEGRATE 마커 없음(no-op)"
+  [[ -f "$rd3/INTEGRATE" ]] && ok "AC2 플래그 no-op INTEGRATE 마커 존재" || bad "AC2 INTEGRATE 마커 존재"
 
-  # ---- S4a: AC7 --resume 서브모드 sticky — direct 시작 후 APPROVER 설정 재개해도 direct 유지 ----
+  # ---- S3b: AC4 --target-branch 지정 → 대상 브랜치가 통합 모듈에 DEFAULT_BRANCH 로 export ----
+  rm -rf "$REPO/.dispatch"
+  local EVENTLOGT="$TMP/ev3b.log"; : > "$EVENTLOGT"
+  ( cd "$REPO" && dsp_env "$EVENTLOGT" APPROVER=approver-bot FORGE_BIN=bash \
+      bash "$DSP" start --target-branch release feature-a.md feature-b.md ) >/dev/null 2>&1 || true
+  local rdT; rdT="$(latest_run)"
+  [[ "$(tmarker "$rdT")" == "release" ]] && ok "AC4 대상 브랜치 마커=release" || bad "AC4 대상 마커=release got=$(tmarker "$rdT")"
+  grep -q 'merge:feature-a.md:release' "$EVENTLOGT" && ok "AC4 지정 대상 release 가 머지 모듈에 export" || bad "AC4 release export(got merges: $(grep -o 'merge:[^ ]*' "$EVENTLOGT" | tr '\n' ' '))"
+  if grep -q 'merge:feature-a.md:main' "$EVENTLOGT"; then bad "AC4 main 잔존 누수"; else ok "AC4 main 하드코딩 잔존 없음"; fi
+
+  # ---- S4a: AC6 --resume 서브모드 sticky — direct 시작 후 APPROVER 설정 재개해도 direct 유지 ----
   rm -rf "$REPO/.dispatch"
   local EVENTLOG4="$TMP/ev4.log"; : > "$EVENTLOG4"
   ( cd "$REPO" && dsp_env "$EVENTLOG4" \
       bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
   local rd4; rd4="$(latest_run)"; local rid4; rid4="$(basename "$rd4")"
-  [[ "$(marker "$rd4")" == "direct" ]] && ok "AC7 최초 시작 submode=direct" || bad "AC7 최초 시작 submode=direct got=$(marker "$rd4")"
+  [[ "$(marker "$rd4")" == "direct" ]] && ok "AC6 최초 시작 submode=direct" || bad "AC6 최초 시작 submode=direct got=$(marker "$rd4")"
   ( cd "$REPO" && dsp_env "$EVENTLOG4" APPROVER=approver-bot FORGE_BIN=bash \
       bash "$DSP" start --resume "$rid4" ) >/dev/null 2>&1 || true
-  [[ "$(marker "$rd4")" == "direct" ]] && ok "AC7 재개 후 submode 여전히 direct(sticky)" || bad "AC7 재개 후 submode sticky got=$(marker "$rd4")"
-  [[ ! -f "$rd4/NO_INTEGRATE" ]] && ok "AC7 재개 후 모드 ON 유지" || bad "AC7 재개 후 모드 ON 유지"
+  [[ "$(marker "$rd4")" == "direct" ]] && ok "AC6 재개 후 submode 여전히 direct(sticky)" || bad "AC6 재개 후 submode sticky got=$(marker "$rd4")"
 
-  # ---- S4b: AC7 --resume 모드 sticky — --no-integrate 시작 후 APPROVER 재개해도 OFF 유지 ----
+  # ---- S4b: AC6 --resume 대상 브랜치 sticky — release 로 시작 후 플래그 없이 재개해도 release 유지 ----
   rm -rf "$REPO/.dispatch"
   local EVENTLOG5="$TMP/ev5.log"; : > "$EVENTLOG5"
-  ( cd "$REPO" && dsp_env "$EVENTLOG5" \
-      bash "$DSP" start --no-integrate feature-a.md feature-b.md ) >/dev/null 2>&1 || true
-  local rd5; rd5="$(latest_run)"; local rid5; rid5="$(basename "$rd5")"
   ( cd "$REPO" && dsp_env "$EVENTLOG5" APPROVER=approver-bot FORGE_BIN=bash \
+      bash "$DSP" start --target-branch release feature-a.md feature-b.md ) >/dev/null 2>&1 || true
+  local rd5; rd5="$(latest_run)"; local rid5; rid5="$(basename "$rd5")"
+  ( cd "$REPO" && dsp_env "$EVENTLOG5" DEFAULT_BRANCH=main APPROVER=approver-bot FORGE_BIN=bash \
       bash "$DSP" start --resume "$rid5" ) >/dev/null 2>&1 || true
-  [[ -f "$rd5/NO_INTEGRATE" && ! -f "$rd5/INTEGRATE" ]] && ok "AC7 재개 후 모드 OFF 유지(sticky)" || bad "AC7 재개 후 모드 OFF 유지(sticky)"
+  [[ "$(tmarker "$rd5")" == "release" ]] && ok "AC6 재개 후 대상 브랜치 release 유지(sticky, env 보다 우선)" || bad "AC6 재개 후 대상 sticky got=$(tmarker "$rd5")"
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
@@ -1033,12 +1075,13 @@ usage() {
 usage: dispatch.sh <subcommand> [args]
 
 Subcommands:
-  start <spec...> [--max-parallel N] [--resume <run-id>] [--no-integrate]
-        통합(리뷰·머지) 모드는 기본 활성이다. forge 구성(APPROVER+forge CLI)이면 풀
-        파이프라인(push→PR→리뷰→ff-only 머지), 미구성이면 직접 ff-only 머지(리뷰·승인
-        우회, version 게이트 유지)로 SPEC 을 main 에 머지한다. --no-integrate 면 통합을
-        끄고 레거시(loop DONE=done, 머지·PR 없음)로 동작한다. 모드·서브모드는 --resume 에서
-        sticky 하다.
+  start <spec...> [--max-parallel N] [--resume <run-id>] [--target-branch <b>]
+        통합(리뷰·머지)은 항상 활성이다(토글 없음). forge 구성(APPROVER+forge CLI)이면 풀
+        파이프라인(push→PR→리뷰→ff-only 머지), 미구성이면 PR 없는 로컬 적대적 리뷰 게이트
+        후 ff-only 직접 머지(version 게이트 유지)로 SPEC 을 대상 브랜치에 머지한다.
+        --target-branch 로 머지·동기화 대상 브랜치를 지정(미지정 시 기본 브랜치). 하위호환을
+        위해 --integrate/--no-integrate 를 받되 무시한다(no-op). 서브모드·대상 브랜치는
+        --resume 에서 sticky 하다(run-dir 마커).
         1 개 이상의 SPEC 파일 경로를 받아 depends_on 으로 DAG 를 만들고,
         각 SPEC 을 그 의존성이 모두 done 이 되는 즉시(준비도 기반 스트리밍,
         동시성 상한 이내) loop driver 에 위임한다. 한 SPEC 이 failed 면 그
