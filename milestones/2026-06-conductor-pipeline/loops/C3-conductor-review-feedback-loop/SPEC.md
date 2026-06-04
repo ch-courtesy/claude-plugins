@@ -11,6 +11,13 @@ verify: "bash -c 'set -e; F=plugins/autopilot/skills/conductor/references/review
 ears_language: ko
 ---
 
+> ⛔ **폐기됨 (제거·외부 위임).** 이 C3 리뷰 피드백 자동수정 루프는 더 이상 파이프라인에
+> 포함되지 않는다. 내부 자동 리뷰·재구현 고리가 프로덕션 경로에서 끊겨 있었고, 외부 CI
+> 리뷰(`claude-review`·`codex-review`)가 같은 역할을 독립 수행한다. 리뷰는 외부 CI(GitHub PR)와
+> 사람에게 위임하며, `review-loop.sh`·`autopilot:review` 스킬·`review-round` 상태는 제거됐다.
+> 통합으로 열린 PR 의 승인은 외부가 수행하고 `poll` 은 미승인 PR 을 "외부 승인 대기" no-op 로
+> 둔다. 아래 본문은 폐기 전 명세의 역사적 기록일 뿐 구현 대상이 아니다.
+
 # conductor 리뷰 피드백 자동수정 루프
 
 ## 무엇을 만들 것인가

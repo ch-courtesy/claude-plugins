@@ -21,11 +21,10 @@
   - 영향 파일: plugins/autopilot/skills/conductor/references/forge.sh
   - verify: forge.sh bash 문법 통과 + 신호 매핑(DONE→Review / spec-gap→In Design / 하드 BLOCKED→Blocked) grep + `loop.sh status` 공개 IF 소비 grep + `--force` 부재 grep + mock으로 DONE→rebase→push→PR 순서·PR 재사용 단언
   - 의존성: C0 (lib-state.sh 상태 헬퍼·라우터 차용)
-- **C3**: 봇 리뷰 피드백 자동수정 루프 + 무한루프 가드
-  - slug: `conductor-review-feedback-loop`
-  - 영향 파일: plugins/autopilot/skills/conductor/references/review-loop.sh
-  - verify: review-loop.sh bash 문법 통과 + 봇 `request_changes`만 반응(사람 코멘트 에스컬레이션) grep + change-adoption 분류 grep + REVIEW_ROUNDS 캡=3 + 동일지적 해시·무진전 가드 grep + 같은 PR 브랜치 push(새 PR 미생성)·`--force` 부재 단언
-  - 의존성: C1, C2 (task-backend.sh·forge.sh 헬퍼 차용)
+- **C3** — ⛔ **폐기됨 (제거·외부 위임)**: 봇 리뷰 피드백 자동수정 루프 + 무한루프 가드
+  - 폐기 사유: 내부 자동 리뷰·재구현 고리가 프로덕션 경로에서 끊겨 있었고(자율 실행기 미연결·워크트리→브랜치 이식 부재), 외부 CI 리뷰(`claude-review`·`codex-review`)가 같은 역할을 독립 수행한다. 리뷰는 외부 CI(GitHub PR)와 사람에게 위임하고 `review-loop.sh`·`autopilot:review` 스킬·`review-round` 상태는 제거됐다. 통합으로 열린 PR 의 승인은 외부가 수행하며 `poll` 은 미승인 PR 을 "외부 승인 대기" no-op 로 둔다.
+  - slug: `conductor-review-feedback-loop` (구현물 제거됨)
+  - ~~영향 파일: review-loop.sh~~ (삭제됨)
 - **C4**: approver-bot 확인 + 버전범프 게이트 + ff-only 머지 + Done + cleanup
   - slug: `conductor-merge-and-done`
   - 영향 파일: plugins/autopilot/skills/conductor/references/merge.sh
