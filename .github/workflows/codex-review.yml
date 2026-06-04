@@ -378,9 +378,17 @@ jobs:
               const { filterFindingsAgainstPatch } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/diff-anchor-filter.js`);
               let diffPatch = '';
               try {
-                diffPatch = fs.readFileSync('.review-context/diff.patch', 'utf8');
+                // Anchor validation MUST use anchor.patch (canonical PR-vs-base
+                // diff), NOT the model-facing diff.patch (incremental on
+                // synchronize → base-merged lines look fully-added → createReview
+                // 422 + false-green). Fall back to diff.patch for older bundles.
+                try {
+                  diffPatch = fs.readFileSync('.review-context/anchor.patch', 'utf8');
+                } catch {
+                  diffPatch = fs.readFileSync('.review-context/diff.patch', 'utf8');
+                }
               } catch (e) {
-                core.warning(`Could not read .review-context/diff.patch (${e.message}); treating diff as empty — all findings will be excluded as off-diff.`);
+                core.warning(`Could not read anchor.patch/diff.patch (${e.message}); treating diff as empty — all findings will be excluded as off-diff.`);
               }
               ({ valid: inlineFindings, excluded: excludedFindings } =
                 filterFindingsAgainstPatch(findings, diffPatch));
