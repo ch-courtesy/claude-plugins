@@ -63,13 +63,14 @@ allowed-tools:
 4. **본문 조립.** 산출 대상인 각 sub-룰(백엔드 변형 sub-룰, 그리고 git 계열이면 동반 `git`)의 (백엔드 변형이 있으면 **2단계에서 판별된** 백엔드의) 템플릿에서 **frontmatter를 제거한 본문**을 그대로 취합니다. 본문은 placeholder 치환 외에 변형하지 않습니다.
    - 선택된 백엔드 변형 sub-룰에 2단계에서 판별된 백엔드의 변형 파일이 없으면, 그 사실을 알리고 종료합니다.
 
-4-bis. **입력(inputs) 치환 — 정적 multi-select 집계.** 산출 대상 템플릿 frontmatter에 `inputs`가 있으면 처리하고, 없으면 이 단계를 건너뜁니다. (현재 `git` 템플릿이 이 메커니즘을 씁니다.)
-   - **스키마.** 각 입력은 `name`, `header`, `question`, `multi_select`, `options[{label, description, value?, default?}]`를 가집니다. `multi_select: true`는 **한 질문에서 여러 정책을 다중 선택**함을 뜻합니다.
-   - **질문.** 입력을 `AskUserQuestion` **다중 선택(multi-select)**으로 **한 번** 묻습니다. 옵션 표시 순서는 frontmatter 순서를 따릅니다. `default: true`인 옵션은 **기본 선택(체크)** 상태로 제시합니다(추천·기본 옵션을 첫 번째에 둡니다). 사용자에게는 정책 선택지만 노출하고, 정책이 공통으로 분리된 내부 사정·분류 기준은 노출하지 않습니다.
-   - **집계 치환.** 본문의 **단일 집계 placeholder** `{{<name>}}`를, **선택된 옵션들의 값을 표시 순서대로 연결**한 텍스트로 치환합니다. 값은 `value`가 있으면 `value`, 없으면 `label`을 씁니다(value 우선). 비어 있지 않은 "Other" 자유 입력도 연결 대상에 포함합니다. 절과 절 사이는 빈 줄 하나로 구분해 마크다운 서식을 유지합니다. **정책별 개별 placeholder는 두지 않습니다.**
-   - **빈 선택.** 아무 옵션도 선택되지 않으면 집계 결과는 빈 문자열이고, placeholder가 놓인 줄을 절 단위로 정리·제거해 빈 줄·깨진 마크다운을 남기지 않습니다. 도입부(헤더 + git 계열 분류)는 그대로 남습니다.
-   - **누락 응답 (디폴트 경로).** 응답이 누락되면 `default: true`인 옵션들이 선택된 것으로 간주합니다. 따라서 force push 금지(기본 체크)가 적용되어 금지 절이 포함된 `git.md`가 생성됩니다(force push 미체크 = 허용).
-   - **확장.** 새 git 공통 정책은 frontmatter `options`에 **옵션 항목만 추가**하면 됩니다 — 이 SKILL.md 로직, 본문 집계 placeholder, 질문 수는 바뀌지 않습니다.
+4-bis. **입력(inputs) 치환 — 정적 multi-select 집계 / single-select 단일 선택.** 산출 대상 템플릿 frontmatter에 `inputs`가 있으면 처리하고, 없으면 이 단계를 건너뜁니다. 한 입력은 `multi_select` 값에 따라 **다중 선택(집계)** 또는 **단일 선택** 두 모드 중 하나로 동작합니다. (현재 `git` 템플릿이 multi-select를, `review-approval` 템플릿의 `merge_method`가 single-select를 씁니다.)
+   - **스키마.** 각 입력은 `name`, `header`, `question`, `multi_select`, `options[{label, description, value?, default?}]`를 가집니다. `multi_select: true`는 **한 질문에서 여러 정책을 다중 선택**함을 뜻하고, `multi_select: false`(또는 생략)는 **한 질문에서 정확히 하나를 고르는 단일 선택**을 뜻합니다.
+   - **질문.** 입력을 `AskUserQuestion`으로 **한 번** 묻되, 다중 선택 입력은 **multi-select**로, 단일 선택 입력은 **single-select**로 제시합니다. 옵션 표시 순서는 frontmatter 순서를 따릅니다. `default: true`인 옵션은 **기본 선택(체크)** 상태로 제시합니다(추천·기본 옵션을 첫 번째에 둡니다). 사용자에게는 정책·방식 선택지만 노출하고, 정책이 공통으로 분리된 내부 사정·분류 기준은 노출하지 않습니다.
+   - **집계 치환 (다중 선택).** 본문의 **단일 집계 placeholder** `{{<name>}}`를, **선택된 옵션들의 값을 표시 순서대로 연결**한 텍스트로 치환합니다. 값은 `value`가 있으면 `value`, 없으면 `label`을 씁니다(value 우선). 비어 있지 않은 "Other" 자유 입력도 연결 대상에 포함합니다. 절과 절 사이는 빈 줄 하나로 구분해 마크다운 서식을 유지합니다. **정책별 개별 placeholder는 두지 않습니다.**
+   - **단일 치환 (단일 선택).** 본문의 placeholder `{{<name>}}`를 **선택된 한 옵션의 값**으로 치환합니다(`value` 우선, 없으면 `label`). 연결은 일어나지 않습니다.
+   - **빈 선택.** (다중 선택에서) 아무 옵션도 선택되지 않으면 집계 결과는 빈 문자열이고, placeholder가 놓인 줄을 절 단위로 정리·제거해 빈 줄·깨진 마크다운을 남기지 않습니다. 도입부(헤더 + git 계열 분류)는 그대로 남습니다.
+   - **누락 응답 (디폴트 경로).** 응답이 누락되면 `default: true`인 옵션(들)이 선택된 것으로 간주합니다. 다중 선택에서는 force push 금지(기본 체크)가 적용되어 금지 절이 포함된 `git.md`가 생성되고(force push 미체크 = 허용), 단일 선택에서는 기본 옵션 하나가 적용됩니다(예: `merge_method` 미응답 시 "저장소 설정을 따름" 절이 들어가 기존 수동 안내로 자연 degrade).
+   - **확장.** 새 정책·방식은 frontmatter `options`에 **옵션 항목만 추가**하면 됩니다 — 이 SKILL.md 로직, 본문 placeholder, 질문 수는 바뀌지 않습니다.
 
 5. **파일 기록.** 산출 대상인 각 sub-룰(백엔드 변형 sub-룰, 그리고 git 계열이면 동반 `git`)을 아래 규칙으로 각각 기록합니다.
    - 대상 디렉터리 `rules/version-control/`가 없으면 기록 전에 생성합니다.
