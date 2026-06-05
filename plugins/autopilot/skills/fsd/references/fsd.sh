@@ -47,6 +47,10 @@ DISPATCH_CMD="${DISPATCH_CMD:-$DISPATCH_CMD_DEFAULT}"
 # 드레인 위임(주입 가능, 기본: 형제 모듈, 서브프로세스 격리).
 FSD_POLL_CMD="${FSD_POLL_CMD:-bash $SCRIPT_DIR/poll.sh}"
 
+# SPEC-to-target-branch ff-merge 위임(주입 가능, 기본: 형제 모듈).
+# dispatch 위임 직전 SPEC 을 감지된 기본 통합 브랜치에 안착시킨다(spec-merge.sh).
+FSD_SPEC_MERGE_CMD="${FSD_SPEC_MERGE_CMD:-bash $SCRIPT_DIR/spec-merge.sh merge}"
+
 # ----- 공통 헬퍼 -----
 
 die() { echo "ERROR: $*" >&2; exit 1; }
@@ -174,6 +178,27 @@ cmd_start() {
     done
     exit 1
   fi
+
+  # ----- SPEC-to-target-branch ff-merge 전제조건 (dispatch 위임 직전) -----
+  # 마커 가드를 통과한 SPEC 만 여기 도달한다 — 미해결 마커 SPEC 은 위에서 이미
+  # 차단되어 타겟 브랜치에 올라가지 않는다(마커 가드가 머지보다 먼저). 감지된 기본
+  # 통합 브랜치에 입력 SPEC 을 ff-merge 안착시켜, dispatch 가 구현을 시작하기 전
+  # 의도(SPEC)가 통합 브랜치 이력에 별도 commit 으로 남도록 보장한다. 멱등: 이미
+  # 같은 내용이 안착해 있으면 새 commit 없이 통과. 실패(비-ff·push 거부 등 오류)면
+  # dispatch 를 시작하지 않고 중단한다(force push 없음).
+  set_state "$id" "spec-merging"
+  log_event "$id" "spec-merge → 타겟 브랜치 안착 시도 specs=${#ABS_SPECS[@]}"
+  local sm_out
+  # shellcheck disable=SC2086
+  if ! sm_out="$($FSD_SPEC_MERGE_CMD "$id" "${ABS_SPECS[@]}" 2>&1)"; then
+    set_state "$id" "spec-merge-failed"
+    log_event "$id" "spec-merge 실패 — dispatch 미시작"
+    echo "task-id: $id"
+    printf '%s\n' "$sm_out" >&2
+    die "SPEC 을 타겟 통합 브랜치에 안착하지 못했습니다 — dispatch 를 시작하지 않았습니다(SPEC 미안착이며 dispatch 실패가 아님). force push 없이 중단. 위 안내(재시도·PR 흐름)대로 처리하세요."
+  fi
+  printf '%s\n' "$sm_out"
+  log_event "$id" "spec-merge 완료 — 타겟 브랜치 안착"
 
   set_state "$id" "dispatching"
   log_event "$id" "start → dispatch 위임 specs=${#ABS_SPECS[@]}"
@@ -305,6 +330,22 @@ echo "run-id: RUN-MOCK"
 EOF
   export DISPATCH_CMD="bash $TMP/m-dispatch.sh"
 
+  # spec-merge mock(성공): TRACE 기록 후 0 — start 배선 검증용(실질 머지는
+  # spec-merge.sh selftest 가 실git 으로 검증; 여기선 cmd_start 의 배선만 본다).
+  cat > "$TMP/m-sm-ok.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "spec-merge $*" >> "$TRACE"
+echo "spec-merge: mock 안착"
+EOF
+  # spec-merge mock(실패): TRACE 기록 후 비-0 — 머지 실패 시 dispatch 미시작 검증용.
+  cat > "$TMP/m-sm-fail.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "spec-merge $*" >> "$TRACE"
+echo "spec-merge: mock 비-ff 실패" >&2
+exit 1
+EOF
+  export FSD_SPEC_MERGE_CMD="bash $TMP/m-sm-ok.sh"
+
   # (a) intake --origin: origin 기록 + status 노출.
   local oid
   oid="$(cmd_intake --origin parent-task "$spec_clean" 2>/dev/null | sed -n 's/^task-id: //p')"
@@ -326,17 +367,35 @@ EOF
   grep -q "^needs-resume: .*SPEC-mark.md" "$TMP/start-mark.out" \
     && ok "마커 needs-resume 출력" || bad "마커 needs-resume 출력"
   grep -q "^dispatch start" "$TRACE" && bad "마커 SPEC dispatch 미위임" || ok "마커 SPEC dispatch 미위임"
+  # AC4: 마커 가드가 spec-merge 보다 먼저 — 마커 SPEC 은 타겟 브랜치에 안 올라간다.
+  grep -q "^spec-merge " "$TRACE" && bad "마커 SPEC spec-merge 미호출" || ok "마커 SPEC spec-merge 미호출(타겟 브랜치 미반영)"
   local mid; mid="$(derive_task_id "$(abspath "$spec_mark")")"
   [[ "$(get_state "$mid")" == "needs-clarification" ]] \
     && ok "마커 state=needs-clarification" || bad "마커 state=needs-clarification"
 
-  # (c) 마커 없는 SPEC: 정상 dispatch 회귀.
+  # (c) 마커 없는 SPEC: spec-merge 선행 후 정상 dispatch 회귀.
   : > "$TRACE"
   ( cmd_start "$spec_clean" ) > "$TMP/start-clean.out" 2>&1; rc=$?
   [[ "$rc" == "0" ]] && ok "마커없는 start 0 exit" || bad "마커없는 start 0 exit (rc=$rc)"
+  # AC1: dispatch 위임 전 spec-merge 가 task-id·SPEC 으로 호출됨(타겟 브랜치 선반영).
+  grep -q "^spec-merge .* .*SPEC-clean.md" "$TRACE" && ok "마커없는 SPEC spec-merge 선행" || bad "마커없는 SPEC spec-merge 선행"
   grep -q "^dispatch start" "$TRACE" && ok "마커없는 SPEC dispatch 위임" || bad "마커없는 SPEC dispatch 위임"
+  # 순서: spec-merge 가 dispatch 보다 먼저(같은 TRACE 내 행 순서).
+  [[ "$(grep -n '^spec-merge ' "$TRACE" | head -1 | cut -d: -f1)" -lt \
+     "$(grep -n '^dispatch start' "$TRACE" | head -1 | cut -d: -f1)" ]] \
+    && ok "spec-merge → dispatch 순서" || bad "spec-merge → dispatch 순서"
   grep -q "^run-id: RUN-MOCK" "$TMP/start-clean.out" && ok "마커없는 run-id 기록" || bad "마커없는 run-id 기록"
   [[ "$(get_state "$oid")" == "dispatched" ]] && ok "마커없는 state=dispatched" || bad "마커없는 state=dispatched"
+
+  # (d) spec-merge 실패: dispatch 미위임·비-0·state=spec-merge-failed (AC5).
+  : > "$TRACE"
+  ( FSD_SPEC_MERGE_CMD="bash $TMP/m-sm-fail.sh" cmd_start "$spec_reg" ) > "$TMP/start-fail.out" 2>&1; rc=$?
+  [[ "$rc" != "0" ]] && ok "spec-merge 실패 시 start 비-0" || bad "spec-merge 실패 시 start 비-0 (rc=$rc)"
+  grep -q "^spec-merge " "$TRACE" && ok "spec-merge 호출됨" || bad "spec-merge 호출됨"
+  grep -q "^dispatch start" "$TRACE" && bad "spec-merge 실패 시 dispatch 미위임" || ok "spec-merge 실패 시 dispatch 미위임"
+  grep -qi "dispatch 를 시작하지 않" "$TMP/start-fail.out" && ok "SPEC 미안착 메시지(dispatch 실패와 구분)" || bad "SPEC 미안착 메시지"
+  local fid; fid="$(derive_task_id "$(abspath "$spec_reg")")"
+  [[ "$(get_state "$fid")" == "spec-merge-failed" ]] && ok "state=spec-merge-failed" || bad "state=spec-merge-failed (got=$(get_state "$fid"))"
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
