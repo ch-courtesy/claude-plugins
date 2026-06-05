@@ -24,7 +24,7 @@ allowed-tools:
 
 # loop
 
-스펙 파일 하나를 받아 로컬에서 자율 구현하는 최소 실행기다. 정체성은 **스펙 파일의 절대 경로**다. 작업 공간은 스펙 디렉토리 아래(보조 worktree 안이면 현재 cwd) — 정확한 경로는 `loop.sh paths <spec>`. **terminal 의도는 `.loop/signals/` 디렉토리**에 워커가 파일을 만들어 표현하고, driver 는 `signals/` 비어있는지만 본다.
+스펙 파일 하나를 받아 로컬에서 자율 구현하는 최소 실행기다. 정체성은 **스펙 파일의 절대 경로**다. 작업 공간은 스펙 디렉토리 아래 전용 워크트리(`<spec_dir>/.worktree`)로, 호출 위치와 무관하게 항상 새로 생성한다(보조 worktree 안에서 호출돼도 재사용하지 않음) — 정확한 경로는 `loop.sh paths <spec>`. **terminal 의도는 `.loop/signals/` 디렉토리**에 워커가 파일을 만들어 표현하고, driver 는 `signals/` 비어있는지만 본다.
 
 워커 헌법은 `references/constitution.md`, 셸 드라이버는 `references/loop.sh`가 단일 출처다.
 
