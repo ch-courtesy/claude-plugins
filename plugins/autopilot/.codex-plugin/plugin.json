@@ -13,7 +13,7 @@
     "agent-runtime",
     "self-directed"
   ],
-  "skills": "./.codex-plugin/skills/",
+  "skills": "./skills/",
   "interface": {
     "displayName": "Autopilot",
     "shortDescription": "spec, loop, dispatch, fsd, review로 자율 task lifecycle을 운영합니다.",

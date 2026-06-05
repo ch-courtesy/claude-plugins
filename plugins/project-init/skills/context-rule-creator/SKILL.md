@@ -1,16 +1,6 @@
 ---
 name: context-rule-creator
 description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍스트 카테고리 디렉터리 아래 두 sub-룰 파일(`rules/context/task-model.md`·`rules/context/task-ops.md`)로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 컨텍스트 지침을 새로 만들고 싶어 할 때.
-allowed-tools:
-  - AskUserQuestion
-  - Read
-  - Write
-  - Glob
-  - Bash(ls:*)
-  - Bash(mkdir -p:*)
-  - Bash(diff:*)
-  - Bash(git diff:*)
-  - Bash(rm:*)
 ---
 
 # context-rule-creator
@@ -44,7 +34,7 @@ allowed-tools:
 
    `task-model.md`가 없거나 `label`이 없는 디렉터리는 후보에서 제외하고 사용자에게 알립니다.
 
-3. **백엔드 선택 (상호배타 단일).** 후보가 하나면 자동 선택하고, 둘 이상이면 `AskUserQuestion` single-select로 묻습니다. 한 번의 실행에서 **정확히 하나**의 백엔드만 기록합니다. 단순 재실행으로 백엔드를 바꾸지 않습니다.
+3. **백엔드 선택 (상호배타 단일).** 후보가 하나면 자동 선택하고, 둘 이상이면 `request_user_input` single-select로 묻습니다. 한 번의 실행에서 **정확히 하나**의 백엔드만 기록합니다. 단순 재실행으로 백엔드를 바꾸지 않습니다.
 
 4. **정적 입력 수집.** 선택된 백엔드 `task-model.md`에 `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, "Other"도 허용합니다. 수집된 값만 `{{name}}`에 치환하고 누락·빈 값은 placeholder를 보존합니다.
 

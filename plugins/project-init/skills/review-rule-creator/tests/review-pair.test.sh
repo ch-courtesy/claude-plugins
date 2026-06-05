@@ -8,7 +8,7 @@
 #     not a one-of menu/single-select.
 #   - change-adoption.md cross-references rules/review/principles.md and does NOT
 #     reference the flat rules/review.md path (dangling-reference guard).
-#   - vendor-neutral: principles.md has no hard CLAUDE.md path and no tool-specific
+#   - vendor-neutral: principles.md has no hard AGENTS.md path and no tool-specific
 #     marker (autopilot).
 #   - principles.md keeps the 9-principle structure (H1 header + "9원칙" section).
 #
@@ -70,10 +70,10 @@ check "change-adoption.md has NO flat rules/review.md reference (dangling guard)
   bash -c "! grep -qE 'rules/review\.md' '$CADO'"
 
 # ===========================================================================
-# 5) vendor-neutral: principles.md has no CLAUDE.md hard path, no tool marker
+# 5) vendor-neutral: principles.md has no AGENTS.md hard path, no tool marker
 # ===========================================================================
-check "principles.md has no hard CLAUDE.md path (vendor-neutral)" \
-  bash -c "! grep -qF 'CLAUDE.md' '$PRIN'"
+check "principles.md has no hard AGENTS.md path (vendor-neutral)" \
+  bash -c "! grep -qF 'AGENTS.md' '$PRIN'"
 check "principles.md has no tool-specific marker (autopilot)" \
   bash -c "! grep -qiF 'autopilot' '$PRIN'"
 

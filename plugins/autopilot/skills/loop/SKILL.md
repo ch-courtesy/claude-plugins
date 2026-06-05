@@ -1,25 +1,6 @@
 ---
 name: loop
-description: 단일 SPEC 파일을 격리 작업 공간에서 자율적으로 구현(랄프 루프)하고 싶을 때 사용. 호출 'Skill(skill="loop", args="<subcommand> [<args>]")' (start/status/stop/list/cleanup/logs).
-allowed-tools:
-  - Monitor
-  - Read
-  - Bash(bash * loop.sh start:*)
-  - Bash(bash * loop.sh status:*)
-  - Bash(bash * loop.sh stop:*)
-  - Bash(bash * loop.sh list)
-  - Bash(bash * loop.sh cleanup:*)
-  - Bash(bash * loop.sh logs:*)
-  - Bash(bash * loop.sh env)
-  - Bash(bash * loop.sh gates)
-  - Bash(bash * loop.sh paths:*)
-  - Bash(bash * loop.sh deps)
-  - Bash(git -C * status:*)
-  - Bash(git -C * log:*)
-  - Bash(git -C * diff:*)
-  - Bash(git -C * stash list)
-  - Bash(git -C * stash show:*)
-  - Bash(git -C * stash pop:*)
+description: 단일 SPEC 파일을 격리 작업 공간에서 자율적으로 구현(랄프 루프)하고 싶을 때 사용. 호출 `loop <subcommand> [<args>]` (start/status/stop/list/cleanup/logs).
 ---
 
 # loop
@@ -30,7 +11,7 @@ allowed-tools:
 
 ## 호출
 
-`Skill(skill: "loop", args: "<subcommand> [<args>]")`
+`loop <subcommand> [<args>]`
 
 loop은 어떤 도구가 만든 스펙이든 **임의의 스펙 파일 경로**를 받는다.
 
@@ -38,15 +19,15 @@ loop은 어떤 도구가 만든 스펙이든 **임의의 스펙 파일 경로**�
 
 ### start <spec-path> [--max-iterations N] [--wall-clock-minutes N]
 
-> 위 bracket의 플래그는 `loop.sh`가 받는 인자다. `--no-monitor`·`--events-only`는 SKILL 차원 모니터링 옵션이라 `loop.sh`에 전달하지 않는다(전달하면 `알 수 없는 옵션`으로 실패) — 의미·우선순위는 아래 [Monitor](#monitor) 절 참조.
+> 위 bracket의 플래그는 `loop.sh`가 받는 인자다. `--no-monitor`·`--events-only`는 SKILL 차원 모니터링 옵션이라 `loop.sh`에 전달하지 않는다(전달하면 `알 수 없는 옵션`으로 실패) — 의미·우선순위는 아래 [command output monitoring](#monitor) 절 참조.
 
-반드시 `Bash(bash $SKILL_DIR/references/loop.sh start <spec-path> [...flags], run_in_background: true)`로 실행한다. 동기 실행은 Monitor 가설을 막으므로 금지.
+반드시 `Bash(bash $SKILL_DIR/references/loop.sh start <spec-path> [...flags], run_in_background: true)`로 실행한다. 동기 실행은 command output monitoring 가설을 막으므로 금지.
 
-driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `CLAUDE.md`로 복사) → 이터레이션 루프. 매 이터는 새 `claude --print` 프로세스. 계산된 경로는 `loop.sh paths <spec>`.
+driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `AGENTS.md`로 복사) → 이터레이션 루프. 매 이터는 새 `codex ` 프로세스. 계산된 경로는 `loop.sh paths <spec>`.
 
-#### Monitor
+#### command output monitoring
 
-기본 ON. `--no-monitor`가 없으면 start 직후 `Monitor`를 붙인다. 기본 필터는 빈 줄과 단독 dot만 제외하고 stdout raw 라인을 통과시킨다. `--events-only`는 SKILL.md 차원 옵션이며 `loop.sh`로 전달하지 않는다 — 핵심 이벤트(`이터 #`, HALT, WARN, FAIL, ERROR, rate limit, claude 비정상, terminal 신호 감지)만 알림한다. `--no-monitor`가 함께 있으면 `--no-monitor`가 우선한다.
+기본 ON. `--no-monitor`가 없으면 start 직후 `command output monitoring`를 붙인다. 기본 필터는 빈 줄과 단독 dot만 제외하고 stdout raw 라인을 통과시킨다. `--events-only`는 SKILL.md 차원 옵션이며 `loop.sh`로 전달하지 않는다 — 핵심 이벤트(`이터 #`, HALT, WARN, FAIL, ERROR, rate limit, codex 비정상, terminal 신호 감지)만 알림한다. `--no-monitor`가 함께 있으면 `--no-monitor`가 우선한다.
 
 ### 신호 계약
 

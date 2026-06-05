@@ -90,10 +90,10 @@ findings[] (history). 발견만 보고. 판정 금지.
 
 ## lens④ — 저장소 가이드라인 준수 (`review_perspective: guideline`)
 
-용도: `CLAUDE.md`·`rules/`·워크플로 문서 등 명시적 지침과 변경의 충돌.
+용도: `AGENTS.md`·`rules/`·워크플로 문서 등 명시적 지침과 변경의 충돌.
 
 ```text
-변경이 저장소 명시 지침(CLAUDE.md·AGENTS.md·rules/·워크플로 문서)과 충돌하는지 확인하라.
+변경이 저장소 명시 지침(AGENTS.md·AGENTS.md·rules/·워크플로 문서)과 충돌하는지 확인하라.
 
 ## 변경
 [diff + 적용되는 규칙 발췌]

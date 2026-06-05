@@ -1,16 +1,6 @@
 ---
 name: review-rule-creator
 description: 현재 프로젝트에 맞는 리뷰 지침을 리뷰 카테고리 디렉터리 아래 두 sub-룰 파일(`rules/review/principles.md`·`rules/review/change-adoption.md`)로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 리뷰 지침을 새로 만들고 싶어 할 때.
-allowed-tools:
-  - AskUserQuestion
-  - Read
-  - Write
-  - Glob
-  - Bash(ls:*)
-  - Bash(mkdir -p:*)
-  - Bash(diff:*)
-  - Bash(git diff:*)
-  - Bash(rm:*)
 ---
 
 # review-rule-creator

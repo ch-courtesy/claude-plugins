@@ -43,7 +43,7 @@ ok "S1"
 # === S2: frontmatter ===
 echo "=== S2: frontmatter ==="
 grep -qE '^name: review$' "$SKILL_MD" || fail "S2: name: review 없음"
-grep -qiE 'skill=\\?"review\\?"' "$SKILL_MD" || fail "S2: 호출 양식(Skill review) 없음"
+grep -qE 'review <subcommand> \[<args>\]' "$SKILL_MD" || fail "S2: 호출 양식(review subcommand) 없음"
 ok "S2"
 
 # === S3: 공개 서브커맨드 3종 ===
@@ -143,5 +143,5 @@ echo "=== S14: 불변식 ==="
 grep -qiE '자기 상태|자기 정의|밖.*경로|밖 경로' "$SKILL_MD" || fail "S14: 경로 생성 제한 불변식 없음"
 ok "S14"
 
-echo ""
+echo "$SKILL_MD"
 echo "ALL SKILL TESTS PASSED"

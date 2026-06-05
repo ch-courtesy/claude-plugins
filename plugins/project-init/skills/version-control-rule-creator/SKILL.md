@@ -1,18 +1,6 @@
 ---
 name: version-control-rule-creator
 description: 현재 프로젝트의 git origin remote에서 호스팅 백엔드(GitHub/GitLab)를 자동 판별해, 그 백엔드에 맞는 변경 제안(PR/MR) 심사·승인 지침을 `rules/version-control/<sub>.md`로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 버전 관리(VCS) 워크플로 지침을 새로 만들고 싶어 할 때.
-allowed-tools:
-  - AskUserQuestion
-  - Read
-  - Write
-  - WebFetch
-  - Glob
-  - Bash(ls:*)
-  - Bash(mkdir -p:*)
-  - Bash(diff:*)
-  - Bash(git diff:*)
-  - Bash(git remote get-url:*)
-  - Bash(git config:*)
 ---
 
 # version-control-rule-creator
@@ -54,7 +42,7 @@ allowed-tools:
 
 3. **sub-룰 선택과 git 공통 동반 산출.** 후보 sub-룰을 두 부류로 나눠 처리합니다.
 
-   - **백엔드 변형 sub-룰과 그 밖의 sub-룰(`review-approval` 등).** sub-룰 ID가 하나면 자동 선택하고 둘 이상이면 `AskUserQuestion` single-select로 고릅니다. 이렇게 고른 sub-룰을 기록합니다. 단순 재실행으로 이 선택을 바꾸지 않습니다.
+   - **백엔드 변형 sub-룰과 그 밖의 sub-룰(`review-approval` 등).** sub-룰 ID가 하나면 자동 선택하고 둘 이상이면 `request_user_input` single-select로 고릅니다. 이렇게 고른 sub-룰을 기록합니다. 단순 재실행으로 이 선택을 바꾸지 않습니다.
    - **git 계열 공통 sub-룰(`git`)은 사용자 선택지가 아닙니다.** `../../shared/version-control-rule-creator/templates/git.md`(백엔드 변형 없음, 출력 `rules/version-control/git.md`)는 **2단계 판별이 git 계열일 때 자동으로 함께 산출되는 동반 출력**입니다. review-approval과 "둘 중 하나"로 고르게 하는 메뉴 항목으로 노출하지 않습니다.
      - 판별된 백엔드를 git 계열로 분류하는 **정적 매핑**만 둡니다: `github`·`gitlab`은 git 계열입니다. 이 정적 매핑이 git 계열 분류의 단일 출처이며, 매핑에 없는 백엔드의 기본값은 **"git 계열 아님"**입니다. 향후 비-git 백엔드는 이 매핑에 넣지 않는 것만으로 동반 산출에서 자연히 빠집니다.
      - 2단계 판별이 **git 계열이면**: 위에서 고른 백엔드 변형 sub-룰(review-approval)과 git 공통 지침(`rules/version-control/git.md`)을 **함께 산출**합니다.
@@ -65,7 +53,7 @@ allowed-tools:
 
 4-bis. **입력(inputs) 치환 — 정적 multi-select 집계 / single-select 단일 선택.** 산출 대상 템플릿 frontmatter에 `inputs`가 있으면 처리하고, 없으면 이 단계를 건너뜁니다. 한 입력은 `multi_select` 값에 따라 **다중 선택(집계)** 또는 **단일 선택** 두 모드 중 하나로 동작합니다. (현재 `git` 템플릿이 multi-select를, `review-approval` 템플릿의 `merge_method`가 single-select를 씁니다.)
    - **스키마.** 각 입력은 `name`, `header`, `question`, `multi_select`, `options[{label, description, value?, default?}]`를 가집니다. `multi_select: true`는 **한 질문에서 여러 정책을 다중 선택**함을 뜻하고, `multi_select: false`(또는 생략)는 **한 질문에서 정확히 하나를 고르는 단일 선택**을 뜻합니다.
-   - **질문.** 입력을 `AskUserQuestion`으로 **한 번** 묻되, 다중 선택 입력은 **multi-select**로, 단일 선택 입력은 **single-select**로 제시합니다. 옵션 표시 순서는 frontmatter 순서를 따릅니다. `default: true`인 옵션은 **기본 선택(체크)** 상태로 제시합니다(추천·기본 옵션을 첫 번째에 둡니다). 사용자에게는 정책·방식 선택지만 노출하고, 정책이 공통으로 분리된 내부 사정·분류 기준은 노출하지 않습니다.
+   - **질문.** 입력을 `request_user_input`으로 **한 번** 묻되, 다중 선택 입력은 **multi-select**로, 단일 선택 입력은 **single-select**로 제시합니다. 옵션 표시 순서는 frontmatter 순서를 따릅니다. `default: true`인 옵션은 **기본 선택(체크)** 상태로 제시합니다(추천·기본 옵션을 첫 번째에 둡니다). 사용자에게는 정책·방식 선택지만 노출하고, 정책이 공통으로 분리된 내부 사정·분류 기준은 노출하지 않습니다.
    - **집계 치환 (다중 선택).** 본문의 **단일 집계 placeholder** `{{<name>}}`를, **선택된 옵션들의 값을 표시 순서대로 연결**한 텍스트로 치환합니다. 값은 `value`가 있으면 `value`, 없으면 `label`을 씁니다(value 우선). 비어 있지 않은 "Other" 자유 입력도 연결 대상에 포함합니다. 절과 절 사이는 빈 줄 하나로 구분해 마크다운 서식을 유지합니다. **정책별 개별 placeholder는 두지 않습니다.**
    - **단일 치환 (단일 선택).** 본문의 placeholder `{{<name>}}`를 **선택된 한 옵션의 값**으로 치환합니다(`value` 우선, 없으면 `label`). 연결은 일어나지 않습니다.
    - **빈 선택.** (다중 선택에서) 아무 옵션도 선택되지 않으면 집계 결과는 빈 문자열이고, placeholder가 놓인 줄을 절 단위로 정리·제거해 빈 줄·깨진 마크다운을 남기지 않습니다. 도입부(헤더 + git 계열 분류)는 그대로 남습니다.
@@ -89,4 +77,4 @@ allowed-tools:
 
 ## plugins 변경 시 버전 동반 (필수)
 
-`plugins/` 하위는 워치 디렉터리이므로, 본 스킬·템플릿을 추가·변경하는 머지에는 **같은 변경 안에서** 플러그인 버전 단일 출처(`plugins/project-init/.claude-plugin/plugin.json`)와 그 미러(`.claude-plugin/marketplace.json`의 project-init 항목)를 함께 올립니다. 두 곳의 버전 값은 일치해야 합니다(`rules/engineering/versioning.md` 참조).
+`plugins/` 하위는 워치 디렉터리이므로, 본 스킬·템플릿을 추가·변경하는 머지에는 **같은 변경 안에서** 플러그인 버전 단일 출처(`plugins/project-init/.codex-plugin/plugin.json`)와 그 미러(`.codex-plugin/marketplace.json`의 project-init 항목)를 함께 올립니다. 두 곳의 버전 값은 일치해야 합니다(`rules/engineering/versioning.md` 참조).

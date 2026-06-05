@@ -12,7 +12,7 @@
 
 ## 보안
 
-루프는 무인 동작을 위해 `claude --dangerously-skip-permissions`로 실행된다. 작업 공간에 secrets·`.env`·credentials·SSH key를 두지 말고 스펙에 secrets를 쓰지 않는다. 신뢰 못 한 외부 스펙은 받지 않는다.
+루프는 무인 동작을 위해 `codex `로 실행된다. 작업 공간에 secrets·`.env`·credentials·SSH key를 두지 말고 스펙에 secrets를 쓰지 않는다. 신뢰 못 한 외부 스펙은 받지 않는다.
 
 ## 구조
 
@@ -21,7 +21,7 @@
 ├── <spec>.md            # 스펙 파일 (정체성)
 ├── .loop-lock           # 실행 중에만 (PID; 워크트리 생성 전 획득)
 └── .worktree/           # 작업 공간 (git worktree, info/exclude)
-    ├── CLAUDE.md        # 헌법 복사본 (워커 계약 SoT)
+    ├── AGENTS.md        # 헌법 복사본 (워커 계약 SoT)
     └── .loop/
         ├── BASE_SHA
         ├── SPEC_PATH    # 스펙 경로 (list 스캔이 정체성 복원에 사용)

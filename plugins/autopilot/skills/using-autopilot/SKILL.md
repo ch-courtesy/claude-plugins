@@ -8,12 +8,12 @@ description: Use at the start of any session in an autopilot-installed project �
 autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다. 새 코드 변경은 **의도를 먼저 자기완결적 SPEC 문서로 뜨는 것**에서 출발하며, 두 경로 중 하나로 흐른다 — **`spec`**(SPEC 문서만 떠서 검토) 또는 **`fsd`**(SPEC 작성부터 구현까지 task 단위로 끝까지 자동). 이 스킬은 그 첫 분기를 강제한다.
 
 <EXTREMELY-IMPORTANT>
-새 코드 변경 신호를 감지하면, **다른 어떤 응답·도구 호출·탐색보다 먼저** `AskUserQuestion`으로 두 경로를 제시한다:
+새 코드 변경 신호를 감지하면, **다른 어떤 응답·도구 호출·탐색보다 먼저** `request_user_input`으로 두 경로를 제시한다:
 
-- **`spec`** — 의도를 자기완결 SPEC 문서로만 떠서 검토한다(가벼운 변경·문서 우선·직접 검토 후 구현). 선택 시 `Skill(skill="spec", args="<자연어 task 설명>")`을 호출한다.
-- **`fsd`** — SPEC 작성부터 구현(dispatch)까지 task 단위로 끝까지 자동으로 닫는다. 선택 시 `Skill(skill="fsd", args="<자연어 task 설명>")`을 호출한다.
+- **`spec`** — 의도를 자기완결 SPEC 문서로만 떠서 검토한다(가벼운 변경·문서 우선·직접 검토 후 구현). 선택 시 `spec <자연어 task 설명>`을 호출한다.
+- **`fsd`** — SPEC 작성부터 구현(dispatch)까지 task 단위로 끝까지 자동으로 닫는다. 선택 시 `fsd <자연어 task 설명>`을 호출한다.
 
-1%라도 새 코드 변경일 가능성이 있으면 이 분기를 먼저 띄운다. 사용자가 경로를 고르기 전에는 코드·탐색·다른 도구에 손대지 않는다. 경로 선택은 사용자 몫이며 자유 텍스트로 묻지 않고 `AskUserQuestion`으로만 받는다. 이것은 협상 대상이 아니다.
+1%라도 새 코드 변경일 가능성이 있으면 이 분기를 먼저 띄운다. 사용자가 경로를 고르기 전에는 코드·탐색·다른 도구에 손대지 않는다. 경로 선택은 사용자 몫이며 자유 텍스트로 묻지 않고 `request_user_input`으로만 받는다. 이것은 협상 대상이 아니다.
 </EXTREMELY-IMPORTANT>
 
 ## 트리거 (이 중 하나라도 해당되면 spec/fsd 분기 먼저)
@@ -60,7 +60,7 @@ milestone 규모(다중 독립 서브시스템)는 spec의 **범위 분해 게�
 | "기존 SPEC을 구현/확인하는 것뿐이니까" | SPEC 읽기·검증은 예외지만 SPEC 구현은 코드-변경 신호다. `SPEC.md 구현`은 분기 먼저. |
 | "문서·지침 편집은 코드 변경이 아니야" | 지침·문서의 편집·압축·축약·수정·삭제는 동작·지침을 바꾸는 코드-변경 신호다. 분기 먼저. |
 | "사용자가 그냥 만들라고 했으니" | "만들어줘"는 WHAT이지 HOW가 아니다 — spec이 HOW 이전에 WHAT을 확정한다. |
-| "어느 경로일지 내가 정하자" | spec/fsd 경로 선택은 사용자 몫이다. 추측하지 말고 `AskUserQuestion`으로 묻는다. |
+| "어느 경로일지 내가 정하자" | spec/fsd 경로 선택은 사용자 몫이다. 추측하지 말고 `request_user_input`으로 묻는다. |
 
 ## 예외 (분기 라우팅 불필요)
 
@@ -74,7 +74,7 @@ milestone 규모(다중 독립 서브시스템)는 spec의 **범위 분해 게�
 
 ```
 새 코드 변경 신호
-   └─ [AskUserQuestion] spec / fsd ?
+   └─ [request_user_input] spec / fsd ?
         ├─ autopilot:spec → docs/specs/<날짜>-<slug>/SPEC.md (자기완결 SPEC) → (옵트인) dispatch
         └─ autopilot:fsd  → spec 산출 → intake(task 등록) → start(dispatch 구현) … 끝까지 자동
 ```

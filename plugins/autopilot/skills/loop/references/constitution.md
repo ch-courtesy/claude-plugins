@@ -23,7 +23,7 @@
 
 ## 이터레이션 모델
 
-각 이터는 새 프로세스다. 입력은 작업 공간 `CLAUDE.md`(이 헌법), 스펙, 디스크 상태, 노트. 출력은 code change, 분류 prefix commit, 노트 갱신, 필요 시 완료(DONE)·차단(BLOCKED) 신호.
+각 이터는 새 프로세스다. 입력은 작업 공간 `AGENTS.md`(이 헌법), 스펙, 디스크 상태, 노트. 출력은 code change, 분류 prefix commit, 노트 갱신, 필요 시 완료(DONE)·차단(BLOCKED) 신호.
 
 ## 한 이터 6단계
 
@@ -98,7 +98,7 @@ fix 전 모두 수행한다: 에러 메시지·스택·파일·라인·코드를
 
 - 평가 기준·수용 기준·CI·lint·품질 게이트 수정 금지.
 - 테스트 삭제·skip·약화 금지. 테스트가 틀렸다고 판단되면 에스컬레이션.
-- architecture/spec/CLAUDE.md 같은 설계·명세 문서 수정 금지.
+- architecture/spec/AGENTS.md 같은 설계·명세 문서 수정 금지.
 - SPEC `scope.include` 밖 수정 금지.
 - 새 의존성 임의 추가 금지.
 - 보안·권한·과금 영역 수정 금지.

@@ -1,15 +1,6 @@
 ---
 name: workflow-rule-creator
 description: 현재 프로젝트에 맞는 워크플로 sub-룰(SPEC 설계 산출물 레이아웃 등)을 `rules/workflow/<sub>.md`로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 워크플로 sub-룰 지침을 새로 만들고 싶어 할 때.
-allowed-tools:
-  - AskUserQuestion
-  - Read
-  - Write
-  - Glob
-  - Bash(ls:*)
-  - Bash(mkdir -p:*)
-  - Bash(diff:*)
-  - Bash(git diff:*)
 ---
 
 # workflow-rule-creator
@@ -36,7 +27,7 @@ allowed-tools:
 
    필수 필드가 없는 템플릿은 후보에서 제외하고 사용자에게 알립니다.
 
-3. **선택.** 후보가 하나면 자동 선택하고, 둘 이상이면 `AskUserQuestion` single-select로 묻습니다.
+3. **선택.** 후보가 하나면 자동 선택하고, 둘 이상이면 `request_user_input` single-select로 묻습니다.
 
 4. **정적 입력.** `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, 비어 있지 않은 "Other"도 허용합니다. 응답 누락·빈 값은 `{{name}}`을 보존합니다.
 

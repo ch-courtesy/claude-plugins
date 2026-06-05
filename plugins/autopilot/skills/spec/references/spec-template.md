@@ -4,7 +4,7 @@ scope:
   exclude:
     - rules/**
     - milestones/**
-    - CLAUDE.md
+    - AGENTS.md
 {{depends_on}}
 # depends_on: optional list of sibling SPEC slugs this unit depends on.
 #   분해 발행(1..N)에서만 채운다. 단일 문서면 이 줄을 제거한다.
