@@ -68,7 +68,8 @@ sm_build_tree() {
     rel="${pair%%	*}"   # tab 구분
     abs="${pair#*	}"
     blob="$(git hash-object -w "$abs")" || { rc=1; break; }
-    GIT_INDEX_FILE="$idx" git update-index --add --cacheinfo "100644,$blob,$rel" || { rc=1; break; }
+    # 분리-인자 형식(쉼표 파싱 회피 — 경로에 쉼표가 있어도 안전).
+    GIT_INDEX_FILE="$idx" git update-index --add --cacheinfo 100644 "$blob" "$rel" || { rc=1; break; }
   done
   if [[ $rc -eq 0 ]]; then
     GIT_INDEX_FILE="$idx" git write-tree || rc=1
