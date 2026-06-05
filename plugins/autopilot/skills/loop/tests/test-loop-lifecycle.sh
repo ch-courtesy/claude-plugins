@@ -10,7 +10,7 @@
 #   L3 secondary fab + status from secondary cwd (same-cwd)
 #   L4 secondary fab + status from main cwd (cross-cwd, codex 핵심)
 #   L5 secondary fab + logs from main cwd (cross-cwd)
-#   L6 secondary fab + cleanup from main cwd (.loop 제거 + worktree 보존)
+#   L6 cleanup 이 전용 워크트리 제거 (spec 이 보조 worktree 안이어도 — no-secondary-reuse)
 #   L7 legacy (no .loop-wt) + status fallback
 #   L8 empty .loop-wt + status fallback
 
@@ -79,12 +79,29 @@ check_contains "L4 secondary status cross-cwd" "terminal" "$out"
 out=$( cd "$MAIN" && bash "$LOOP_SH" logs "$SPEC_DIR_S/spec.md" 2>&1 | grep -F 'signals/' | head -1 )
 check_contains "L5 secondary logs cross-cwd" "signals/DONE" "$out"
 
-# L6: Secondary + cleanup from main cwd (cross-cwd, .loop 제거 + worktree 보존)
-( cd "$MAIN" && bash "$LOOP_SH" cleanup "$SPEC_DIR_S/spec.md" >/dev/null 2>&1 )
-if [[ ! -d "$SEC/.loop" && -d "$SEC" && ! -f "$SPEC_DIR_S/.loop-wt" ]]; then
-  echo "PASS  L6 secondary cleanup cross-cwd"
+# L6: cleanup 은 항상 자신의 전용 워크트리를 제거한다 (보조라는 이유로 보존하지 않음).
+#     SPEC 디렉토리가 보조 worktree(SEC) 안에 있어도, loop 의 전용 워크트리는
+#     <SPEC_DIR>/.worktree(중첩) 이며 cleanup 이 이를 제거한다 (no-secondary-reuse).
+SPEC_DIR_D="$SEC/d1"
+mkdir -p "$SPEC_DIR_D"
+printf -- '---\nscope: {include: ["**"]}\n---\n# t\n' > "$SPEC_DIR_D/spec.md"
+git -C "$MAIN" worktree add --detach "$SPEC_DIR_D/.worktree" HEAD >/dev/null 2>&1
+# prepare_workspace 와 동일하게 .loop/·.worktree/ 를 공통 git dir info/exclude 에 등록
+# (ignored → untracked 아님 → git worktree remove 가 --force 없이 성공; 실제 start 동작).
+gcd_d="$(git -C "$SPEC_DIR_D/.worktree" rev-parse --git-common-dir)"
+[[ "$gcd_d" != /* ]] && gcd_d="$SPEC_DIR_D/.worktree/$gcd_d"
+mkdir -p "$gcd_d/info"
+for p in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt"; do
+  grep -qxF "$p" "$gcd_d/info/exclude" 2>/dev/null || echo "$p" >> "$gcd_d/info/exclude"
+done
+mkdir -p "$SPEC_DIR_D/.worktree/.loop/signals"
+touch "$SPEC_DIR_D/.worktree/.loop/signals/DONE"
+printf '%s\n' "$SPEC_DIR_D/.worktree" > "$SPEC_DIR_D/.loop-wt"
+( cd "$MAIN" && bash "$LOOP_SH" cleanup "$SPEC_DIR_D/spec.md" >/dev/null 2>&1 )
+if [[ ! -d "$SPEC_DIR_D/.worktree" && ! -f "$SPEC_DIR_D/.loop-wt" ]]; then
+  echo "PASS  L6 cleanup 이 전용 워크트리 제거 (spec in secondary)"
 else
-  echo "FAIL  L6 secondary cleanup cross-cwd  — .loop=$(test -d "$SEC/.loop" && echo 잔존 || echo OK), worktree=$(test -d "$SEC" && echo OK || echo 사라짐), meta=$(test -f "$SPEC_DIR_S/.loop-wt" && echo 잔존 || echo OK)"
+  echo "FAIL  L6 cleanup 이 전용 워크트리 제거  — worktree=$(test -d "$SPEC_DIR_D/.worktree" && echo 잔존 || echo OK), meta=$(test -f "$SPEC_DIR_D/.loop-wt" && echo 잔존 || echo OK)"
   fail=1
 fi
 

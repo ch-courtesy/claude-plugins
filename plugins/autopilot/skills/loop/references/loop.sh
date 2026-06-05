@@ -10,7 +10,7 @@
 #   bash .../loop/references/loop.sh logs   <spec-path> [--iter N]
 #
 # 정체성: 스펙 파일의 절대 경로.
-# 작업 공간: <spec 디렉토리>/.worktree (보조 worktree 안에서 호출되면 현재 cwd 사용).
+# 작업 공간: <spec 디렉토리>/.worktree (호출 위치와 무관하게 항상 전용 워크트리 생성).
 # 이터 간 노트: <WT>/.loop/notes.md. 워커 terminal 신호: <WT>/.loop/signals/ 디렉토리.
 #
 # 환경 변수:
@@ -85,7 +85,7 @@ on_signal_exit() {
 # 입력: 스펙 파일 경로. 출력 전역:
 #   SPEC_PATH        스펙 절대 경로 (정체성)
 #   SPEC_DIR         스펙 디렉토리 절대 경로
-#   WT               작업 공간 (<SPEC_DIR>/.worktree 또는 보조 worktree cwd)
+#   WT               작업 공간 (<SPEC_DIR>/.worktree — 항상 전용 워크트리)
 #   LOOP_DIR         <WT>/.loop (노트·신호·메타)
 #   LOCK_FILE        <SPEC_DIR>/.loop-lock (실행 중에만; 워크트리 생성 전에 획득해 race 보호)
 compute_paths() {
@@ -115,27 +115,6 @@ compute_paths() {
   WT="$SPEC_DIR/.worktree"
   LOOP_DIR="$WT/.loop"
   LOCK_FILE="$SPEC_DIR/.loop-lock"   # 스펙 디렉토리에 colocate — 워크트리 생성 전에 획득해 race 보호
-}
-
-# 호출 cwd가 git 저장소의 *보조 worktree* 인지 판정 (주 작업트리면 false).
-# 보조 worktree: top-level의 .git이 'gitdir: <main>/.git/worktrees/<name>' 형태의 파일.
-is_secondary_worktree() {
-  local top dotgit
-  top="$(git rev-parse --show-toplevel 2>/dev/null)" || return 1
-  dotgit="$top/.git"
-  [[ -f "$dotgit" ]] || return 1
-  grep -q 'gitdir:.*/\.git/worktrees/' "$dotgit" 2>/dev/null
-}
-
-# 보조 worktree 모드에서 WT·LOOP_DIR 를 현재 worktree top-level 로 재정의.
-# compute_paths 의 기본값(<SPEC_DIR>/.worktree)을 덮어쓴다. cmd_start 가 호출해
-# 작업 공간을 정한다(이후 cmd_start 가 영구 메타 <SPEC_DIR>/.loop-wt 에 기록).
-# 반환: 0 = 보조 worktree(재정의 함), 1 = 주 작업트리(변경 없음).
-apply_secondary_override() {
-  is_secondary_worktree || return 1
-  WT="$(git rev-parse --show-toplevel)"
-  LOOP_DIR="$WT/.loop"
-  return 0
 }
 
 # 실제 WT 영구 메타 읽기 — start 가 작성한 <SPEC_DIR>/.loop-wt 가 있으면 그 값으로
@@ -445,6 +424,49 @@ iterate() {
   return 0
 }
 
+# 워크스페이스 준비: 호출 위치와 무관하게 항상 스펙 디렉토리 하위 전용 워크트리
+# (<SPEC_DIR>/.worktree)를 생성한다. 보조(secondary) worktree 안에서 호출돼도 그
+# enclosing 워크트리를 재사용하지 않고 전용(필요 시 중첩) 워크트리를 새로 만든다.
+# 전용 워크트리 생성 실패는 die 로 abort(0이 아닌 코드) — 대체 위치 폴백 없음.
+# 이미 동일 전용 워크트리가 있으면(같은 스펙 재기동) 재사용한다.
+prepare_workspace() {
+  if [[ ! -d "$WT" ]]; then
+    echo "[$(now_iso)] 워크트리 생성: $WT (detached HEAD)"
+    git -C "$SPEC_DIR" worktree add --detach "$WT" HEAD \
+      || die "git worktree add 실패: $WT"
+    mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
+    git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" \
+      || die "BASE SHA 캡처 실패: $LOOP_DIR/BASE_SHA"
+  else
+    echo "[$(now_iso)] 기존 워크트리 사용: $WT"
+    mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
+  fi
+
+  # 스펙 경로 기록 — list 스캔이 작업 공간에서 정체성을 복원하는 데 사용.
+  printf '%s\n' "$SPEC_PATH" > "$LOOP_DIR/SPEC_PATH"
+  # 실제 WT 경로를 spec_dir 메타에 영구 기록 — follow-up 명령(status·logs·cleanup·paths)이
+  # 어느 cwd 에서 호출되든 같은 작업 공간을 본다.
+  printf '%s\n' "$WT" > "$SPEC_DIR/.loop-wt"
+
+  # 헌법을 워크트리 CLAUDE.md로 복사. 워커 계약(노트·signals/ 컨벤션 등)의 SoT 는
+  # constitution.md 이므로 별도 append 없이 cp 만으로 충분하다.
+  cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
+    || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
+  if git -C "$WT" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
+    git -C "$WT" update-index --skip-worktree CLAUDE.md || true
+  fi
+  local gcd; gcd="$(git -C "$WT" rev-parse --git-common-dir)"
+  [[ "$gcd" != /* ]] && gcd="$WT/$gcd"
+  mkdir -p "$gcd/info"; touch "$gcd/info/exclude"
+  # .worktree/ 가 제외되면 그 안의 .loop/(노트·신호·BASE_SHA·SPEC_PATH·iterations)도
+  # 자동 제외. enclosing worktree(보조 포함)에서 중첩 .worktree/ 가 untracked 로
+  # 노출되지 않게 공통 git 디렉토리의 info/exclude 에 등록한다(모든 worktree 공유).
+  # .loop-lock 은 SPEC_DIR 레벨이라 별도 패턴 필요. .loop/ 는 안전망 중복.
+  for pat in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt"; do
+    grep -qxF "$pat" "$gcd/info/exclude" 2>/dev/null || echo "$pat" >> "$gcd/info/exclude"
+  done
+}
+
 # ----- subcommand: start -----
 cmd_start() {
   local input="$1"; shift || true
@@ -476,45 +498,10 @@ cmd_start() {
   #    워크트리 존재와 무관하게 잡을 수 있다(noclobber 원자성).
   acquire_lock
 
-  # 2) 워크스페이스 준비. 보조 worktree 안에서 호출 시 nested 생성 생략, 현재 cwd 사용.
-  if apply_secondary_override; then
-    echo "[$(now_iso)] 보조 worktree 감지 — nested 생성 생략. 작업 공간: $WT"
-    mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
-    [[ -f "$LOOP_DIR/BASE_SHA" ]] || git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" \
-      || die "BASE SHA 캡처 실패(보조 worktree): $LOOP_DIR/BASE_SHA"
-  elif [[ ! -d "$WT" ]]; then
-    echo "[$(now_iso)] 워크트리 생성: $WT (detached HEAD)"
-    git -C "$SPEC_DIR" worktree add --detach "$WT" HEAD \
-      || die "git worktree add 실패: $WT"
-    mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
-    git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" \
-      || die "BASE SHA 캡처 실패: $LOOP_DIR/BASE_SHA"
-  else
-    echo "[$(now_iso)] 기존 워크트리 사용: $WT"
-    mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
-  fi
-
-  # 3) 스펙 경로 기록 — list 스캔이 작업 공간에서 정체성을 복원하는 데 사용.
-  printf '%s\n' "$SPEC_PATH" > "$LOOP_DIR/SPEC_PATH"
-  # 실제 WT 경로를 spec_dir 메타에 영구 기록 — follow-up 명령(status·logs·cleanup·paths)이
-  # 어느 cwd 에서 호출되든 같은 작업 공간을 본다(보조 worktree 모드 정합).
-  printf '%s\n' "$WT" > "$SPEC_DIR/.loop-wt"
-
-  # 4) 헌법을 워크트리 CLAUDE.md로 복사. 워커 계약(노트·signals/ 컨벤션 등)의 SoT 는
-  #    constitution.md 이므로 별도 append 없이 cp 만으로 충분하다.
-  cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
-    || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
-  if git -C "$WT" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
-    git -C "$WT" update-index --skip-worktree CLAUDE.md || true
-  fi
-  local gcd; gcd="$(git -C "$WT" rev-parse --git-common-dir)"
-  [[ "$gcd" != /* ]] && gcd="$WT/$gcd"
-  mkdir -p "$gcd/info"; touch "$gcd/info/exclude"
-  # .worktree/ 가 제외되면 그 안의 .loop/(노트·신호·BASE_SHA·SPEC_PATH·iterations)도
-  # 자동 제외. .loop-lock 은 SPEC_DIR 레벨이라 별도 패턴 필요. .loop/ 는 안전망 중복.
-  for pat in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt"; do
-    grep -qxF "$pat" "$gcd/info/exclude" 2>/dev/null || echo "$pat" >> "$gcd/info/exclude"
-  done
+  # 2) 워크스페이스 준비 — 호출 위치와 무관하게 항상 <SPEC_DIR>/.worktree 전용
+  #    워크트리를 생성한다(보조 worktree 안에서도 enclosing 재사용 금지). 생성 실패는
+  #    prepare_workspace 내부에서 die 로 abort.
+  prepare_workspace
 
   # 이터레이션 루프
   START_TIME=$(date +%s)
@@ -721,14 +708,8 @@ cmd_cleanup() {
   done
   compute_paths "$input"
   # 영구 메타(<SPEC_DIR>/.loop-wt)에서 start 가 쓴 실제 WT 를 해석. 어느 cwd 에서
-  # 호출돼도 같은 작업 공간을 본다. fallback: 같은 cwd 가 보조 worktree 면 그쪽.
-  local secondary=0
-  if resolve_actual_wt; then
-    # 보조 모드 여부는 WT 가 기본값과 다른지로 판정.
-    [[ "$WT" != "$SPEC_DIR/.worktree" ]] && secondary=1
-  else
-    apply_secondary_override && secondary=1
-  fi
+  # 호출돼도 같은 작업 공간을 본다. 메타 부재 시 기본값(<SPEC_DIR>/.worktree) 유지.
+  resolve_actual_wt || true
 
   if [[ -f "$LOCK_FILE" ]]; then
     local pid; pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
@@ -751,15 +732,8 @@ cmd_cleanup() {
 
   [[ -n "$WT" ]] || die "WT 비어 있음 (cleanup 거부)"
 
-  if (( secondary == 1 )); then
-    # 보조 worktree: 사용자가 만든 워크트리를 우리가 지우지 않는다. .loop/·메타만 제거.
-    [[ -d "$WT/.loop" ]] && rm -rf "$WT/.loop"
-    rm -f "$LOCK_FILE" "$SPEC_DIR/.loop-wt"
-    echo "보조 worktree 정리: .loop/ 제거 (워크트리는 보존): $SPEC_PATH"
-    return 0
-  fi
-
-  # 주 작업트리: <spec_dir>/.worktree 형식 보장 + 워크트리 자체 제거.
+  # loop 은 항상 자신의 전용 워크트리(<spec_dir>/.worktree)를 소유하므로, 호출 위치와
+  # 무관하게 그 워크트리를 제거한다(보조 worktree 라는 이유로 보존하는 분기 없음).
   case "$WT" in
     */.worktree) ;;
     *) die "워크트리 경로 형식 부적절 (기대: */.worktree): $WT" ;;
@@ -785,8 +759,8 @@ cmd_logs() {
     esac
   done
   compute_paths "$input"
-  # 영구 메타에서 실제 WT/LOOP_DIR 해석. 어느 cwd 에서 호출돼도 일관.
-  resolve_actual_wt || apply_secondary_override >/dev/null 2>&1 || true
+  # 영구 메타에서 실제 WT/LOOP_DIR 해석. 어느 cwd 에서 호출돼도 일관. 메타 부재 시 기본값.
+  resolve_actual_wt || true
   if [[ -n "$iter_n" ]]; then
     local log="$LOOP_DIR/iterations/$iter_n.log"
     [[ -f "$log" ]] || die "이터 로그 없음: $log"
@@ -869,22 +843,18 @@ cmd_paths() {
   [[ -f "$input" ]] || die "스펙 파일을 찾을 수 없음: $input"
   compute_paths "$input"
   # 메타(<SPEC_DIR>/.loop-wt)가 있으면 그 값을 사용(실제 start 가 쓴 경로).
-  # 없으면 현재 cwd 의 보조 worktree 여부로 예측한다.
+  # 없으면 기본값(<SPEC_DIR>/.worktree) 유지.
   local source="default"
   if resolve_actual_wt; then
     source="meta"
-  elif apply_secondary_override; then
-    source="cwd"
   fi
-  local secondary="no"
-  [[ "$WT" != "$SPEC_DIR/.worktree" ]] && secondary="yes"
   cat <<EOF
 SPEC_PATH   $SPEC_PATH
 SPEC_DIR    $SPEC_DIR
 WT          $WT
 LOOP_DIR    $LOOP_DIR
 LOCK_FILE   $LOCK_FILE
-SECONDARY   $secondary  (source: $source)
+WT_SOURCE   $source
 EOF
 }
 
