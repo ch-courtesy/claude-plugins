@@ -19,15 +19,17 @@ loop은 어떤 도구가 만든 스펙이든 **임의의 스펙 파일 경로**�
 
 ### start <spec-path> [--max-iterations N] [--wall-clock-minutes N]
 
-> 위 bracket의 플래그는 `loop.sh`가 받는 인자다. `--no-monitor`·`--events-only`는 SKILL 차원 모니터링 옵션이라 `loop.sh`에 전달하지 않는다(전달하면 `알 수 없는 옵션`으로 실패) — 의미·우선순위는 아래 [command output monitoring](#monitor) 절 참조.
+> 위 bracket의 플래그(`--max-iterations`·`--wall-clock-minutes`)는 `loop.sh`가 받는 인자다.
 
-반드시 `Bash(bash $SKILL_DIR/references/loop.sh start <spec-path> [...flags], run_in_background: true)`로 실행한다. 동기 실행은 command output monitoring 가설을 막으므로 금지.
+`bash $SKILL_DIR/references/loop.sh start <spec-path> [...flags]`로 **포그라운드(동기)** 실행한다. start 는 이터레이션 루프가 끝날 때까지 블로킹하고, 종료 후 호출자가 `signals/` 내용을 직접 검사한다.
 
-driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `AGENTS.md`로 복사) → 이터레이션 루프. 매 이터는 새 `codex ` 프로세스. 계산된 경로는 `loop.sh paths <spec>`.
+**비차단(non-blocking)이 필요하면** loop 을 `run_in_background`로 직접 띄우지 말고, loop 스킬 워크플로를 별도 백그라운드 서브에이전트에 위임하고 그 서브에이전트가 위 명령으로 loop 을 **포그라운드** 실행하게 한다. 이유: 서브에이전트 안에서 loop 을 백그라운드 프로세스로 띄우면 서브에이전트 턴이 끝나는 순간 그 백그라운드 프로세스가 kill 되어 워커가 산출물 없이 실패한다(통제 실험으로 확인). 같은 서브에이전트라도 포그라운드 실행은 루프 종료까지 살아남아 정상 완료한다.
 
-#### command output monitoring
+driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `AGENTS.md`로 복사) → 이터레이션 루프. 매 이터는 새 `codex exec` 프로세스. 계산된 경로는 `loop.sh paths <spec>`.
 
-기본 ON. `--no-monitor`가 없으면 start 직후 `command output monitoring`를 붙인다. 기본 필터는 빈 줄과 단독 dot만 제외하고 stdout raw 라인을 통과시킨다. `--events-only`는 SKILL.md 차원 옵션이며 `loop.sh`로 전달하지 않는다 — 핵심 이벤트(`이터 #`, HALT, WARN, FAIL, ERROR, rate limit, codex 비정상, terminal 신호 감지)만 알림한다. `--no-monitor`가 함께 있으면 `--no-monitor`가 우선한다.
+#### 진행 관찰
+
+포그라운드 start 는 종료까지 블로킹하므로 실시간 진행을 보려면 loop 이 디스크에 남기는 실행 아티팩트를 따로 관찰한다 — 이터레이션 로그는 `loop.sh logs <spec>`, terminal 신호는 `signals/` 디렉토리(경로는 `loop.sh paths <spec>`)다. 백그라운드 서브에이전트 경유로 돌릴 때도 호출 세션은 이 아티팩트를 폴링해 진행을 확인한다.
 
 ### 신호 계약
 
