@@ -27,8 +27,8 @@ SKILL_DIR="$SCRIPT_DIR/.."
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REVIEW_SH="$SKILL_DIR/references/review.sh"
 AGENT_PROMPTS="$SKILL_DIR/references/agent-prompts.md"
-SCHEMA="$SKILL_DIR/references/output-schema.json"
-PERSONAS="$SKILL_DIR/../spec/references/personas.md"
+SCHEMA="$SKILL_DIR/../../shared/review/references/output-schema.json"
+PERSONAS="$SKILL_DIR/../../shared/spec/references/personas.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }

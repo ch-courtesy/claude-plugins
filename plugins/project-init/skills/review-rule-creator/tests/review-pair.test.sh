@@ -17,8 +17,20 @@ set -u
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SKILL="$DIR/SKILL.md"
-PRIN="$DIR/templates/principles.md"
-CADO="$DIR/templates/change-adoption.md"
+find_shared_templates() {
+  local p="$DIR"
+  while [ "$p" != "/" ]; do
+    if [ -d "$p/shared/review-rule-creator/templates" ]; then
+      printf '%s\n' "$p/shared/review-rule-creator/templates"
+      return 0
+    fi
+    p="$(dirname "$p")"
+  done
+  return 1
+}
+TEMPLATE_DIR="$(find_shared_templates)"
+PRIN="$TEMPLATE_DIR/principles.md"
+CADO="$TEMPLATE_DIR/change-adoption.md"
 
 fail=0
 check() { # desc, cmd...

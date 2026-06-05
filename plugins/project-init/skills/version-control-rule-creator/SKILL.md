@@ -17,18 +17,18 @@ allowed-tools:
 
 # version-control-rule-creator
 
-`templates/*.md` 중 하나를 `rules/version-control/<sub>.md`로 기록합니다. `<sub>`는 sub-룰 ID이며, 백엔드 변형을 가진 sub-룰은 git origin remote에서 자동 판별한 백엔드의 변형 본문을 씁니다.
+공통 템플릿 디렉터리 `../../shared/version-control-rule-creator/templates/`의 `*.md` 중 하나를 `rules/version-control/<sub>.md`로 기록합니다. `<sub>`는 sub-룰 ID이며, 백엔드 변형을 가진 sub-룰은 git origin remote에서 자동 판별한 백엔드의 변형 본문을 씁니다.
 
 본 스킬은 **버전 관리(VCS) 카테고리의 sub-룰 디스패처**입니다. 백엔드 변형을 가진 sub-룰(예: `review-approval`)은 사용자 메뉴 선택이 아니라 git origin remote URL 파싱으로 백엔드를 자동 판별해 그 변형 본문을 씁니다. 백엔드가 **git 계열**로 판별되면 git 계열 공통 지침(`git`)을 그 백엔드 룰셋의 **동반 출력**으로 함께 산출합니다 — git을 review-approval과 "둘 중 하나"로 고르게 하지 않습니다.
 
-이 카테고리의 첫 sub-룰은 변경 제안 심사·승인(`review-approval`)이며, 브랜치 전략·커밋 컨벤션 등 다른 git sub-룰로 확장할 수 있습니다. 새 백엔드나 새 sub-룰을 추가하려면 `templates/` 아래에 새 마크다운 파일을 두면 되고, **이 SKILL.md는 변경하지 않습니다**.
+이 카테고리의 첫 sub-룰은 변경 제안 심사·승인(`review-approval`)이며, 브랜치 전략·커밋 컨벤션 등 다른 git sub-룰로 확장할 수 있습니다. 새 백엔드나 새 sub-룰을 추가하려면 공통 템플릿 디렉터리 `../../shared/version-control-rule-creator/templates/` 아래에 새 마크다운 파일을 두면 되고, **이 SKILL.md는 변경하지 않습니다**.
 
 ## 템플릿 레이아웃과 파일명 규약
 
-이 파일 옆 `templates/` 아래에만 둡니다. 다른 경로는 탐색하지 않습니다.
+공통 템플릿 디렉터리 `../../shared/version-control-rule-creator/templates/` 아래에만 둡니다. 다른 경로는 탐색하지 않습니다.
 
-- `templates/<sub>.<backend>.md` — **백엔드 변형**을 가진 sub-룰. `<sub>`가 sub-룰 ID, `<backend>`가 백엔드 식별자(`github`·`gitlab`)입니다. 예: `review-approval.github.md`, `review-approval.gitlab.md`.
-- `templates/<sub>.md` — 백엔드 변형이 **없는** sub-룰(후속 확장용). 파일명에서 `.md`를 뺀 값이 sub-룰 ID입니다.
+- `../../shared/version-control-rule-creator/templates/<sub>.<backend>.md` — **백엔드 변형**을 가진 sub-룰. `<sub>`가 sub-룰 ID, `<backend>`가 백엔드 식별자(`github`·`gitlab`)입니다. 예: `review-approval.github.md`, `review-approval.gitlab.md`.
+- `../../shared/version-control-rule-creator/templates/<sub>.md` — 백엔드 변형이 **없는** sub-룰(후속 확장용). 파일명에서 `.md`를 뺀 값이 sub-룰 ID입니다.
 
 판정 규칙: 파일명에서 `.md`를 제거한 뒤, 남은 문자열에 점(`.`)이 있으면 마지막 점 뒤가 백엔드 식별자이고 앞이 sub-룰 ID입니다(백엔드 변형). 점이 없으면 그 자체가 sub-룰 ID입니다(변형 없음).
 
@@ -36,7 +36,7 @@ allowed-tools:
 
 ## 생성 절차
 
-1. **템플릿 열거.** `templates/*.md`만 읽습니다. 위 파일명 규약으로 각 파일의 sub-룰 ID와 (있으면) 백엔드 변형을 식별합니다. 같은 sub-룰 ID의 변형 집합을 묶습니다.
+1. **템플릿 열거.** 공통 템플릿 디렉터리 `../../shared/version-control-rule-creator/templates/*.md`만 읽습니다. 위 파일명 규약으로 각 파일의 sub-룰 ID와 (있으면) 백엔드 변형을 식별합니다. 같은 sub-룰 ID의 변형 집합을 묶습니다.
 
 2. **백엔드 판별 (후보 확정 전 1회).** 1단계에서 열거한 후보 중 백엔드 변형을 가진 sub-룰(예: `review-approval`)이 있거나 git 계열 여부에 따라 동반 산출되는 sub-룰(`git`)이 있으면, sub-룰을 선택하기 **전에** 백엔드를 1회 판별합니다. 이 판별 결과는 3단계의 git 계열 동반 산출 판정과 4단계의 백엔드 변형 본문 선택에서 **함께 재사용**하며 재판별하지 않습니다. git origin remote URL을 파싱해 호스트를 추출한 뒤, **공식 도메인은 호스트명 정밀 매칭으로(네트워크 호출 없음), self-hosted 호스트는 부작용 없는 read-only API probe로** 백엔드를 판별합니다. **호스트명 substring 매칭은 쓰지 않습니다**(`github-mirror.*`·`mygithub.com` 류 오판별 방지).
    - origin URL은 `git remote get-url origin`(또는 `git config --get remote.origin.url`)으로 읽습니다.
@@ -55,7 +55,7 @@ allowed-tools:
 3. **sub-룰 선택과 git 공통 동반 산출.** 후보 sub-룰을 두 부류로 나눠 처리합니다.
 
    - **백엔드 변형 sub-룰과 그 밖의 sub-룰(`review-approval` 등).** sub-룰 ID가 하나면 자동 선택하고 둘 이상이면 `AskUserQuestion` single-select로 고릅니다. 이렇게 고른 sub-룰을 기록합니다. 단순 재실행으로 이 선택을 바꾸지 않습니다.
-   - **git 계열 공통 sub-룰(`git`)은 사용자 선택지가 아닙니다.** `templates/git.md`(백엔드 변형 없음, 출력 `rules/version-control/git.md`)는 **2단계 판별이 git 계열일 때 자동으로 함께 산출되는 동반 출력**입니다. review-approval과 "둘 중 하나"로 고르게 하는 메뉴 항목으로 노출하지 않습니다.
+   - **git 계열 공통 sub-룰(`git`)은 사용자 선택지가 아닙니다.** `../../shared/version-control-rule-creator/templates/git.md`(백엔드 변형 없음, 출력 `rules/version-control/git.md`)는 **2단계 판별이 git 계열일 때 자동으로 함께 산출되는 동반 출력**입니다. review-approval과 "둘 중 하나"로 고르게 하는 메뉴 항목으로 노출하지 않습니다.
      - 판별된 백엔드를 git 계열로 분류하는 **정적 매핑**만 둡니다: `github`·`gitlab`은 git 계열입니다. 이 정적 매핑이 git 계열 분류의 단일 출처이며, 매핑에 없는 백엔드의 기본값은 **"git 계열 아님"**입니다. 향후 비-git 백엔드는 이 매핑에 넣지 않는 것만으로 동반 산출에서 자연히 빠집니다.
      - 2단계 판별이 **git 계열이면**: 위에서 고른 백엔드 변형 sub-룰(review-approval)과 git 공통 지침(`rules/version-control/git.md`)을 **함께 산출**합니다.
      - **git 계열이 아니면**: git 공통 지침을 산출하지 않습니다. 사용자에게는 산출 대상이 무엇인지만 안내하고, git이 왜 공통으로 분리됐는지·분류 기준 같은 내부 사정은 노출하지 않습니다.
@@ -83,7 +83,7 @@ allowed-tools:
 
 - 본 스킬은 `rules/version-control/` 아래 sub-룰 파일만 생성·갱신합니다. 한 실행에서 기록하는 백엔드 변형 sub-룰은 하나이며, 백엔드가 git 계열이면 git 공통 지침(`git.md`)을 그 **동반 출력**으로 함께 기록합니다. 카테고리 밖 파일이나 다른 카테고리의 기존 지침(범용 리뷰 원칙 `rules/review.md`·릴리스 버전 지침 `rules/engineering/versioning.md` 포함)은 변경하지 않습니다.
 - 백엔드 변형 sub-룰은 한 번의 호출에서 하나만 고릅니다. git 계열일 때 동반 산출되는 git 공통 지침은 그 예외로, 백엔드 변형 sub-룰과 `git.md`가 함께 기록됩니다. 템플릿 본문을 서로 합치지는 않습니다.
-- 템플릿 본문은 그대로 복사합니다. SKILL.md에 본문별 로직을 추가하지 않습니다. 새 백엔드·새 sub-룰은 `templates/` 파일 추가만으로 확장하며 이 SKILL.md를 수정하지 않습니다.
+- 템플릿 본문은 그대로 복사합니다. SKILL.md에 본문별 로직을 추가하지 않습니다. 새 백엔드·새 sub-룰은 공통 템플릿 디렉터리 `../../shared/version-control-rule-creator/templates/` 파일 추가만으로 확장하며 이 SKILL.md를 수정하지 않습니다.
 - 백엔드 판별은 **공식 도메인 호스트명 정밀 매칭(네트워크 없음) + self-hosted read-only API probe**로 수행합니다. 호스트명 substring 매칭은 쓰지 않으며, 정밀 매칭에도 probe에도 걸리지 않으면(inconclusive 포함) 추측 없이 중단하고 안내합니다.
 - 기존 sub-룰 파일은 사용자 명시 동의 없이는 절대 덮어쓰지 않습니다. 단순 재실행으로 sub-룰·백엔드를 바꾸지 않습니다.
 

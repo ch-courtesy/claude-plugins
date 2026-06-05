@@ -24,16 +24,16 @@ allowed-tools:
 
 ## 템플릿 레이아웃
 
-이 파일 옆 `templates/` 아래:
+공통 템플릿 디렉터리 `../../shared/context-rule-creator/templates/` 아래:
 
-- `templates/<backend>/task-model.md` — 백엔드별 task-model 본문. 이 파일의 frontmatter가 백엔드 선택 메타데이터입니다.
-- `templates/task-ops.md` — 모든 백엔드가 공유하는 백엔드 무관 task-ops 본문(frontmatter 없음).
+- `../../shared/context-rule-creator/templates/<backend>/task-model.md` — 백엔드별 task-model 본문. 이 파일의 frontmatter가 백엔드 선택 메타데이터입니다.
+- `../../shared/context-rule-creator/templates/task-ops.md` — 모든 백엔드가 공유하는 백엔드 무관 task-ops 본문(frontmatter 없음).
 
-`<backend>`는 백엔드 id(예: `filesystem`, `github-project`)이며 상호배타적 단일 선택지입니다. 새 백엔드를 추가하려면 `templates/` 아래에 `task-model.md`를 담은 새 디렉터리를 두면 되고, 이 SKILL.md는 변경하지 않습니다.
+`<backend>`는 백엔드 id(예: `filesystem`, `github-project`)이며 상호배타적 단일 선택지입니다. 새 백엔드를 추가하려면 공통 템플릿 디렉터리 `../../shared/context-rule-creator/templates/` 아래에 `task-model.md`를 담은 새 디렉터리를 두면 되고, 이 SKILL.md는 변경하지 않습니다.
 
 ## 생성 절차
 
-1. **백엔드 열거.** `templates/` 아래에서 `task-model.md`를 가진 서브디렉터리만 백엔드 후보로 삼습니다. 디렉터리명이 백엔드 id입니다. 공유 본문 `templates/task-ops.md`도 읽어 둡니다. 다른 경로는 탐색하지 않습니다.
+1. **백엔드 열거.** 공통 템플릿 디렉터리 `../../shared/context-rule-creator/templates/` 아래에서 `task-model.md`를 가진 서브디렉터리만 백엔드 후보로 삼습니다. 디렉터리명이 백엔드 id입니다. 공유 본문 `../../shared/context-rule-creator/templates/task-ops.md`도 읽어 둡니다. 다른 경로는 탐색하지 않습니다.
 
 2. **frontmatter 파싱.** 각 백엔드의 `task-model.md` frontmatter를 읽습니다.
    - `label` 필수, 옵션 라벨입니다.
@@ -67,7 +67,7 @@ allowed-tools:
 
 6. **본문 조립.** 두 산출물 본문을 조립합니다.
    - task-model 본문: 선택된 백엔드 `task-model.md`의 frontmatter를 제거한 본문에 4·5단계 수집값을 치환합니다.
-   - task-ops 본문: 공유 `templates/task-ops.md` 본문에 5단계 수집값을 치환합니다.
+   - task-ops 본문: 공유 `../../shared/context-rule-creator/templates/task-ops.md` 본문에 5단계 수집값을 치환합니다.
    - "기본 흐름:" 줄의 `{{transition_order}}`는 사용자 입력이 아니라, 순서가 정해진 on-path 이벤트들의 목표 상태(`{{event_initial}}` → `{{event_plan_doc}}` → `{{event_impl_start}}` → `{{event_review_start}}` → `{{event_merge_done}}`)를 종합해 자동으로 채웁니다. 차단·해제 같은 off-path 이벤트는 기본 흐름에 포함하지 않습니다. on-path 이벤트의 목표 상태가 누락되면 그 자리는 placeholder를 보존합니다.
    - 수집되지 않은 값의 `{{...}}` placeholder는 그대로 보존합니다.
 

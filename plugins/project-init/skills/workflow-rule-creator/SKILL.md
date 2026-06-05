@@ -14,17 +14,17 @@ allowed-tools:
 
 # workflow-rule-creator
 
-`templates/*.md` 중 하나를 `rules/workflow/<sub>.md`로 기록합니다. `<sub>`는 템플릿 파일명에서 확장자를 뺀 값입니다. 선택지, 입력값, 사후 작업은 템플릿 frontmatter에서 도출합니다.
+공통 템플릿 디렉터리 `../../shared/workflow-rule-creator/templates/`의 `*.md` 중 하나를 `rules/workflow/<sub>.md`로 기록합니다. `<sub>`는 템플릿 파일명에서 확장자를 뺀 값입니다. 선택지, 입력값, 사후 작업은 템플릿 frontmatter에서 도출합니다.
 
 본 스킬은 **워크플로 카테고리의 sub-룰 디스패처**입니다. 형제 스킬(`engineering-rule-creator`)과 동형으로, 같은 워크플로 카테고리 아래 여러 sub-룰(SPEC 설계 산출물 레이아웃·게이트 등 — 후속 task에서 확장)을 호출마다 하나씩 디렉터리 구조로 누적합니다.
 
 워크플로 카테고리는 하나의 변경이 설계 → 구현 → 리뷰 → 반복 → 완료로 진행하는 개발 흐름의 "얇은 척추(spine)"입니다 — 흐름·게이트와 단계별 영속 설계 산출물(SPEC 등)의 경로/레이아웃만 정의하고, 기계적 관심사는 기존 직교 축에 위임합니다: 작업 상태 추적은 context, 변경 통합·머지는 version-control, 빌드·버전은 engineering. 본 스킬이 만드는 sub-룰은 그 흐름·레이아웃 정의뿐이며, 위 축들의 기존 지침을 중복 정의하거나 건드리지 않습니다.
 
-새 sub-룰을 추가하려면 `templates/` 아래에 새 마크다운 파일을 두면 되고, 이 SKILL.md는 변경하지 않습니다.
+새 sub-룰을 추가하려면 공통 템플릿 디렉터리 `../../shared/workflow-rule-creator/templates/` 아래에 새 마크다운 파일을 두면 되고, 이 SKILL.md는 변경하지 않습니다.
 
 ## 생성 절차
 
-1. **템플릿 열거.** 이 파일 옆 `templates/*.md`만 읽습니다. 다른 경로를 탐색하지 않습니다. 파일명에서 확장자를 뺀 값이 sub-룰 ID입니다.
+1. **템플릿 열거.** 공통 템플릿 디렉터리 `../../shared/workflow-rule-creator/templates/*.md`만 읽습니다. 다른 경로를 탐색하지 않습니다. 파일명에서 확장자를 뺀 값이 sub-룰 ID입니다.
 
 2. **frontmatter 파싱.**
    - `label` 필수, 옵션 라벨입니다.

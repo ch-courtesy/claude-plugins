@@ -48,7 +48,7 @@ allowed-tools:
 
 ### 1. 컨텍스트 탐색
 
-`git log --oneline -5`, `ls -A`, 선택적 `cat CLAUDE.md`, `ls rules/`, 얕은 테스트 디렉터리 탐색으로 테스트 컨벤션·룰·구조만 요약한다. 부족하면 `references/agent-prompts.md`의 `spec-context-explorer`를 Agent로 위임한다. 권장 도입 휴리스틱: 적용 룰이 많음, 기존 SPEC 선례가 많음, multi-file 영향, 자연어 의도만 있음. subagent는 사실 수집만 하며 결정·합성은 메인 책임이다(헌법 §11.6, 이터 내 서브 도구 위임).
+`git log --oneline -5`, `ls -A`, 선택적 `cat CLAUDE.md`, `ls rules/`, 얕은 테스트 디렉터리 탐색으로 테스트 컨벤션·룰·구조만 요약한다. 부족하면 `../../shared/spec/references/agent-prompts.md`의 `spec-context-explorer`를 Agent로 위임한다. 권장 도입 휴리스틱: 적용 룰이 많음, 기존 SPEC 선례가 많음, multi-file 영향, 자연어 의도만 있음. subagent는 사실 수집만 하며 결정·합성은 메인 책임이다(헌법 §11.6, 이터 내 서브 도구 위임).
 
 ### 2. 범위 분해 게이트
 
@@ -68,7 +68,7 @@ allowed-tools:
 
 ### 5. SPEC 문서 작성
 
-`references/spec-template.md` placeholder를 치환한다: `{{task_title}}`, `{{task_description}}`, `{{purpose}}`, `{{acceptance_criteria}}`, `{{scope_in}}`, `{{scope_out}}`, `{{scope_include}}`, `{{depends_on}}`, `{{constraints}}`, `{{risks}}`. `{{task_description}}`(무엇을 만들 것인가)는 **WHAT/HOW 방어선**을 지킨다 — 무엇을 만들지만 적고 기술 스택·파일 경로·라이브러리·클래스명 같은 HOW는 제약으로 옮긴다. `{{purpose}}`(목적/왜)는 "무엇을 만들 것인가" 뒤·"완료 조건" 앞의 **별도 목적 섹션**에 1–3문장으로 변경의 목표·동기를 적는다 — 목적은 완료 조건의 **종속 앵커**일 뿐 **검증 기준이 아니므로**, 완료 조건(트리거·조건·응답)에 인코딩하지 않는다. 인터뷰에서 변경의 목적(왜)이 모호성 없이 잡히지 않았으면 목적 섹션 자리에 `[NEEDS CLARIFICATION: 왜 ...]` 마커를 남긴다. 수용 기준 섹션은 사용자에게 노출되는 라벨로 **"완료 조건"**을 쓰며 어려운 영문 약어를 쓰지 않는다 — 5문장 패턴(항상 / …할 때 / …인 동안 / …이면(오류) / …기능이 켜지면)과 언어 규칙은 `references/ears-patterns.md`를 따르되, 각 조건은 여전히 관찰 가능·독립 테스트 가능해야 한다(내부 검증 구조 보존). 검증 섹션은 검증 진입 명령을 싣지 않는다 — 완료 조건이 인수 바의 단일 출처이고 진입 명령은 프로젝트 규칙(`rules/`)에서 온다는 명시 문구만 둔다. 미해결 항목은 `[NEEDS CLARIFICATION: <구체 질문>]` 마커로 남긴다.
+`references/spec-template.md` placeholder를 치환한다: `{{task_title}}`, `{{task_description}}`, `{{purpose}}`, `{{acceptance_criteria}}`, `{{scope_in}}`, `{{scope_out}}`, `{{scope_include}}`, `{{depends_on}}`, `{{constraints}}`, `{{risks}}`. `{{task_description}}`(무엇을 만들 것인가)는 **WHAT/HOW 방어선**을 지킨다 — 무엇을 만들지만 적고 기술 스택·파일 경로·라이브러리·클래스명 같은 HOW는 제약으로 옮긴다. `{{purpose}}`(목적/왜)는 "무엇을 만들 것인가" 뒤·"완료 조건" 앞의 **별도 목적 섹션**에 1–3문장으로 변경의 목표·동기를 적는다 — 목적은 완료 조건의 **종속 앵커**일 뿐 **검증 기준이 아니므로**, 완료 조건(트리거·조건·응답)에 인코딩하지 않는다. 인터뷰에서 변경의 목적(왜)이 모호성 없이 잡히지 않았으면 목적 섹션 자리에 `[NEEDS CLARIFICATION: 왜 ...]` 마커를 남긴다. 수용 기준 섹션은 사용자에게 노출되는 라벨로 **"완료 조건"**을 쓰며 어려운 영문 약어를 쓰지 않는다 — 5문장 패턴(항상 / …할 때 / …인 동안 / …이면(오류) / …기능이 켜지면)과 언어 규칙은 `../../shared/spec/references/ears-patterns.md`를 따르되, 각 조건은 여전히 관찰 가능·독립 테스트 가능해야 한다(내부 검증 구조 보존). 검증 섹션은 검증 진입 명령을 싣지 않는다 — 완료 조건이 인수 바의 단일 출처이고 진입 명령은 프로젝트 규칙(`rules/`)에서 온다는 명시 문구만 둔다. 미해결 항목은 `[NEEDS CLARIFICATION: <구체 질문>]` 마커로 남긴다.
 
 분해 발행(step 2의 N개)에서는 단위마다 템플릿을 한 번씩 치환해 문서를 만들고, 각 문서의 `{{depends_on}}`에 선행 단위 slug 목록을 기록한다(`depends_on: ["<slug>"]`). 단일 발행이면 `{{depends_on}}` 줄을 제거한다.
 
@@ -76,11 +76,11 @@ allowed-tools:
 
 ### 6. 자체 검토
 
-`references/self-review.md` 5축(placeholder, 모순, 범위, 모호성, 검증 가능성)을 검사한다. 수정 또는 `[NEEDS CLARIFICATION]` 마커만 남기고 사용자 Q&A와 재루프는 하지 않는다.
+`../../shared/spec/references/self-review.md` 5축(placeholder, 모순, 범위, 모호성, 검증 가능성)을 검사한다. 수정 또는 `[NEEDS CLARIFICATION]` 마커만 남기고 사용자 Q&A와 재루프는 하지 않는다.
 
-5축에 더해, 기존 규모 임계(`references/self-review.md`가 단일 출처)가 충족되면 세 **적대 렌즈**(반대 가정·최소 해법·구속력 있는 제약)를 가산 적용한다 — 렌즈 정의의 단일 출처는 `references/personas.md`이며 이 단계는 복제하지 않고 참조한다. 임계 미만이면 적대 렌즈는 발동하지 않는다. 적대 렌즈는 발견만 보고하고 새 사용자 Q&A 라운드 없이 단일 패스로 종료하며, 발견 반영(수정·마커 삽입)은 메인이 한다. 적대 렌즈는 5축을 약화·우회하지 않고 가산한다.
+5축에 더해, 기존 규모 임계(`../../shared/spec/references/self-review.md`가 단일 출처)가 충족되면 세 **적대 렌즈**(반대 가정·최소 해법·구속력 있는 제약)를 가산 적용한다 — 렌즈 정의의 단일 출처는 `../../shared/spec/references/personas.md`이며 이 단계는 복제하지 않고 참조한다. 임계 미만이면 적대 렌즈는 발동하지 않는다. 적대 렌즈는 발견만 보고하고 새 사용자 Q&A 라운드 없이 단일 패스로 종료하며, 발견 반영(수정·마커 삽입)은 메인이 한다. 적대 렌즈는 5축을 약화·우회하지 않고 가산한다.
 
-규모 임계가 충족되면 `references/agent-prompts.md`의 `spec-self-reviewer`(5축 + 적대 렌즈)를 권장 도입한다. subagent는 발견만 보고하고 수정·마커 박기는 메인이 한다.
+규모 임계가 충족되면 `../../shared/spec/references/agent-prompts.md`의 `spec-self-reviewer`(5축 + 적대 렌즈)를 권장 도입한다. subagent는 발견만 보고하고 수정·마커 박기는 메인이 한다.
 
 ### 7. 최종 승인 + 구현 스킬 추천 (옵트인 핸드오프)
 
