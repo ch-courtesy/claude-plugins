@@ -22,7 +22,7 @@ fsd 자동 파이프라인이 SPEC을 떠서 곧바로 구현을 위임하면 "�
 - **항상**, `fsd start`는 입력 SPEC 문서(들)를 `dispatch`에 위임하기 전에 그 SPEC 문서(들)가 타겟 통합 브랜치에 머지되어 있도록 보장한다 — dispatch 위임이 시작되는 시점에 타겟 브랜치의 git 이력에 해당 SPEC 문서 commit이 존재한다.
 - **항상**, 타겟 통합 브랜치는 리터럴 `main`으로 하드코딩하지 않고 레포의 기본 통합 브랜치를 감지해 결정한다 — 기본 브랜치가 `main`이 아닌 레포에서도 그 기본 브랜치에 SPEC이 안착한다.
 - 입력 SPEC이 이미 타겟 브랜치에 같은 내용으로 올라가 있을 때, 머지 단계는 새 commit을 만들지 않고 통과하며 같은 SPEC으로 `start`를 재실행해도 중복 SPEC commit이 생기지 않는다(멱등).
-- 입력 SPEC 중 하나라도 미해결 `[NEEDS CLARIFICATION` 마커를 포함하면, SPEC을 타겟 브랜치에 올리지도 dispatch에 위임하지도 않고 기존 미해결-마커 가드대로 `state=needs-clarification`으로 차단한다 — 미완 SPEC은 타겟 브랜치 이력에 남지 않는다.
+- 입력 SPEC 중 하나라도 미해결 명확화 마커(여는 대괄호 + `NEEDS CLARIFICATION` 토큰으로 시작)를 포함하면, SPEC을 타겟 브랜치에 올리지도 dispatch에 위임하지도 않고 기존 미해결-마커 가드대로 `state=needs-clarification`으로 차단한다 — 미완 SPEC은 타겟 브랜치 이력에 남지 않는다.
 - SPEC을 타겟 브랜치에 fast-forward 머지하거나 원격에 반영하지 못하면(비-fast-forward·push 거부 등 **오류**이면), `start`는 `dispatch` 위임을 시작하지 않고 중단하며, SPEC이 타겟 브랜치에 안착하지 못했음과 PR 흐름·재시도 안내를 출력하고, 어떤 경우에도 force push를 하지 않는다.
 - **항상**, 이 변경 후에도 `spec` 스킬 정의 파일은 수정되지 않는다 — SPEC을 브랜치에 반영하는 책임은 fsd(오케스트레이터)에만 있고 spec은 SPEC 문서만 산출하는 불변식이 보존된다.
 
