@@ -13,6 +13,8 @@
 #  C3 start/acquire_lock 활성 판정에 worker(orphan 포함) 생존 반영 → 더블 start 거부
 #  C4 stale(driver·worker 모두 사망) → 락 정리 후 진행
 #  C5 주입 가능 인터페이스 결정적 selftest (본 파일 자체가 증거)
+#  C6 자손 열거 불가(pgrep/ps 부재 모사 = 자식 미발견) 시에도 명시 추적된
+#     driver+worker 종료·사망 확인 — 발견 의존 없이 거짓 성공 금지
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -172,6 +174,40 @@ echo 901 > "$SPEC_DIR_T/.loop-worker"
 ( compute_paths "$SPEC_T"; acquire_lock ) >/dev/null 2>&1
 rc=$?
 [[ $rc -eq 0 ]] && pass "E2 acquire_lock proceeds on stale" || bad "E2 acquire_lock stale rc=$rc"
+
+# ---------------------------------------------------------------------------
+# F. 자손 열거 불가(pgrep/ps 부재) 경로 (C6)
+#   PCHILDREN 를 비워 자손 미발견을 모사(실제 proc_children 의 pgrep·ps 부재 출력과
+#   동일). worker 는 자식으로 안 잡혀도 cmd_stop 이 명시 추적(tree_pids "$worker_pid")
+#   하므로 종료·사망 확인되어야 한다 — 발견 의존 없이 보수적.
+# ---------------------------------------------------------------------------
+# F1: 자손 열거 불가 + driver·worker term → 명시 추적 worker 종료·확인 → rc 0, 파일 제거
+reset_table
+PALIVE[1000]=1; PALIVE[1001]=1; POLICY[1000]=term; POLICY[1001]=term   # PCHILDREN 비움
+echo 1000 > "$SPEC_DIR_T/.loop-lock"
+echo 1001 > "$SPEC_DIR_T/.loop-worker"
+( TERM_WAIT_TRIES=2 KILL_WAIT_TRIES=2 cmd_stop "$SPEC_T" ) >/dev/null 2>&1
+rc=$?
+if [[ $rc -eq 0 && ! -f "$SPEC_DIR_T/.loop-lock" && ! -f "$SPEC_DIR_T/.loop-worker" ]]; then
+  pass "F1 자손 열거 불가에도 명시 추적 worker 종료·확인 → 성공"
+else
+  bad "F1 rc=$rc lock=$([[ -f $SPEC_DIR_T/.loop-lock ]] && echo y || echo n) worker=$([[ -f $SPEC_DIR_T/.loop-worker ]] && echo y || echo n)"
+fi
+
+# F2: 자손 열거 불가 + worker immortal → SIGKILL 후도 생존 → rc 비-0·락 유지·성공선언 없음
+reset_table
+PALIVE[1100]=1; PALIVE[1101]=1; POLICY[1100]=term; POLICY[1101]=immortal   # PCHILDREN 비움
+echo 1100 > "$SPEC_DIR_T/.loop-lock"
+echo 1101 > "$SPEC_DIR_T/.loop-worker"
+out=$( ( TERM_WAIT_TRIES=2 KILL_WAIT_TRIES=2 cmd_stop "$SPEC_T" ) 2>&1 )
+rc=$?
+if [[ $rc -ne 0 && -f "$SPEC_DIR_T/.loop-lock" && -f "$SPEC_DIR_T/.loop-worker" ]] \
+   && [[ "$out" != *"사망 확인"* ]]; then
+  pass "F2 자손 열거 불가+immortal worker → 비-0·락 유지·성공선언 없음"
+else
+  bad "F2 rc=$rc lock_kept=$([[ -f $SPEC_DIR_T/.loop-lock ]] && echo y || echo n) out=$out"
+fi
+rm -f "$SPEC_DIR_T/.loop-lock" "$SPEC_DIR_T/.loop-worker"
 
 echo
 if [[ $fail -eq 0 ]]; then
