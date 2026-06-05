@@ -67,17 +67,80 @@ spec_key() {
 # 함수 source가 claude·yq 부재에도 동작하도록.
 require_tool git
 
-# ----- 시그널 처리: SIGTERM/SIGINT 시 자식 트리 정리 (orphan 방지) -----
-kill_descendants() {
-  local parent="$1" child
-  for child in $(pgrep -P "$parent" 2>/dev/null || true); do
-    kill_descendants "$child"
-    kill -TERM "$child" 2>/dev/null || true
+# ----- 주입 가능 프로세스 인터페이스 -----
+# 생존 확인·종료(kill)·대기(sleep)·자식 열거를 함수로 감싸 selftest 가 실제
+# 프로세스 없이 모사 프로세스 테이블로 override 해 결정적으로 검증할 수 있게 한다.
+# 자손 열거는 pgrep/ps 가용성에 의존 — 부재 시 빈 출력(보수적). 사망 미확인이면
+# 호출자(stop)가 성공을 선언하지 않으므로 보수적 처리가 거짓 성공으로 이어지지 않는다.
+proc_alive()    { kill -0 "$1" 2>/dev/null; }
+proc_term()     { kill -TERM "$1" 2>/dev/null || true; }
+proc_kill()     { kill -KILL "$1" 2>/dev/null || true; }
+proc_sleep()    { sleep "$1"; }
+proc_children() {
+  local parent="$1"
+  if command -v pgrep >/dev/null 2>&1; then
+    pgrep -P "$parent" 2>/dev/null || true
+  elif command -v ps >/dev/null 2>&1; then
+    ps -o pid= --ppid "$parent" 2>/dev/null | tr -d ' ' || true
+  fi
+}
+
+# 프로세스 트리 스냅샷: root + 모든 자손 PID(줄단위). 종료 전에 스냅샷해야
+# 부모 사망 후 reparent 로 끊긴 자손도 추적할 수 있다.
+tree_pids() {
+  local root="$1" child
+  printf '%s\n' "$root"
+  for child in $(proc_children "$root"); do
+    tree_pids "$child"
   done
 }
 
+# 주어진 PID 목록 중 살아있는 것만 출력(줄단위).
+list_alive_pids() {
+  local pids="$1" p
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && proc_alive "$p" && printf '%s\n' "$p"
+  done <<< "$pids"
+}
+
+# 트리 완결 종료: SIGTERM 전체 → 대기 → 미사망에 SIGKILL → 대기 → 남은 생존자
+# 를 stdout 으로 출력. 생존자가 없으면 빈 출력(성공). 호출자는 stdout 비었는지로
+# 전 프로세스 사망 여부를 판정한다.
+terminate_pids() {
+  local pids="$1" p i
+  while IFS= read -r p; do [[ -n "$p" ]] && proc_term "$p"; done <<< "$pids"
+  i=0
+  while [[ $i -lt ${TERM_WAIT_TRIES:-5} ]]; do
+    [[ -z "$(list_alive_pids "$pids")" ]] && return 0
+    proc_sleep 1; i=$((i + 1))
+  done
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && proc_alive "$p" && proc_kill "$p"
+  done <<< "$pids"
+  i=0
+  while [[ $i -lt ${KILL_WAIT_TRIES:-3} ]]; do
+    [[ -z "$(list_alive_pids "$pids")" ]] && return 0
+    proc_sleep 1; i=$((i + 1))
+  done
+  list_alive_pids "$pids"
+}
+
+# 활성 판정: driver 또는 worker(자식 실행기) 중 하나라도 살아있으면 0(active).
+# 둘 다 죽었으면 1(stale). orphan(driver 죽고 worker 만 생존)도 active 로 본다.
+run_active() {
+  local driver_pid="$1" worker_pid="$2"
+  [[ -n "$driver_pid" ]] && proc_alive "$driver_pid" && return 0
+  [[ -n "$worker_pid" ]] && proc_alive "$worker_pid" && return 0
+  return 1
+}
+
+# ----- 시그널 처리: SIGTERM/SIGINT 시 워커 트리 완결 종료 (orphan 방지) -----
 on_signal_exit() {
-  [[ -n "${CLAUDE_PID:-}" ]] && kill_descendants "$CLAUDE_PID"
+  if [[ -n "${CLAUDE_PID:-}" ]]; then
+    local tree
+    tree=$(tree_pids "$CLAUDE_PID" 2>/dev/null | grep -E '^[0-9]+$' | sort -un)
+    terminate_pids "$tree" >/dev/null || true
+  fi
   exit 130
 }
 
@@ -115,6 +178,7 @@ compute_paths() {
   WT="$SPEC_DIR/.worktree"
   LOOP_DIR="$WT/.loop"
   LOCK_FILE="$SPEC_DIR/.loop-lock"   # 스펙 디렉토리에 colocate — 워크트리 생성 전에 획득해 race 보호
+  WORKER_FILE="$SPEC_DIR/.loop-worker" # 현재 이터의 워커(자식 실행기) PID — orphan 활성 판정용
 }
 
 # 실제 WT 영구 메타 읽기 — start 가 작성한 <SPEC_DIR>/.loop-wt 가 있으면 그 값으로
@@ -135,23 +199,40 @@ resolve_actual_wt() {
   return 0
 }
 
+# 종료 시 락 해제 — 단, 워커 트리가 살아있으면 락을 유지해 orphan 워커를 보호한다.
+# (signal-triggered exit 에서 on_signal_exit 가 트리를 완결 종료하므로 정상 경로엔
+#  생존자가 없다. immortal 워커 같은 병리적 경우에만 락이 유지된다.)
+release_lock_on_exit() {
+  local survivors=""
+  [[ -n "${CLAUDE_PID:-}" ]] \
+    && survivors=$(list_alive_pids "$(tree_pids "$CLAUDE_PID" 2>/dev/null | grep -E '^[0-9]+$' | sort -un)")
+  if [[ -n "$survivors" ]]; then
+    echo "[$(now_iso)] WARN: 종료 시 워커 생존 — 락 유지(orphan 보호): ${survivors//$'\n'/ }" >&2
+    return
+  fi
+  rm -f "$LOCK_FILE" "$WORKER_FILE"
+}
+
 # ----- 동시성 락 -----
 acquire_lock() {
-  # stale lock 정리 (PID 비활성 시)
+  # stale lock 정리 — 단, 활성 판정은 driver PID 뿐 아니라 worker(자식 실행기,
+  # orphan 포함) 생존까지 본다. driver 죽고 worker 만 남은 orphan 도 "실행 중"으로
+  # 판정해 두 번째 start 를 거부한다.
   if [[ -f "$LOCK_FILE" ]]; then
-    local old_pid
+    local old_pid worker_pid=""
     old_pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
-    if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
-      die "이미 실행 중입니다 (PID $old_pid): $SPEC_PATH\n정지: $0 stop $SPEC_PATH"
+    [[ -f "$WORKER_FILE" ]] && worker_pid=$(cat "$WORKER_FILE" 2>/dev/null || echo "")
+    if run_active "$old_pid" "$worker_pid"; then
+      die "이미 실행 중입니다 (driver PID ${old_pid:-?}, worker PID ${worker_pid:-none}): $SPEC_PATH\n정지: $0 stop $SPEC_PATH"
     fi
-    echo "[$(now_iso)] WARN: stale lock 정리 (PID ${old_pid:-?} 비활성)" >&2
-    rm -f "$LOCK_FILE"
+    echo "[$(now_iso)] WARN: stale lock 정리 (driver PID ${old_pid:-?}·worker PID ${worker_pid:-none} 모두 비활성)" >&2
+    rm -f "$LOCK_FILE" "$WORKER_FILE"
   fi
   # 원자적 획득 (noclobber): 두 start 동시 진입 시 한 쪽만 성공.
   ( set -C; echo "$$" > "$LOCK_FILE" ) 2>/dev/null \
     || die "lock 획득 실패 (race): $LOCK_FILE"
-  # EXIT trap으로 lock 해제. 작업 공간(.worktree/)은 cleanup까지 유지.
-  trap 'rm -f "$LOCK_FILE"' EXIT
+  # EXIT trap으로 lock 해제(워커 트리 사망 확인 시에만). 작업 공간(.worktree/)은 cleanup까지 유지.
+  trap 'release_lock_on_exit' EXIT
   trap on_signal_exit INT TERM
 }
 
@@ -374,8 +455,12 @@ iterate() {
       > ".loop/iterations/$n.log" 2>&1
   ) &
   CLAUDE_PID=$!
+  # 워커 PID 영속 — driver 가 죽고 워커만 남는 orphan 을 다음 start/stop 이 감지.
+  printf '%s\n' "$CLAUDE_PID" > "$WORKER_FILE" 2>/dev/null || true
   wait "$CLAUDE_PID" || exit_code=$?
   CLAUDE_PID=""
+  # 워커 정상 종료 — orphan 아님. 워커 PID 메타 정리.
+  rm -f "$WORKER_FILE" 2>/dev/null || true
 
   echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 게이트 검사..."
 
@@ -462,7 +547,7 @@ prepare_workspace() {
   # 자동 제외. enclosing worktree(보조 포함)에서 중첩 .worktree/ 가 untracked 로
   # 노출되지 않게 공통 git 디렉토리의 info/exclude 에 등록한다(모든 worktree 공유).
   # .loop-lock 은 SPEC_DIR 레벨이라 별도 패턴 필요. .loop/ 는 안전망 중복.
-  for pat in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt"; do
+  for pat in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt" ".loop-worker"; do
     grep -qxF "$pat" "$gcd/info/exclude" 2>/dev/null || echo "$pat" >> "$gcd/info/exclude"
   done
 }
@@ -559,8 +644,12 @@ print_run_status() {
   fi
   state="idle"
   if [[ -f "$lock" ]]; then
-    local pid; pid=$(cat "$lock" 2>/dev/null || echo "")
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then state="running"; else state="stale"; fi
+    # 활성 판정은 driver PID 뿐 아니라 worker(자식 실행기, orphan 포함) 생존까지 본다.
+    # driver 죽고 worker 만 남은 orphan 도 running 으로 표기(stale 오인 방지).
+    local pid worker_pid=""
+    pid=$(cat "$lock" 2>/dev/null || echo "")
+    [[ -f "$spec_dir/.loop-worker" ]] && worker_pid=$(cat "$spec_dir/.loop-worker" 2>/dev/null || echo "")
+    if run_active "$pid" "$worker_pid"; then state="running"; else state="stale"; fi
   elif [[ "$files" != "-" ]]; then
     state="terminal"
   fi
@@ -672,6 +761,10 @@ cmd_status() {
 cmd_list() { cmd_status ""; }
 
 # ----- subcommand: stop -----
+# 워커 프로세스 트리(드라이버·자식·자손)를 완결 종료한다: 트리 스냅샷 → SIGTERM →
+# 미사망에 SIGKILL 에스컬레이션 → 전 프로세스 사망 확인 후에만 락 해제 + 정상 정지
+# 선언. 생존이 남으면 락을 유지한 채 비-0 으로 실패를 보고한다(생존 중 "정상 정지"
+# 금지). stop 이 직접 트리를 종료하므로 wedged 드라이버에도 강건하다.
 cmd_stop() {
   local input="$1"
   [[ -z "$input" ]] && die "사용: $0 stop <spec-path>"
@@ -679,20 +772,33 @@ cmd_stop() {
   [[ -f "$LOCK_FILE" ]] || die "활성 실행이 없습니다: $SPEC_PATH"
   local pid; pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
   [[ -z "$pid" ]] && die "락 파일에서 PID 읽기 실패"
-  if ! kill -0 "$pid" 2>/dev/null; then
-    echo "[$(now_iso)] WARN: PID $pid 비활성 (stale). 락만 정리." >&2
-    rm -f "$LOCK_FILE"; return 0
+  local worker_pid=""
+  [[ -f "$WORKER_FILE" ]] && worker_pid=$(cat "$WORKER_FILE" 2>/dev/null || echo "")
+
+  # driver·worker 모두 죽은 stale → 락·워커 메타만 정리(종료할 트리 없음).
+  if ! run_active "$pid" "$worker_pid"; then
+    echo "[$(now_iso)] WARN: driver PID $pid·worker PID ${worker_pid:-none} 모두 비활성 (stale). 락 정리." >&2
+    rm -f "$LOCK_FILE" "$WORKER_FILE"; return 0
   fi
-  echo "[$(now_iso)] 정지 시그널 전송 (PID $pid)..."
-  kill -TERM "$pid" 2>/dev/null
-  for _ in 1 2 3 4 5; do
-    sleep 1
-    if ! kill -0 "$pid" 2>/dev/null; then
-      echo "[$(now_iso)] 정상 정지."; rm -f "$LOCK_FILE"; return 0
-    fi
-  done
-  echo "[$(now_iso)] WARN: PID $pid 무응답. 수동: kill -9 $pid && rm $LOCK_FILE" >&2
-  exit 1
+
+  # 종료 대상 트리 스냅샷(driver+worker 자손 포함) — 종료 전에 캡처해야 reparent 된
+  # orphan 워커도 추적된다. worker PID 는 트리에 안 잡혀도 명시적으로 포함.
+  local targets
+  targets=$( { tree_pids "$pid"; [[ -n "$worker_pid" ]] && tree_pids "$worker_pid"; } 2>/dev/null \
+             | grep -E '^[0-9]+$' | sort -un )
+
+  echo "[$(now_iso)] 워커 트리 종료 (driver $pid, worker ${worker_pid:-none}): SIGTERM→SIGKILL..."
+  local survivors
+  survivors=$(terminate_pids "$targets")
+
+  if [[ -n "$survivors" ]]; then
+    echo "[$(now_iso)] ERROR: 종료 미확인 생존 프로세스 — 락 유지(정상 정지 선언 안 함): ${survivors//$'\n'/ }" >&2
+    echo "[$(now_iso)] 수동: kill -9 ${survivors//$'\n'/ } && rm $LOCK_FILE $WORKER_FILE" >&2
+    exit 1
+  fi
+  echo "[$(now_iso)] 정상 정지 (워커 트리 전 프로세스 사망 확인)."
+  rm -f "$LOCK_FILE" "$WORKER_FILE"
+  return 0
 }
 
 # ----- subcommand: cleanup -----
@@ -712,17 +818,22 @@ cmd_cleanup() {
   resolve_actual_wt || true
 
   if [[ -f "$LOCK_FILE" ]]; then
-    local pid; pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+    local pid worker_pid=""
+    pid=$(cat "$LOCK_FILE" 2>/dev/null || echo "")
+    [[ -f "$WORKER_FILE" ]] && worker_pid=$(cat "$WORKER_FILE" 2>/dev/null || echo "")
     if [[ $force -eq 0 ]]; then
       die "실행 중입니다. 먼저 정지: $0 stop $SPEC_PATH\n강제: $0 cleanup $SPEC_PATH --force"
     fi
-    if [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-      echo "WARN: --force — 실행 중 (PID $pid) SIGTERM 후 종료 대기..."
-      kill -TERM "$pid" 2>/dev/null || true
-      for _ in 1 2 3 4 5; do sleep 1; kill -0 "$pid" 2>/dev/null || break; done
-      kill -0 "$pid" 2>/dev/null && { echo "WARN: SIGKILL 전송" >&2; kill -KILL "$pid" 2>/dev/null || true; sleep 1; }
+    # --force: 워커 트리(driver+worker, orphan 포함)를 SIGTERM→SIGKILL 로 완결 종료.
+    if run_active "$pid" "$worker_pid"; then
+      echo "WARN: --force — 실행 중 (driver $pid, worker ${worker_pid:-none}) 워커 트리 종료..." >&2
+      local targets survivors
+      targets=$( { [[ -n "$pid" ]] && tree_pids "$pid"; [[ -n "$worker_pid" ]] && tree_pids "$worker_pid"; } 2>/dev/null \
+                 | grep -E '^[0-9]+$' | sort -un )
+      survivors=$(terminate_pids "$targets")
+      [[ -n "$survivors" ]] && echo "WARN: 종료 미확인 생존(무시하고 강제 정리 진행): ${survivors//$'\n'/ }" >&2
     fi
-    rm -f "$LOCK_FILE"
+    rm -f "$LOCK_FILE" "$WORKER_FILE"
   fi
 
   # terminal 확인 — signals/ 디렉토리에 파일이 하나라도 있어야 함(이름·내용 미파싱).
@@ -743,7 +854,7 @@ cmd_cleanup() {
     git -C "$SPEC_DIR" worktree remove $flags "$WT" \
       || die "git worktree remove 실패. 수동: git worktree remove --force $WT"
   fi
-  rm -f "$LOCK_FILE" "$SPEC_DIR/.loop-wt"
+  rm -f "$LOCK_FILE" "$WORKER_FILE" "$SPEC_DIR/.loop-wt"
   echo "정리 완료: $SPEC_PATH"
 }
 
