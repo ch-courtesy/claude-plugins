@@ -48,7 +48,7 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 <project_root>/.fsd/
 └── tasks/
     └── <task-id>/
-        ├── state          # 상태 로컬 미러 (intake|dispatching|dispatched|stopped|done|dispatch-failed)
+        ├── state          # 상태 로컬 미러 (intake|spec-merging|spec-merge-failed|dispatching|dispatched|stopped|done|dispatch-failed)
         ├── SPECS.txt       # 이 task 의 SPEC 경로 목록 (append-only, 한 줄에 하나)
         ├── run-id          # 이 task 가 소유한 dispatch run 식별자
         ├── origin          # 이 task 를 촉발한 원본 task 식별자 (버그 분리 연결, 선택)
@@ -73,8 +73,13 @@ fsd 는 4 서브커맨드(`intake`·`start`·`poll`·`status`/`list`/`stop`)를 
 task 의 SPEC(들)을 자율 실행기 오케스트레이터(`dispatch`)에 위임해 구현을 시작한다.
 
 - 입력: 1 개 이상의 SPEC 파일 경로(검증·절대경로화).
-- **미해결 마커 가드**: 입력 SPEC 중 하나라도 미해결 사용자-결정 마커(`[NEEDS CLARIFICATION` 로 시작)를 포함하면 dispatch 위임을 하지 않는다 — `state=needs-clarification` 으로 기록하고, 마커를 가진 SPEC 마다 `needs-resume: <SPEC-경로>` 를 출력한 뒤 비-0 으로 종료한다. 빈 칸은 `spec --resume <SPEC-경로>` 로 채운 뒤 다시 `start` 한다.
-- 동작(마커 없을 때): task-id 도출 후 디렉토리를 보장하고(미등록이면 `SPECS.txt` 기록), `state=dispatching` → `dispatch start <spec...>` 공개 서브커맨드로 위임 → 그 출력에서 run 식별자를 추출해 `run-id` 에 기록 → `state=dispatched`.
+- **미해결 마커 가드**: 입력 SPEC 중 하나라도 미해결 사용자-결정 마커(`[NEEDS CLARIFICATION` 로 시작)를 포함하면 dispatch 위임을 하지 않는다 — `state=needs-clarification` 으로 기록하고, 마커를 가진 SPEC 마다 `needs-resume: <SPEC-경로>` 를 출력한 뒤 비-0 으로 종료한다. 빈 칸은 `spec --resume <SPEC-경로>` 로 채운 뒤 다시 `start` 한다. **이 가드는 SPEC-to-target 머지보다 먼저 실행되므로 마커를 가진 미완 SPEC 은 타겟 브랜치 이력에 올라가지 않는다.**
+- **SPEC-to-target-branch ff-merge 전제조건**: 마커 가드를 통과하면, dispatch 위임 **직전에** 입력 SPEC 문서(들)를 감지된 **타겟 기본 통합 브랜치**에 fast-forward 로 안착시킨다(`spec-merge.sh` 위임, 주입 가능 `FSD_SPEC_MERGE_CMD`). 이로써 dispatch 가 구현을 시작하기 전에 의도(SPEC)가 통합 브랜치 이력에 **구현과 분리된 별도 commit** 으로 항상 남는다.
+  - **타겟 브랜치 감지**: 리터럴 `main` 으로 하드코딩하지 않고 레포의 기본 통합 브랜치를 감지한다(`DEFAULT_BRANCH` env > `origin/HEAD` > `remote show origin` HEAD > 로컬 `main`/`master` > 현재 브랜치). 기본 브랜치가 `main` 이 아닌 레포에서도 그 브랜치에 안착한다.
+  - **멱등**: 같은 내용이 이미 타겟 브랜치에 올라가 있으면 새 commit 없이 통과한다 — 같은 SPEC 으로 `start` 를 재실행해도 중복 SPEC commit 이 생기지 않는다.
+  - **절차 단일 출처**: `rules/engineering/branch-and-slug.md` 의 "feat 브랜치 + commit" · "원격 동기화" 절차 형태(feat 브랜치 경유 · ff-only · **force push 금지**)를 소비하며 fsd 안에서 중복 재정의하지 않는다. `git` 만 쓰고 forge CLI 를 호출하지 않는다.
+  - **실패 시 차단**: SPEC 을 타겟 브랜치에 ff-merge 하거나 원격에 반영하지 못하면(비-fast-forward·push 거부 등 **오류**), `state=spec-merge-failed` 로 기록하고 **dispatch 위임을 시작하지 않은 채 중단**한다. 출력은 SPEC 이 타겟 브랜치에 안착하지 못했음(=dispatch 실패가 아님)과 재시도·PR 흐름 안내를 담으며, 어떤 경우에도 force push 를 하지 않는다.
+- 동작(마커 없음 + SPEC 안착 성공): task-id 도출 후 디렉토리를 보장하고(미등록이면 `SPECS.txt` 기록), `state=spec-merging` → SPEC 을 타겟 브랜치에 안착 → `state=dispatching` → `dispatch start <spec...>` 공개 서브커맨드로 위임 → 그 출력에서 run 식별자를 추출해 `run-id` 에 기록 → `state=dispatched`.
 - 출력: `task-id: <task-id>` 와 `run-id: <run-id>`.
 - 실패: dispatch 출력에서 run-id 를 얻지 못하면 `state=dispatch-failed` 로 기록하고 dispatch 출력과 함께 abort.
 - **리뷰·머지**: `dispatch start` 는 통합 모드(기본 ON)로 위임되므로(`--no-integrate` 미전달), dispatch 가 loop 구현 후 통합(PR)→리뷰→(direct 서브모드)ff-only 머지까지 자기 run 안에서 수행한다. fsd 는 이를 다시 하지 않는다.
@@ -122,6 +127,7 @@ task 가 소유한 dispatch run 을 `dispatch` 의 공개 `stop` 서브커맨드
 | 파일 | 역할 |
 |---|---|
 | `fsd.sh` | 서브커맨드 라우터 + 프로젝트 루트 탐지 + intake/start 의 spec·dispatch 블랙박스 조합 |
+| `spec-merge.sh` | dispatch 위임 직전 SPEC 을 감지된 기본 통합 브랜치에 ff-merge 안착(타겟 감지·멱등 no-op·비-ff/push거부 시 중단, force 금지). branch-and-slug.md 절차 형태 소비 |
 | `poll.sh` | dispatch run 관측 드레인(`dispatch status` 공개 인터페이스로 done 전이, 멱등) |
 | `lib-state.sh` | `.fsd/tasks/<task-id>/` 상태 저장소 헬퍼(set/get 필드·log_event·run-id 기록·list 등) |
 | `operational-guide.md` | 상시 호스트 무인 운영 가이드(토큰 스코프·실행기 권한 격리·폴링 주기) |
@@ -133,8 +139,8 @@ task 가 소유한 dispatch run 을 `dispatch` 의 공개 `stop` 서브커맨드
 
 ## 불변식 / 규칙
 
-- fsd 는 `.fsd/` 디렉토리 밖 경로를 만들지 않는다(자기 스킬 정의 파일 제외).
-- `spec`·`loop`·`dispatch` 의 정의 파일을 수정하지 않고, 공개 인터페이스만 소비한다.
+- fsd 는 `.fsd/` 디렉토리 밖 경로를 만들지 않는다(자기 스킬 정의 파일 제외). SPEC 을 타겟 브랜치에 안착시키는 것은 git 이력 생성이지 `.fsd/` 밖 파일 경로 생성이 아니며, forge CLI 없이 `git` 만 쓴다.
+- **SPEC 을 통합 브랜치에 반영하는 책임은 fsd(오케스트레이터)에만 있다** — `spec` 스킬은 SPEC 문서만 산출하고 외부 상태(이슈·브랜치·원격)를 만들지 않는 불변식이 보존된다. fsd 는 `spec`·`loop`·`dispatch` 의 정의 파일을 수정하지 않고, 공개 인터페이스만 소비한다.
 - 구현·리뷰·머지 위임은 `dispatch start <spec...>`(통합 모드 ON) 공개 서브커맨드로만 하고, dispatch run 관측은 `dispatch status` 로만 한다 — dispatch·loop 의 내부 신호 파일·run 디렉토리·워크트리를 직접 들여다보지 않는다.
 - fsd 는 리뷰·머지·통합(PR)을 직접 하지 않고 forge CLI 를 호출하지 않는다 — 그 책임은 dispatch 통합 모드에 있다.
 - 완전자율: fsd 파이프라인에는 외부 승인 보류·사람 개입 게이트가 없다.
