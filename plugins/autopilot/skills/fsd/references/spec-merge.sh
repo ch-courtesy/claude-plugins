@@ -111,12 +111,19 @@ merge_specs_to_target() {
   base_tree="$(git rev-parse "$base^{tree}")"
 
   # rel\tabs 쌍 구성(레포 루트 상대 경로만 허용).
+  # rel 과 abs 를 탭 한 개로 인코딩하므로, 경로 자체에 탭·개행이 들어가면 분리가
+  # 깨져 엉뚱한 경로를 tree 에 쓸 수 있다(git 은 경로에 탭을 허용함). SPEC 문서 경로에
+  # 탭·개행은 정당하게 쓰이지 않으므로 명시 거부한다(미안착·dispatch 미시작).
   local pairs=() s rel
   for s in "$@"; do
     case "$s" in
       "$root"/*) rel="${s#"$root"/}" ;;
       *) echo "spec-merge: SPEC 이 레포 루트 밖: $s — SPEC 미안착, dispatch 미시작" >&2; return 1 ;;
     esac
+    if [[ "$rel" == *$'\t'* || "$rel" == *$'\n'* ]]; then
+      echo "spec-merge: SPEC 경로에 탭·개행 문자 — 미지원(엉뚱한 경로 기록 위험). SPEC 미안착, dispatch 미시작: $rel" >&2
+      return 1
+    fi
     [[ -f "$s" ]] || { echo "spec-merge: SPEC 파일 없음: $s" >&2; return 1; }
     pairs+=("$rel	$s")
   done
@@ -139,37 +146,50 @@ merge_specs_to_target() {
 
   local cleanup_feat='git branch -D "$feat_branch" >/dev/null 2>&1 || true'
 
-  # 로컬 타겟 브랜치 ff 안착 (force 금지).
-  local orig_branch local_sha
+  # 로컬 타겟이 이미 있으면 분기(비-ff) 여부를 먼저 검사한다(어떤 ref 변경보다 먼저).
+  local orig_branch local_sha local_exists=0
   orig_branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
   if git rev-parse --verify --quiet "refs/heads/$target" >/dev/null 2>&1; then
+    local_exists=1
     local_sha="$(git rev-parse "refs/heads/$target")"
     if ! git merge-base --is-ancestor "$local_sha" "$feat_commit"; then
       eval "$cleanup_feat"
       echo "spec-merge: 로컬 $target 가 origin/$target 와 분기 — ff 불가. force 금지; 'git reset --hard origin/$target' 또는 PR 흐름으로 재시도. SPEC 미안착, dispatch 미시작." >&2
       return 1
     fi
+  fi
+
+  # 원격 반영을 먼저 한다(force 금지). 로컬 타겟은 원격 push 가 성공한 뒤에만 전진시켜,
+  # push 거부 시 로컬 기본 브랜치에 SPEC commit 이 남지 않게 한다(미안착 의미·멱등 보존).
+  # feat_commit 을 origin/<target> 으로 직접 ff push — 로컬 ref 상태와 분리한다.
+  if [[ $has_origin -eq 1 ]]; then
+    if ! git push --quiet origin "$feat_commit:refs/heads/$target" 2>/dev/null; then
+      eval "$cleanup_feat"
+      echo "spec-merge: origin/$target push 거부 — 로컬 $target 미전진(원격·로컬 모두 미반영). force 금지; 'git fetch origin $target' 후 재시도하거나 PR 흐름으로 전환. SPEC 미안착, dispatch 미시작." >&2
+      return 1
+    fi
+  fi
+
+  # 여기 도달 = 원격 push 성공(또는 origin 없음). 이제 로컬 타겟을 ff 로 전진시킨다.
+  # origin 이 있으면 SPEC 은 이미 origin/<target> 에 안착했으므로 로컬 sync 실패는
+  # 치명적이지 않다(best-effort). origin 이 없으면 로컬이 곧 통합 타겟이라 실패는 오류.
+  if [[ $local_exists -eq 1 ]]; then
     if [[ "$orig_branch" == "$target" ]]; then
-      if ! git merge --ff-only "$feat_branch" >/dev/null 2>&1; then
+      if ! git merge --ff-only "$feat_branch" >/dev/null 2>&1 && [[ $has_origin -eq 0 ]]; then
         eval "$cleanup_feat"
         echo "spec-merge: 로컬 $target ff 머지 실패 — SPEC 미안착, dispatch 미시작." >&2
         return 1
       fi
     else
-      git update-ref "refs/heads/$target" "$feat_commit" "$local_sha"
+      if ! git update-ref "refs/heads/$target" "$feat_commit" "$local_sha" 2>/dev/null && [[ $has_origin -eq 0 ]]; then
+        eval "$cleanup_feat"
+        echo "spec-merge: 로컬 $target 갱신 실패 — SPEC 미안착, dispatch 미시작." >&2
+        return 1
+      fi
     fi
   else
     # 로컬 타겟 브랜치 없음(base=origin/target) → 새로 생성.
     git update-ref "refs/heads/$target" "$feat_commit"
-  fi
-
-  # 원격 반영 (force 금지).
-  if [[ $has_origin -eq 1 ]]; then
-    if ! git push --quiet origin "$target" 2>/dev/null; then
-      eval "$cleanup_feat"
-      echo "spec-merge: origin/$target push 거부 — 로컬 $target 는 ff 됨(원격 미반영). force 금지; 'git reset --hard origin/$target' 또는 PR 흐름으로 재시도. SPEC 원격 미안착, dispatch 미시작." >&2
-      return 1
-    fi
   fi
 
   eval "$cleanup_feat"
@@ -259,6 +279,52 @@ sm_selftest() {
   ( cd "$R2" && ! git show "origin/trunk:docs/specs/y/SPEC.md" >/dev/null 2>&1 ) \
     && ok "S4 SPEC origin 미반영(force 금지)" || bad "S4 SPEC origin 반영됨(force 의심)"
   ( cd "$R2" && [[ "$(git rev-parse origin/trunk)" == "$( cd "$R2b" && git rev-parse origin/trunk 2>/dev/null || echo x )" ]] ) >/dev/null 2>&1
+
+  # ---- S5: 원격 push 실패 시 로컬 타겟 미전진 (롤백/미반영) [blocking/90] ----
+  # 로컬은 비-분기인데 origin push 만 거부되는 상황: push 후 로컬 기본 브랜치에
+  # SPEC commit 이 남으면 "SPEC 미안착"·멱등 의미가 깨진다(codex blocking/90).
+  local O3="$TMP/o3.git" R3="$TMP/r3"
+  git init -q --bare "$O3"
+  git init -q "$R3"
+  ( cd "$R3"
+    git config user.email t@t; git config user.name t
+    git checkout -q -b trunk
+    echo a > a.txt; git add a.txt; git commit -q -m A
+    git remote add origin "$O3"; git push -q origin trunk )
+  git -C "$O3" symbolic-ref HEAD refs/heads/trunk
+  cat > "$O3/hooks/update" <<'HK'
+#!/bin/sh
+[ "$1" = refs/heads/trunk ] && { echo "test-hook: trunk push rejected" >&2; exit 1; }
+exit 0
+HK
+  chmod +x "$O3/hooks/update"
+  ( cd "$R3"
+    git checkout -q -b work
+    mkdir -p docs/specs/z; printf '# Z\n## 수용 기준\n1. C.\n' > docs/specs/z/SPEC.md )
+  local s5_before
+  s5_before="$( cd "$R3" && git rev-parse refs/heads/trunk )"
+  ( cd "$R3" && DEFAULT_BRANCH=trunk merge_specs_to_target "z-task" "$R3/docs/specs/z/SPEC.md" ) > "$TMP/s5.out" 2>&1
+  rc=$?
+  [[ $rc -ne 0 ]] && ok "S5 push 실패 시 비-0 종료" || { bad "S5 push 실패 rc=$rc"; cat "$TMP/s5.out"; }
+  [[ "$( cd "$R3" && git rev-parse refs/heads/trunk )" == "$s5_before" ]] \
+    && ok "S5 push 실패 후 로컬 trunk 미전진(롤백) [blocking/90]" || bad "S5 로컬 trunk 가 전진함(롤백 안 됨)"
+  ( cd "$R3" && ! git show "refs/heads/trunk:docs/specs/z/SPEC.md" >/dev/null 2>&1 ) \
+    && ok "S5 SPEC 로컬 trunk 미반영" || bad "S5 SPEC 로컬 trunk 반영됨"
+
+  # ---- S6: 탭/개행 포함 SPEC 경로 거부 [blocking/85] ----
+  # git 경로엔 탭이 허용되므로 탭 포함 경로를 받으면 rel\tabs 인코딩이 깨져 엉뚱한
+  # 경로를 기본 브랜치 이력에 쓸 수 있다 — 명시 거부해야 한다(codex blocking/85).
+  local s6dir
+  s6dir="docs/specs/$(printf 'tab\there')"
+  ( cd "$R1" && mkdir -p "$s6dir" && printf '# T\n## 수용 기준\n1. A.\n' > "$s6dir/SPEC.md" )
+  local s6_before
+  s6_before="$( cd "$R1" && git rev-parse origin/trunk )"
+  ( cd "$R1" && unset DEFAULT_BRANCH && merge_specs_to_target "tab-task" "$R1/$s6dir/SPEC.md" ) > "$TMP/s6.out" 2>&1
+  rc=$?
+  [[ $rc -ne 0 ]] && ok "S6 탭 경로 비-0 종료 [blocking/85]" || { bad "S6 탭 경로 rc=$rc(거부 안 됨)"; cat "$TMP/s6.out"; }
+  grep -qi "탭\|개행\|미지원" "$TMP/s6.out" && ok "S6 탭 경로 거부 메시지" || bad "S6 탭 경로 메시지 없음"
+  ( cd "$R1" && git fetch -q origin trunk 2>/dev/null; [[ "$(git rev-parse origin/trunk)" == "$s6_before" ]] ) \
+    && ok "S6 origin/trunk 불변(미기록)" || bad "S6 origin/trunk 변경됨"
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
