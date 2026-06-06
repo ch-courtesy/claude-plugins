@@ -39,7 +39,7 @@
 ## Context Modes
 
 - `full`: initial PR review. Sends full PR patch and existing comments.
-- `incremental`: synchronize event. Sends only previous head to current head patch when available.
+- `incremental`: synchronize event. Diffs from the commit **this reviewer last successfully reviewed** — the head SHA carried by its most recent formal-review marker, trusted only when the marker's review author is a recognized review bot — up to the current head. Falls back to `full` when no such marker exists or it is not an ancestor of the current head (first review, all prior reviews failed/unavailable, or force-push/rebase). This base is **not** the webhook `event.before`; the rationale is documented in `docs/codex/pr-review-workflow.md` ("Incremental base 현행화").
 - `thread`: review-comment reply. Sends target thread metadata and the target file patch.
 
 If the model returns `needs_context`, the workflow fetches up to 5 requested files from the PR head and runs one follow-up pass.
