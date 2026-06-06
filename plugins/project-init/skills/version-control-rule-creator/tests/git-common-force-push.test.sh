@@ -19,19 +19,7 @@ set -u
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SKILL="$DIR/SKILL.md"
-find_shared_templates() {
-  local p="$DIR"
-  while [ "$p" != "/" ]; do
-    if [ -d "$p/shared/version-control-rule-creator/templates" ]; then
-      printf '%s\n' "$p/shared/version-control-rule-creator/templates"
-      return 0
-    fi
-    p="$(dirname "$p")"
-  done
-  return 1
-}
-TEMPLATE_DIR="$(find_shared_templates)"
-TPL="$TEMPLATE_DIR/git.md"
+TPL="$DIR/templates/git.md"
 
 fail=0
 check() { # desc, cmd...
@@ -114,7 +102,7 @@ check "git.md intro states git-family classification" grep -qF 'git 계열' "$TP
 # 6) no backend-variant git template (single body, always git.md)
 # ===========================================================================
 check "no backend-variant git template (git.<backend>.md) exists" \
-  bash -c "! ls '$TEMPLATE_DIR/' | grep -qE '^git\.[a-z]+\.md$'"
+  bash -c "! ls '$DIR/templates/' | grep -qE '^git\.[a-z]+\.md$'"
 
 # ===========================================================================
 # 7) SKILL.md: multi-select aggregate mechanism

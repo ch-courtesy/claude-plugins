@@ -20,20 +20,8 @@ set -u
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SKILL="$DIR/SKILL.md"
-find_shared_templates() {
-  local p="$DIR"
-  while [ "$p" != "/" ]; do
-    if [ -d "$p/shared/version-control-rule-creator/templates" ]; then
-      printf '%s\n' "$p/shared/version-control-rule-creator/templates"
-      return 0
-    fi
-    p="$(dirname "$p")"
-  done
-  return 1
-}
-TEMPLATE_DIR="$(find_shared_templates)"
-GH="$TEMPLATE_DIR/review-approval.github.md"
-GL="$TEMPLATE_DIR/review-approval.gitlab.md"
+GH="$DIR/templates/review-approval.github.md"
+GL="$DIR/templates/review-approval.gitlab.md"
 
 fail=0
 check() { # desc, cmd...

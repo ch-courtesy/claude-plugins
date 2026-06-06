@@ -335,7 +335,7 @@ mg_selftest() {
 
   # ---- AC7: plugins/ 변경 + 범프 없음 → 차단(비완료 종착 rc=1) ----
   reset; setup k4
-  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.codex-plugin/plugin.json" MOCK_BUMP="" \
+  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="" \
     mg_merge_finish "$spec" "$rd" k4 >/dev/null 2>&1; rc=$?
   chk "AC7 워치+범프없음 rc=1(차단)" "$rc" "1"
   if has 'git merge --ff-only'; then bad "AC7 범프없음 머지 안 함"; else ok "AC7 범프없음 머지 안 함"; fi
@@ -343,14 +343,14 @@ mg_selftest() {
 
   # ---- AC7 반례: plugins/ 변경 + 범프 있음 → 머지 ----
   reset; setup k5
-  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.codex-plugin/plugin.json" MOCK_BUMP="1" \
+  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="1" \
     mg_merge_finish "$spec" "$rd" k5 >/dev/null 2>&1; rc=$?
   chk "AC7 워치+범프있음 rc=0" "$rc" "0"
   has 'git merge --ff-only' && ok "AC7 범프시 머지" || bad "AC7 범프시 머지"
 
   # ---- 같은 version 값 재기입(라인은 추가되나 값 동일) → 차단 (Codex blocking 회귀 가드) ----
   reset; setup k6
-  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.codex-plugin/plugin.json" MOCK_BUMP="same" \
+  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="same" \
     mg_merge_finish "$spec" "$rd" k6 >/dev/null 2>&1; rc=$?
   chk "동일 버전 재기입 rc=1(차단)" "$rc" "1"
   if has 'git merge --ff-only'; then bad "동일 버전인데 머지함"; else ok "동일 버전 → 머지 안 함"; fi
@@ -367,7 +367,7 @@ mg_selftest() {
 
   # ---- AC5: skip_approval=1 이어도 version gate 는 유지(차단) ----
   reset; setup kd2
-  MOCK_REVIEWS="" MOCK_FILES="plugins/autopilot/.codex-plugin/plugin.json" MOCK_BUMP="" \
+  MOCK_REVIEWS="" MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="" \
     mg_merge_finish "$spec" "$rd" kd2 "" 1 >/dev/null 2>&1; rc=$?
   chk "AC5 직접머지 version gate 차단 rc=1" "$rc" "1"
   if has 'git merge --ff-only'; then bad "AC5 직접머지 범프없음 머지 안 함"; else ok "AC5 직접머지 범프없음 머지 안 함"; fi

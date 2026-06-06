@@ -16,19 +16,7 @@
 set -u
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
-find_shared_templates() {
-  local p="$DIR"
-  while [ "$p" != "/" ]; do
-    if [ -d "$p/shared/version-control-rule-creator/templates" ]; then
-      printf '%s\n' "$p/shared/version-control-rule-creator/templates"
-      return 0
-    fi
-    p="$(dirname "$p")"
-  done
-  return 1
-}
-TEMPLATE_DIR="$(find_shared_templates)"
-TPL="$TEMPLATE_DIR/branch-naming.md"
+TPL="$DIR/templates/branch-naming.md"
 
 fail=0
 check() { # desc, cmd...
@@ -104,7 +92,7 @@ check "branch-naming.md intro states a purpose sentence" grep -qF '브랜치 이
 # 5) no backend-variant branch-naming template (single body, always branch-naming.md)
 # ===========================================================================
 check "no backend-variant branch-naming template (branch-naming.<backend>.md) exists" \
-  bash -c "! ls '$TEMPLATE_DIR/' | grep -qE '^branch-naming\.[a-z]+\.md$'"
+  bash -c "! ls '$DIR/templates/' | grep -qE '^branch-naming\.[a-z]+\.md$'"
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS"; exit 0

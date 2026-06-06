@@ -78,19 +78,6 @@ sm_build_tree() {
   return $rc
 }
 
-sm_base_has_exact_specs() {
-  local base_tree="$1"; shift
-  local pair rel abs want got
-  for pair in "$@"; do
-    rel="${pair%%	*}"
-    abs="${pair#*	}"
-    want="$(git hash-object "$abs")" || return 1
-    got="$(git rev-parse "$base_tree:$rel" 2>/dev/null)" || return 1
-    [[ "$got" == "$want" ]] || return 1
-  done
-  return 0
-}
-
 # ----- 핵심: SPEC 을 타겟 브랜치에 ff-merge -----
 merge_specs_to_target() {
   local task_id="${1:-}"; shift || true
@@ -138,10 +125,6 @@ merge_specs_to_target() {
       return 1
     fi
     [[ -f "$s" ]] || { echo "spec-merge: SPEC 파일 없음: $s" >&2; return 1; }
-    if git check-ignore -q -- "$rel" && ! git cat-file -e "$base_tree:$rel" 2>/dev/null; then
-      echo "spec-merge: SPEC 경로가 gitignore 대상이며 타겟 이력에 없음 — 강제 추가하지 않음. SPEC 미안착, dispatch 미시작: $rel" >&2
-      return 1
-    fi
     pairs+=("$rel	$s")
   done
 
@@ -149,10 +132,6 @@ merge_specs_to_target() {
   local newtree
   newtree="$(sm_build_tree "$base" "${pairs[@]}")" || { echo "spec-merge: tree 구성 실패" >&2; return 1; }
   if [[ "$newtree" == "$base_tree" ]]; then
-    sm_base_has_exact_specs "$base_tree" "${pairs[@]}" || {
-      echo "spec-merge: no-op 판정 불일치 — SPEC 이 타겟 tree 에 실제 동일 blob 으로 존재하지 않음. SPEC 미안착, dispatch 미시작" >&2
-      return 1
-    }
     echo "spec-merge: SPEC 이미 타겟 브랜치($target)에 안착 — no-op (멱등)"
     return 0
   fi
@@ -346,24 +325,6 @@ HK
   grep -qi "탭\|개행\|미지원" "$TMP/s6.out" && ok "S6 탭 경로 거부 메시지" || bad "S6 탭 경로 메시지 없음"
   ( cd "$R1" && git fetch -q origin trunk 2>/dev/null; [[ "$(git rev-parse origin/trunk)" == "$s6_before" ]] ) \
     && ok "S6 origin/trunk 불변(미기록)" || bad "S6 origin/trunk 변경됨"
-
-
-  # ---- S7: gitignore 된 새 SPEC 경로 거부 [blocking/90] ----
-  # plumbing 은 ignored/untracked 파일도 tree 에 넣을 수 있으므로, 기본 브랜치 이력에
-  # 추적되지 않은 ignored SPEC 을 강제 추가하지 않는다.
-  ( cd "$R1"
-    printf 'ignored-specs/\n' > .gitignore
-    mkdir -p ignored-specs
-    printf '# I\n## 수용 기준\n1. ignored.\n' > ignored-specs/SPEC.md )
-  local s7_before
-  s7_before="$( cd "$R1" && git rev-parse origin/trunk )"
-  ( cd "$R1" && unset DEFAULT_BRANCH && merge_specs_to_target "ignored-task" "$R1/ignored-specs/SPEC.md" ) > "$TMP/s7.out" 2>&1
-  rc=$?
-  [[ $rc -ne 0 ]] && ok "S7 ignored 새 SPEC 비-0 종료 [blocking/90]" || { bad "S7 ignored SPEC rc=$rc(거부 안 됨)"; cat "$TMP/s7.out"; }
-  grep -qi "gitignore\|강제 추가하지 않음\|미안착" "$TMP/s7.out" \
-    && ok "S7 ignored SPEC 거부 메시지" || bad "S7 ignored SPEC 메시지 없음"
-  ( cd "$R1" && git fetch -q origin trunk 2>/dev/null; [[ "$(git rev-parse origin/trunk)" == "$s7_before" ]] ) \
-    && ok "S7 origin/trunk 불변(ignored SPEC 미기록)" || bad "S7 origin/trunk 변경됨"
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"

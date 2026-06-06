@@ -7,11 +7,5 @@
     "email": "ch.courtesy@gmail.com"
   },
   "license": "MIT",
-  "keywords": [
-    "autonomous",
-    "ralph-loop",
-    "agent-runtime",
-    "self-directed"
-  ],
-  "skills": "./claude-skills/"
+  "keywords": ["autonomous", "ralph-loop", "agent-runtime", "self-directed"]
 }
