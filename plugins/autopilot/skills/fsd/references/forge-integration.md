@@ -37,4 +37,4 @@
 
 ## 보안
 
-forge 인증(토큰·자격증명)은 dispatch 통합을 돌리는 호출 호스트가 보유한다(상세는 `operational-guide.md`). 루프 작업 공간·스펙에는 secrets를 두지 않는다(루프는 ``로 무인 실행됨).
+forge 인증(토큰·자격증명)은 dispatch 통합을 돌리는 호출 호스트가 보유한다(상세는 `operational-guide.md`). 루프 작업 공간·스펙에는 secrets를 두지 않는다(루프는 `--dangerously-skip-permissions`로 무인 실행됨).

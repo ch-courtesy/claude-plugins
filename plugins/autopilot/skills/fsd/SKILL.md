@@ -1,6 +1,16 @@
 ---
 name: fsd
-description: "자연어 의도 → SPEC → 구현 → 머지 파이프라인을 task 단위로 끝까지 **완전자율**로 닫고 싶을 때 사용 — SPEC 작성(spec)·구현 위임(dispatch)을 엔드투엔드로 오케스트레이션. 리뷰·머지는 dispatch 통합 모드(기본 ON)에 완전위임하며 fsd 내부엔 리뷰·머지·승인 게이트가 없다(외부 승인 보류·사람 개입 없음). 호출 예: `fsd <subcommand> [<args>]` (intake/start/poll/status/list/stop)."
+description: "자연어 의도 → SPEC → 구현 → 머지 파이프라인을 task 단위로 끝까지 **완전자율**로 닫고 싶을 때 사용 — SPEC 작성(spec)·구현 위임(dispatch)을 엔드투엔드로 오케스트레이션. 리뷰·머지는 dispatch 통합 모드(기본 ON)에 완전위임하며 fsd 내부엔 리뷰·머지·승인 게이트가 없다(외부 승인 보류·사람 개입 없음). 호출 'Skill(skill=\"fsd\", args=\"<subcommand> [<args>]\")' (intake/start/poll/status/list/stop)."
+allowed-tools:
+  - Read
+  - Skill
+  - Bash(bash * fsd.sh intake:*)
+  - Bash(bash * fsd.sh start:*)
+  - Bash(bash * fsd.sh poll)
+  - Bash(bash * fsd.sh status:*)
+  - Bash(bash * fsd.sh list)
+  - Bash(bash * fsd.sh stop:*)
+  - Bash(bash * fsd.sh selftest:*)
 ---
 
 # fsd
@@ -11,7 +21,7 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 
 ## 호출
 
-`fsd <subcommand> [<args>]`
+`Skill(skill: "fsd", args: "<subcommand> [<args>]")`
 
 또는 직접: `bash plugins/autopilot/skills/fsd/references/fsd.sh <subcommand> [<args>]`
 
@@ -19,7 +29,7 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 
 `fsd` 는 두 가지 입력으로 진입한다:
 
-- **자연어 의도로 호출되면** (예: `fsd <자연어 task 설명>`) — 먼저 `spec <자연어 task 설명>`로 SPEC 을 산출하고, 그 결과 SPEC 경로(들)로 `intake` → `start` 를 이어 구현까지 자동으로 닫는다. spec 의 명확화 인터뷰·미해결 마커 가드·최종 SPEC 산출은 그대로 수행되지만, **fsd 가 spec 을 호출하는 맥락에서는 spec 의 step-7 옵트인 핸드오프 프롬프트("구현까지 자동 진행할까요?")를 띄우지 않는다** — fsd 는 항상 자율이므로 진행 결정을 fsd 가 소유하며 그 확인은 중복이다. 별도의 신호 인자는 필요 없다(같은 오케스트레이터가 fsd→spec 를 연달아 실행하므로 호출 맥락만으로 생략이 성립한다). **이 맥락에서 spec 은 dispatch 를 직접 호출하지 않고 SPEC 경로만 반환하며, dispatch 기동은 fsd 의 `start` 가 단독으로 수행한다** — spec 의 handoff 와 fsd 의 `start` 가 같은 SPEC 에 dispatch 를 이중 기동하지 않도록 시작 책임을 fsd 한쪽에만 둔다. 산출된 SPEC 으로 task 등록(intake)·dispatch 위임(start)이 사람 개입 없이 자동으로 흐른다. SPEC 에 `[NEEDS CLARIFICATION` 미해결 마커가 남으면 자동 진행을 멈추고 `--resume` 해결을 안내한다.
+- **자연어 의도로 호출되면** (예: `Skill(skill: "fsd", args: "<자연어 task 설명>")`) — 먼저 `Skill(skill: "spec", args: "<자연어 task 설명>")` 로 SPEC 을 산출하고, 그 결과 SPEC 경로(들)로 `intake` → `start` 를 이어 구현까지 자동으로 닫는다. spec 의 명확화 인터뷰·미해결 마커 가드·최종 SPEC 산출은 그대로 수행되지만, **fsd 가 spec 을 호출하는 맥락에서는 spec 의 step-7 옵트인 핸드오프 프롬프트("구현까지 자동 진행할까요?")를 띄우지 않는다** — fsd 는 항상 자율이므로 진행 결정을 fsd 가 소유하며 그 확인은 중복이다. 별도의 신호 인자는 필요 없다(같은 오케스트레이터가 fsd→spec 를 연달아 실행하므로 호출 맥락만으로 생략이 성립한다). **이 맥락에서 spec 은 dispatch 를 직접 호출하지 않고 SPEC 경로만 반환하며, dispatch 기동은 fsd 의 `start` 가 단독으로 수행한다** — spec 의 handoff 와 fsd 의 `start` 가 같은 SPEC 에 dispatch 를 이중 기동하지 않도록 시작 책임을 fsd 한쪽에만 둔다. 산출된 SPEC 으로 task 등록(intake)·dispatch 위임(start)이 사람 개입 없이 자동으로 흐른다. SPEC 에 `[NEEDS CLARIFICATION` 미해결 마커가 남으면 자동 진행을 멈추고 `--resume` 해결을 안내한다.
 - **이미 SPEC 경로(들)가 주어지면** — spec 호출을 건너뛰고 바로 `intake <spec...>` → `start <spec...>` 를 수행한다.
 
 어느 모드든 SPEC 산출은 `spec` 스킬의 책임(외부 상태 안 만듦)이고, task 등록·run 소유·dispatch 위임은 `fsd` 의 책임이며, 리뷰·머지·통합은 `dispatch` 통합 모드의 책임이다 — 이 역할 분리는 불변이다. 실효 자동 범위는 `intake → start`(dispatch 위임) → `poll`(dispatch run 관측 전이)까지 **완전자율**로 닫힌다. dispatch 가 통합·머지를 소유하므로 fsd 에는 별도의 `merge` 서브커맨드나 외부 승인 보류 게이트가 없다 — `poll` 은 dispatch run 의 모든 SPEC 이 머지 종착에 도달하면 task 를 `done` 으로 전이할 뿐이다.
@@ -28,7 +38,7 @@ fsd 는 `spec`·`loop`·`dispatch` 를 **공개 인터페이스로만** 조합�
 
 - **단위**: task. 하나의 task 는 한 작업 의도(보통 SPEC 한 묶음)에 대응하며, 진행 상태를 `<project_root>/.fsd/tasks/<task-id>/` 아래 격리 디렉토리에 보관한다.
 - **task-id**: 첫 SPEC 의 slug + 입력 SPEC 집합 sha7. 같은 SPEC 집합으로 재진입하면 같은 task-id 를 얻어 idempotent 하다.
-- **위임**: SPEC 작성은 `spec` 스킬의 공개 호출(`spec` 스킬 워크플로)로, 구현·리뷰·머지는 `dispatch` 의 공개 서브커맨드(`dispatch start <spec...>` — 통합 모드 기본 ON)로만 한다. fsd 는 dispatch run 상태를 `dispatch status` 공개 인터페이스로 관측한다.
+- **위임**: SPEC 작성은 `spec` 스킬의 공개 호출(`Skill(skill: "spec", ...)`)로, 구현·리뷰·머지는 `dispatch` 의 공개 서브커맨드(`dispatch start <spec...>` — 통합 모드 기본 ON)로만 한다. fsd 는 dispatch run 상태를 `dispatch status` 공개 인터페이스로 관측한다.
 - **상태 저장소**: task 별 디렉토리에 상태 미러·SPEC 경로·소유한 dispatch run-id·origin·append-only 로그를 담는다. 리뷰·머지·통합은 dispatch 가 소유하므로 forge 부수효과(브랜치·PR·head)는 fsd 상태에 보관하지 않는다. 이 디렉토리는 git 추적에서 제외한다(`.gitignore` 의 `.fsd/`).
 - **완전자율**: fsd 는 외부 승인 보류·사람 개입 지점 없이 `intake → start → poll` 로 task 를 done 까지 전진시킨다. 리뷰·머지의 자율성은 dispatch 통합 모드(direct 서브모드: 분리 승인 신원 없이 ff-only 머지)가 제공한다.
 

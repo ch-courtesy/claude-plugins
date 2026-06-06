@@ -1,6 +1,14 @@
 ---
 name: dispatch
-description: "하나 이상의 SPEC 파일을 구현 단계로 넘기고 싶을 때 사용 — 의존성(depends_on)을 풀어 각 SPEC 을 준비되는 즉시 자율 실행기에 스트리밍 위임하고 결과를 취합. 통합(리뷰·머지)은 항상 활성이라 구현 완료 SPEC 을 대상 브랜치로 머지한다(forge 구성이면 push→PR→리뷰→ff-only 머지, 미구성이면 PR 없는 로컬 적대적 리뷰 게이트 후 ff-only 직접 머지). 대상 브랜치는 --target-branch 로 지정(기본: 기본 브랜치). 호출 예: `dispatch <subcommand> [<args>]` (start/list/status/stop/watch)."
+description: "하나 이상의 SPEC 파일을 구현 단계로 넘기고 싶을 때 사용 — 의존성(depends_on)을 풀어 각 SPEC 을 준비되는 즉시 자율 실행기에 스트리밍 위임하고 결과를 취합. 통합(리뷰·머지)은 항상 활성이라 구현 완료 SPEC 을 대상 브랜치로 머지한다(forge 구성이면 push→PR→리뷰→ff-only 머지, 미구성이면 PR 없는 로컬 적대적 리뷰 게이트 후 ff-only 직접 머지). 대상 브랜치는 --target-branch 로 지정(기본: 기본 브랜치). 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch)."
+allowed-tools:
+  - Read
+  - Bash(bash * dispatch.sh start:*)
+  - Bash(bash * dispatch.sh list)
+  - Bash(bash * dispatch.sh status:*)
+  - Bash(bash * dispatch.sh stop:*)
+  - Bash(bash * dispatch.sh watch:*)
+  - Bash(bash * dispatch.sh selftest:*)
 ---
 
 # dispatch
@@ -9,7 +17,7 @@ description: "하나 이상의 SPEC 파일을 구현 단계로 넘기고 싶을 
 
 ## 호출
 
-`dispatch <subcommand> [<args>]`
+`Skill(skill: "dispatch", args: "<subcommand> [<args>]")`
 
 ## 모델
 

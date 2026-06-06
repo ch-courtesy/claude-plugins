@@ -50,7 +50,7 @@ set +e
 set -uo pipefail
 
 REVIEW_ROUNDS_MAX="${REVIEW_ROUNDS_MAX:-3}"
-REVIEW_BOT_LOGIN_RE="${REVIEW_BOT_LOGIN_RE:-(\[bot\]$|codex|github-actions)}"
+REVIEW_BOT_LOGIN_RE="${REVIEW_BOT_LOGIN_RE:-(\[bot\]$|claude|github-actions)}"
 
 REVIEW_FETCH_CMD="${REVIEW_FETCH_CMD:-rl_review_fetch_gh}"
 REVIEW_PRODUCE_CMD="${REVIEW_PRODUCE_CMD:-rl_produce_review_skill}"
