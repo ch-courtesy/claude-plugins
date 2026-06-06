@@ -783,7 +783,11 @@ jobs:
               try {
                 const comments = await github.paginate(github.rest.issues.listComments,
                   { owner, repo, issue_number: pull_number, per_page: 100 });
-                const existing = comments.find((c) => (c.body || '').includes(skipMarker));
+                // 작성자 검증: 우리 워크플로 토큰 신원(botLogin)이 단 댓글만 기존 후보로
+                // 본다. 다른 사용자가 같은 숨은 마커를 단 댓글을 먼저 올려도 그걸 골라
+                // updateComment(권한 없음→실패)로 기능이 막히지 않게 한다(위조 차단).
+                const existing = comments.find((c) =>
+                  c.user?.login === botLogin && (c.body || '').includes(skipMarker));
                 if (existing) {
                   await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
                   core.info(`Updated skip-reason comment (${existing.id}).`);
