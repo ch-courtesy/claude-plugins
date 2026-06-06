@@ -1,16 +1,6 @@
 ---
 name: review-rule-creator
 description: 현재 프로젝트에 맞는 리뷰 지침을 리뷰 카테고리 디렉터리 아래 두 sub-룰 파일(`rules/review/principles.md`·`rules/review/change-adoption.md`)로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 리뷰 지침을 새로 만들고 싶어 할 때.
-allowed-tools:
-  - AskUserQuestion
-  - Read
-  - Write
-  - Glob
-  - Bash(ls:*)
-  - Bash(mkdir -p:*)
-  - Bash(diff:*)
-  - Bash(git diff:*)
-  - Bash(rm:*)
 ---
 
 # review-rule-creator
@@ -30,16 +20,16 @@ allowed-tools:
 
 ## 템플릿 레이아웃
 
-이 파일 옆 `templates/` 아래:
+공통 템플릿 디렉터리 `../../shared/review-rule-creator/templates/` 아래:
 
-- `templates/principles.md` — 리뷰 원칙 본문(frontmatter 없음).
-- `templates/change-adoption.md` — 변경 반영 판단 본문(frontmatter 없음).
+- `../../shared/review-rule-creator/templates/principles.md` — 리뷰 원칙 본문(frontmatter 없음).
+- `../../shared/review-rule-creator/templates/change-adoption.md` — 변경 반영 판단 본문(frontmatter 없음).
 
-두 템플릿 본문은 placeholder 치환 없이 그대로 복사합니다. 새 리뷰 sub-룰을 추가하려면 `templates/` 아래에 본문 파일을 두고 이 SKILL.md를 함께 갱신합니다.
+두 템플릿 본문은 placeholder 치환 없이 그대로 복사합니다. 새 리뷰 sub-룰을 추가하려면 공통 템플릿 디렉터리 `../../shared/review-rule-creator/templates/` 아래에 본문 파일을 두고 이 SKILL.md를 함께 갱신합니다.
 
 ## 생성 절차
 
-1. **템플릿 열거.** 이 파일 옆 `templates/principles.md`·`templates/change-adoption.md`만 읽습니다. 다른 경로를 탐색하지 않습니다. 둘 중 하나라도 없으면 사용자에게 알리고 중단합니다.
+1. **템플릿 열거.** `../../shared/review-rule-creator/templates/principles.md`·`../../shared/review-rule-creator/templates/change-adoption.md`만 읽습니다. 다른 경로를 탐색하지 않습니다. 둘 중 하나라도 없으면 사용자에게 알리고 중단합니다.
 
 2. **본문 조립.** 두 템플릿 본문을 그대로 사용합니다. placeholder 치환·대화형 입력·옵션 선택은 없습니다.
 

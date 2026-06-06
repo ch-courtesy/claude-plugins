@@ -1,55 +1,46 @@
 ---
 name: bootstrap
-description: 새 프로젝트를 시작할 때 기본 지침을 자동으로 설정합니다. 사용자가 "새 프로젝트 시작", "프로젝트 초기화", "레포 새로 만들기", "initialize a project", "set up a new repo"처럼 새 프로젝트를 준비하려는 의도를 보이거나, 현재 디렉토리가 비어 있고 `CLAUDE.md`가 없을 때 자동으로 활성화됩니다. 각 카테고리의 지침 생성은 형제 스킬(`*-rule-creator`)에 위임합니다.
-allowed-tools:
-  - AskUserQuestion
-  - Read
-  - Write
-  - Skill
-  - Glob
-  - Bash(ls:*)
-  - Bash(diff:*)
-  - Bash(git diff:*)
+description: 새 프로젝트를 시작할 때 기본 지침을 자동으로 설정합니다. 사용자가 "새 프로젝트 시작", "프로젝트 초기화", "레포 새로 만들기", "initialize a project", "set up a new repo"처럼 새 프로젝트를 준비하려는 의도를 보이거나, 현재 디렉토리가 비어 있고 `AGENTS.md`가 없을 때 자동으로 활성화됩니다. 각 카테고리의 지침 생성은 형제 스킬(`*-rule-creator`)에 위임합니다.
 ---
 
 # bootstrap
 
-`CLAUDE.md`를 만들고 선택된 형제 `*-rule-creator`에 `rules/` 생성을 위임합니다.
+`AGENTS.md`를 만들고 선택된 형제 `*-rule-creator`에 `rules/` 생성을 위임합니다.
 
 ## 진행 순서
 
-1. **루트 확인.** 현재 디렉토리가 프로젝트 루트인지 확인합니다. `CLAUDE.md` 또는 `rules/`가 있으면 기존 초기화로 간주하고 계속 여부를 묻습니다.
+1. **루트 확인.** 현재 디렉토리가 프로젝트 루트인지 확인합니다. `AGENTS.md` 또는 `rules/`가 있으면 기존 초기화로 간주하고 계속 여부를 묻습니다.
 
    남은 카테고리는 4단계의 전체 카테고리 중 `rules/<name>.md`와 `rules/<name>/`가 모두 없는 항목입니다.
 
    - 남은 항목 있음: `남은 카테고리 추가 (Recommended)` / `전부 다시 검토` / `중단`
    - 남은 항목 없음: `중단 (Recommended)` / `전부 다시 검토`
 
-2. **선택적 섹션 통합 질문.** 루트에 `CLAUDE.md`가 없어 이번 흐름에서 **새로 생성하는 경우에만**, 두 선택적 콘텐츠 블록 — 안드레이 카파시의 65줄 룰(`skills/bootstrap/assets/karpathy-rules.ko.md`)과 "Claude 상호작용 규칙" 섹션(`skills/bootstrap/assets/interaction-rules.ko.md`) — 의 포함 여부를 **정확히 하나의 `AskUserQuestion` multiSelect 질문**으로 묻습니다. 이 질문은 매 초기화 흐름에서 **최대 한 번만** 호출합니다. 루트에 `CLAUDE.md`가 이미 있어 새로 생성하지 않으면 이 질문을 하지 않습니다.
+2. **선택적 섹션 통합 질문.** 루트에 `AGENTS.md`가 없어 이번 흐름에서 **새로 생성하는 경우에만**, 두 선택적 콘텐츠 블록 — 안드레이 카파시의 65줄 룰(`skills/bootstrap/assets/karpathy-rules.ko.md`)과 "Codex 상호작용 규칙" 섹션(`skills/bootstrap/assets/interaction-rules.ko.md`) — 의 포함 여부를 **정확히 하나의 `request_user_input` multiSelect 질문**으로 묻습니다. 이 질문은 매 초기화 흐름에서 **최대 한 번만** 호출합니다. 루트에 `AGENTS.md`가 이미 있어 새로 생성하지 않으면 이 질문을 하지 않습니다.
 
-   - 두 선택지는 모두 **기본 포함(권장)**으로 제시합니다. `AskUserQuestion`의 multiSelect에는 사전 체크(pre-checked) 상태를 표현하는 스키마가 없으므로, 두 선택지 라벨을 모두 `(Recommended)`로 달고 설명에서 기본 포함 의도를 명시합니다(도구가 실제로 항목을 미리 체크하지는 않습니다).
-     - **카파시 65줄 룰 (Recommended)** — 선택하면 3단계에서 `CLAUDE.md` 최상단에 카파시 룰 본문을 포함합니다.
-     - **Claude 상호작용 규칙 (Recommended)** — 선택하면 3단계에서 "Claude 상호작용 규칙" 섹션을 포함합니다.
+   - 두 선택지는 모두 **기본 포함(권장)**으로 제시합니다. `request_user_input`의 multiSelect에는 사전 체크(pre-checked) 상태를 표현하는 스키마가 없으므로, 두 선택지 라벨을 모두 `(Recommended)`로 달고 설명에서 기본 포함 의도를 명시합니다(도구가 실제로 항목을 미리 체크하지는 않습니다).
+     - **카파시 65줄 룰 (Recommended)** — 선택하면 3단계에서 `AGENTS.md` 최상단에 카파시 룰 본문을 포함합니다.
+     - **Codex 상호작용 규칙 (Recommended)** — 선택하면 3단계에서 "Codex 상호작용 규칙" 섹션을 포함합니다.
    - 사용자의 선택을 3단계에서 사용할 수 있도록 기억합니다. 선택하지 않은 블록은 생성된 파일에 어떤 형태로도(주석·접힘 포함) 넣지 않습니다.
 
-3. **`CLAUDE.md` 생성.** 루트에 `CLAUDE.md`가 **없을 때만** 새로 생성합니다. 이미 존재하면 어떤 질문도 하지 않고 덮어쓰지 않으며 diff를 보여주고 물어봅니다.
+3. **`AGENTS.md` 생성.** 루트에 `AGENTS.md`가 **없을 때만** 새로 생성합니다. 이미 존재하면 어떤 질문도 하지 않고 덮어쓰지 않으며 diff를 보여주고 물어봅니다.
 
-   생성되는 `CLAUDE.md`의 본문은 **베이스 템플릿** `skills/bootstrap/CLAUDE.md`(항상 포함되는 "카테고리별 지침" 섹션)에, 2단계에서 선택한 두 선택적 자산(`skills/bootstrap/assets/karpathy-rules.ko.md`·`skills/bootstrap/assets/interaction-rules.ko.md`)을 조립해 만듭니다. 세 영역의 내용은 각각 한 파일에만 존재합니다(단일 출처).
+   생성되는 `AGENTS.md`의 본문은 **베이스 템플릿** `skills/bootstrap/AGENTS.md`(항상 포함되는 "카테고리별 지침" 섹션)에, 2단계에서 선택한 두 선택적 자산(`skills/bootstrap/assets/karpathy-rules.ko.md`·`skills/bootstrap/assets/interaction-rules.ko.md`)을 조립해 만듭니다. 세 영역의 내용은 각각 한 파일에만 존재합니다(단일 출처).
 
    - 조립되는 각 블록(카파시 룰·상호작용 규칙·카테고리별 지침)은 각각 형제 관계의 **최상위 제목(H1)**으로 시작하므로, 블록 사이 경계는 제목 레벨만으로 드러납니다. 파일명과 중복되는 별도의 파일 제목 줄은 두지 않습니다.
-   - 2단계에서 **Claude 상호작용 규칙**을 선택했으면, `skills/bootstrap/assets/interaction-rules.ko.md`의 본문을 "카테고리별 지침" 블록보다 **앞**에 그대로 끼워 넣습니다(자산은 이미 최상위 제목 `# Claude 상호작용 규칙`으로 시작합니다). 선택하지 않았으면 그 섹션의 본문·헤딩을 어떤 형태로도(주석·접힘 포함) 넣지 않습니다.
-   - 2단계에서 **카파시 65줄 룰**을 선택했으면, 동봉 정적 자산 `skills/bootstrap/assets/karpathy-rules.ko.md`의 본문을 생성되는 `CLAUDE.md`의 **최상단**(위에서 조립한 본문보다 앞)에 그대로 붙여 넣고, 그 아래에 조립한 본문을 이어 붙입니다(자산은 이미 최상위 제목으로 시작하므로 형제 H1 경계가 유지됩니다). 선택하지 않았으면 카파시 룰 텍스트 없이 처리합니다.
-   - 조립 순서는 항상 `[카파시 룰(선택 시)] → [상호작용 규칙(선택 시)] → [카테고리별 지침(항상)]`입니다. 사용자의 선택과 무관하게 "카테고리별 지침" 블록은 항상 포함되며, 생성된 `CLAUDE.md`의 최상위 제목들은 포함된 블록들의 형제 H1 제목입니다.
+   - 2단계에서 **Codex 상호작용 규칙**을 선택했으면, `skills/bootstrap/assets/interaction-rules.ko.md`의 본문을 "카테고리별 지침" 블록보다 **앞**에 그대로 끼워 넣습니다(자산은 이미 최상위 제목 `# Codex 상호작용 규칙`으로 시작합니다). 선택하지 않았으면 그 섹션의 본문·헤딩을 어떤 형태로도(주석·접힘 포함) 넣지 않습니다.
+   - 2단계에서 **카파시 65줄 룰**을 선택했으면, 동봉 정적 자산 `skills/bootstrap/assets/karpathy-rules.ko.md`의 본문을 생성되는 `AGENTS.md`의 **최상단**(위에서 조립한 본문보다 앞)에 그대로 붙여 넣고, 그 아래에 조립한 본문을 이어 붙입니다(자산은 이미 최상위 제목으로 시작하므로 형제 H1 경계가 유지됩니다). 선택하지 않았으면 카파시 룰 텍스트 없이 처리합니다.
+   - 조립 순서는 항상 `[카파시 룰(선택 시)] → [상호작용 규칙(선택 시)] → [카테고리별 지침(항상)]`입니다. 사용자의 선택과 무관하게 "카테고리별 지침" 블록은 항상 포함되며, 생성된 `AGENTS.md`의 최상위 제목들은 포함된 블록들의 형제 H1 제목입니다.
    - 자산은 스킬에 동봉된 파일만 사용하며 네트워크 접근이나 추가 사용자 입력은 하지 않습니다.
 
 4. **카테고리 선택.** 부모 `skills/`에서 `*-rule-creator/`만 열거해 접미사를 제거합니다. 하드코딩하거나 다른 경로를 탐색하지 않습니다. 남은 항목만 추가할 때는 기존 카테고리를 제외합니다.
 
-   `AskUserQuestion` 직전 후보 목록을 일반 메시지로 한 번 출력합니다. `preview` 필드는 사용하지 않습니다.
+   `request_user_input` 직전 후보 목록을 일반 메시지로 한 번 출력합니다. `preview` 필드는 사용하지 않습니다.
 
-   그 다음 `AskUserQuestion`(single-select)로 확인합니다:
+   그 다음 `request_user_input`(single-select)로 확인합니다:
    - **전체 생성 (Recommended)** — 도출된 목록 전부 생성
    - **일부만 선택** — 후속 멀티셀렉트 질문으로 원하는 카테고리만 선택
-   - **아무것도 생성하지 않음** — `CLAUDE.md`만 두고 6단계로 이동합니다.
+   - **아무것도 생성하지 않음** — `AGENTS.md`만 두고 6단계로 이동합니다.
 
    일부 선택 시 `multiSelect` 질문 하나에는 카테고리를 최대 4개만 넣습니다. 카테고리 16개 초과 시 여러 번 묻습니다. 아무것도 선택하지 않으면 생성하지 않습니다.
 
@@ -60,9 +51,9 @@ allowed-tools:
 
 ## 규칙
 
-- 이 오케스트레이터가 직접 만드는 파일은 **`CLAUDE.md`** 하나뿐입니다. `rules/<category>.md`는 각 생성기 스킬이 책임지고 만듭니다.
-- `.gitignore`, `README.md`, `.claude/settings.json`, 언어별 설정 파일 등은 이 스킬의 범위 밖입니다.
-- `CLAUDE.md`에는 **Claude 사용 지침만** 넣습니다. 프로젝트 세부 정보는 `rules/` 아래로 분리합니다.
+- 이 오케스트레이터가 직접 만드는 파일은 **`AGENTS.md`** 하나뿐입니다. `rules/<category>.md`는 각 생성기 스킬이 책임지고 만듭니다.
+- `.gitignore`, `README.md`, `.codex/settings.json`, 언어별 설정 파일 등은 이 스킬의 범위 밖입니다.
+- `AGENTS.md`에는 **Codex 사용 지침만** 넣습니다. 프로젝트 세부 정보는 `rules/` 아래로 분리합니다.
 - 기존 파일을 절대 덮어쓰지 않습니다. 이미 있으면 diff를 보여주고 물어봅니다.
 - 카테고리는 사용자가 명시적으로 제외하지 않는 한 기본으로 전체 생성합니다. 추측성 스캐폴딩은 금지합니다.
 - `git init`, 의존성 설치, 패키지 매니저 실행 등 파일 생성 외 작업을 하지 않습니다.

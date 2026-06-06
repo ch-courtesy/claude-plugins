@@ -91,7 +91,7 @@ git -C "$MAIN" worktree add --detach "$SPEC_DIR_D/.worktree" HEAD >/dev/null 2>&
 gcd_d="$(git -C "$SPEC_DIR_D/.worktree" rev-parse --git-common-dir)"
 [[ "$gcd_d" != /* ]] && gcd_d="$SPEC_DIR_D/.worktree/$gcd_d"
 mkdir -p "$gcd_d/info"
-for p in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt"; do
+for p in "AGENTS.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt"; do
   grep -qxF "$p" "$gcd_d/info/exclude" 2>/dev/null || echo "$p" >> "$gcd_d/info/exclude"
 done
 mkdir -p "$SPEC_DIR_D/.worktree/.loop/signals"

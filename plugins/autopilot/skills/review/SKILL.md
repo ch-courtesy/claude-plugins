@@ -1,14 +1,6 @@
 ---
 name: review
-description: "한 작업의 변경(diff)을 여러 독립 관점으로 리뷰해 단일 머신리더블 판정(approve/request_changes/unavailable)·근거 있는 지적·재작업 브리프를 생산하고 싶을 때 사용 — 반복(iterate-until-approved)·승인·머지는 소유하지 않는 원샷 리뷰 생산자. 호출 'Skill(skill=\"review\", args=\"<subcommand> [<args>]\")' (run/status/list)."
-allowed-tools:
-  - Read
-  - Agent
-  - Bash(bash * review.sh run:*)
-  - Bash(bash * review.sh status:*)
-  - Bash(bash * review.sh list:*)
-  - Bash(bash * review.sh fingerprint:*)
-  - Bash(bash * review.sh selftest:*)
+description: "한 작업의 변경(diff)을 여러 독립 관점으로 리뷰해 단일 머신리더블 판정(approve/request_changes/unavailable)·근거 있는 지적·재작업 브리프를 생산하고 싶을 때 사용 — 반복(iterate-until-approved)·승인·머지는 소유하지 않는 원샷 리뷰 생산자. 호출 예: `review <subcommand> [<args>]` (run/status/list)."
 ---
 
 # review
@@ -19,9 +11,9 @@ allowed-tools:
 
 ## 호출
 
-`Skill(skill="review", args="<subcommand> [<args>]")`
+`review <subcommand> [<args>]`
 
-또는 직접: `bash plugins/autopilot/skills/review/references/review.sh <subcommand> [<args>]`
+또는 직접: `bash $SKILL_DIR/references/review.sh <subcommand> [<args>]`
 
 ## 모델
 
@@ -36,9 +28,9 @@ allowed-tools:
 1. **SPEC 수용기준 준수** (`spec_compliance`) — 각 수용기준 충족 여부를 검증하고 검증된 기준 id 를 보고.
 2. **정확성·보안** (`bug`) — 변경 hunk 의 명확한 correctness/security/reliability 버그.
 3. **회귀·역사적 맥락** (`history`) — 변경이 기존 의도·이전 결정을 깨는지.
-4. **저장소 가이드라인 준수** (`guideline`) — `CLAUDE.md`·`rules/`·워크플로 문서와의 충돌.
+4. **저장소 가이드라인 준수** (`guideline`) — `AGENTS.md`·`rules/`·워크플로 문서와의 충돌.
 
-각 lens dispatch 양식은 `references/agent-prompts.md`. 규모 임계가 충족될 때만 가산 발동하는 적대 렌즈가 필요하면 그 정의는 `plugins/autopilot/skills/spec/references/personas.md`(단일 출처)를 **참조**한다 — 복제하지 않는다.
+각 lens dispatch 양식은 `references/agent-prompts.md`. 규모 임계가 충족될 때만 가산 발동하는 적대 렌즈가 필요하면 그 정의는 `plugins/autopilot/shared/spec/references/personas.md`(단일 출처)를 **참조**한다 — 복제하지 않는다.
 
 ## 중재 게이트 (결정적)
 
@@ -54,7 +46,7 @@ allowed-tools:
   - blocking 지적 또는 미검증 수용기준이 있으면 `request_changes`.
   - 그 외(컨텍스트 온전·blocking 없음·전 수용기준 검증)면 `approve`.
 
-출력은 `references/output-schema.json` 을 따르는 단일 JSON 한 건이다.
+출력은 `../../shared/review/references/output-schema.json` 을 따르는 단일 JSON 한 건이다.
 
 ## Subcommands
 
@@ -80,7 +72,7 @@ allowed-tools:
 |---|---|
 | `references/review.sh` | 서브커맨드 라우터 + 결정적 중재 하니스(diff 수집·fingerprint·신뢰도 게이트·판정·스레드 라이프사이클·selftest). 외부 인터페이스를 주입 가능 명령 변수로 둠. |
 | `references/agent-prompts.md` | 4 lens 독립 dispatch brief + 공통 출력 계약(발견만 보고, 판정 금지) |
-| `references/output-schema.json` | 출력 스키마. `.github/prompts/codex-pr-review.schema.json` 공유 계약 재사용 + 파이프라인 필드(pipeline_verdict·acceptance_coverage·rework_brief) 가산 |
+| `../../shared/review/references/output-schema.json` | 출력 스키마. `.github/prompts/codex-pr-review.schema.json` 공유 계약 재사용 + 파이프라인 필드(pipeline_verdict·acceptance_coverage·rework_brief) 가산 |
 
 ## 의존성
 

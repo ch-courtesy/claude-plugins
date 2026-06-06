@@ -13,14 +13,14 @@
 #   (6) vendor-neutral: names no plugin/skill or tool marker prefix.
 #   + must NOT weaken the existing force (violation = gravest defect; follow
 #     relevant content "예외 없이").
-#   + structural invariants kept (single H1 '# 카테고리별 지침', no AskUserQuestion,
+#   + structural invariants kept (single H1 '# 카테고리별 지침', no request_user_input,
 #     no interaction-rules section) so the assembly/exclude test still holds.
 #
 # Run: bash category-rules-reading-model.test.sh   (exit 0 = pass)
 set -u
 
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BASE="$DIR/CLAUDE.md"
+BASE="$DIR/AGENTS.md"
 
 fail=0
 check() { local desc="$1"; shift; if "$@" >/dev/null 2>&1; then echo "ok   - $desc"; else echo "FAIL - $desc"; fail=1; fi; }
@@ -45,7 +45,7 @@ check "keeps gravest-defect framing" grep -qF '무거운 결함' "$BASE"
 check "no 'autopilot' marker" bash -c "! grep -qiF 'autopilot' '$BASE'"
 check "no 'using-autopilot' marker" bash -c "! grep -qiF 'using-autopilot' '$BASE'"
 check "no 'fsd' marker" bash -c "! grep -qiwF 'fsd' '$BASE'"
-check "no AskUserQuestion (kept out)" bash -c "! grep -qF 'AskUserQuestion' '$BASE'"
+check "no request_user_input (kept out)" bash -c "! grep -qF 'request_user_input' '$BASE'"
 check "no interaction-rules section leaked" bash -c "! grep -qF '상호작용 규칙' '$BASE'"
 check "single H1" bash -c "[ \"\$(grep -cE '^# ' '$BASE')\" -eq 1 ]"
 check "H1 is '# 카테고리별 지침'" grep -qxF '# 카테고리별 지침' "$BASE"

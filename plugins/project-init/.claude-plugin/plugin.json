@@ -7,5 +7,11 @@
     "email": "ch.courtesy@gmail.com"
   },
   "license": "MIT",
-  "keywords": ["scaffold", "init", "bootstrap", "project-setup"]
+  "keywords": [
+    "scaffold",
+    "init",
+    "bootstrap",
+    "project-setup"
+  ],
+  "skills": "./claude-skills/"
 }

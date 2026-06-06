@@ -16,16 +16,17 @@
 # 환경 변수:
 #   MAX_ITERATIONS         이터 상한 (기본: 30)
 #   WALL_CLOCK_MINUTES     시계 캡 (기본: 120)
-#   CLAUDE_FAIL_STREAK_LIMIT  claude 비정상 exit 연속 허용 (기본: 3)
+#   CODEX_FAIL_STREAK_LIMIT  codex 비정상 exit 연속 허용 (기본: 3)
 
 set -euo pipefail
 
 # ----- 스크립트 자신의 디렉토리 (references/) -----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ----- 워커 claude 세션 도구 권한 -----
-# 무인 이터 워커는 `--dangerously-skip-permissions`로 실행되므로 별도 allow-list를
-# 코어에서 강제하지 않는다.
+# ----- 워커 Codex 세션 -----
+# 무인 이터 워커는 Codex sandbox 기반으로 실행한다. legacy tool allow-list 모델은
+# Codex CLI에 1:1 대응하지 않으므로 --sandbox workspace-write와 --ask-for-approval never로
+# 자동 루프에 필요한 비대화형 실행 경계를 고정한다.
 
 # ----- 헬퍼 -----
 die() {
@@ -62,9 +63,9 @@ spec_key() {
 }
 
 # ----- 의존성 검사 -----
-# git은 모든 subcommand가 쓴다(compute_paths). yq·claude는 start의 게이트·이터에서만
+# git은 모든 subcommand가 쓴다(compute_paths). yq·codex는 start의 게이트·이터에서만
 # 필요하므로 cmd_start에서 늦게 검사한다 — status/list/stop/cleanup/logs와 테스트의
-# 함수 source가 claude·yq 부재에도 동작하도록.
+# 함수 source가 codex·yq 부재에도 동작하도록.
 require_tool git
 
 # ----- 주입 가능 프로세스 인터페이스 -----
@@ -136,9 +137,9 @@ run_active() {
 
 # ----- 시그널 처리: SIGTERM/SIGINT 시 워커 트리 완결 종료 (orphan 방지) -----
 on_signal_exit() {
-  if [[ -n "${CLAUDE_PID:-}" ]]; then
+  if [[ -n "${CODEX_PID:-}" ]]; then
     local tree
-    tree=$(tree_pids "$CLAUDE_PID" 2>/dev/null | grep -E '^[0-9]+$' | sort -un)
+    tree=$(tree_pids "$CODEX_PID" 2>/dev/null | grep -E '^[0-9]+$' | sort -un)
     terminate_pids "$tree" >/dev/null || true
   fi
   exit 130
@@ -204,8 +205,8 @@ resolve_actual_wt() {
 #  생존자가 없다. immortal 워커 같은 병리적 경우에만 락이 유지된다.)
 release_lock_on_exit() {
   local survivors=""
-  [[ -n "${CLAUDE_PID:-}" ]] \
-    && survivors=$(list_alive_pids "$(tree_pids "$CLAUDE_PID" 2>/dev/null | grep -E '^[0-9]+$' | sort -un)")
+  [[ -n "${CODEX_PID:-}" ]] \
+    && survivors=$(list_alive_pids "$(tree_pids "$CODEX_PID" 2>/dev/null | grep -E '^[0-9]+$' | sort -un)")
   if [[ -n "$survivors" ]]; then
     echo "[$(now_iso)] WARN: 종료 시 워커 생존 — 락 유지(orphan 보호): ${survivors//$'\n'/ }" >&2
     return
@@ -444,34 +445,32 @@ iterate() {
   local exit_code=0
   (
     cd "$WT"
-    exec claude \
-      --print \
-      --no-session-persistence \
-      --dangerously-skip-permissions \
-      --system-prompt-file CLAUDE.md \
-      --add-dir . \
-      --output-format json \
+    exec codex exec \
+      --cd "$WT" \
+      --sandbox workspace-write \
+      --ask-for-approval never \
+      - \
       < "$SPEC_PATH" \
       > ".loop/iterations/$n.log" 2>&1
   ) &
-  CLAUDE_PID=$!
+  CODEX_PID=$!
   # 워커 PID 영속 — driver 가 죽고 워커만 남는 orphan 을 다음 start/stop 이 감지.
-  printf '%s\n' "$CLAUDE_PID" > "$WORKER_FILE" 2>/dev/null || true
-  wait "$CLAUDE_PID" || exit_code=$?
-  CLAUDE_PID=""
+  printf '%s\n' "$CODEX_PID" > "$WORKER_FILE" 2>/dev/null || true
+  wait "$CODEX_PID" || exit_code=$?
+  CODEX_PID=""
   # 워커 정상 종료 — orphan 아님. 워커 PID 메타 정리.
   rm -f "$WORKER_FILE" 2>/dev/null || true
 
   echo "[$(now_iso)] 이터 #$n 종료 (exit: $exit_code). 게이트 검사..."
 
   if [[ $exit_code -ne 0 ]]; then
-    CLAUDE_FAIL_STREAK=$((CLAUDE_FAIL_STREAK + 1))
-    echo "WARN: claude 비정상 exit (연속 $CLAUDE_FAIL_STREAK회). .loop/iterations/$n.log 확인."
-    if [[ $CLAUDE_FAIL_STREAK -ge ${CLAUDE_FAIL_STREAK_LIMIT:-3} ]]; then
-      halt "claude 비정상 exit ${CLAUDE_FAIL_STREAK}회 연속 (rate limit·네트워크·인증 의심)."
+    CODEX_FAIL_STREAK=$((CODEX_FAIL_STREAK + 1))
+    echo "WARN: codex 비정상 exit (연속 $CODEX_FAIL_STREAK회). .loop/iterations/$n.log 확인."
+    if [[ $CODEX_FAIL_STREAK -ge ${CODEX_FAIL_STREAK_LIMIT:-3} ]]; then
+      halt "codex 비정상 exit ${CODEX_FAIL_STREAK}회 연속 (rate limit·네트워크·인증 의심)."
     fi
   else
-    CLAUDE_FAIL_STREAK=0
+    CODEX_FAIL_STREAK=0
   fi
 
   # 워커 terminal: signals/ 디렉토리가 비어있지 않으면 정지(파일 이름·내용 미파싱).
@@ -533,12 +532,12 @@ prepare_workspace() {
   # 어느 cwd 에서 호출되든 같은 작업 공간을 본다.
   printf '%s\n' "$WT" > "$SPEC_DIR/.loop-wt"
 
-  # 헌법을 워크트리 CLAUDE.md로 복사. 워커 계약(노트·signals/ 컨벤션 등)의 SoT 는
+  # 헌법을 워크트리 AGENTS.md로 복사. 워커 계약(노트·signals/ 컨벤션 등)의 SoT 는
   # constitution.md 이므로 별도 append 없이 cp 만으로 충분하다.
-  cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
+  cp "$SCRIPT_DIR/constitution.md" "$WT/AGENTS.md" \
     || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
-  if git -C "$WT" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
-    git -C "$WT" update-index --skip-worktree CLAUDE.md || true
+  if git -C "$WT" ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then
+    git -C "$WT" update-index --skip-worktree AGENTS.md || true
   fi
   local gcd; gcd="$(git -C "$WT" rev-parse --git-common-dir)"
   [[ "$gcd" != /* ]] && gcd="$WT/$gcd"
@@ -547,7 +546,7 @@ prepare_workspace() {
   # 자동 제외. enclosing worktree(보조 포함)에서 중첩 .worktree/ 가 untracked 로
   # 노출되지 않게 공통 git 디렉토리의 info/exclude 에 등록한다(모든 worktree 공유).
   # .loop-lock 은 SPEC_DIR 레벨이라 별도 패턴 필요. .loop/ 는 안전망 중복.
-  for pat in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt" ".loop-worker"; do
+  for pat in "AGENTS.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt" ".loop-worker"; do
     grep -qxF "$pat" "$gcd/info/exclude" 2>/dev/null || echo "$pat" >> "$gcd/info/exclude"
   done
 }
@@ -557,9 +556,9 @@ cmd_start() {
   local input="$1"; shift || true
   [[ -z "$input" ]] && die "사용: $0 start <spec-path> [--max-iterations N] [--wall-clock-minutes N]"
   [[ -f "$input" ]] || die "스펙 파일을 찾을 수 없음: $input"
-  # 게이트(yq)·이터(claude)는 start에서만 필요 — 여기서 검사.
+  # 게이트(yq)·이터(codex)는 start에서만 필요 — 여기서 검사.
   require_tool yq
-  require_tool claude
+  require_tool codex
 
   local max_iterations_override="" wall_clock_minutes_override=""
   while [[ $# -gt 0 ]]; do
@@ -590,7 +589,7 @@ cmd_start() {
 
   # 이터레이션 루프
   START_TIME=$(date +%s)
-  CLAUDE_FAIL_STREAK=0
+  CODEX_FAIL_STREAK=0
   local n=0
   while true; do
     n=$((n + 1))
@@ -900,7 +899,7 @@ start 동작을 조정하는 환경 변수:
 
   MAX_ITERATIONS             기본 30      이터 상한 (--max-iterations 로 override)
   WALL_CLOCK_MINUTES         기본 120     시간 상한 (--wall-clock-minutes 로 override)
-  CLAUDE_FAIL_STREAK_LIMIT   기본 3       claude 비정상 exit 연속 허용 횟수
+  CODEX_FAIL_STREAK_LIMIT   기본 3       codex 비정상 exit 연속 허용 횟수
 EOF
 }
 
@@ -911,7 +910,7 @@ cmd_gates() {
 
   - 이터 상한 도달               (MAX_ITERATIONS)
   - 시간 상한 도달               (WALL_CLOCK_MINUTES)
-  - claude 비정상 exit 연속      (CLAUDE_FAIL_STREAK_LIMIT)
+  - codex 비정상 exit 연속      (CODEX_FAIL_STREAK_LIMIT)
   - 테스트 약화                  (기존 테스트 파일 변경 감지)
   - 의존성 manifest 변경
   - SPEC scope 위반              (scope.include 밖 변경)
@@ -932,7 +931,7 @@ cmd_deps() {
   echo "  ✓ bash $BASH_VERSION"
   echo "  $(command -v git    >/dev/null 2>&1 && echo "✓" || echo "✗") git"
   echo "  $(command -v yq     >/dev/null 2>&1 && echo "✓" || echo "✗") yq (mikefarah)"
-  echo "  $(command -v claude >/dev/null 2>&1 && echo "✓" || echo "✗") claude"
+  echo "  $(command -v codex >/dev/null 2>&1 && echo "✓" || echo "✗") codex"
   if [[ -n "$HASH_BIN" ]]; then
     echo "  ✓ $HASH_BIN (해시 유틸)"
   else
@@ -989,7 +988,7 @@ Subcommands:
 
 Exit codes (driver 자체):
   0     정상 종료 (signals/ 가 비어있지 않음 — 워커 terminal 의도)
-  1     halt (객관 게이트 위반, claude 비정상 streak, 환경/락 에러 등)
+  1     halt (객관 게이트 위반, codex 비정상 streak, 환경/락 에러 등)
   2     사용법 에러 (잘못된 인자)
   130   SIGTERM/SIGINT
 
