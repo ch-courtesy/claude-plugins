@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# merge.sh — autopilot:dispatch per-SPEC 승인+머지 (M4)
+# merge.sh — autopilot:dispatch per-SPEC 머지 (M4)
 #
-# 책임 (파이프라인 종착: "승인되면 머지되고 SPEC 은 done(=머지됨)이 된다"):
-#   - 승인 제출(분리 신원): 리뷰가 approve 로 수렴하면 **분리된 자율 approver 신원**으로
-#     PR 을 승인한다(APPROVE_CMD). 자동 리뷰 봇(REVIEW_BOT)으로는 승인하지 않는다.
-#   - 승인 확인: PR 에 approver 신원의 APPROVED 정식 리뷰가 있는지 확인한다. 자동 리뷰 봇의
-#     self-approve 는 무효(분리된 approver 신원의 승인만 인정).
+# 책임 (파이프라인 종착: "리뷰가 approve 로 수렴하면 머지되고 SPEC 은 done(=머지됨)이 된다"):
 #   - 버전 범프 게이트: 머지될 변경이 워치 디렉토리(plugins/)를 건드리면 같은 변경 안에서
 #     plugin.json 버전이 올랐는지 단언한다. 안 올랐으면 머지 차단(비완료 종착).
 #   - 머지: default 브랜치에 fast-forward 전용(--ff-only)으로 머지(+base push). 머지 커밋·
@@ -13,20 +9,24 @@
 #   - 완료: 머지 확인되면 int-phase=merged(스케줄러가 SPEC 을 done 으로 전이) + 작업 공간
 #     정리를 loop 의 공개 cleanup 인터페이스로 위임.
 #
+# 분리 approver 신원 요구 없음:
+#   머지는 **가용한 forge 토큰**(예: gh 인증)으로 수행한다. 별도의 분리 승인 신원(APPROVER)의
+#   정식 APPROVED 리뷰를 머지 전제로 두지 않는다 — 리뷰 수렴(approve) 판정은 상위 리뷰 루프가
+#   책임지고, 이 모듈은 버전 게이트 통과 시 가용 토큰으로 ff-only 머지한다. forge 서브모드는
+#   통합이 PR 을 통하며(작업 브랜치 push→PR), direct 서브모드(forge 백엔드 미가용)는 PR 없이
+#   로컬 작업 브랜치를 머지한다.
+#
 # 불변식:
 #   - force(강제) 머지·push 금지. 머지는 git merge --ff-only 만.
 #   - 작업 공간은 직접 지우지 않고 loop 공개 cleanup 으로만 위임.
 #   - per-SPEC 상태는 lib-integration.sh(run-dir + 키)로만. 키는 호출자 주입.
 #   - 버전 게이트는 rules/engineering/versioning.md 실행자.
 #
-# 모든 외부 인터페이스(git·forge·loop·approve CLI)는 주입 가능. mock 으로 독립 검증
+# 모든 외부 인터페이스(git·forge·loop CLI)는 주입 가능. mock 으로 독립 검증
 # (self-referential: 실제 머지·PR 미수행). bash 3.2+ 호환.
 #
 # 환경 변수 (mock 치환 가능):
 #   GIT_CMD/FORGE_CMD/LOOP_CMD/DEFAULT_BRANCH   integration.sh 와 공유.
-#   APPROVER        승인 권한 신원 login(설정 시 그 신원의 승인만 인정).
-#   REVIEW_BOT      자동 리뷰 봇 login(이 신원의 self-approve 는 무효).
-#   APPROVE_CMD <pr>  PR 승인 제출(기본: gh pr review <pr> --approve). approver 신원 자격으로.
 #   WATCH_DIRS      버전 워치 디렉토리 prefix(기본: plugins/).
 
 set -uo pipefail
@@ -46,49 +46,11 @@ FORGE_CMD="${FORGE_CMD:-gh}"
 LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../loop/references/loop.sh"
 LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
-APPROVER="${APPROVER:-}"
-REVIEW_BOT="${REVIEW_BOT:-}"
 WATCH_DIRS="${WATCH_DIRS:-plugins/}"
-APPROVE_CMD="${APPROVE_CMD:-mg_approve_gh}"
 
 mg_die() { echo "merge: $*" >&2; return 1; }
 
-# ===== 1) 승인 제출 — 분리된 approver 신원으로 PR 승인 =====
-mg_approve_gh() {
-  local pr="$1"
-  command -v gh >/dev/null 2>&1 || { mg_die "gh CLI 필요"; return 1; }
-  gh pr review "$pr" --approve >/dev/null 2>&1
-}
-
-# mg_submit_approval <pr> — approver 신원으로 승인 제출(REVIEW_BOT 로는 승인 안 함).
-mg_submit_approval() {
-  local pr="$1"
-  [[ -n "$pr" ]] || return 1
-  # shellcheck disable=SC2086
-  $APPROVE_CMD "$pr"
-}
-
-# ===== 2) 승인 확인 — approver 신원의 APPROVED. 리뷰 봇 self-approve 무효 =====
-mg_pr_reviews() {
-  # shellcheck disable=SC2086
-  $FORGE_CMD pr view "$1" --json reviews \
-    --jq '.reviews[] | "\(.state)\t\(.author.login)"' 2>/dev/null
-}
-
-# mg_approval_ok <pr> — approver 신원의 APPROVED 가 있으면 0.
-mg_approval_ok() {
-  local pr="$1" state author
-  [[ -n "$pr" ]] || return 1
-  while IFS=$'\t' read -r state author; do
-    [[ "$state" == "APPROVED" ]] || continue
-    [[ -n "$REVIEW_BOT" && "$author" == "$REVIEW_BOT" ]] && continue   # self-approve 무효
-    [[ -n "$APPROVER" && "$author" != "$APPROVER" ]] && continue       # approver 신원만 인정
-    return 0
-  done < <(mg_pr_reviews "$pr")
-  return 1
-}
-
-# ===== 3) 버전 범프 게이트 — versioning.md 실행자 =====
+# ===== 1) 버전 범프 게이트 — versioning.md 실행자 =====
 mg_merge_changed_files() {
   # shellcheck disable=SC2086
   $GIT_CMD diff --name-only "origin/$DEFAULT_BRANCH...$1" 2>/dev/null
@@ -151,7 +113,7 @@ mg_version_gate() {
   return 0
 }
 
-# ===== 4) 머지 직렬화 락 — run-dir 단위(mkdir 원자성) =====
+# ===== 2) 머지 직렬화 락 — run-dir 단위(mkdir 원자성) =====
 # mg_try_lock <run_dir> — 비차단 획득(성공 0, 점유중 1).
 mg_try_lock() { mkdir "$1/.merge.lock" 2>/dev/null; }
 # mg_release_lock <run_dir>
@@ -166,12 +128,12 @@ mg_acquire_lock() {
   return 0
 }
 
-# ===== 5) ff-only 머지 — 락 보호 구간. 머지 커밋·force 없음 =====
+# ===== 3) ff-only 머지 — 락 보호 구간. 머지 커밋·force 없음. 가용 토큰으로 수행 =====
 # mg_merge_ff_only <run_dir> <branch>
 mg_merge_ff_only() {
   local rd="$1" branch="$2"
   mg_acquire_lock "$rd" || { mg_die "머지 락 획득 실패(직렬화 대기 초과): $rd"; return 1; }
-  # 임계구간: main 체크아웃 + ff-only 머지 + base push.
+  # 임계구간: main 체크아웃 + ff-only 머지 + base push(가용 토큰).
   local rc=0
   {
     # shellcheck disable=SC2086
@@ -184,38 +146,40 @@ mg_merge_ff_only() {
   [[ "$rc" -eq 0 ]] || { mg_die "fast-forward 머지/푸시 실패(머지 커밋·force 금지): $branch → $DEFAULT_BRANCH"; return 1; }
 }
 
-# ===== 6) 정리 — loop 공개 cleanup 위임 =====
+# ===== 4) 정리 — loop 공개 cleanup 위임 =====
 mg_cleanup_workspace() {
   # shellcheck disable=SC2086
   $LOOP_CMD cleanup "$1" >/dev/null 2>&1 || echo "WARN: cleanup 위임 실패(수동 정리 필요): $1" >&2
 }
 
-# ===== 7) 메인 진입 — 승인·버전 게이트 통과 시 머지하고 phase=merged =====
-# mg_merge_finish <spec> <run_dir> <key> [pr] [skip_approval]
-#   skip_approval=1 이면 승인 게이트만 우회한다(forge 미구성 직접 머지 서브모드: 승인 요청·
-#   리뷰·승인 없이 머지). version 범프 게이트·ff-only·작업공간 정리는 그대로 유지한다.
-#   반환: 0=머지 완료(phase=merged) / 1=버전게이트 차단(phase=blocked, 비완료 종착) /
-#         2=미승인(대기, phase 불변).
+# ===== 5) 메인 진입 — 버전 게이트 통과 시 머지하고 phase=merged =====
+# mg_merge_finish <spec> <run_dir> <key> [pr] [direct]
+#   direct=1 이면 direct 서브모드(forge 백엔드 미가용 — PR 없이 로컬 머지) 계약으로, PR 보강·
+#   PR 출력을 건너뛴다. version 범프 게이트·ff-only·작업공간 정리는 두 서브모드 공통.
+#   머지는 분리 approver 승인을 전제하지 않고 가용 토큰으로 수행한다(리뷰 수렴은 상위 책임).
+#   반환: 0=머지 완료(phase=merged) / 1=차단(phase=blocked, 비완료 종착 — forge PR 없음 또는
+#         버전게이트).
 mg_merge_finish() {
-  local spec="$1" rd="$2" key="$3" pr="${4:-}" skip_approval="${5:-}"
-  [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { mg_die "사용: merge.sh finish <spec> <run_dir> <key> [pr] [skip_approval]"; return 1; }
+  local spec="$1" rd="$2" key="$3" pr="${4:-}" direct="${5:-}"
+  [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { mg_die "사용: merge.sh finish <spec> <run_dir> <key> [pr] [direct]"; return 1; }
   mkdir -p "$rd"
 
   local branch; branch="$(int_get_branch "$rd" "$key")"
   [[ -n "$branch" ]] || { mg_die "작업 브랜치 미설정(통합 선행 필요): key=$key"; return 1; }
-  # direct 서브모드(skip_approval=1)는 PR 없이 동작하는 계약 — PR 보강을 건너뛴다
+  # direct 서브모드(direct=1)는 PR 없이 동작하는 계약 — PR 보강을 건너뛴다
   # (같은 key 가 이전 forge 경로·재개에서 가졌을 수 있는 stale PR 을 끌어오지 않음).
-  [[ "$skip_approval" == "1" ]] || { [[ -n "$pr" ]] || pr="$(int_get_pr "$rd" "$key")"; }
-  int_log "$rd" "$key" "merge_finish spec=$spec branch=$branch pr=$pr skip_approval=${skip_approval:-0}"
+  [[ "$direct" == "1" ]] || { [[ -n "$pr" ]] || pr="$(int_get_pr "$rd" "$key")"; }
+  int_log "$rd" "$key" "merge_finish spec=$spec branch=$branch pr=$pr direct=${direct:-0}"
 
-  # 1) 승인 게이트(직접 머지 서브모드면 우회).
-  if [[ "$skip_approval" == "1" ]]; then
-    int_log "$rd" "$key" "직접 머지 서브모드: 승인 게이트 우회(version·ff-only 게이트는 유지)"
-  elif ! mg_approval_ok "$pr"; then
-    int_log "$rd" "$key" "승인 게이트 차단: approver 신원 APPROVED 없음(pr=$pr) — 머지 안 함(대기)"
+  # 1) forge PR 존재 게이트 — forge 경로(direct≠1)는 PR 을 통해 통합한다. PR 이 없으면
+  #    (생성 누락·상태 손상) 대상 브랜치에 PR 없이 직접 머지해 PR 리뷰 경로를 우회하는 것을
+  #    막기 위해 차단한다(비완료 종착). direct 는 PR 없이 동작하는 계약이라 적용하지 않는다.
+  if [[ "$direct" != "1" && -z "$pr" ]]; then
+    int_set_phase "$rd" "$key" blocked
+    int_log "$rd" "$key" "forge PR 없음 차단: PR 미보강(생성 누락·상태 손상) — PR 없이 머지 안 함(비완료 종착)"
     echo "key:     $key"
-    echo "blocked: approval — approver 신원의 '승인됨' 리뷰가 없습니다(pr=$pr)."
-    return 2
+    echo "blocked: no-pr — forge 서브모드인데 PR 이 없습니다(PR 없이 대상 브랜치에 직접 머지하지 않습니다)."
+    return 1
   fi
 
   # 2) 버전 범프 게이트(비완료 종착).
@@ -227,9 +191,9 @@ mg_merge_finish() {
     return 1
   fi
 
-  # 3) ff-only 머지(직렬화 락 보호).
+  # 3) ff-only 머지(직렬화 락 보호, 가용 토큰).
   int_set_phase "$rd" "$key" merging
-  int_log "$rd" "$key" "게이트 통과 → ff-only 머지(직렬화): $branch → $DEFAULT_BRANCH"
+  int_log "$rd" "$key" "게이트 통과 → ff-only 머지(직렬화, 가용 토큰): $branch → $DEFAULT_BRANCH"
   mg_merge_ff_only "$rd" "$branch" || { int_set_phase "$rd" "$key" blocked; return 1; }
 
   # 4) 완료.
@@ -240,7 +204,7 @@ mg_merge_finish() {
   echo "phase:   merged"
   echo "branch:  $branch → $DEFAULT_BRANCH (ff-only)"
   # direct 서브모드는 PR 없이 동작 — PR 필드 생략(stale PR 출력 방지).
-  [[ "$skip_approval" == "1" ]] || echo "pr:      $pr"
+  [[ "$direct" == "1" ]] || echo "pr:      $pr"
   return 0
 }
 
@@ -250,20 +214,19 @@ mg_usage() {
 usage: merge.sh <command> [args]
 
 Commands:
-  approve  <pr>                    분리 approver 신원으로 PR 승인 제출.
-  approval <pr>                    approver 신원 APPROVED 유무(0/1).
   version-gate <branch>            버전 범프 게이트 판정(0=통과,1=차단).
-  finish <spec> <run_dir> <key> [pr]
-                                   승인·버전 게이트 통과 시 직렬화 ff-only 머지 후
-                                   phase=merged + 작업 공간 정리 위임.
+  finish <spec> <run_dir> <key> [pr] [direct]
+                                   버전 게이트 통과 시 직렬화 ff-only 머지(가용 토큰) 후
+                                   phase=merged + 작업 공간 정리 위임. direct=1 이면 PR 없이.
 
-환경 변수: GIT_CMD FORGE_CMD LOOP_CMD DEFAULT_BRANCH APPROVER REVIEW_BOT APPROVE_CMD WATCH_DIRS
+환경 변수: GIT_CMD FORGE_CMD LOOP_CMD DEFAULT_BRANCH WATCH_DIRS
 EOF
   return 1
 }
 
 # =====================================================================
-# selftest — mock 인터페이스로 승인·버전 게이트·ff-only·직렬화 락·force 미사용 검증.
+# selftest — mock 인터페이스로 버전 게이트·ff-only·직렬화 락·force 미사용 검증.
+#   (분리 approver 요구 없음 — 머지는 버전 게이트 통과 시 가용 토큰으로 수행.)
 # =====================================================================
 mg_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
@@ -289,15 +252,10 @@ mg_selftest() {
     esac
     return 0
   }
-  mock_forge() {
-    echo "forge $*" >> "$trace"
-    if [[ "$1" == "pr" && "$2" == "view" ]]; then printf '%s\n' "${MOCK_REVIEWS:-}"; fi
-    return 0
-  }
+  mock_forge() { echo "forge $*" >> "$trace"; return 0; }
   mock_loop() { echo "loop $*" >> "$trace"; return 0; }
-  mock_approve() { echo "approve $*" >> "$trace"; return 0; }
-  GIT_CMD=mock_git; FORGE_CMD=mock_forge; LOOP_CMD=mock_loop; APPROVE_CMD=mock_approve
-  DEFAULT_BRANCH=main; REVIEW_BOT="auto-review-bot"; APPROVER="approver-bot"
+  GIT_CMD=mock_git; FORGE_CMD=mock_forge; LOOP_CMD=mock_loop
+  DEFAULT_BRANCH=main
 
   local spec="$TMP/SPEC.md"; printf '# T\n' > "$spec"
   local fail=0
@@ -308,86 +266,77 @@ mg_selftest() {
   setup() { local k="$1"; int_set_branch "$rd" "$k" "feat/run1-$k"; int_set_pr "$rd" "$k" 77; }
   reset() { : > "$trace"; }
 
-  # ---- AC6/AC7: 승인 O + 워치 변경 없음 → ff-only 머지 + phase=merged + cleanup ----
+  # ---- forge: 워치 변경 없음 → ff-only 머지 + phase=merged + cleanup (approver 불필요) ----
   reset; setup k1
-  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="README.md" MOCK_BUMP="" \
+  MOCK_FILES="README.md" MOCK_BUMP="" \
     mg_merge_finish "$spec" "$rd" k1 >/dev/null 2>&1; local rc=$?
-  chk "AC7 머지 rc=0" "$rc" "0"
-  has 'git merge --ff-only' && ok "AC7 ff-only 머지 호출" || bad "AC7 ff-only 머지 호출"
-  has 'git push origin main' && ok "AC7 base push" || bad "AC7 base push"
-  chk "AC7 phase=merged" "$(int_get_phase "$rd" k1)" "merged"
-  has 'loop cleanup' && ok "AC7 cleanup 위임" || bad "AC7 cleanup 위임"
+  chk "forge 머지 rc=0(approver 불필요)" "$rc" "0"
+  has 'git merge --ff-only' && ok "ff-only 머지 호출" || bad "ff-only 머지 호출"
+  has 'git push origin main' && ok "base push(가용 토큰)" || bad "base push(가용 토큰)"
+  chk "phase=merged" "$(int_get_phase "$rd" k1)" "merged"
+  has 'loop cleanup' && ok "cleanup 위임" || bad "cleanup 위임"
 
-  # ---- AC6: 미승인 → 머지 안 함(대기 rc=2) ----
-  reset; setup k2
-  MOCK_REVIEWS=$'COMMENTED\tsomeone' MOCK_FILES="README.md" \
-    mg_merge_finish "$spec" "$rd" k2 >/dev/null 2>&1; rc=$?
-  chk "AC6 미승인 rc=2(대기)" "$rc" "2"
-  if has 'git merge --ff-only'; then bad "AC6 미승인 머지 안 함"; else ok "AC6 미승인 머지 안 함"; fi
-  chk "AC6 미승인 phase 불변" "$(int_get_phase "$rd" k2)" ""
-
-  # ---- AC6: 리뷰 봇 self-approve → 무효 → 머지 안 함 ----
-  reset; setup k3
-  MOCK_REVIEWS=$'APPROVED\tauto-review-bot' MOCK_FILES="README.md" \
-    mg_merge_finish "$spec" "$rd" k3 >/dev/null 2>&1; rc=$?
-  chk "AC6 self-approve 무효 rc=2" "$rc" "2"
-  if has 'git merge --ff-only'; then bad "AC6 self-approve 머지 안 함"; else ok "AC6 self-approve 머지 안 함"; fi
-
-  # ---- AC7: plugins/ 변경 + 범프 없음 → 차단(비완료 종착 rc=1) ----
+  # ---- forge: plugins/ 변경 + 범프 없음 → 차단(비완료 종착 rc=1) ----
   reset; setup k4
-  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="" \
+  MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="" \
     mg_merge_finish "$spec" "$rd" k4 >/dev/null 2>&1; rc=$?
-  chk "AC7 워치+범프없음 rc=1(차단)" "$rc" "1"
-  if has 'git merge --ff-only'; then bad "AC7 범프없음 머지 안 함"; else ok "AC7 범프없음 머지 안 함"; fi
-  chk "AC7 차단 phase=blocked" "$(int_get_phase "$rd" k4)" "blocked"
+  chk "워치+범프없음 rc=1(차단)" "$rc" "1"
+  if has 'git merge --ff-only'; then bad "범프없음 머지 안 함"; else ok "범프없음 머지 안 함"; fi
+  chk "차단 phase=blocked" "$(int_get_phase "$rd" k4)" "blocked"
 
-  # ---- AC7 반례: plugins/ 변경 + 범프 있음 → 머지 ----
+  # ---- forge: plugins/ 변경 + 범프 있음 → 머지 ----
   reset; setup k5
-  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="1" \
+  MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="1" \
     mg_merge_finish "$spec" "$rd" k5 >/dev/null 2>&1; rc=$?
-  chk "AC7 워치+범프있음 rc=0" "$rc" "0"
-  has 'git merge --ff-only' && ok "AC7 범프시 머지" || bad "AC7 범프시 머지"
+  chk "워치+범프있음 rc=0" "$rc" "0"
+  has 'git merge --ff-only' && ok "범프시 머지" || bad "범프시 머지"
 
   # ---- 같은 version 값 재기입(라인은 추가되나 값 동일) → 차단 (Codex blocking 회귀 가드) ----
   reset; setup k6
-  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="same" \
+  MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="same" \
     mg_merge_finish "$spec" "$rd" k6 >/dev/null 2>&1; rc=$?
   chk "동일 버전 재기입 rc=1(차단)" "$rc" "1"
   if has 'git merge --ff-only'; then bad "동일 버전인데 머지함"; else ok "동일 버전 → 머지 안 함"; fi
 
-  # ---- AC3/AC6: skip_approval=1 → 승인 게이트만 우회(직접 머지 서브모드) ----
-  #   forge 미구성 직접 머지는 승인 요청·리뷰·승인 없이 머지하되 version gate·ff-only 는 유지.
-  reset; setup kd1   # setup 은 int_set_pr 77 을 심는다 — direct 경로가 이 stale PR 을 끌어오면 안 된다.
-  out="$(MOCK_REVIEWS=$'COMMENTED\tsomeone' MOCK_FILES="README.md" \
-    mg_merge_finish "$spec" "$rd" kd1 "" 1 2>/dev/null)"; rc=$?
-  chk "AC3 직접머지 skip-approval rc=0" "$rc" "0"
-  has 'git merge --ff-only' && ok "AC3 직접머지 ff-only 머지" || bad "AC3 직접머지 ff-only 머지"
-  chk "AC3 직접머지 phase=merged" "$(int_get_phase "$rd" kd1)" "merged"
-  case "$out" in *77*) bad "AC3 직접머지 stale PR(77) 미출력 — skip_approval 시 보강 안 함";; *) ok "AC3 직접머지 stale PR(77) 미출력 — skip_approval 시 보강 안 함";; esac
-
-  # ---- AC5: skip_approval=1 이어도 version gate 는 유지(차단) ----
-  reset; setup kd2
-  MOCK_REVIEWS="" MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="" \
-    mg_merge_finish "$spec" "$rd" kd2 "" 1 >/dev/null 2>&1; rc=$?
-  chk "AC5 직접머지 version gate 차단 rc=1" "$rc" "1"
-  if has 'git merge --ff-only'; then bad "AC5 직접머지 범프없음 머지 안 함"; else ok "AC5 직접머지 범프없음 머지 안 함"; fi
-
-  # ---- AC6: approver 신원으로 승인 제출(approve action) ----
+  # ---- forge: PR 없음(보강 실패·상태 손상) → 차단(rc=1), merge/push 미호출 (codex blocking/96 가드) ----
   reset
-  mg_submit_approval 88 >/dev/null
-  has 'approve 88' && ok "AC6 approver 신원 승인 제출" || bad "AC6 approver 신원 승인 제출"
+  int_set_branch "$rd" knopr "feat/run1-knopr"   # PR 미설정(int_set_pr 안 함) → int_get_pr 빈 값
+  MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" knopr >/dev/null 2>&1; rc=$?
+  chk "forge PR없음 rc=1(차단)" "$rc" "1"
+  if has 'git merge --ff-only'; then bad "forge PR없음인데 머지/push 호출됨(차단 실패)"; else ok "forge PR없음 머지/push 미호출"; fi
+  chk "forge PR없음 phase=blocked" "$(int_get_phase "$rd" knopr)" "blocked"
+  # 대조: direct=1 은 PR 없이도 머지(PR 게이트는 forge 전용).
+  reset
+  int_set_branch "$rd" kdnopr "feat/run1-kdnopr"
+  MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdnopr "" 1 >/dev/null 2>&1; rc=$?
+  chk "direct PR없음 rc=0(머지)" "$rc" "0"
+  has 'git merge --ff-only' && ok "direct PR없음에도 머지함(forge 전용 게이트)" || bad "direct PR없음인데 머지 안 됨(게이트가 direct에 오적용)"
 
-  # ---- AC10: 머지 락 직렬화 — 점유 중엔 두 번째 획득 실패, 해제 후 성공 ----
-  mg_try_lock "$rd" && ok "AC10 락 1차 획득" || bad "AC10 락 1차 획득"
-  if mg_try_lock "$rd"; then bad "AC10 점유 중 2차 획득 차단"; else ok "AC10 점유 중 2차 획득 차단"; fi
+  # ---- direct=1 → PR 없이 머지(version gate·ff-only 유지) ----
+  reset; setup kd1   # setup 은 int_set_pr 77 을 심는다 — direct 경로가 이 stale PR 을 끌어오면 안 된다.
+  out="$(MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kd1 "" 1 2>/dev/null)"; rc=$?
+  chk "direct 머지 rc=0" "$rc" "0"
+  has 'git merge --ff-only' && ok "direct ff-only 머지" || bad "direct ff-only 머지"
+  chk "direct phase=merged" "$(int_get_phase "$rd" kd1)" "merged"
+  case "$out" in *77*) bad "direct stale PR(77) 미출력";; *) ok "direct stale PR(77) 미출력";; esac
+
+  # ---- direct=1 이어도 version gate 는 유지(차단) ----
+  reset; setup kd2
+  MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="" \
+    mg_merge_finish "$spec" "$rd" kd2 "" 1 >/dev/null 2>&1; rc=$?
+  chk "direct version gate 차단 rc=1" "$rc" "1"
+  if has 'git merge --ff-only'; then bad "direct 범프없음 머지 안 함"; else ok "direct 범프없음 머지 안 함"; fi
+
+  # ---- 머지 락 직렬화 — 점유 중엔 두 번째 획득 실패, 해제 후 성공 ----
+  mg_try_lock "$rd" && ok "락 1차 획득" || bad "락 1차 획득"
+  if mg_try_lock "$rd"; then bad "점유 중 2차 획득 차단"; else ok "점유 중 2차 획득 차단"; fi
   mg_release_lock "$rd"
-  mg_try_lock "$rd" && ok "AC10 해제 후 재획득" || bad "AC10 해제 후 재획득"
+  mg_try_lock "$rd" && ok "해제 후 재획득" || bad "해제 후 재획득"
   mg_release_lock "$rd"
 
   # ---- force 미사용 (mock_git force 보면 exit99; 위 머지 케이스 통과 = 미사용) ----
-  reset; setup k6
-  MOCK_REVIEWS=$'APPROVED\tapprover-bot' MOCK_FILES="README.md" \
-    mg_merge_finish "$spec" "$rd" k6 >/dev/null 2>&1
+  reset; setup k7
+  MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" k7 >/dev/null 2>&1
   if grep -qiE 'force|(^| )-f( |$)' "$trace"; then bad "force 미사용"; else ok "force 미사용(git 인자에 force 없음)"; fi
 
   echo "----"
@@ -399,8 +348,6 @@ mg_selftest() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   SUB="${1:-}"; shift || true
   case "$SUB" in
-    approve)      [[ $# -ge 1 ]] || mg_usage; mg_submit_approval "$1" ;;
-    approval)     [[ $# -ge 1 ]] || mg_usage; mg_approval_ok "$1" && echo approved || { echo unapproved; exit 1; } ;;
     version-gate) [[ $# -ge 1 ]] || mg_usage; mg_version_gate "$1" && echo pass || { echo block; exit 1; } ;;
     finish)       mg_merge_finish "$@" ;;
     selftest)     mg_selftest ;;
