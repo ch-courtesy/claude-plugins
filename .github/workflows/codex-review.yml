@@ -147,6 +147,7 @@ jobs:
           PR_NUMBER="$PR_NUMBER" \
           PR_BASE_SHA="$PR_BASE_SHA" \
           PR_HEAD_SHA="$PR_HEAD_SHA" \
+          REVIEW_MARKER_PREFIX="codex-formal-review" \
           .github/scripts/pr-review-context.sh
 
           source .review-context/context-mode.env
