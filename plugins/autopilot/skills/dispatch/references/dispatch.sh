@@ -585,6 +585,11 @@ cmd_ready() {
   done
   local RD; local -a SP=() DEP_IDX=()
   load_run "$rid"
+  # --max-parallel 미지정이면 start 가 영속한 MAX_PARALLEL 마커를 기본값으로(sticky).
+  if (( max_parallel == 0 )) && [[ -f "$RD/MAX_PARALLEL" ]]; then
+    max_parallel="$(cat "$RD/MAX_PARALLEL" 2>/dev/null || echo 0)"
+    [[ "$max_parallel" =~ ^[0-9]+$ ]] || max_parallel=0
+  fi
   propagate_skips "$RD" "${SP[@]}"
   local n=${#SP[@]} i d ready running_count=0
   for ((i=0; i<n; i++)); do
@@ -713,117 +718,34 @@ cmd_start() {
   export DEFAULT_BRANCH="$TARGET_BRANCH"
   log_event "$rd" "integration submode=$INTEGRATE_SUBMODE target-branch=$TARGET_BRANCH (done=머지됨)"
 
-  # ----- 스트리밍 스케줄러 (SPEC별 준비도 기반) -----
-  # WAVES.txt 는 진단용으로 보존하되, 실제 실행은 wave 배리어가 아니라 각 SPEC 의
-  # depends_on 준비도로 구동한다. 한 SPEC 은 자신의 모든 dep 이 done 이 되는 즉시
-  # (같은 위상의 무관 SPEC 이 아직 실행 중이어도) 동시성 상한 이내에서 시작된다.
-  # 한 SPEC 이 failed 면 그 이행적 의존자만 skipped 로 차단되고, 의존 관계가 없는
-  # 가지는 끝까지 진행한다.
-  local n=${#specs_abs[@]}
-  local -a DEP_IDX=()
-  compute_dep_idx "${specs_abs[@]}"
+  # ----- max-parallel 마커(동시성 상한, resume sticky) -----
+  # 모델 주도 ready 가 기본값으로 읽는다(모델이 --max-parallel 을 매번 주지 않아도 일관).
+  # 마커가 있으면(=재개) 현재 플래그보다 우선(sticky).
+  [[ -f "$rd/MAX_PARALLEL" ]] || printf '%s\n' "$max_parallel" > "$rd/MAX_PARALLEL"
 
-  # resume: done 이 아닌 모든 상태(failed/skipped/running/pending)를 pending 으로
-  # 되돌려 미완 SPEC 을 스트리밍 스케줄에 따라 재시도(이미 done 인 SPEC 은 재실행 안 함).
+  # ----- 셋업 완료 — 모델 주도 오케스트레이션으로 인계 -----
+  # dispatch.sh 는 결정적 셋업(run-dir·DAG·markers·pending 상태)만 수행한다. 준비된 SPEC당
+  # 서브에이전트 spawn·구현·리뷰·머지는 모델(dispatch 스킬)이 ready/mark 헬퍼 + Agent 도구로
+  # 소유한다(서브에이전트 계약: references/spec-subagent.md). bash 무인 드레인 루프는 없다.
+  #
+  # 모델 루프:
+  #   1. ready <run-id> [--max-parallel N] → 지금 띄울 준비된 SPEC 목록.
+  #   2. 각 SPEC: mark <run-id> running <spec> → 서브에이전트 1개 spawn(Agent 도구).
+  #   3. 서브에이전트 보고: 머지됨→mark done(=의존자 해제), 비완료→mark failed(이행적 skip).
+  #   4. ready 가 비고 running 이 없을 때까지 반복.
+  #
+  # resume: done 이 아닌 모든 상태(failed/skipped/running/pending)를 pending 으로 되돌려
+  #   미완 SPEC 을 다시 스케줄 대상에 올린다(이미 done 인 SPEC 은 보존).
+  local n=${#specs_abs[@]} i
   if [[ -n "$resume" ]]; then
-    local ri
-    for ((ri=0; ri<n; ri++)); do
-      [[ "$(get_state "$rd" "${specs_abs[ri]}")" == "done" ]] \
-        || set_state "$rd" "${specs_abs[ri]}" "pending"
+    for ((i=0; i<n; i++)); do
+      [[ "$(get_state "$rd" "${specs_abs[i]}")" == "done" ]] \
+        || set_state "$rd" "${specs_abs[i]}" "pending"
     done
   fi
-
-  local -a PIDS=() LAUNCH_TS=()
-  local i
-  for ((i=0; i<n; i++)); do PIDS[i]=""; LAUNCH_TS[i]=0; done
-  local overall_rc=0 timed_out=0
-  log_event "$rd" "stream start specs=$n max_parallel=$max_parallel"
-
-  while :; do
-    # 1) skip 전파 — pending 인데 dep 중 failed/skipped 가 있으면 skipped (fixpoint).
-    #    cmd_ready·cmd_mark 와 공유하는 결정적 헬퍼(단일 출처).
-    local d
-    propagate_skips "$rd" "${specs_abs[@]}"
-
-    # 2) 준비된 pending 실행 — 모든 dep 이 done & 동시 실행 수 < 상한.
-    local running_count=0
-    for ((i=0; i<n; i++)); do
-      [[ "$(get_state "$rd" "${specs_abs[i]}")" == "running" ]] && running_count=$((running_count+1))
-    done
-    local ready
-    for ((i=0; i<n; i++)); do
-      [[ "$(get_state "$rd" "${specs_abs[i]}")" == "pending" ]] || continue
-      ready=1
-      for d in ${DEP_IDX[i]}; do
-        [[ "$(get_state "$rd" "${specs_abs[d]}")" == "done" ]] || { ready=0; break; }
-      done
-      (( ready == 1 )) || continue
-      if (( max_parallel > 0 )) && (( running_count >= max_parallel )); then continue; fi
-      set_state "$rd" "${specs_abs[i]}" "running"
-      local pid; pid="$(loop_start_bg "${specs_abs[i]}")"
-      PIDS[i]="$pid"; LAUNCH_TS[i]=$(date +%s)
-      running_count=$((running_count+1))
-      log_event "$rd" "launch $(spec_slug "${specs_abs[i]}") pid=$pid"
-    done
-
-    # 3) 종료된 running reap + per-spec runtime cap(WAVE_TIMEOUT_SECONDS).
-    local now term; now=$(date +%s)
-    for ((i=0; i<n; i++)); do
-      [[ "$(get_state "$rd" "${specs_abs[i]}")" == "running" ]] || continue
-      [[ -n "${PIDS[i]}" ]] || continue
-      if kill -0 "${PIDS[i]}" 2>/dev/null; then
-        # 아직 실행 중 — per-spec runtime cap 초과 시 SIGTERM→SIGKILL 으로 정리.
-        if (( now - LAUNCH_TS[i] >= WAVE_TIMEOUT_SECONDS )); then
-          timed_out=1
-          log_event "$rd" "timeout $(spec_slug "${specs_abs[i]}") elapsed=$((now - LAUNCH_TS[i]))s cap=${WAVE_TIMEOUT_SECONDS}s"
-          kill_tree "${PIDS[i]}" TERM; sleep 1
-          kill -0 "${PIDS[i]}" 2>/dev/null && kill_tree "${PIDS[i]}" KILL
-          wait "${PIDS[i]}" 2>/dev/null || true
-          # timeout 직전 이미 done 인 child 는 done(통합 모드면 integrating 진입), 아니면 failed.
-          term="$(child_terminal_state "${specs_abs[i]}")"
-          mark_loop_terminal "$rd" "${specs_abs[i]}" "$term"
-          PIDS[i]=""
-        fi
-        continue
-      fi
-      # PID 종료 — loop 구조화 상태로 종료 상태 판정. 통합 모드면 done/failed 를
-      # integrating 으로 두고(아래 드레인이 분류·전진), 비활성이면 기존대로 done/failed.
-      term="$(child_terminal_state "${specs_abs[i]}")"
-      mark_loop_terminal "$rd" "${specs_abs[i]}" "$term"
-      PIDS[i]=""
-    done
-
-    # 3.5) 통합 드레인 — integrating SPEC 을 틱당 한 스텝씩 멱등 전진(통합은 항상 활성).
-    #   integrate→review→(approve)→merge. merged→done(=의존자 해제), 비완료 종착→failed.
-    for ((i=0; i<n; i++)); do
-      [[ "$(get_state "$rd" "${specs_abs[i]}")" == "integrating" ]] || continue
-      drain_integration "$rd" "${specs_abs[i]}"
-    done
-
-    # 4) 종료 판정 — 모든 SPEC 이 done/failed/skipped 이면 끝.
-    local pending_or_running=0
-    for ((i=0; i<n; i++)); do
-      case "$(get_state "$rd" "${specs_abs[i]}")" in
-        done|failed|skipped) ;;
-        *) pending_or_running=1 ;;
-      esac
-    done
-    (( pending_or_running == 0 )) && break
-    sleep "${POLL_SECONDS:-1}"
-  done
-
-  # 종합 결과: timeout 있었으면 2, 아니면 하나라도 failed/skipped 면 1, 전부 done 이면 0.
-  local any_bad=0
-  for ((i=0; i<n; i++)); do
-    case "$(get_state "$rd" "${specs_abs[i]}")" in failed|skipped) any_bad=1 ;; esac
-  done
-  if (( timed_out == 1 )); then overall_rc=2
-  elif (( any_bad == 1 )); then overall_rc=1
-  else overall_rc=0; fi
-  log_event "$rd" "stream done rc=$overall_rc"
-
+  log_event "$rd" "setup done specs=$n submode=$INTEGRATE_SUBMODE target-branch=$TARGET_BRANCH max_parallel=$(cat "$rd/MAX_PARALLEL" 2>/dev/null) (모델 주도; done=머지됨)"
   echo "run-id: $(basename "$rd")"
-  return "$overall_rc"
+  return 0
 }
 
 # ----- subcommand: list -----
@@ -943,100 +865,35 @@ cmd_watch() {
 }
 
 # =====================================================================
-# selftest — 스케줄러 통합 검증(mock loop/integration/review/merge).
-#   AC1: 통합 항상 활성(플래그 없이). 의존자는 의존성이 머지(done)된 뒤에만 launch.
-#   AC2: --no-integrate/--integrate 플래그 no-op(받되 무시, 통합 동작).
-#   AC3: 비통합(레거시) 경로 부재 — NO_INTEGRATE 마커·loop DONE=done 분기 없음.
-#   AC4/AC5: --target-branch 지정/미지정(기본 브랜치) → 통합 모듈에 DEFAULT_BRANCH export.
-#   AC6: --resume 에서 서브모드(forge/direct)·대상 브랜치 sticky(run-dir 마커).
-#   AC7/AC8/AC10: direct 서브모드 적대적 리뷰 게이트(integrate-direct→review→merge),
-#                 리뷰 가드 소진(escalated)→failed + 이행적 의존자만 skipped.
-#   forge 풀 파이프라인(integrate→review→merge) 순서·차단 전파.
-#   self-referential: 실제 PR·머지 미수행(모두 mock).
+# selftest — 결정적 오케스트레이션 검증(모델 주도). 실제 spawn·머지·PR 미수행.
+#   dispatch.sh 는 결정적 셋업(start)·readiness(ready)·전이(mark) 헬퍼만 제공하고,
+#   서브에이전트 spawn·구현·리뷰·머지는 모델(Agent 도구)이 소유한다(계약: spec-subagent.md).
+#   따라서 여기서는 통합·리뷰·머지 bash 드레인을 검증하지 않는다(그 동작은 서브에이전트 소유
+#   이며 helper 모듈 integration/review-loop/merge.sh 의 자체 selftest 가 검증).
+#   완료 조건 1·9·12 의 결정적 부분을 검증:
+#     S1 start=셋업 전용(스스로 done 으로 드라이브하지 않음) + 마커 생성.
+#     S2 모델 루프(ready→mark): done(=머지)된 뒤에만 의존자 ready(의존자 해제 게이트).
+#     S3 이행적 실패 격리: A failed → B(dep A) skipped, 독립 가지 C 는 계속.
+#     S4 동시성 상한(MAX_PARALLEL 마커 + sticky + ready 가 존중).
+#     S5 대상 브랜치(기본/지정) + 서브모드(forge/direct) 마커 + --resume sticky.
+#     S6 depends_on cycle → abort(실행 셋업 안 함).
+#     S7 bash 드레인·레거시 경로 부재(integrating 상태·NO_INTEGRATE 마커 없음, no-op 플래그).
 # =====================================================================
 cmd_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
-  local LIBINT="$SCRIPT_DIR/lib-integration.sh"
   local DSP="$SCRIPT_DIR/dispatch.sh"
 
-  # mock loop: start→launch 이벤트 + 즉시 종료, status --json→terminal/DONE.
-  cat > "$TMP/m-loop.sh" <<'EOF'
-#!/usr/bin/env bash
-case "$1" in
-  start)  shift; [[ "$1" == --* ]] && shift; printf 'launch:%s\n' "$(basename "$1")" >> "$EVENTLOG"; exit 0 ;;
-  status) printf '{"state":"terminal","signals":["DONE"]}\n' ;;
-  logs|stop|cleanup) : ;;
-esac
-exit 0
-EOF
-  # mock integration: integrate / integrate-direct <spec> <rd> <key>.
-  #   integrate(풀)→phase=review(+pr). integrate-direct(direct)→phase=review(리뷰 게이트, PR 없음).
-  #   MOCK_INT_BLOCK 이면 그 spec 을 blocked.
-  cat > "$TMP/m-int.sh" <<'EOF'
-#!/usr/bin/env bash
-. "$LIBINT"
-sub="$1"; spec="$2"; rd="$3"; key="$4"
-printf '%s:%s\n' "$sub" "$(basename "$spec")" >> "$EVENTLOG"
-if [[ -n "${MOCK_INT_BLOCK:-}" && "$(basename "$spec")" == "$MOCK_INT_BLOCK" ]]; then
-  int_set_phase "$rd" "$key" blocked
-elif [[ "$sub" == "integrate-direct" ]]; then
-  int_set_branch "$rd" "$key" "feat/x-$key"   # PR 없음 — 리뷰 게이트로.
-  int_set_phase "$rd" "$key" review
-else
-  int_set_branch "$rd" "$key" "feat/x-$key"; int_set_pr "$rd" "$key" 100
-  int_set_phase "$rd" "$key" review
-fi
-exit 0
-EOF
-  # mock review: run(forge)→approved / run-direct(direct)→merging(approve, 승인 의례 없음).
-  #   MOCK_REVIEW_BLOCK 이면 direct 리뷰가 가드 소진처럼 escalated 로 종료(머지 안 함).
-  cat > "$TMP/m-review.sh" <<'EOF'
-#!/usr/bin/env bash
-. "$LIBINT"
-sub="$1"; rd="$2"; key="$3"; spec="$4"
-if [[ "$sub" == "run-direct" ]]; then
-  printf 'review-direct:%s\n' "$(basename "$spec")" >> "$EVENTLOG"
-  if [[ -n "${MOCK_REVIEW_BLOCK:-}" && "$(basename "$spec")" == "$MOCK_REVIEW_BLOCK" ]]; then
-    int_set_phase "$rd" "$key" escalated
-  else
-    int_set_phase "$rd" "$key" merging
-  fi
-else
-  printf 'review:%s\n' "$(basename "$spec")" >> "$EVENTLOG"
-  int_set_phase "$rd" "$key" approved
-fi
-exit 0
-EOF
-  # mock merge: approve <pr> / finish <spec> <rd> <key> [pr] [skip_approval] → merged.
-  #   merge 로그에 대상 브랜치(DEFAULT_BRANCH)를 함께 적어 --target-branch export 를 검증.
-  cat > "$TMP/m-merge.sh" <<'EOF'
-#!/usr/bin/env bash
-. "$LIBINT"
-case "$1" in
-  approve) printf 'approve:%s\n' "$2" >> "$EVENTLOG" ;;
-  finish)  spec="$2"; rd="$3"; key="$4"
-           printf 'merge:%s:%s\n' "$(basename "$spec")" "${DEFAULT_BRANCH:-main}" >> "$EVENTLOG"
-           int_set_phase "$rd" "$key" merged ;;
-esac
-exit 0
-EOF
-
-  # 격리 git 저장소 + SPEC 2개(B depends_on A).
+  # 격리 git 저장소 + SPEC: A(무dep), B(dep A), C(무dep 독립).
   local REPO="$TMP/repo"; mkdir -p "$REPO"
   ( cd "$REPO" && git init -q )
   printf -- '---\n---\n# Feature A\n' > "$REPO/feature-a.md"
   printf -- '---\ndepends_on: [feature-a]\n---\n# Feature B\n' > "$REPO/feature-b.md"
+  printf -- '---\n---\n# Feature C\n' > "$REPO/feature-c.md"
 
   local fail=0
   ok()  { echo "PASS  $1"; }
   bad() { echo "FAIL  $1"; fail=1; }
-  before() { # <eventlog> <pat-A> <pat-B> : A 줄번호 < B 줄번호 (둘 다 존재)
-    local lg="$1" a b
-    a="$(grep -n "$2" "$lg" | head -1 | cut -d: -f1)"
-    b="$(grep -n "$3" "$lg" | head -1 | cut -d: -f1)"
-    [[ -n "$a" && -n "$b" && "$a" -lt "$b" ]]
-  }
-  run_state() { # <run_dir> <spec-basename> — state_path 산식(state.<slug>-<hash7>) 재현.
+  run_state() { # <run_dir> <spec-basename>
     local rd="$1" sp key; sp="$REPO/$2"
     key="$(spec_slug "$sp")-$(hash7 "$sp")"
     cat "$rd/state.$key" 2>/dev/null || echo "MISSING"
@@ -1044,149 +901,119 @@ EOF
   latest_run() { ls -1dt "$REPO"/.dispatch/runs/*/ 2>/dev/null | head -1 | sed 's:/$::'; }
   marker()  { cat "$1/INTEGRATE" 2>/dev/null; }
   tmarker() { cat "$1/TARGET_BRANCH" 2>/dev/null; }
-  # 공통 주입 env(서브모듈 mock + 결정성). 호출자가 APPROVER/FORGE_BIN 으로 서브모드 제어.
-  dsp_env() { env EVENTLOG="$1" LOOP_CMD="bash $TMP/m-loop.sh" \
-      INTEGRATION_CMD="bash $TMP/m-int.sh" REVIEW_CMD="bash $TMP/m-review.sh" MERGE_CMD="bash $TMP/m-merge.sh" \
-      LIBINT="$LIBINT" DISPATCH_POLL_SECONDS=0 DISPATCH_WAVE_TIMEOUT_SECONDS=120 "${@:2}"; }
-
-  # ---- S1: AC1 통합 항상 활성 + forge 구성 → 풀 파이프라인(integrate→review→merge) ----
-  #   플래그 없이 시작해도 통합 활성(AC1). APPROVER+forge CLI(FORGE_BIN=bash) → submode=forge.
-  rm -rf "$REPO/.dispatch"
-  local EVENTLOG="$TMP/ev1.log"; : > "$EVENTLOG"
-  ( cd "$REPO" && dsp_env "$EVENTLOG" APPROVER=approver-bot FORGE_BIN=bash \
-      bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
-  local rd1; rd1="$(latest_run)"
-  [[ "$(run_state "$rd1" feature-a.md)" == "done" ]] && ok "AC1 통합 활성 A 머지(done)" || bad "AC1 통합 활성 A 머지(done) got=$(run_state "$rd1" feature-a.md)"
-  [[ "$(run_state "$rd1" feature-b.md)" == "done" ]] && ok "AC1 통합 활성 B 머지(done)" || bad "AC1 통합 활성 B 머지(done) got=$(run_state "$rd1" feature-b.md)"
-  before "$EVENTLOG" 'merge:feature-a.md' 'launch:feature-b.md' \
-    && ok "AC1 A 머지 후에만 B launch" || bad "AC1 A 머지 후에만 B launch"
-  before "$EVENTLOG" 'integrate:feature-a.md' 'review:feature-a.md' \
-    && ok "forge integrate→review 순서" || bad "forge integrate→review 순서"
-  before "$EVENTLOG" 'review:feature-a.md' 'merge:feature-a.md' \
-    && ok "forge review→merge 순서" || bad "forge review→merge 순서"
-  [[ "$(marker "$rd1")" == "forge" ]] && ok "AC6 마커 submode=forge" || bad "AC6 마커 submode=forge got=$(marker "$rd1")"
-  [[ ! -f "$rd1/NO_INTEGRATE" ]] && ok "AC3 NO_INTEGRATE 마커 부재(레거시 경로 없음)" || bad "AC3 NO_INTEGRATE 마커 부재"
-  # AC5: --target-branch 미지정 → 대상 = 기본 브랜치(main). 머지 모듈에 export 됨.
-  [[ "$(tmarker "$rd1")" == "main" ]] && ok "AC5 기본 대상 브랜치=main 마커" || bad "AC5 기본 대상=main 마커 got=$(tmarker "$rd1")"
-  grep -q 'merge:feature-a.md:main' "$EVENTLOG" && ok "AC5 기본 대상 main 이 머지 모듈에 export" || bad "AC5 기본 대상 main export"
-
-  # ---- S1b: AC7 forge 미구성(direct) → 적대적 리뷰 게이트(integrate-direct→review-direct→merge) ----
-  #   APPROVER 미설정 → submode=direct. 머지 직전 PR 없는 로컬 리뷰 한 단계(run-direct)를 거친다.
-  rm -rf "$REPO/.dispatch"
-  local EVENTLOGD="$TMP/ev1b.log"; : > "$EVENTLOGD"
-  ( cd "$REPO" && dsp_env "$EVENTLOGD" \
-      bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
-  local rdD; rdD="$(latest_run)"
-  [[ "$(run_state "$rdD" feature-a.md)" == "done" ]] && ok "AC7 direct A 머지(done)" || bad "AC7 direct A 머지(done) got=$(run_state "$rdD" feature-a.md)"
-  [[ "$(run_state "$rdD" feature-b.md)" == "done" ]] && ok "AC7 direct B 머지(done)" || bad "AC7 direct B 머지(done) got=$(run_state "$rdD" feature-b.md)"
-  before "$EVENTLOGD" 'integrate-direct:feature-a.md' 'review-direct:feature-a.md' \
-    && ok "AC7 direct integrate-direct→리뷰 게이트 순서" || bad "AC7 direct integrate-direct→리뷰 게이트 순서"
-  before "$EVENTLOGD" 'review-direct:feature-a.md' 'merge:feature-a.md' \
-    && ok "AC7 direct 리뷰 게이트→merge 순서(approve 후 머지)" || bad "AC7 direct 리뷰 게이트→merge 순서"
-  if grep -q '^integrate:' "$EVENTLOGD"; then bad "AC7 direct 풀-integrate 미호출"; else ok "AC7 direct 풀-integrate 미호출"; fi
-  if grep -q '^approve:' "$EVENTLOGD"; then bad "AC7 direct 분리승인 의례 미호출"; else ok "AC7 direct 분리승인 의례 미호출(승인 게이트 우회)"; fi
-  [[ "$(marker "$rdD")" == "direct" ]] && ok "AC6 마커 submode=direct" || bad "AC6 마커 submode=direct got=$(marker "$rdD")"
-
-  # ---- S1c: AC10 direct 리뷰 가드 소진(escalated) → A failed, 이행적 의존자 B skipped(머지 안 함) ----
-  rm -rf "$REPO/.dispatch"
-  local EVENTLOGDB="$TMP/ev1c.log"; : > "$EVENTLOGDB"
-  ( cd "$REPO" && dsp_env "$EVENTLOGDB" MOCK_REVIEW_BLOCK="feature-a.md" \
-      bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
-  local rdDB; rdDB="$(latest_run)"
-  [[ "$(run_state "$rdDB" feature-a.md)" == "failed" ]] && ok "AC10 direct 리뷰 가드소진 A failed" || bad "AC10 direct A failed got=$(run_state "$rdDB" feature-a.md)"
-  [[ "$(run_state "$rdDB" feature-b.md)" == "skipped" ]] && ok "AC10 direct 리뷰 차단 B 이행적 skipped" || bad "AC10 direct B skipped got=$(run_state "$rdDB" feature-b.md)"
-  if grep -q '^merge:feature-a.md' "$EVENTLOGDB"; then bad "AC10 direct 리뷰 차단 시 머지 안 함"; else ok "AC10 direct 리뷰 차단 시 머지 안 함"; fi
-
-  # ---- S2: AC: 통합 차단(A, forge) → 이행적 의존자 B skipped ----
-  rm -rf "$REPO/.dispatch"
-  local EVENTLOG2="$TMP/ev2.log"; : > "$EVENTLOG2"
-  ( cd "$REPO" && dsp_env "$EVENTLOG2" MOCK_INT_BLOCK="feature-a.md" APPROVER=approver-bot FORGE_BIN=bash \
-      bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
-  local rd2; rd2="$(latest_run)"
-  [[ "$(run_state "$rd2" feature-a.md)" == "failed" ]] && ok "차단 A 비완료 종착(failed)" || bad "차단 A failed got=$(run_state "$rd2" feature-a.md)"
-  [[ "$(run_state "$rd2" feature-b.md)" == "skipped" ]] && ok "차단 B 이행적 skipped" || bad "차단 B skipped got=$(run_state "$rd2" feature-b.md)"
-  if grep -q 'launch:feature-b.md' "$EVENTLOG2"; then bad "차단 B 미launch"; else ok "차단 B 미launch(차단 전파)"; fi
-
-  # ---- S3: AC2 --no-integrate/--integrate 플래그 no-op → 통합 그대로 동작(레거시 경로 없음) ----
-  rm -rf "$REPO/.dispatch"
-  local EVENTLOG3="$TMP/ev3.log"; : > "$EVENTLOG3"
-  ( cd "$REPO" && dsp_env "$EVENTLOG3" APPROVER=approver-bot FORGE_BIN=bash \
-      bash "$DSP" start --no-integrate --integrate feature-a.md feature-b.md ) >/dev/null 2>&1 || true
-  local rd3; rd3="$(latest_run)"
-  [[ "$(run_state "$rd3" feature-a.md)" == "done" ]] && ok "AC2 플래그 no-op A 머지(done)" || bad "AC2 플래그 no-op A done got=$(run_state "$rd3" feature-a.md)"
-  grep -qE 'integrate:|review:|merge:' "$EVENTLOG3" && ok "AC2 플래그 no-op 통합 모듈 호출됨(통합 동작)" || bad "AC2 플래그 no-op 통합 동작"
-  [[ ! -f "$rd3/NO_INTEGRATE" ]] && ok "AC3 --no-integrate 줘도 NO_INTEGRATE 마커 없음" || bad "AC3 NO_INTEGRATE 마커 없음(no-op)"
-  [[ -f "$rd3/INTEGRATE" ]] && ok "AC2 플래그 no-op INTEGRATE 마커 존재" || bad "AC2 INTEGRATE 마커 존재"
-
-  # ---- S3b: AC4 --target-branch 지정 → 대상 브랜치가 통합 모듈에 DEFAULT_BRANCH 로 export ----
-  rm -rf "$REPO/.dispatch"
-  local EVENTLOGT="$TMP/ev3b.log"; : > "$EVENTLOGT"
-  ( cd "$REPO" && dsp_env "$EVENTLOGT" APPROVER=approver-bot FORGE_BIN=bash \
-      bash "$DSP" start --target-branch release feature-a.md feature-b.md ) >/dev/null 2>&1 || true
-  local rdT; rdT="$(latest_run)"
-  [[ "$(tmarker "$rdT")" == "release" ]] && ok "AC4 대상 브랜치 마커=release" || bad "AC4 대상 마커=release got=$(tmarker "$rdT")"
-  grep -q 'merge:feature-a.md:release' "$EVENTLOGT" && ok "AC4 지정 대상 release 가 머지 모듈에 export" || bad "AC4 release export(got merges: $(grep -o 'merge:[^ ]*' "$EVENTLOGT" | tr '\n' ' '))"
-  if grep -q 'merge:feature-a.md:main' "$EVENTLOGT"; then bad "AC4 main 잔존 누수"; else ok "AC4 main 하드코딩 잔존 없음"; fi
-
-  # ---- S4a: AC6 --resume 서브모드 sticky — direct 시작 후 APPROVER 설정 재개해도 direct 유지 ----
-  rm -rf "$REPO/.dispatch"
-  local EVENTLOG4="$TMP/ev4.log"; : > "$EVENTLOG4"
-  ( cd "$REPO" && dsp_env "$EVENTLOG4" \
-      bash "$DSP" start feature-a.md feature-b.md ) >/dev/null 2>&1 || true
-  local rd4; rd4="$(latest_run)"; local rid4; rid4="$(basename "$rd4")"
-  [[ "$(marker "$rd4")" == "direct" ]] && ok "AC6 최초 시작 submode=direct" || bad "AC6 최초 시작 submode=direct got=$(marker "$rd4")"
-  ( cd "$REPO" && dsp_env "$EVENTLOG4" APPROVER=approver-bot FORGE_BIN=bash \
-      bash "$DSP" start --resume "$rid4" ) >/dev/null 2>&1 || true
-  [[ "$(marker "$rd4")" == "direct" ]] && ok "AC6 재개 후 submode 여전히 direct(sticky)" || bad "AC6 재개 후 submode sticky got=$(marker "$rd4")"
-
-  # ---- S4b: AC6 --resume 대상 브랜치 sticky — release 로 시작 후 플래그 없이 재개해도 release 유지 ----
-  rm -rf "$REPO/.dispatch"
-  local EVENTLOG5="$TMP/ev5.log"; : > "$EVENTLOG5"
-  ( cd "$REPO" && dsp_env "$EVENTLOG5" APPROVER=approver-bot FORGE_BIN=bash \
-      bash "$DSP" start --target-branch release feature-a.md feature-b.md ) >/dev/null 2>&1 || true
-  local rd5; rd5="$(latest_run)"; local rid5; rid5="$(basename "$rd5")"
-  ( cd "$REPO" && dsp_env "$EVENTLOG5" DEFAULT_BRANCH=main APPROVER=approver-bot FORGE_BIN=bash \
-      bash "$DSP" start --resume "$rid5" ) >/dev/null 2>&1 || true
-  [[ "$(tmarker "$rd5")" == "release" ]] && ok "AC6 재개 후 대상 브랜치 release 유지(sticky, env 보다 우선)" || bad "AC6 재개 후 대상 sticky got=$(tmarker "$rd5")"
-
-  # ---- S5: 결정적 readiness/transition 헬퍼(ready/mark) — 모델 주도 오케스트레이션용 ----
-  #   완료 조건 1·9·12: 준비된 SPEC만 ready, done 후 의존자 해제, 동시성 상한, 이행적 skip.
-  #   서브에이전트 spawn 은 모델(Agent 도구)이 하고, dispatch.sh 는 이 결정적 헬퍼만 제공한다.
-  st_path() { echo "$REPO/.dispatch/runs/$1/state.$(spec_slug "$REPO/$2")-$(hash7 "$REPO/$2")"; }
-  mk_run() { # <rid> <spec-basename...> — pending state 의 run-dir 생성(start 셋업 모사).
-    local rid="$1"; shift; local rd="$REPO/.dispatch/runs/$rid" b
-    mkdir -p "$rd"; : > "$rd/MANIFEST.txt"
-    for b in "$@"; do printf '%s\n' "$REPO/$b" >> "$rd/MANIFEST.txt"; printf 'pending\n' > "$(st_path "$rid" "$b")"; done
+  mpmarker(){ cat "$1/MAX_PARALLEL" 2>/dev/null; }
+  start_rid() { # cd repo 에서 start 하고 run-id 를 반환(stdout 의 "run-id: X" 파싱).
+    ( cd "$REPO" && "$@" ) | sed -n 's/^run-id: //p'
   }
-  printf -- '---\n---\n# Feature C\n' > "$REPO/feature-c.md"   # 무dep 독립 SPEC(동시성 테스트용).
+  dsp() { env DISPATCH_POLL_SECONDS=0 DISPATCH_WAVE_TIMEOUT_SECONDS=120 "$@"; }
+  rdy() { ( cd "$REPO" && dsp bash "$DSP" ready "$@" 2>/dev/null ); }
+  mk() { ( cd "$REPO" && dsp bash "$DSP" mark "$@" ) >/dev/null 2>&1; }
 
+  # ---- S1: start = 셋업 전용 (스스로 done 으로 드라이브하지 않음) + 마커 ----
   rm -rf "$REPO/.dispatch"
-  mk_run rid-ready feature-a.md feature-b.md
-  local rdy
-  rdy="$( cd "$REPO" && bash "$DSP" ready rid-ready 2>/dev/null )"
-  printf '%s\n' "$rdy" | grep -q 'feature-a.md' && ok "S5 ready: A(무dep) 준비됨" || bad "S5 ready: A 준비됨 got=[$rdy]"
-  printf '%s\n' "$rdy" | grep -q 'feature-b.md' && bad "S5 ready: B(dep A) 미준비여야" || ok "S5 ready: B 미준비(dep A pending)"
-  ( cd "$REPO" && bash "$DSP" mark rid-ready running "$REPO/feature-a.md" ) >/dev/null 2>&1
-  rdy="$( cd "$REPO" && bash "$DSP" ready rid-ready 2>/dev/null )"
-  printf '%s\n' "$rdy" | grep -q 'feature-a.md' && bad "S5 ready: running A 제외돼야" || ok "S5 ready: running A 제외(중복 spawn 방지)"
-  ( cd "$REPO" && bash "$DSP" mark rid-ready done "$REPO/feature-a.md" ) >/dev/null 2>&1
-  rdy="$( cd "$REPO" && bash "$DSP" ready rid-ready 2>/dev/null )"
-  printf '%s\n' "$rdy" | grep -q 'feature-b.md' && ok "S5 ready: A done 후 B 준비됨(의존자 해제)" || bad "S5 ready: A done 후 B 준비 got=[$rdy]"
+  local rid1; rid1="$( start_rid dsp bash "$DSP" start feature-a.md feature-b.md )"
+  local rd1; rd1="$(latest_run)"
+  [[ -n "$rid1" && -d "$rd1" ]] && ok "S1 start: run-id·run-dir 생성" || bad "S1 start: run-id 생성 got=[$rid1]"
+  [[ "$(run_state "$rd1" feature-a.md)" == "pending" ]] && ok "S1 start: A 셋업 직후 pending(미드라이브)" || bad "S1 start: A pending got=$(run_state "$rd1" feature-a.md)"
+  [[ "$(run_state "$rd1" feature-b.md)" == "pending" ]] && ok "S1 start: B 셋업 직후 pending" || bad "S1 start: B pending got=$(run_state "$rd1" feature-b.md)"
+  [[ -f "$rd1/MANIFEST.txt" && -f "$rd1/WAVES.txt" ]] && ok "S1 start: MANIFEST·WAVES 생성" || bad "S1 start: MANIFEST·WAVES 생성"
+  [[ "$(grep -c . "$rd1/MANIFEST.txt")" == "2" ]] && ok "S1 start: MANIFEST 2 SPEC" || bad "S1 start: MANIFEST 2"
+  [[ -f "$rd1/MAX_PARALLEL" ]] && ok "S1 start: MAX_PARALLEL 마커" || bad "S1 start: MAX_PARALLEL 마커"
 
-  # 동시성 상한 — A·C 둘 다 무dep, --max-parallel 1 → 한 번에 하나만.
+  # ---- S2: 모델 루프(ready→mark) — done(=머지)된 뒤에만 의존자 ready(의존자 해제) ----
   rm -rf "$REPO/.dispatch"
-  mk_run rid-cap feature-a.md feature-c.md
-  rdy="$( cd "$REPO" && bash "$DSP" ready rid-cap --max-parallel 1 2>/dev/null )"
-  [[ "$(printf '%s\n' "$rdy" | grep -c 'feature-')" == "1" ]] && ok "S5 ready: --max-parallel 1 → 1개만" || bad "S5 ready: max-parallel 1 got=[$rdy]"
-  rdy="$( cd "$REPO" && bash "$DSP" ready rid-cap 2>/dev/null )"
-  [[ "$(printf '%s\n' "$rdy" | grep -c 'feature-')" == "2" ]] && ok "S5 ready: 상한 없으면 둘 다" || bad "S5 ready: 무상한 got=[$rdy]"
+  local rid2; rid2="$( start_rid dsp bash "$DSP" start feature-a.md feature-b.md )"
+  local rd2; rd2="$(latest_run)"
+  local r; r="$(rdy "$rid2")"
+  printf '%s\n' "$r" | grep -q 'feature-a.md' && ok "S2 ready: A(무dep) 준비됨" || bad "S2 ready: A 준비됨 got=[$r]"
+  printf '%s\n' "$r" | grep -q 'feature-b.md' && bad "S2 ready: B(dep A) 미준비여야" || ok "S2 ready: B 미준비(dep A pending)"
+  mk "$rid2" running "$REPO/feature-a.md"
+  r="$(rdy "$rid2")"
+  printf '%s\n' "$r" | grep -q 'feature-a.md' && bad "S2 ready: running A 제외돼야(중복 spawn 방지)" || ok "S2 ready: running A 제외"
+  mk "$rid2" done "$REPO/feature-a.md"
+  r="$(rdy "$rid2")"
+  printf '%s\n' "$r" | grep -q 'feature-b.md' && ok "S2 ready: A done(머지) 후 B 준비됨(의존자 해제)" || bad "S2 ready: A done 후 B 준비 got=[$r]"
+  mk "$rid2" running "$REPO/feature-b.md"; mk "$rid2" done "$REPO/feature-b.md"
+  [[ "$(run_state "$rd2" feature-a.md)" == "done" && "$(run_state "$rd2" feature-b.md)" == "done" ]] && ok "S2 모델 루프: 전부 done(머지)" || bad "S2 전부 done"
+  r="$(rdy "$rid2")"
+  [[ -z "$r" ]] && ok "S2 ready: 모두 terminal 이면 빈 출력(루프 종료)" || bad "S2 빈 ready got=[$r]"
 
-  # 이행적 skip — A failed → B(dep A) skipped.
+  # ---- S3: 이행적 실패 격리 — A failed → B skipped, 독립 C 는 계속 ----
   rm -rf "$REPO/.dispatch"
-  mk_run rid-skip feature-a.md feature-b.md
-  ( cd "$REPO" && bash "$DSP" mark rid-skip failed "$REPO/feature-a.md" ) >/dev/null 2>&1
-  [[ "$(cat "$(st_path rid-skip feature-b.md)")" == "skipped" ]] && ok "S5 mark failed: B 이행적 skipped" || bad "S5 mark failed: B skipped got=$(cat "$(st_path rid-skip feature-b.md)")"
-  rm -f "$REPO/feature-c.md"
+  local rid3; rid3="$( start_rid dsp bash "$DSP" start feature-a.md feature-b.md feature-c.md )"
+  local rd3; rd3="$(latest_run)"
+  mk "$rid3" failed "$REPO/feature-a.md"
+  [[ "$(run_state "$rd3" feature-b.md)" == "skipped" ]] && ok "S3 mark failed: B(dep A) 이행적 skipped" || bad "S3 B skipped got=$(run_state "$rd3" feature-b.md)"
+  [[ "$(run_state "$rd3" feature-c.md)" == "pending" ]] && ok "S3 독립 C 는 pending(계속)" || bad "S3 C pending got=$(run_state "$rd3" feature-c.md)"
+  r="$(rdy "$rid3")"
+  printf '%s\n' "$r" | grep -q 'feature-c.md' && ok "S3 ready: 독립 C 는 준비됨(가지 격리)" || bad "S3 ready C got=[$r]"
+  printf '%s\n' "$r" | grep -q 'feature-b.md' && bad "S3 ready: skipped B 는 미준비" || ok "S3 ready: skipped B 미준비"
+
+  # ---- S4: 동시성 상한 (MAX_PARALLEL 마커 + sticky + ready 존중) ----
+  rm -rf "$REPO/.dispatch"
+  local rid4; rid4="$( start_rid dsp bash "$DSP" start --max-parallel 1 feature-a.md feature-c.md )"
+  local rd4; rd4="$(latest_run)"
+  [[ "$(mpmarker "$rd4")" == "1" ]] && ok "S4 MAX_PARALLEL 마커=1" || bad "S4 MAX_PARALLEL got=$(mpmarker "$rd4")"
+  r="$(rdy "$rid4")"
+  [[ "$(printf '%s\n' "$r" | grep -c 'feature-')" == "1" ]] && ok "S4 ready: 상한 1 → 1개만(마커 기본값 존중)" || bad "S4 ready 상한 got=[$r]"
+  # 하나 running 표시 후 ready 는 비어야(상한 도달).
+  mk "$rid4" running "$(printf '%s\n' "$r" | head -1)"
+  r="$(rdy "$rid4")"
+  [[ "$(printf '%s\n' "$r" | grep -c 'feature-')" == "0" ]] && ok "S4 ready: 상한 도달 시 빈 출력" || bad "S4 ready 상한도달 got=[$r]"
+  # --max-parallel 명시는 마커보다 우선(상한 2 → 둘 다, 단 running 1 제외 → 1).
+  r="$( ( cd "$REPO" && dsp bash "$DSP" ready "$rid4" --max-parallel 2 2>/dev/null ) )"
+  [[ "$(printf '%s\n' "$r" | grep -c 'feature-')" == "1" ]] && ok "S4 ready: 명시 상한 2 + running 1 → 1개" || bad "S4 명시 상한 got=[$r]"
+  # resume sticky: --max-parallel 미지정 재개해도 마커 1 유지.
+  ( cd "$REPO" && dsp bash "$DSP" start --resume "$rid4" ) >/dev/null 2>&1 || true
+  [[ "$(mpmarker "$rd4")" == "1" ]] && ok "S4 resume: MAX_PARALLEL sticky(마커 유지)" || bad "S4 resume sticky got=$(mpmarker "$rd4")"
+
+  # ---- S5: 대상 브랜치 + 서브모드 마커 + --resume sticky ----
+  # 기본 대상 = main.
+  rm -rf "$REPO/.dispatch"
+  local ridm; ridm="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local rdm; rdm="$(latest_run)"
+  [[ "$(tmarker "$rdm")" == "main" ]] && ok "S5 기본 대상 브랜치=main 마커" || bad "S5 기본 대상=main got=$(tmarker "$rdm")"
+  # 지정 대상 = release + 미구성(direct) 서브모드.
+  rm -rf "$REPO/.dispatch"
+  local ridr; ridr="$( start_rid dsp bash "$DSP" start --target-branch release feature-a.md feature-b.md )"
+  local rdr; rdr="$(latest_run)"
+  [[ "$(tmarker "$rdr")" == "release" ]] && ok "S5 지정 대상 브랜치=release 마커" || bad "S5 대상=release got=$(tmarker "$rdr")"
+  [[ "$(marker "$rdr")" == "direct" ]] && ok "S5 forge 미구성 → submode=direct" || bad "S5 submode=direct got=$(marker "$rdr")"
+  # 대상 브랜치 resume sticky: 플래그 없이/다른 env 로 재개해도 release 유지.
+  local ridr2; ridr2="$(basename "$rdr")"
+  ( cd "$REPO" && dsp env DEFAULT_BRANCH=main bash "$DSP" start --resume "$ridr2" ) >/dev/null 2>&1 || true
+  [[ "$(tmarker "$rdr")" == "release" ]] && ok "S5 resume: 대상 브랜치 release sticky(env 보다 우선)" || bad "S5 resume 대상 sticky got=$(tmarker "$rdr")"
+  # forge 구성(APPROVER + forge CLI) → submode=forge + resume sticky(direct 로 시작 후 forge env 재개해도 유지).
+  rm -rf "$REPO/.dispatch"
+  local ridf; ridf="$( start_rid dsp env APPROVER=approver-bot FORGE_BIN=bash bash "$DSP" start feature-a.md )"
+  local rdf; rdf="$(latest_run)"
+  [[ "$(marker "$rdf")" == "forge" ]] && ok "S5 forge 구성 → submode=forge" || bad "S5 submode=forge got=$(marker "$rdf")"
+  rm -rf "$REPO/.dispatch"
+  local ridd; ridd="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local rdd; rdd="$(latest_run)"; local riddb; riddb="$(basename "$rdd")"
+  ( cd "$REPO" && dsp env APPROVER=approver-bot FORGE_BIN=bash bash "$DSP" start --resume "$riddb" ) >/dev/null 2>&1 || true
+  [[ "$(marker "$rdd")" == "direct" ]] && ok "S5 resume: submode direct sticky(forge env 보다 마커 우선)" || bad "S5 resume submode sticky got=$(marker "$rdd")"
+
+  # ---- S6: depends_on cycle → abort(실행 셋업 안 함) ----
+  rm -rf "$REPO/.dispatch"
+  printf -- '---\ndepends_on: [cyc-y]\n---\n# X\n' > "$REPO/cyc-x.md"
+  printf -- '---\ndepends_on: [cyc-x]\n---\n# Y\n' > "$REPO/cyc-y.md"
+  if ( cd "$REPO" && dsp bash "$DSP" start cyc-x.md cyc-y.md ) >/dev/null 2>&1; then
+    bad "S6 cycle: abort 해야(비-0 종료)"
+  else
+    ok "S6 cycle: abort(비-0 종료)"
+  fi
+  rm -f "$REPO/cyc-x.md" "$REPO/cyc-y.md"
+
+  # ---- S7: bash 드레인·레거시 경로 부재 ----
+  rm -rf "$REPO/.dispatch"
+  local rid7; rid7="$( start_rid dsp bash "$DSP" start --no-integrate --integrate feature-a.md feature-b.md )"
+  local rd7; rd7="$(latest_run)"
+  [[ -n "$rid7" ]] && ok "S7 --no-integrate/--integrate no-op(받되 셋업 진행)" || bad "S7 no-op 플래그 셋업"
+  [[ ! -f "$rd7/NO_INTEGRATE" ]] && ok "S7 NO_INTEGRATE 마커 부재(레거시 경로 없음)" || bad "S7 NO_INTEGRATE 마커 부재"
+  # 셋업만 한 직후 어떤 SPEC 도 integrating/done 으로 자동 전이되지 않음(드레인 없음).
+  if grep -rqx 'integrating' "$rd7"/state.* 2>/dev/null; then bad "S7 integrating 상태 부재(드레인 없음)"; else ok "S7 integrating 상태 부재(bash 드레인 없음)"; fi
+  if grep -rqx 'done' "$rd7"/state.* 2>/dev/null; then bad "S7 셋업 직후 자동 done 부재"; else ok "S7 셋업 직후 자동 done 부재(start 미드라이브)"; fi
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
