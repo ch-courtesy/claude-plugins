@@ -526,6 +526,102 @@ compute_dep_idx() {
   done
 }
 
+# propagate_skips <run_dir> <spec...> — fixpoint skip 전파(결정적). pending 인데 dep 중
+# failed/skipped 가 있으면 skipped 로 차단한다(이행적). 전제: 호출 전에 compute_dep_idx 로
+# 호출자 scope 의 DEP_IDX(MANIFEST 순서 평행 인덱스)를 채워 둔다 — bash 동적 스코프로 참조.
+# cmd_start(스트리밍 스케줄러)·cmd_ready·cmd_mark 가 공유하는 단일 출처.
+propagate_skips() {
+  local rd="$1"; shift
+  local -a SP=("$@"); local n=${#SP[@]}
+  local changed=1 i d ds
+  while (( changed == 1 )); do
+    changed=0
+    for ((i=0; i<n; i++)); do
+      [[ "$(get_state "$rd" "${SP[i]}")" == "pending" ]] || continue
+      for d in ${DEP_IDX[i]}; do
+        ds="$(get_state "$rd" "${SP[d]}")"
+        if [[ "$ds" == "failed" || "$ds" == "skipped" ]]; then
+          set_state "$rd" "${SP[i]}" "skipped"
+          log_event "$rd" "skip $(spec_slug "${SP[i]}") (dep $(spec_slug "${SP[d]}") $ds)"
+          changed=1; break
+        fi
+      done
+    done
+  done
+}
+
+# ----- 결정적 오케스트레이션 헬퍼(모델 주도) -----
+# 모델(dispatch 스킬)이 ready 로 "지금 서브에이전트를 띄울 SPEC"을 묻고, 각각에 서브에이전트
+# 1개를 Agent 도구로 spawn 한 뒤 mark 로 상태를 전이한다. 스케줄링·동시성·skip 전파의
+# 결정적 로직은 여기(코드)에 있고, spawn·구현·리뷰·머지는 서브에이전트(모델)가 소유한다.
+
+# load_run <run-id> → RD(전역) 설정 + SP(전역 배열) 채움 + DEP_IDX 계산. 없으면 die.
+load_run() {
+  local rid="$1"
+  [[ -n "$rid" ]] || die "run-id 필요"
+  RD="$(run_dir "$rid")"
+  [[ -d "$RD" ]] || die "run-id 없음: $rid"
+  [[ -f "$RD/MANIFEST.txt" ]] || die "MANIFEST 없음: $rid"
+  SP=()
+  local p
+  while IFS= read -r p; do [[ -n "$p" ]] && SP+=("$p"); done < "$RD/MANIFEST.txt"
+  DEP_IDX=()
+  compute_dep_idx "${SP[@]}"
+}
+
+# cmd_ready <run-id> [--max-parallel N] — 지금 서브에이전트를 띄울 준비가 된 SPEC abspath 를
+# 한 줄씩 출력한다. skip 전파를 먼저 적용한 뒤, state==pending & 모든 dep done & (상한 미설정
+# 또는 running 수 < 상한)인 SPEC 을 고른다. 한 호출 안에서 상한을 넘지 않도록 선택분을 센다.
+# 출력이 비면 "지금 띄울 것 없음"(아직 running 중이거나 모두 terminal).
+cmd_ready() {
+  require_git_root
+  local rid="" max_parallel=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --max-parallel) max_parallel="$2"; shift 2 ;;
+      -*) die "알 수 없는 옵션: $1" ;;
+      *) rid="$1"; shift ;;
+    esac
+  done
+  local RD; local -a SP=() DEP_IDX=()
+  load_run "$rid"
+  propagate_skips "$RD" "${SP[@]}"
+  local n=${#SP[@]} i d ready running_count=0
+  for ((i=0; i<n; i++)); do
+    [[ "$(get_state "$RD" "${SP[i]}")" == "running" ]] && running_count=$((running_count+1))
+  done
+  for ((i=0; i<n; i++)); do
+    [[ "$(get_state "$RD" "${SP[i]}")" == "pending" ]] || continue
+    ready=1
+    for d in ${DEP_IDX[i]}; do
+      [[ "$(get_state "$RD" "${SP[d]}")" == "done" ]] || { ready=0; break; }
+    done
+    (( ready == 1 )) || continue
+    if (( max_parallel > 0 )) && (( running_count >= max_parallel )); then continue; fi
+    printf '%s\n' "${SP[i]}"
+    running_count=$((running_count+1))
+  done
+}
+
+# cmd_mark <run-id> <running|done|failed> <spec> — SPEC 상태 전이(결정적).
+#   running: 서브에이전트 spawn 직전(중복 spawn 방지 — ready 에서 빠짐).
+#   done   : 서브에이전트가 대상 브랜치 머지를 보고(= 의존자 해제 게이트).
+#   failed : 서브에이전트가 비완료(에스컬레이션) 보고 → 이행적 의존자만 skipped 전파.
+cmd_mark() {
+  require_git_root
+  local rid="$1" st="${2:-}" spec="${3:-}"
+  [[ -n "$rid" && -n "$st" && -n "$spec" ]] || die "사용: $0 mark <run-id> <running|done|failed> <spec>"
+  case "$st" in running|done|failed) ;; *) die "알 수 없는 상태: $st (running|done|failed)" ;; esac
+  local RD; local -a SP=() DEP_IDX=()
+  load_run "$rid"
+  local ap; ap="$(abspath "$spec")"
+  set_state "$RD" "$ap" "$st"
+  log_event "$RD" "mark $(spec_slug "$ap") $st"
+  if [[ "$st" == "failed" ]]; then
+    propagate_skips "$RD" "${SP[@]}"
+  fi
+}
+
 # ----- subcommand: start -----
 
 cmd_start() {
@@ -645,21 +741,9 @@ cmd_start() {
 
   while :; do
     # 1) skip 전파 — pending 인데 dep 중 failed/skipped 가 있으면 skipped (fixpoint).
-    local changed=1 d ds
-    while (( changed == 1 )); do
-      changed=0
-      for ((i=0; i<n; i++)); do
-        [[ "$(get_state "$rd" "${specs_abs[i]}")" == "pending" ]] || continue
-        for d in ${DEP_IDX[i]}; do
-          ds="$(get_state "$rd" "${specs_abs[d]}")"
-          if [[ "$ds" == "failed" || "$ds" == "skipped" ]]; then
-            set_state "$rd" "${specs_abs[i]}" "skipped"
-            log_event "$rd" "skip $(spec_slug "${specs_abs[i]}") (dep $(spec_slug "${specs_abs[d]}") $ds)"
-            changed=1; break
-          fi
-        done
-      done
-    done
+    #    cmd_ready·cmd_mark 와 공유하는 결정적 헬퍼(단일 출처).
+    local d
+    propagate_skips "$rd" "${specs_abs[@]}"
 
     # 2) 준비된 pending 실행 — 모든 dep 이 done & 동시 실행 수 < 상한.
     local running_count=0
@@ -1065,6 +1149,45 @@ EOF
       bash "$DSP" start --resume "$rid5" ) >/dev/null 2>&1 || true
   [[ "$(tmarker "$rd5")" == "release" ]] && ok "AC6 재개 후 대상 브랜치 release 유지(sticky, env 보다 우선)" || bad "AC6 재개 후 대상 sticky got=$(tmarker "$rd5")"
 
+  # ---- S5: 결정적 readiness/transition 헬퍼(ready/mark) — 모델 주도 오케스트레이션용 ----
+  #   완료 조건 1·9·12: 준비된 SPEC만 ready, done 후 의존자 해제, 동시성 상한, 이행적 skip.
+  #   서브에이전트 spawn 은 모델(Agent 도구)이 하고, dispatch.sh 는 이 결정적 헬퍼만 제공한다.
+  st_path() { echo "$REPO/.dispatch/runs/$1/state.$(spec_slug "$REPO/$2")-$(hash7 "$REPO/$2")"; }
+  mk_run() { # <rid> <spec-basename...> — pending state 의 run-dir 생성(start 셋업 모사).
+    local rid="$1"; shift; local rd="$REPO/.dispatch/runs/$rid" b
+    mkdir -p "$rd"; : > "$rd/MANIFEST.txt"
+    for b in "$@"; do printf '%s\n' "$REPO/$b" >> "$rd/MANIFEST.txt"; printf 'pending\n' > "$(st_path "$rid" "$b")"; done
+  }
+  printf -- '---\n---\n# Feature C\n' > "$REPO/feature-c.md"   # 무dep 독립 SPEC(동시성 테스트용).
+
+  rm -rf "$REPO/.dispatch"
+  mk_run rid-ready feature-a.md feature-b.md
+  local rdy
+  rdy="$( cd "$REPO" && bash "$DSP" ready rid-ready 2>/dev/null )"
+  printf '%s\n' "$rdy" | grep -q 'feature-a.md' && ok "S5 ready: A(무dep) 준비됨" || bad "S5 ready: A 준비됨 got=[$rdy]"
+  printf '%s\n' "$rdy" | grep -q 'feature-b.md' && bad "S5 ready: B(dep A) 미준비여야" || ok "S5 ready: B 미준비(dep A pending)"
+  ( cd "$REPO" && bash "$DSP" mark rid-ready running "$REPO/feature-a.md" ) >/dev/null 2>&1
+  rdy="$( cd "$REPO" && bash "$DSP" ready rid-ready 2>/dev/null )"
+  printf '%s\n' "$rdy" | grep -q 'feature-a.md' && bad "S5 ready: running A 제외돼야" || ok "S5 ready: running A 제외(중복 spawn 방지)"
+  ( cd "$REPO" && bash "$DSP" mark rid-ready done "$REPO/feature-a.md" ) >/dev/null 2>&1
+  rdy="$( cd "$REPO" && bash "$DSP" ready rid-ready 2>/dev/null )"
+  printf '%s\n' "$rdy" | grep -q 'feature-b.md' && ok "S5 ready: A done 후 B 준비됨(의존자 해제)" || bad "S5 ready: A done 후 B 준비 got=[$rdy]"
+
+  # 동시성 상한 — A·C 둘 다 무dep, --max-parallel 1 → 한 번에 하나만.
+  rm -rf "$REPO/.dispatch"
+  mk_run rid-cap feature-a.md feature-c.md
+  rdy="$( cd "$REPO" && bash "$DSP" ready rid-cap --max-parallel 1 2>/dev/null )"
+  [[ "$(printf '%s\n' "$rdy" | grep -c 'feature-')" == "1" ]] && ok "S5 ready: --max-parallel 1 → 1개만" || bad "S5 ready: max-parallel 1 got=[$rdy]"
+  rdy="$( cd "$REPO" && bash "$DSP" ready rid-cap 2>/dev/null )"
+  [[ "$(printf '%s\n' "$rdy" | grep -c 'feature-')" == "2" ]] && ok "S5 ready: 상한 없으면 둘 다" || bad "S5 ready: 무상한 got=[$rdy]"
+
+  # 이행적 skip — A failed → B(dep A) skipped.
+  rm -rf "$REPO/.dispatch"
+  mk_run rid-skip feature-a.md feature-b.md
+  ( cd "$REPO" && bash "$DSP" mark rid-skip failed "$REPO/feature-a.md" ) >/dev/null 2>&1
+  [[ "$(cat "$(st_path rid-skip feature-b.md)")" == "skipped" ]] && ok "S5 mark failed: B 이행적 skipped" || bad "S5 mark failed: B skipped got=$(cat "$(st_path rid-skip feature-b.md)")"
+  rm -f "$REPO/feature-c.md"
+
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
   return $fail
@@ -1089,6 +1212,12 @@ Subcommands:
         동시성 상한 이내) loop driver 에 위임한다. 한 SPEC 이 failed 면 그
         이행적 의존자만 skipped 되고 독립 가지는 끝까지 진행. WAVES.txt 는
         진단용으로 보존. --resume 이면 done 이 아닌 SPEC 만 재시도.
+  ready <run-id> [--max-parallel N]
+        지금 서브에이전트를 띄울 준비가 된 SPEC(모든 dep done & pending & 동시성 상한 이내)
+        abspath 를 한 줄씩 출력(결정적). 모델이 각 SPEC 에 서브에이전트 1개를 spawn 한다.
+  mark <run-id> <running|done|failed> <spec>
+        SPEC 상태 전이(결정적). running=spawn 직전, done=서브에이전트 머지 보고(의존자 해제),
+        failed=비완료 보고 → 이행적 의존자만 skipped 전파.
   list
         모든 run-id 와 진행 요약.
   status <run-id>
@@ -1111,6 +1240,8 @@ if [[ $# -lt 1 ]]; then usage; fi
 SUB="$1"; shift
 case "$SUB" in
   start)  cmd_start  "$@" ;;
+  ready)  cmd_ready  "$@" ;;
+  mark)   cmd_mark   "$@" ;;
   list)   cmd_list  ;;
   status) cmd_status "$@" ;;
   stop)   cmd_stop   "$@" ;;
