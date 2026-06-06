@@ -13,7 +13,7 @@
       "name": "project-init",
       "source": "./plugins/project-init",
       "description": "새 프로젝트 시작 시 필요한 기본 지침과 도구를 자동으로 설정해주는 플러그인",
-      "version": "0.16.0",
+      "version": "0.16.1",
       "category": "scaffold",
       "tags": ["scaffold", "init", "bootstrap"]
     },
@@ -21,7 +21,7 @@
       "name": "autopilot",
       "source": "./plugins/autopilot",
       "description": "자율 수행 루프(랄프 루프) 운영 인터페이스. spec/loop/dispatch/fsd/review 5-skill family — spec으로 SPEC 작성, loop으로 스펙 파일 기반 로컬 자율 실행, dispatch로 spec-list-driven 다중 SPEC 오케스트레이션(통합 항상 활성: forge 구성이면 push→PR→리뷰→ff-only 머지, 미구성이면 PR 없는 로컬 적대적 리뷰 게이트 후 ff-only 직접 머지; 대상 브랜치 --target-branch 로 지정), fsd로 spec→dispatch 자동화 파이프라인을 완전자율(리뷰·머지는 dispatch 위임, 외부 승인 대기 없음)로 닫는 task 오케스트레이션(intake·start·poll; start는 dispatch 위임 직전 SPEC을 타겟 통합 브랜치에 ff-merge 선반영), review로 변경을 다관점 리뷰해 머신리더블 판정·재작업 브리프 생산.",
-      "version": "0.28.0",
+      "version": "0.28.1",
       "category": "automation",
       "tags": ["autonomous", "ralph-loop", "agent-runtime", "self-directed"]
     }

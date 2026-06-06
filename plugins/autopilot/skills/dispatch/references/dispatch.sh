@@ -839,9 +839,11 @@ cmd_watch() {
           # 미완 — loop 공개 IF 로 현 상태 재확인.
           local term; term="$(child_terminal_state "$sp")"
           case "$term" in
-            done)   set_state "$rd" "$sp" "done" ;;
-            failed) set_state "$rd" "$sp" "failed"; any_fail=1 ;;
-            *)      all_terminal=0 ;;
+            done|failed)
+              mark_loop_terminal "$rd" "$sp" "$term"
+              all_terminal=0
+              ;;
+            *) all_terminal=0 ;;
           esac
           ;;
       esac
