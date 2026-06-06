@@ -28,8 +28,18 @@
 // extractMarkerShas(reviews, markerPrefix) → [sha, ...]
 //   reviews: array of GitHub review objects (each may have .body, .submitted_at).
 //   markerPrefix: e.g. 'claude-formal-review' — only this reviewer's markers
-//     are considered (codex and claude share one bot identity, so the prefix,
-//     not the author, scopes ownership).
+//     are considered (codex and claude share one bot identity, so the prefix
+//     scopes WHICH reviewer; the author check below scopes that the marker is
+//     genuinely bot-posted).
+//   SECURITY: only reviews authored by a Bot account (`user.type === 'Bot'`) are
+//     trusted. Formal-review markers are posted by the App bot (`<slug>[bot]`) or
+//     the default `github-actions[bot]` — both type Bot. A human (e.g. the PR
+//     author, type 'User') could otherwise submit a COMMENT review carrying the
+//     marker to FORGE a "last reviewed" SHA at an un-reviewed head, making the
+//     next incremental diff skip their unreviewed changes. Requiring Bot
+//     authorship blocks that forgery. (Residual: a *separate* malicious bot app
+//     with PR-review-write installed on the repo — out of this threat model;
+//     such an app could compromise far more than review coverage.)
 //   Returns the marker head_sha values ordered by submitted_at DESCENDING
 //   (latest review first), de-duplicated (first/most-recent occurrence kept).
 //   Bodies without a well-formed marker for this prefix are ignored.
@@ -40,7 +50,9 @@ function extractMarkerShas(reviews, markerPrefix) {
   const needle = `<!-- ${markerPrefix} head_sha=`;
   const hits = [];
   for (const r of reviews) {
-    const body = r && typeof r.body === 'string' ? r.body : '';
+    // Trust only bot-authored reviews — a human/non-bot marker is a forgery.
+    if (!r || !r.user || r.user.type !== 'Bot') continue;
+    const body = typeof r.body === 'string' ? r.body : '';
     const at = body.indexOf(needle);
     if (at === -1) continue;
     // SHA runs from just after the needle up to the next whitespace.
