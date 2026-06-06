@@ -157,7 +157,8 @@ mg_cleanup_workspace() {
 #   direct=1 이면 direct 서브모드(forge 백엔드 미가용 — PR 없이 로컬 머지) 계약으로, PR 보강·
 #   PR 출력을 건너뛴다. version 범프 게이트·ff-only·작업공간 정리는 두 서브모드 공통.
 #   머지는 분리 approver 승인을 전제하지 않고 가용 토큰으로 수행한다(리뷰 수렴은 상위 책임).
-#   반환: 0=머지 완료(phase=merged) / 1=버전게이트 차단(phase=blocked, 비완료 종착).
+#   반환: 0=머지 완료(phase=merged) / 1=차단(phase=blocked, 비완료 종착 — forge PR 없음 또는
+#         버전게이트).
 mg_merge_finish() {
   local spec="$1" rd="$2" key="$3" pr="${4:-}" direct="${5:-}"
   [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { mg_die "사용: merge.sh finish <spec> <run_dir> <key> [pr] [direct]"; return 1; }
@@ -170,7 +171,18 @@ mg_merge_finish() {
   [[ "$direct" == "1" ]] || { [[ -n "$pr" ]] || pr="$(int_get_pr "$rd" "$key")"; }
   int_log "$rd" "$key" "merge_finish spec=$spec branch=$branch pr=$pr direct=${direct:-0}"
 
-  # 1) 버전 범프 게이트(비완료 종착).
+  # 1) forge PR 존재 게이트 — forge 경로(direct≠1)는 PR 을 통해 통합한다. PR 이 없으면
+  #    (생성 누락·상태 손상) 대상 브랜치에 PR 없이 직접 머지해 PR 리뷰 경로를 우회하는 것을
+  #    막기 위해 차단한다(비완료 종착). direct 는 PR 없이 동작하는 계약이라 적용하지 않는다.
+  if [[ "$direct" != "1" && -z "$pr" ]]; then
+    int_set_phase "$rd" "$key" blocked
+    int_log "$rd" "$key" "forge PR 없음 차단: PR 미보강(생성 누락·상태 손상) — PR 없이 머지 안 함(비완료 종착)"
+    echo "key:     $key"
+    echo "blocked: no-pr — forge 서브모드인데 PR 이 없습니다(PR 없이 대상 브랜치에 직접 머지하지 않습니다)."
+    return 1
+  fi
+
+  # 2) 버전 범프 게이트(비완료 종착).
   if ! mg_version_gate "$branch"; then
     int_set_phase "$rd" "$key" blocked
     int_log "$rd" "$key" "버전 게이트 차단: plugins/ 변경에 plugin.json 범프 없음 — 머지 안 함(비완료 종착)"
@@ -179,12 +191,12 @@ mg_merge_finish() {
     return 1
   fi
 
-  # 2) ff-only 머지(직렬화 락 보호, 가용 토큰).
+  # 3) ff-only 머지(직렬화 락 보호, 가용 토큰).
   int_set_phase "$rd" "$key" merging
   int_log "$rd" "$key" "게이트 통과 → ff-only 머지(직렬화, 가용 토큰): $branch → $DEFAULT_BRANCH"
   mg_merge_ff_only "$rd" "$branch" || { int_set_phase "$rd" "$key" blocked; return 1; }
 
-  # 3) 완료.
+  # 4) 완료.
   int_set_phase "$rd" "$key" merged
   mg_cleanup_workspace "$spec"
   int_log "$rd" "$key" "완료: 머지 확인, phase=merged, 작업 공간 정리 위임."
@@ -285,6 +297,20 @@ mg_selftest() {
     mg_merge_finish "$spec" "$rd" k6 >/dev/null 2>&1; rc=$?
   chk "동일 버전 재기입 rc=1(차단)" "$rc" "1"
   if has 'git merge --ff-only'; then bad "동일 버전인데 머지함"; else ok "동일 버전 → 머지 안 함"; fi
+
+  # ---- forge: PR 없음(보강 실패·상태 손상) → 차단(rc=1), merge/push 미호출 (codex blocking/96 가드) ----
+  reset
+  int_set_branch "$rd" knopr "feat/run1-knopr"   # PR 미설정(int_set_pr 안 함) → int_get_pr 빈 값
+  MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" knopr >/dev/null 2>&1; rc=$?
+  chk "forge PR없음 rc=1(차단)" "$rc" "1"
+  if has 'git merge --ff-only'; then bad "forge PR없음 머지/push 미호출"; else ok "forge PR없음 머지/push 미호출"; fi
+  chk "forge PR없음 phase=blocked" "$(int_get_phase "$rd" knopr)" "blocked"
+  # 대조: direct=1 은 PR 없이도 머지(PR 게이트는 forge 전용).
+  reset
+  int_set_branch "$rd" kdnopr "feat/run1-kdnopr"
+  MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdnopr "" 1 >/dev/null 2>&1; rc=$?
+  chk "direct PR없음 rc=0(머지)" "$rc" "0"
+  has 'git merge --ff-only' && ok "direct PR없음에도 머지(forge 전용 게이트)" || bad "direct PR없음에도 머지(forge 전용 게이트)"
 
   # ---- direct=1 → PR 없이 머지(version gate·ff-only 유지) ----
   reset; setup kd1   # setup 은 int_set_pr 77 을 심는다 — direct 경로가 이 stale PR 을 끌어오면 안 된다.
