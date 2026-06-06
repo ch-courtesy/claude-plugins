@@ -46,7 +46,7 @@ if [[ "$GITHUB_EVENT_NAME" == "pull_request" && "$action" == "synchronize" ]]; t
         incremental_base="$cand_sha"
         break
       fi
-    done < <(printf '%s' "$reviews_json" | node "$base_resolver" "$REVIEW_MARKER_PREFIX" 2>/dev/null || true)
+    done < <(printf '%s' "$reviews_json" | node "$base_resolver" "$REVIEW_MARKER_PREFIX" "${REVIEW_BOT_LOGINS:-}" 2>/dev/null || true)
   fi
 elif [[ "$GITHUB_EVENT_NAME" == "pull_request_review_comment" && -n "$reply_to_id" && -n "$comment_path" ]]; then
   mode="thread"

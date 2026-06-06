@@ -24,8 +24,10 @@ function test(name, fn) {
 
 const CLAUDE = 'claude-formal-review';
 const CODEX = 'codex-formal-review';
-const BOT = { type: 'Bot' };   // trusted formal-review author
+const BOT = { type: 'Bot' };   // trusted formal-review author (no login pin)
 const HUMAN = { type: 'User' }; // untrusted — forged markers must be ignored
+const TRUSTED = ['courtesy-bot[bot]', 'github-actions[bot]']; // pinned trusted logins
+const bot = (login) => ({ type: 'Bot', login }); // bot with a specific login
 
 // COMMENT-style review body: marker only, no prose.
 const commentBody = (prefix, sha) => `<!-- ${prefix} head_sha=${sha} verdict=comment -->`;
@@ -86,6 +88,28 @@ test('SECURITY: bot marker accepted, concurrent human forgery for same prefix dr
     rev(approveBody(CODEX, 'dead00aa11'), '2026-06-06T08:00:00Z', BOT), // genuine
   ];
   assert.deepStrictEqual(extractMarkerShas(reviews, CODEX), ['dead00aa11']);
+});
+
+test('SECURITY: allowedLogins pins to trusted bot; a DIFFERENT bot is rejected', () => {
+  const reviews = [
+    rev(commentBody(CODEX, 'ffaa00'), '2026-06-06T09:00:00Z', bot('rogue-bot[bot]')),  // other bot → drop
+    rev(approveBody(CODEX, 'bbcc11'), '2026-06-06T08:00:00Z', bot('courtesy-bot[bot]')), // trusted → keep
+  ];
+  assert.deepStrictEqual(extractMarkerShas(reviews, CODEX, TRUSTED), ['bbcc11']);
+});
+
+test('allowedLogins accepts each trusted login (app bot + github-actions), case-insensitive', () => {
+  const reviews = [
+    rev(commentBody(CLAUDE, 'aa11'), '2026-06-06T08:00:00Z', bot('github-actions[bot]')),
+    rev(approveBody(CLAUDE, 'bb22'), '2026-06-06T09:00:00Z', bot('Courtesy-Bot[bot]')), // case differs
+  ];
+  assert.deepStrictEqual(extractMarkerShas(reviews, CLAUDE, TRUSTED), ['bb22', 'aa11']);
+});
+
+test('empty allowedLogins falls back to type===Bot only (unconfigured deployment)', () => {
+  const reviews = [rev(commentBody(CLAUDE, 'cc33'), '2026-06-06T08:00:00Z', bot('any-bot[bot]'))];
+  assert.deepStrictEqual(extractMarkerShas(reviews, CLAUDE, []), ['cc33']);
+  assert.deepStrictEqual(extractMarkerShas(reviews, CLAUDE), ['cc33']);
 });
 
 test('review with missing user is ignored', () => {

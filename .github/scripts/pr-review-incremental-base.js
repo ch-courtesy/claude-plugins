@@ -36,22 +36,33 @@
 //     the default `github-actions[bot]` — both type Bot. A human (e.g. the PR
 //     author, type 'User') could otherwise submit a COMMENT review carrying the
 //     marker to FORGE a "last reviewed" SHA at an un-reviewed head, making the
-//     next incremental diff skip their unreviewed changes. Requiring Bot
-//     authorship blocks that forgery. (Residual: a *separate* malicious bot app
-//     with PR-review-write installed on the repo — out of this threat model;
-//     such an app could compromise far more than review coverage.)
+//     next incremental diff skip their unreviewed changes.
+//   allowedLogins: optional array of the EXACT trusted reviewer-bot logins (e.g.
+//     ['courtesy-bot[bot]', 'github-actions[bot]']). The workflow derives these
+//     dynamically from the review App slug (`<app-slug>[bot]`) plus the default
+//     `github-actions[bot]`. When provided, a marker is trusted ONLY if its
+//     review author login is in this set — so a DIFFERENT bot account that also
+//     has PR-review-write cannot forge a marker (the residual gap that bare
+//     `type === 'Bot'` left open). When empty/omitted, falls back to requiring
+//     `type === 'Bot'` (blocks human forgery; used by unconfigured deployments).
 //   Returns the marker head_sha values ordered by submitted_at DESCENDING
 //   (latest review first), de-duplicated (first/most-recent occurrence kept).
 //   Bodies without a well-formed marker for this prefix are ignored.
-function extractMarkerShas(reviews, markerPrefix) {
+function extractMarkerShas(reviews, markerPrefix, allowedLogins) {
   if (!Array.isArray(reviews) || typeof markerPrefix !== 'string' || !markerPrefix) {
     return [];
   }
+  const allow = Array.isArray(allowedLogins)
+    ? allowedLogins.filter((l) => typeof l === 'string' && l).map((l) => l.toLowerCase())
+    : [];
   const needle = `<!-- ${markerPrefix} head_sha=`;
   const hits = [];
   for (const r of reviews) {
     // Trust only bot-authored reviews — a human/non-bot marker is a forgery.
     if (!r || !r.user || r.user.type !== 'Bot') continue;
+    // When an explicit trusted-login set is configured, the marker author must
+    // be one of them — a different review-writing bot cannot forge the base.
+    if (allow.length && !allow.includes(String(r.user.login || '').toLowerCase())) continue;
     const body = typeof r.body === 'string' ? r.body : '';
     const at = body.indexOf(needle);
     if (at === -1) continue;
@@ -76,12 +87,15 @@ function extractMarkerShas(reviews, markerPrefix) {
 
 module.exports = { extractMarkerShas };
 
-// ---- CLI: `node pr-review-incremental-base.js <markerPrefix>` ----
+// ---- CLI: `node pr-review-incremental-base.js <markerPrefix> [allowedLogins]` ----
 // Reads the reviews JSON array on stdin, prints candidate SHAs (latest first),
-// one per line. On any parse error prints nothing (exit 0) so the caller safely
-// degrades to a full review.
+// one per line. allowedLogins is an optional comma-separated trusted-bot login
+// list. On any parse error prints nothing (exit 0) so the caller safely degrades
+// to a full review.
 if (require.main === module) {
   const markerPrefix = process.argv[2] || '';
+  const allowedLogins = (process.argv[3] || '')
+    .split(',').map((s) => s.trim()).filter(Boolean);
   let buf = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (d) => { buf += d; });
@@ -94,7 +108,7 @@ if (require.main === module) {
       // Malformed/empty input → no candidates → caller does a full review.
       return;
     }
-    const shas = extractMarkerShas(reviews, markerPrefix);
+    const shas = extractMarkerShas(reviews, markerPrefix, allowedLogins);
     if (shas.length) process.stdout.write(shas.join('\n') + '\n');
   });
 }
