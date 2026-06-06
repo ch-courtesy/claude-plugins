@@ -88,7 +88,8 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 
 ## 의존성
 
-`git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `autopilot:loop` 스킬, `yq`(mikefarah). `yq` 는 depends_on 파싱(없으면 awk 폴백)뿐 아니라 **loop 구조화 상태(`status --json`) 판정의 단일 출처**이므로 `start`/`status`/`stop`/`watch` 에서 필수다(부재 시 명확히 정지 — 텍스트 컬럼으로 silent fallback 하지 않음). **forge 서브모드**는 추가로 `jq`(리뷰 판정 JSON 파싱)와 forge CLI(`gh`, 주입 가능)·리뷰 생산자(`autopilot:review`)를 쓴다. **direct 서브모드**(forge 미구성)는 forge CLI 없이 동작하지만, 적대적 리뷰 게이트를 위해 `jq` 와 리뷰 생산자(`autopilot:review`)는 쓴다(PR·원격 push 없이 로컬 작업 브랜치 diff 로 리뷰).
+- **결정적 헬퍼(`dispatch.sh`)**: `git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `yq`(mikefarah). `yq` 는 SPEC frontmatter 의 `depends_on` 파싱(DAG 구성)에 쓰며 `start` 가 요구한다(없으면 awk 폴백이 있으나 신·구 레이아웃·인라인/블록 형식의 견고한 파싱을 위해 명시 요구). `ready`/`mark`/`status`/`stop`/`watch` 는 결정적 상태 헬퍼로 yq 비의존.
+- **서브에이전트가 호출하는 스킬**: `autopilot:loop`(구현)·`autopilot:review`(리뷰; 판정 JSON 파싱에 `jq`). **forge 서브모드**는 추가로 forge CLI(`gh`, 주입 가능)와 분리 승인 신원(`APPROVER`)을 쓴다(PR 적대 리뷰·분리 승인·머지). **direct 서브모드**(forge 미구성)는 forge CLI·원격 push 없이 작업 브랜치 변경(base..head)을 로컬 적대 리뷰한다. 서브에이전트는 loop 종료를 그 공개 구조화 상태(`loop status --json`)로만 판정한다.
 
 ## 규칙
 
