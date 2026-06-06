@@ -303,14 +303,14 @@ mg_selftest() {
   int_set_branch "$rd" knopr "feat/run1-knopr"   # PR 미설정(int_set_pr 안 함) → int_get_pr 빈 값
   MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" knopr >/dev/null 2>&1; rc=$?
   chk "forge PR없음 rc=1(차단)" "$rc" "1"
-  if has 'git merge --ff-only'; then bad "forge PR없음 머지/push 미호출"; else ok "forge PR없음 머지/push 미호출"; fi
+  if has 'git merge --ff-only'; then bad "forge PR없음인데 머지/push 호출됨(차단 실패)"; else ok "forge PR없음 머지/push 미호출"; fi
   chk "forge PR없음 phase=blocked" "$(int_get_phase "$rd" knopr)" "blocked"
   # 대조: direct=1 은 PR 없이도 머지(PR 게이트는 forge 전용).
   reset
   int_set_branch "$rd" kdnopr "feat/run1-kdnopr"
   MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdnopr "" 1 >/dev/null 2>&1; rc=$?
   chk "direct PR없음 rc=0(머지)" "$rc" "0"
-  has 'git merge --ff-only' && ok "direct PR없음에도 머지(forge 전용 게이트)" || bad "direct PR없음에도 머지(forge 전용 게이트)"
+  has 'git merge --ff-only' && ok "direct PR없음에도 머지함(forge 전용 게이트)" || bad "direct PR없음인데 머지 안 됨(게이트가 direct에 오적용)"
 
   # ---- direct=1 → PR 없이 머지(version gate·ff-only 유지) ----
   reset; setup kd1   # setup 은 int_set_pr 77 을 심는다 — direct 경로가 이 stale PR 을 끌어오면 안 된다.
