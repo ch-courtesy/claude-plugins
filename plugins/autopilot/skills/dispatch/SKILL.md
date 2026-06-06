@@ -1,6 +1,6 @@
 ---
 name: dispatch
-description: "하나 이상의 SPEC 파일을 구현·머지 단계로 넘기고 싶을 때 사용 — depends_on 준비도를 풀어 **준비된 SPEC마다 서브에이전트를 1개 띄우는 모델 주도 오케스트레이터**. 각 SPEC 서브에이전트는 자기 컨텍스트에서 loop(구현)·review(리뷰)를 승인까지 반복하고 대상 브랜치로 직접 머지한다(forge 구성이면 PR 적대 리뷰→분리 승인→ff-only 머지, 미구성이면 로컬 적대 리뷰 게이트→ff-only 직접 머지). dispatch 는 의존성·웨이브·동시성·실패 격리만 총괄하고, 머지(=done)되면 의존자를 해제한다. 대상 브랜치는 --target-branch 로 지정(기본: 기본 브랜치). 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch)."
+description: "하나 이상의 SPEC 파일을 구현·머지 단계로 넘기고 싶을 때 사용 — depends_on 준비도를 풀어 **준비된 SPEC마다 서브에이전트를 1개 띄우는 모델 주도 오케스트레이터**. 각 SPEC 서브에이전트는 자기 컨텍스트에서 loop(구현)·review(리뷰)를 승인까지 반복하고 대상 브랜치로 직접 머지한다(forge 백엔드 가용이면 PR 적대 리뷰→가용 토큰 ff-only 머지(분리 승인 신원 불필요), 미가용이면 로컬 적대 리뷰 게이트→ff-only 직접 머지). dispatch 는 의존성·웨이브·동시성·실패 격리만 총괄하고, 머지(=done)되면 의존자를 해제한다. 대상 브랜치는 --target-branch 로 지정(기본: 기본 브랜치). 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch)."
 allowed-tools:
   - Read
   - Bash(bash * dispatch.sh start:*)
@@ -37,11 +37,11 @@ dispatch 는 준비된(모든 dep 이 done) SPEC마다 서브에이전트를 **�
 - **dispatch 의 책임(결정적)**: depends_on 준비도 스케줄링·동시성 상한·서브에이전트 spawn/reap·done(=대상 브랜치에 머지됨)이면 의존자 해제·실패 이행 격리. 이 부분은 결정적 헬퍼(`dispatch.sh`)로 분리되어 selftest 로 검증된다(서브에이전트 spawn 은 Agent 도구를 쓰는 살아있는 에이전트 컨텍스트가 수행 — bash 무인 파이프라인이 아님).
 - **서브에이전트의 책임(모델 주도)**: 한 컨텍스트에서 `loop`(구현)·`review`(리뷰)를 **공개 스킬 인터페이스로** 호출하고(별도 추가 서브에이전트로 나누지 않음), `request_changes` 면 같은 작업 브랜치(`feat/<run-id>-<slug>`) 위에서 재구현→재리뷰를 `approve` 까지 반복(무한루프 가드 안), `approve` 후 대상 브랜치로 머지, dispatch 에 보고. 상세는 `references/spec-subagent.md`.
 - **대상 브랜치**: `--target-branch <branch>` 로 지정(미지정 시 기본 브랜치 `main` 또는 주입된 `DEFAULT_BRANCH`). run 전역으로 결정돼 모든 서브에이전트의 base 동기화·리뷰 대상·ff 머지에 일관 적용되며, run-dir 마커(`TARGET_BRANCH`)로 영속해 `--resume` 에서 sticky 하다(재개 시 마커가 현재 env·플래그보다 우선).
-- **서브모드(forge / direct)**: 서브에이전트가 리뷰·머지 대상을 정한다 — 분리 승인 신원(`APPROVER`)이 설정되고 forge CLI 가 사용 가능하면 **forge**(작업 브랜치 push→같은 head PR 재사용/생성→PR 적대 리뷰→분리 승인→ff 머지), 아니면 **direct**(PR·원격 push 없이 작업 브랜치 변경 base..head 를 로컬 적대 리뷰→ff 직접 머지). forge 구성 판정 규칙은 불변. 두 서브모드 모두 적대 리뷰·버전 범프 게이트·fast-forward 전용 머지를 통과한다.
-- **머지 게이트(done=머지)**: 서브에이전트가 머지를 보고한 SPEC 만 `done` 으로 전이한다. 따라서 **의존자는 의존성이 대상 브랜치에 머지된 뒤에만** 실행 큐에 풀리고, 갱신된 대상 브랜치 위에서 분기한다. 서브에이전트가 비완료(가드 소진·loop/review `unavailable`·분리 승인 신원 부재·충돌 해결 불가)로 끝나면 거짓 green 대신 에스컬레이션하고, 그 SPEC 은 `failed` 이며 그 **이행적 의존자만** `skipped` 된다. 무관한 가지는 계속 진행한다.
-- **무한루프 가드·안전 강등(결정적 헬퍼)**: 재구현→재리뷰 반복은 결정적 가드(라운드 상한 기본 3·무진전·동일 지적 핑퐁 — `review-loop.sh` 헬퍼가 판정, selftest 검증)에 걸리면 머지 없이 에스컬레이션한다. 승인 게이트(forge: 분리 승인 신원, 리뷰봇 self-approve 무효)·버전 범프 게이트(`plugins/` 변경 시 `plugin.json` 범프 강제)·ff-only 머지(`merge.sh` 헬퍼, selftest 검증)를 통과하지 못하면 안전 강등한다.
+- **서브모드(forge / direct)**: 서브에이전트가 리뷰·머지 대상을 정한다 — **forge CLI(백엔드)가 사용 가능하면** **forge**(작업 브랜치 push→같은 head PR 재사용/생성→PR 적대 리뷰→가용 토큰 ff 머지), 아니면 **direct**(PR·원격 push 없이 작업 브랜치 변경 base..head 를 로컬 적대 리뷰→ff 직접 머지). **분리 승인 신원(`APPROVER`)은 요구하지 않는다** — forge 백엔드가 있으면 approver 구성과 무관하게 forge 경로를 쓰고 머지는 가용 토큰으로 한다. 두 서브모드 모두 적대 리뷰·버전 범프 게이트·fast-forward 전용 머지를 통과한다.
+- **머지 게이트(done=머지)**: 서브에이전트가 머지를 보고한 SPEC 만 `done` 으로 전이한다. 따라서 **의존자는 의존성이 대상 브랜치에 머지된 뒤에만** 실행 큐에 풀리고, 갱신된 대상 브랜치 위에서 분기한다. 서브에이전트가 비완료(가드 소진·loop/review `unavailable`·충돌 해결 불가)로 끝나면 거짓 green 대신 에스컬레이션하고, 그 SPEC 은 `failed` 이며 그 **이행적 의존자만** `skipped` 된다. 무관한 가지는 계속 진행한다.
+- **무한루프 가드·안전 강등(결정적 헬퍼)**: 재구현→재리뷰 반복은 결정적 가드(라운드 상한 기본 3·무진전·동일 지적 핑퐁 — `review-loop.sh` 헬퍼가 판정, selftest 검증)에 걸리면 머지 없이 에스컬레이션한다. 버전 범프 게이트(`plugins/` 변경 시 `plugin.json` 범프 강제)·ff-only 머지(`merge.sh` 헬퍼, selftest 검증)를 통과하지 못하면 안전 강등한다(머지는 분리 승인 신원 없이 가용 토큰으로 수행).
 - **동시 머지 직렬화**: 여러 서브에이전트가 같은 대상 브랜치로 머지할 때 **전역 락·dispatch 머지 순번 통제 없이** git 자체 메커니즘이 직렬성을 제공한다. 한 머지가 대상 브랜치를 전진시켜 다른 서브에이전트의 머지가 더 이상 fast-forward 가 아니게 되면, 그 서브에이전트는 갱신된 대상 브랜치에 동기화·충돌 해결 후 머지한다. **어떤 경로(forge·direct)에서도 force(push·merge·rebase)를 쓰지 않는다.**
-- **주입 가능한 인터페이스(mock 검증)**: 결정적 헬퍼의 외부 인터페이스(`LOOP_CMD` `GIT_CMD` `FORGE_CMD`(기본 gh) `FORGE_BIN`(서브모드 판정용 forge CLI) `DEFAULT_BRANCH`(대상 브랜치) `APPROVER` `REVIEW_BOT` `APPROVE_CMD` `REVIEW_ROUNDS_MAX`(3) `WATCH_DIRS`(plugins/) `REVIEW_PRODUCE_CMD` 등)는 주입 가능해 실제 PR·머지 없이 mock 으로 독립 검증된다.
+- **주입 가능한 인터페이스(mock 검증)**: 결정적 헬퍼의 외부 인터페이스(`LOOP_CMD` `GIT_CMD` `FORGE_CMD`(기본 gh) `FORGE_BIN`(서브모드 판정용 forge CLI) `DEFAULT_BRANCH`(대상 브랜치) `REVIEW_ROUNDS_MAX`(3) `WATCH_DIRS`(plugins/) `REVIEW_PRODUCE_CMD` 등)는 주입 가능해 실제 PR·머지 없이 mock 으로 독립 검증된다.
 
 ## Subcommands
 
@@ -89,7 +89,7 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 ## 의존성
 
 - **결정적 헬퍼(`dispatch.sh`)**: `git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `yq`(mikefarah). `yq` 는 SPEC frontmatter 의 `depends_on` 파싱(DAG 구성)에 쓰며 `start` 가 요구한다(없으면 awk 폴백이 있으나 신·구 레이아웃·인라인/블록 형식의 견고한 파싱을 위해 명시 요구). `ready`/`mark`/`status`/`stop`/`watch` 는 결정적 상태 헬퍼로 yq 비의존.
-- **서브에이전트가 호출하는 스킬**: `autopilot:loop`(구현)·`autopilot:review`(리뷰; 판정 JSON 파싱에 `jq`). **forge 서브모드**는 추가로 forge CLI(`gh`, 주입 가능)와 분리 승인 신원(`APPROVER`)을 쓴다(PR 적대 리뷰·분리 승인·머지). **direct 서브모드**(forge 미구성)는 forge CLI·원격 push 없이 작업 브랜치 변경(base..head)을 로컬 적대 리뷰한다. 서브에이전트는 loop 종료를 그 공개 구조화 상태(`loop status --json`)로만 판정한다.
+- **서브에이전트가 호출하는 스킬**: `autopilot:loop`(구현)·`autopilot:review`(리뷰; 판정 JSON 파싱에 `jq`). **forge 서브모드**는 추가로 forge CLI(`gh`, 주입 가능)를 쓴다(PR 적대 리뷰·가용 토큰 머지 — 분리 승인 신원 불필요). **direct 서브모드**(forge 백엔드 미가용)는 forge CLI·원격 push 없이 작업 브랜치 변경(base..head)을 로컬 적대 리뷰한다. 서브에이전트는 loop 종료를 그 공개 구조화 상태(`loop status --json`)로만 판정한다.
 
 ## 규칙
 

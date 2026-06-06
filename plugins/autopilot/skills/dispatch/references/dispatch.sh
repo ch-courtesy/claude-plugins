@@ -34,7 +34,7 @@
 # 환경 변수:
 #   DISPATCH_POLL_SECONDS          watch 폴링 간격 (기본 2)
 #   DISPATCH_WAVE_TIMEOUT_SECONDS  watch 최대 대기 (기본 7200 = 2 시간)
-#   FORGE_BIN APPROVER DEFAULT_BRANCH  서브모드·대상 브랜치 판정(주입 가능, mock 검증).
+#   FORGE_BIN DEFAULT_BRANCH  서브모드·대상 브랜치 판정(주입 가능, mock 검증).
 #
 # bash 3.2 호환 (assoc array 사용 안 함).
 
@@ -49,8 +49,8 @@ WAVE_TIMEOUT_SECONDS="${DISPATCH_WAVE_TIMEOUT_SECONDS:-7200}"
 # dispatch.sh 는 결정적 셋업·스케줄링 헬퍼만 제공하고 통합 모듈을 드레인하지 않는다.
 # 서브모드(forge/direct)와 대상 브랜치는 run 전역 사실로 cmd_start 가 결정·영속(run-dir 마커)해
 # 서브에이전트가 일관되게 읽고 --resume 에서 sticky 하다.
-#   서브모드: forge(분리 승인 신원+forge CLI → PR 적대 리뷰·분리 승인·ff 머지) | direct(미구성 →
-#             로컬 적대 리뷰·ff 직접 머지). cmd_start 가 INTEGRATE 마커로 영속.
+#   서브모드: forge(forge CLI 백엔드 가용 → PR 적대 리뷰·가용 토큰 ff 머지, approver 불필요) |
+#             direct(백엔드 미가용 → 로컬 적대 리뷰·ff 직접 머지). cmd_start 가 INTEGRATE 마커로 영속.
 INTEGRATE_SUBMODE=""
 # 대상 브랜치(--target-branch, 미지정 시 기본 브랜치). cmd_start 가 TARGET_BRANCH 마커로 영속하고
 # 서브에이전트에 DEFAULT_BRANCH 로 export 한다.
@@ -58,11 +58,12 @@ TARGET_BRANCH=""
 # forge CLI 바이너리(서브모드 판정용). '사용 가능' 판정에만 쓴다.
 FORGE_BIN="${FORGE_BIN:-gh}"
 
-# forge_configured — 서브모드 판정(기존 컨벤션 불변): 분리 승인 신원(APPROVER) 설정 +
-#   forge CLI(FORGE_BIN) 사용 가능이면 0(forge), 아니면 1(미구성 → direct). cmd_start 가
-#   run 전역 서브모드를 결정할 때 쓴다(서브에이전트는 이 마커를 읽어 리뷰·머지 대상을 정한다).
-forge_configured() {
-  [[ -n "${APPROVER:-}" ]] || return 1
+# forge_backend_available — 서브모드 판정: forge CLI(FORGE_BIN)가 사용 가능하면 0(forge),
+#   아니면 1(백엔드 미가용 → direct). forge 백엔드가 있으면 분리 승인 신원(approver) 구성
+#   여부와 무관하게 forge 경로(작업 브랜치 push→PR)를 쓰고, 머지는 가용 토큰으로 수행한다
+#   (분리 approver 요구 없음 — merge.sh 참조). cmd_start 가 run 전역 서브모드를 결정할 때 쓴다
+#   (서브에이전트는 이 마커를 읽어 리뷰·머지 대상을 정한다).
+forge_backend_available() {
   command -v "${FORGE_BIN%% *}" >/dev/null 2>&1
 }
 
@@ -503,9 +504,9 @@ cmd_start() {
   if [[ -f "$rd/INTEGRATE" ]]; then
     INTEGRATE_SUBMODE="$(cat "$rd/INTEGRATE" 2>/dev/null || true)"
   fi
-  # 서브모드 미정(최초 시작 또는 빈 마커)이면 forge 구성 여부로 결정.
+  # 서브모드 미정(최초 시작 또는 빈 마커)이면 forge 백엔드 가용 여부로 결정.
   if [[ -z "$INTEGRATE_SUBMODE" ]]; then
-    if forge_configured; then INTEGRATE_SUBMODE=forge; else INTEGRATE_SUBMODE=direct; fi
+    if forge_backend_available; then INTEGRATE_SUBMODE=forge; else INTEGRATE_SUBMODE=direct; fi
   fi
   printf '%s\n' "$INTEGRATE_SUBMODE" > "$rd/INTEGRATE"
 
@@ -771,24 +772,24 @@ cmd_selftest() {
   [[ "$(tmarker "$rdm")" == "main" ]] && ok "S5 기본 대상 브랜치=main 마커" || bad "S5 기본 대상=main got=$(tmarker "$rdm")"
   # 지정 대상 = release + 미구성(direct) 서브모드.
   rm -rf "$REPO/.dispatch"
-  local ridr; ridr="$( start_rid dsp bash "$DSP" start --target-branch release feature-a.md feature-b.md )"
+  local ridr; ridr="$( start_rid dsp env FORGE_BIN=__noforge__ bash "$DSP" start --target-branch release feature-a.md feature-b.md )"
   local rdr; rdr="$(latest_run)"
   [[ "$(tmarker "$rdr")" == "release" ]] && ok "S5 지정 대상 브랜치=release 마커" || bad "S5 대상=release got=$(tmarker "$rdr")"
-  [[ "$(marker "$rdr")" == "direct" ]] && ok "S5 forge 미구성 → submode=direct" || bad "S5 submode=direct got=$(marker "$rdr")"
+  [[ "$(marker "$rdr")" == "direct" ]] && ok "S5 forge 백엔드 미가용(FORGE_BIN) → submode=direct" || bad "S5 submode=direct got=$(marker "$rdr")"
   # 대상 브랜치 resume sticky: 플래그 없이/다른 env 로 재개해도 release 유지.
   local ridr2; ridr2="$(basename "$rdr")"
   ( cd "$REPO" && dsp env DEFAULT_BRANCH=main bash "$DSP" start --resume "$ridr2" ) >/dev/null 2>&1 || true
   [[ "$(tmarker "$rdr")" == "release" ]] && ok "S5 resume: 대상 브랜치 release sticky(env 보다 우선)" || bad "S5 resume 대상 sticky got=$(tmarker "$rdr")"
-  # forge 구성(APPROVER + forge CLI) → submode=forge + resume sticky(direct 로 시작 후 forge env 재개해도 유지).
+  # forge 백엔드 가용(forge CLI) → submode=forge — approver 불필요(정상화). + resume sticky.
   rm -rf "$REPO/.dispatch"
-  local ridf; ridf="$( start_rid dsp env APPROVER=approver-bot FORGE_BIN=bash bash "$DSP" start feature-a.md )"
+  local ridf; ridf="$( start_rid dsp env FORGE_BIN=bash bash "$DSP" start feature-a.md )"
   local rdf; rdf="$(latest_run)"
-  [[ "$(marker "$rdf")" == "forge" ]] && ok "S5 forge 구성 → submode=forge" || bad "S5 submode=forge got=$(marker "$rdf")"
+  [[ "$(marker "$rdf")" == "forge" ]] && ok "S5 forge 백엔드 가용 → submode=forge(approver 불필요)" || bad "S5 submode=forge got=$(marker "$rdf")"
   rm -rf "$REPO/.dispatch"
-  local ridd; ridd="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local ridd; ridd="$( start_rid dsp env FORGE_BIN=__noforge__ bash "$DSP" start feature-a.md )"
   local rdd; rdd="$(latest_run)"; local riddb; riddb="$(basename "$rdd")"
-  ( cd "$REPO" && dsp env APPROVER=approver-bot FORGE_BIN=bash bash "$DSP" start --resume "$riddb" ) >/dev/null 2>&1 || true
-  [[ "$(marker "$rdd")" == "direct" ]] && ok "S5 resume: submode direct sticky(forge env 보다 마커 우선)" || bad "S5 resume submode sticky got=$(marker "$rdd")"
+  ( cd "$REPO" && dsp env FORGE_BIN=bash bash "$DSP" start --resume "$riddb" ) >/dev/null 2>&1 || true
+  [[ "$(marker "$rdd")" == "direct" ]] && ok "S5 resume: submode direct sticky(forge 가용 env 보다 마커 우선)" || bad "S5 resume submode sticky got=$(marker "$rdd")"
 
   # ---- S6: depends_on cycle → abort(실행 셋업 안 함) ----
   rm -rf "$REPO/.dispatch"
@@ -866,7 +867,7 @@ Subcommands:
         도달할 때까지 대기(상태 전진은 모델의 ready/mark 소유). exit 0=전부 done, 1=실패 있음, 2=timeout.
 
 환경 변수:
-  DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS, FORGE_BIN, APPROVER, DEFAULT_BRANCH
+  DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS, FORGE_BIN, DEFAULT_BRANCH
 EOF
   exit 1
 }

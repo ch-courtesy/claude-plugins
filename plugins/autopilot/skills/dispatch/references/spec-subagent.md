@@ -34,10 +34,10 @@ loop·review 를 직접 호출한다.
 구현이 DONE 이면 `Skill(skill="review", ...)` **공개 인터페이스로** 변경을 다관점 적대 리뷰해
 머신리더블 단일 판정(`approve`/`request_changes`/`unavailable`)을 받는다.
 
-- **리뷰 대상은 통합 서브모드로 갈린다**(forge 구성 판정 규칙은 불변 — 비목표):
-  - **forge**(분리 승인 신원 `APPROVER` + forge CLI 사용 가능): 작업 브랜치를 push 하고 같은 head 의
-    open PR 을 재사용/생성해 **PR 을 대상으로** 리뷰.
-  - **direct**(forge 미구성): 원격 push·PR 없이 **작업 브랜치 변경(base..head)** 을 대상으로 로컬 적대 리뷰.
+- **리뷰 대상은 통합 서브모드로 갈린다**(forge 백엔드 가용 여부로 판정):
+  - **forge**(forge CLI 사용 가능): 작업 브랜치를 push 하고 같은 head 의 open PR 을 재사용/생성해
+    **PR 을 대상으로** 리뷰. 분리 승인 신원(approver) 구성은 요구하지 않는다.
+  - **direct**(forge 백엔드 미가용): 원격 push·PR 없이 **작업 브랜치 변경(base..head)** 을 대상으로 로컬 적대 리뷰.
 - 판정이 `unavailable`(리뷰 producer 실패·판정 불가)이면 거짓 승인 대신 **에스컬레이션**한다(완료 조건 8).
 
 ### 3. 반복 — request_changes → 재구현→재리뷰 (완료 조건 3·4)
@@ -56,10 +56,11 @@ loop·review 를 직접 호출한다.
 `approve` 판정 **이후에만** 대상 브랜치로 머지한다. 머지는 **결정적 게이트**(`merge.sh`)를 통과한다:
 
 1. **버전 범프 게이트** — `plugins/` 변경이면 `plugin.json` SemVer 범프를 강제(완료 조건 11 의 일부).
-2. **승인 게이트(forge 만)** — **분리 승인 신원**(`APPROVER`, App 토큰)으로 PR 을 승인·확인한다.
-   **리뷰봇 자신의 self-approve 는 무효**(승인자≠리뷰봇 보존). 분리 승인 신원이 없거나 forge 가
-   불가하면 거짓 green 대신 **안전 강등(에스컬레이션)** 한다(완료 조건 7). direct 서브모드는 승인 게이트를
-   우회하되(로컬 적대 리뷰 게이트가 approve 를 이미 산출) 버전·ff 게이트는 동일 적용.
+2. **머지(분리 승인 신원 불필요)** — 머지는 **가용한 forge 토큰**(예: gh 인증)으로 수행한다. 별도의
+   분리 승인 신원(`APPROVER`)의 정식 APPROVED 리뷰를 머지 전제로 두지 않는다 — 리뷰 수렴(`approve`)
+   판정은 위 적대 리뷰가 이미 책임졌고, 머지 단계는 버전·ff 게이트만 더한다. forge 서브모드는 통합이
+   PR 을 통하며(작업 브랜치 push→PR), direct 서브모드는 PR 없이 로컬 작업 브랜치를 머지한다. 두 경로
+   모두 버전·ff 게이트는 동일 적용.
 3. **fast-forward 전용 머지** — `git merge --ff-only`. **force push·force merge·force rebase 를 어떤
    경로에서도 쓰지 않는다**(완료 조건 6).
 
@@ -80,8 +81,8 @@ git 자체 메커니즘이 직렬성을 제공한다. 한 서브에이전트의 
 
 ## 안전 불변식 (요약)
 
-- 승인 없이 머지 없음. approve 판정 이후에만 머지(완료 조건 5).
-- 거짓 green 금지: loop/review unavailable·분리 승인 신원 부재·충돌 해결 불가 → 에스컬레이션(완료 조건 7·8).
+- approve 없이 머지 없음. 적대 리뷰가 approve 판정을 낸 이후에만 머지(완료 조건 5).
+- 거짓 green 금지: loop/review unavailable·충돌 해결 불가 → 에스컬레이션(완료 조건 7·8).
 - force 금지: 어떤 경로에서도 force push/merge/rebase 미사용(완료 조건 6).
 - 블랙박스 경계: loop·review 는 공개 스킬 인터페이스로만 호출, 내부 신호 파일·워크트리 미열람.
 - 결정적 가드·게이트(라운드 상한·무진전·핑퐁·버전 범프·ff 머지)는 헬퍼가 판정하며 selftest 로 검증된다.
