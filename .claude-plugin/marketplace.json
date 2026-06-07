@@ -28,10 +28,10 @@
     {
       "name": "roundtable",
       "source": "./plugins/roundtable",
-      "description": "의뢰자 인터뷰와 중앙 리서치를 바탕으로 다중 관점 숙의를 진행하고 합의서 또는 불합의 보고서를 작성",
-      "version": "0.1.0",
+      "description": "중앙 리서치를 바탕으로 다중 관점 숙의와 추적 가능한 브레인스토밍을 진행",
+      "version": "0.2.0",
       "category": "productivity",
-      "tags": ["roundtable", "deliberation", "consensus", "decision-making"]
+      "tags": ["roundtable", "brainstorming", "deliberation", "consensus", "ideation", "decision-making"]
     }
   ]
 }
