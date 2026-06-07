@@ -24,6 +24,14 @@
       "version": "0.7.0",
       "category": "automation",
       "tags": ["autonomous", "ralph-loop", "agent-runtime", "self-directed"]
+    },
+    {
+      "name": "roundtable",
+      "source": "./plugins/roundtable",
+      "description": "의뢰자 인터뷰와 중앙 리서치를 바탕으로 다중 관점 숙의를 진행하고 합의서 또는 불합의 보고서를 작성",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["roundtable", "deliberation", "consensus", "decision-making"]
     }
   ]
 }
