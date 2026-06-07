@@ -1,6 +1,16 @@
 ---
 name: context-rule-creator
 description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍스트 카테고리 디렉터리 아래 두 sub-룰 파일(`rules/context/task-model.md`·`rules/context/task-ops.md`)로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 컨텍스트 지침을 새로 만들고 싶어 할 때.
+allowed-tools:
+  - AskUserQuestion
+  - Read
+  - Write
+  - Glob
+  - Bash(ls:*)
+  - Bash(mkdir -p:*)
+  - Bash(diff:*)
+  - Bash(git diff:*)
+  - Bash(rm:*)
 ---
 
 # context-rule-creator
@@ -14,16 +24,16 @@ description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍�
 
 ## 템플릿 레이아웃
 
-공통 템플릿 디렉터리 `../../shared/context-rule-creator/templates/` 아래:
+이 파일 옆 `templates/` 아래:
 
-- `../../shared/context-rule-creator/templates/<backend>/task-model.md` — 백엔드별 task-model 본문. 이 파일의 frontmatter가 백엔드 선택 메타데이터입니다.
-- `../../shared/context-rule-creator/templates/task-ops.md` — 모든 백엔드가 공유하는 백엔드 무관 task-ops 본문(frontmatter 없음).
+- `templates/<backend>/task-model.md` — 백엔드별 task-model 본문. 이 파일의 frontmatter가 백엔드 선택 메타데이터입니다.
+- `templates/task-ops.md` — 모든 백엔드가 공유하는 백엔드 무관 task-ops 본문(frontmatter 없음).
 
-`<backend>`는 백엔드 id(예: `filesystem`, `github-project`)이며 상호배타적 단일 선택지입니다. 새 백엔드를 추가하려면 공통 템플릿 디렉터리 `../../shared/context-rule-creator/templates/` 아래에 `task-model.md`를 담은 새 디렉터리를 두면 되고, 이 SKILL.md는 변경하지 않습니다.
+`<backend>`는 백엔드 id(예: `filesystem`, `github-project`)이며 상호배타적 단일 선택지입니다. 새 백엔드를 추가하려면 `templates/` 아래에 `task-model.md`를 담은 새 디렉터리를 두면 되고, 이 SKILL.md는 변경하지 않습니다.
 
 ## 생성 절차
 
-1. **백엔드 열거.** 공통 템플릿 디렉터리 `../../shared/context-rule-creator/templates/` 아래에서 `task-model.md`를 가진 서브디렉터리만 백엔드 후보로 삼습니다. 디렉터리명이 백엔드 id입니다. 공유 본문 `../../shared/context-rule-creator/templates/task-ops.md`도 읽어 둡니다. 다른 경로는 탐색하지 않습니다.
+1. **백엔드 열거.** `templates/` 아래에서 `task-model.md`를 가진 서브디렉터리만 백엔드 후보로 삼습니다. 디렉터리명이 백엔드 id입니다. 공유 본문 `templates/task-ops.md`도 읽어 둡니다. 다른 경로는 탐색하지 않습니다.
 
 2. **frontmatter 파싱.** 각 백엔드의 `task-model.md` frontmatter를 읽습니다.
    - `label` 필수, 옵션 라벨입니다.
@@ -34,7 +44,7 @@ description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍�
 
    `task-model.md`가 없거나 `label`이 없는 디렉터리는 후보에서 제외하고 사용자에게 알립니다.
 
-3. **백엔드 선택 (상호배타 단일).** 후보가 하나면 자동 선택하고, 둘 이상이면 `request_user_input` single-select로 묻습니다. 한 번의 실행에서 **정확히 하나**의 백엔드만 기록합니다. 단순 재실행으로 백엔드를 바꾸지 않습니다.
+3. **백엔드 선택 (상호배타 단일).** 후보가 하나면 자동 선택하고, 둘 이상이면 `AskUserQuestion` single-select로 묻습니다. 한 번의 실행에서 **정확히 하나**의 백엔드만 기록합니다. 단순 재실행으로 백엔드를 바꾸지 않습니다.
 
 4. **정적 입력 수집.** 선택된 백엔드 `task-model.md`에 `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, "Other"도 허용합니다. 수집된 값만 `{{name}}`에 치환하고 누락·빈 값은 placeholder를 보존합니다.
 
@@ -57,7 +67,7 @@ description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍�
 
 6. **본문 조립.** 두 산출물 본문을 조립합니다.
    - task-model 본문: 선택된 백엔드 `task-model.md`의 frontmatter를 제거한 본문에 4·5단계 수집값을 치환합니다.
-   - task-ops 본문: 공유 `../../shared/context-rule-creator/templates/task-ops.md` 본문에 5단계 수집값을 치환합니다.
+   - task-ops 본문: 공유 `templates/task-ops.md` 본문에 5단계 수집값을 치환합니다.
    - "기본 흐름:" 줄의 `{{transition_order}}`는 사용자 입력이 아니라, 순서가 정해진 on-path 이벤트들의 목표 상태(`{{event_initial}}` → `{{event_plan_doc}}` → `{{event_impl_start}}` → `{{event_review_start}}` → `{{event_merge_done}}`)를 종합해 자동으로 채웁니다. 차단·해제 같은 off-path 이벤트는 기본 흐름에 포함하지 않습니다. on-path 이벤트의 목표 상태가 누락되면 그 자리는 placeholder를 보존합니다.
    - 수집되지 않은 값의 `{{...}}` placeholder는 그대로 보존합니다.
 

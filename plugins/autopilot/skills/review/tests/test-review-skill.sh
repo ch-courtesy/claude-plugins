@@ -27,8 +27,8 @@ SKILL_DIR="$SCRIPT_DIR/.."
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REVIEW_SH="$SKILL_DIR/references/review.sh"
 AGENT_PROMPTS="$SKILL_DIR/references/agent-prompts.md"
-SCHEMA="$SKILL_DIR/../../shared/review/references/output-schema.json"
-PERSONAS="$SKILL_DIR/../../shared/spec/references/personas.md"
+SCHEMA="$SKILL_DIR/references/output-schema.json"
+PERSONAS="$SKILL_DIR/../spec/references/personas.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -43,7 +43,7 @@ ok "S1"
 # === S2: frontmatter ===
 echo "=== S2: frontmatter ==="
 grep -qE '^name: review$' "$SKILL_MD" || fail "S2: name: review 없음"
-grep -qE 'review <subcommand> \[<args>\]' "$SKILL_MD" || fail "S2: 호출 양식(review subcommand) 없음"
+grep -qiE 'skill=\\?"review\\?"' "$SKILL_MD" || fail "S2: 호출 양식(Skill review) 없음"
 ok "S2"
 
 # === S3: 공개 서브커맨드 3종 ===
@@ -143,5 +143,5 @@ echo "=== S14: 불변식 ==="
 grep -qiE '자기 상태|자기 정의|밖.*경로|밖 경로' "$SKILL_MD" || fail "S14: 경로 생성 제한 불변식 없음"
 ok "S14"
 
-echo "$SKILL_MD"
+echo ""
 echo "ALL SKILL TESTS PASSED"

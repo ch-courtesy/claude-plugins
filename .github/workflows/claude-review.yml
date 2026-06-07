@@ -61,6 +61,10 @@ jobs:
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      # Exposed for the app-token step's `if` (mirrors the merge job). Empty on
+      # forks / unconfigured repos → app-token skipped → github-actions[bot] only.
+      REVIEW_APP_ID: ${{ secrets.REVIEW_APP_ID }}
     outputs:
       chunks: ${{ steps.plan.outputs.chunks }}
       chunk_count: ${{ steps.plan.outputs.chunk_count }}
@@ -120,6 +124,20 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Generate GitHub App token
+        id: app-token
+        # Resolve the App bot login (`<app-slug>[bot]`) so the incremental-base
+        # resolver can pin marker trust to it (+ github-actions[bot]) and reject a
+        # forged marker from any OTHER review-writing bot. Gated on REVIEW_APP_ID;
+        # skipped/failed (continue-on-error) → app-slug empty → github-actions[bot]
+        # only. Same action/identity the merge job uses to POST the marker.
+        if: ${{ env.REVIEW_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+        with:
+          app-id: ${{ secrets.REVIEW_APP_ID }}
+          private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+
       - name: Prepare Claude review context
         id: prepare-claude-review
         # Build the untrusted-context HEADER (metadata/comments, up to and
@@ -140,6 +158,7 @@ jobs:
           PR_HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           PR_TITLE: ${{ steps.pr.outputs.title }}
           CLAUDE_REVIEW_LANG: ${{ vars.CLAUDE_REVIEW_LANG || 'Korean' }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
           if [ -z "$claude_code_oauth_token" ]; then
             echo "CLAUDE_CODE_OAUTH_TOKEN secret is required for Claude review authentication." >&2
@@ -151,6 +170,14 @@ jobs:
           REVIEW_PROMPT=".github/prompts/claude-pr-review.ko.md"
           REVIEW_SCHEMA=".github/prompts/codex-pr-review.schema.json"
 
+          # Trusted formal-review marker authors: the App bot (<slug>[bot]) when an
+          # App token is configured, plus the default github-actions[bot] fallback.
+          if [ -n "${APP_SLUG:-}" ]; then
+            review_bot_logins="${APP_SLUG}[bot],github-actions[bot]"
+          else
+            review_bot_logins="github-actions[bot]"
+          fi
+
           REVIEW_OUTPUT_DIR=".review-context" \
           GITHUB_EVENT_NAME="$GITHUB_EVENT_NAME" \
           GITHUB_EVENT_PATH="$GITHUB_EVENT_PATH" \
@@ -158,6 +185,8 @@ jobs:
           PR_NUMBER="$PR_NUMBER" \
           PR_BASE_SHA="$PR_BASE_SHA" \
           PR_HEAD_SHA="$PR_HEAD_SHA" \
+          REVIEW_MARKER_PREFIX="claude-formal-review" \
+          REVIEW_BOT_LOGINS="$review_bot_logins" \
           .github/scripts/pr-review-context.sh
 
           source .review-context/context-mode.env
@@ -731,7 +760,44 @@ jobs:
             // chunk was reviewed there is nothing to post.
             const reviewedResults = chunkResults.filter((r) => r.eligibility?.status === 'reviewed');
             if (reviewedResults.length === 0) {
-              core.info('No review output to post.');
+              // 리뷰된 청크가 없음(모든 청크 적격성 ≠ reviewed — 예: 문서 전용 변경). 침묵 대신
+              // "왜 리뷰하지 않았는지" 사유를 issue 레벨 PR 댓글로 남긴다(리뷰어당 1개 upsert).
+              // formal review 가 아니므로 reviewDecision 에 영향 없음. createReview·false-green
+              // 가드·thread resolve 경로는 타지 않는다(이 분기에서 바로 종료).
+              core.info('No review output to post; upserting a skip-reason comment.');
+              const reviewerName = /^codex/.test(prefix) ? 'Codex' : 'Claude';
+              const reasons = [...new Set(chunkResults
+                .map((r) => String(r.eligibility?.reason || r.automation_safety?.reason || '').trim())
+                .filter(Boolean))];
+              const reasonText = reasons.length ? reasons.join('\n\n')
+                : '변경이 코드 리뷰 대상이 아니라고 판정되어 리뷰를 게시하지 않았습니다.';
+              const skipMarker = `<!-- ${prefix}-skipped -->`;
+              const body = [
+                `🤖 **${reviewerName} 리뷰** — 리뷰를 게시하지 않았습니다`,
+                '',
+                reasonText,
+                '',
+                `<sub>head: \`${head_sha}\`</sub>`,
+                skipMarker,
+              ].join('\n');
+              try {
+                const comments = await github.paginate(github.rest.issues.listComments,
+                  { owner, repo, issue_number: pull_number, per_page: 100 });
+                // 작성자 검증: 우리 워크플로 토큰 신원(botLogin)이 단 댓글만 기존 후보로
+                // 본다. 다른 사용자가 같은 숨은 마커를 단 댓글을 먼저 올려도 그걸 골라
+                // updateComment(권한 없음→실패)로 기능이 막히지 않게 한다(위조 차단).
+                const existing = comments.find((c) =>
+                  c.user?.login === botLogin && (c.body || '').includes(skipMarker));
+                if (existing) {
+                  await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+                  core.info(`Updated skip-reason comment (${existing.id}).`);
+                } else {
+                  await github.rest.issues.createComment({ owner, repo, issue_number: pull_number, body });
+                  core.info('Created skip-reason comment.');
+                }
+              } catch (e) {
+                core.warning(`Skip-reason comment upsert failed: ${e.message}`);
+              }
               return;
             }
 

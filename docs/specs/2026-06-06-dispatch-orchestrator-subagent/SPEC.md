@@ -2,18 +2,14 @@
 scope:
   include:
     - plugins/autopilot/skills/dispatch/**
-    - plugins/autopilot/claude-skills/dispatch/**
     - plugins/autopilot/.claude-plugin/plugin.json
-    - plugins/autopilot/.codex-plugin/plugin.json
     - .claude-plugin/marketplace.json
   exclude:
     - rules/**
     - milestones/**
     - CLAUDE.md
     - plugins/autopilot/skills/loop/**
-    - plugins/autopilot/claude-skills/loop/**
     - plugins/autopilot/skills/review/**
-    - plugins/autopilot/claude-skills/review/**
 ears_language: ko
 ---
 
@@ -49,8 +45,8 @@ ears_language: ko
 7. forge·direct 두 서브모드 모두 서브에이전트 한 컨텍스트에서 머지까지 닫는다. forge 서브모드에서 서브에이전트는 **분리 승인 신원**으로 PR을 승인·머지하며, 리뷰봇 자신의 self-approve는 무효다(승인자≠리뷰봇 보존). 분리 승인 신원이 없거나 forge가 불가하면 거짓 green 대신 안전 강등(에스컬레이션)한다.
 8. `loop`·`review` 호출이 실패하거나 판정 불가(`unavailable`)면 거짓 승인·거짓 머지 대신 그 SPEC을 에스컬레이션한다.
 9. depends_on 준비도 스케줄링·동시성 상한·실패 이행 격리(한 SPEC이 실패하면 그 이행적 의존자만 skip, 독립 가지는 계속)는 보존된다.
-10. 위 계약이 두 변형(`plugins/autopilot/skills/dispatch`·`plugins/autopilot/claude-skills/dispatch`)에 일관되게 반영된다 — 두 dispatch SKILL.md 모두 "통합·리뷰·머지를 dispatch가 직접 소유"가 아니라 "서브에이전트가 SPEC당 구현·리뷰·머지를 소유하고 dispatch는 의존성·웨이브만 총괄"로 서술한다.
-11. plugins/ 하위 변경이므로 autopilot 플러그인 SemVer가 범프되고(`.claude-plugin/plugin.json`·`.codex-plugin/plugin.json`), 루트 `.claude-plugin/marketplace.json` 미러가 같은 버전·설명으로 동기화되며 두 매니페스트가 `jq .`로 유효하다.
+10. dispatch SKILL.md(`plugins/autopilot/skills/dispatch`)가 "통합·리뷰·머지를 dispatch가 직접 소유"가 아니라 "서브에이전트가 SPEC당 구현·리뷰·머지를 소유하고 dispatch는 의존성·웨이브만 총괄"로 서술한다.
+11. plugins/ 하위 변경이므로 autopilot 플러그인 SemVer가 범프되고(`.claude-plugin/plugin.json`), 루트 `.claude-plugin/marketplace.json` 미러가 같은 버전·설명으로 동기화되며 두 파일이 `jq .`로 유효하다.
 12. dispatch의 결정적 부분(DAG 준비도·동시성·라운드 상한·무진전·핑퐁·버전 범프 게이트·ff 머지 메커니즘)에 대한 기존 결정적 검증(`selftest`)이, 오케스트레이션 주체가 서브에이전트로 바뀐 뒤에도 회귀 없이 통과한다.
 
 ## 범위
@@ -61,13 +57,14 @@ ears_language: ko
 - review 호출 맥락의 forge/direct 대상 결정(PR vs base..head)과 머지 게이트·분리 승인 신원의 서브에이전트 위임.
 - 동시 머지의 git 메커니즘 직렬화(전역 락 없음, 충돌 시 동기화·해결 후 머지, force 없음).
 - 무한루프 가드·안전 강등(거짓 머지 금지)·에스컬레이션.
-- 두 변형(`skills/dispatch`·`claude-skills/dispatch`) 일관 적용 + 플러그인 SemVer 범프 및 marketplace 미러 동기화.
+- 플러그인 SemVer 범프(`.claude-plugin/plugin.json`) 및 marketplace 미러 동기화.
 
 비-목표 / 제외:
 - **loop·review 스킬 자체 변경** — 서브에이전트가 호출만 한다(이터 처리·리뷰 판정 방식 불변).
 - depends_on DAG 구성·준비도 스케줄링 의미론 변경(실행 주체만 바뀌고 스케줄 규칙은 유지).
 - forge 서브모드 진입 조건(forge 구성 판정) 규칙 변경.
 - 분리 승인 신원(App 토큰)·스레드 resolve에 필요한 권한 인프라 신규 구축 — 기존 전제를 그대로 쓰되, 불가 환경에서는 안전 강등으로 처리.
+- **`fsd`(sibling 스킬) 적응 — 별도 후속 SPEC으로 처리한다(이 SPEC 범위 밖).** dispatch가 모델 주도(셋업 전용)가 되면, fsd의 헤드리스 bash 폴 자율 파이프라인(`fsd.sh`→`dispatch start`→`poll.sh`가 `dispatch status`로 done까지 폴링; `dispatch start`가 자율로 구현→통합→머지→done까지 구동한다는 전제)이 깨진다. fsd를 모델 주도 dispatch에 맞추는 변경은 **별도 후속 SPEC**이 담당하며, 그 후속이 머지되기 전까지 fsd의 완전자율 경로는 **의도적으로 비활성**이다(알려진·수용된 상태). 이 dispatch SPEC의 완료 조건(1–12)은 fsd 적응과 독립으로 충족된다.
 
 ## 검증
 <!-- 검증 기준의 단일 출처는 위 "완료 조건"이다. -->
@@ -81,7 +78,6 @@ ears_language: ko
 - 결정적인 것은 코드(오케스트레이터·헬퍼)에 남긴다: DAG 준비도·동시성 상한·라운드 상한·무진전·핑퐁·상태·버전 범프 게이트·ff 머지 메커니즘. 서브에이전트는 구현·리뷰·반복 제어·머지 실행만.
 - 머지는 ff를 우선하고 force push·force merge·force rebase를 쓰지 않는다 — 충돌은 갱신된 대상 브랜치에 동기화한 뒤 비-force로 해결해 머지하거나, 해결 불가면 에스컬레이션한다(거짓 green 금지).
 - forge 승인·스레드 resolve는 분리 승인 신원(App 토큰)을 전제하며, 불가 시 안전 강등(거짓 승인·거짓 머지 금지). 리뷰봇 self-approve는 무효(승인자≠리뷰봇).
-- 변경은 두 변형(`skills/dispatch`·`claude-skills/dispatch`)에 일관되게 적용한다.
 - 변경은 plugins/ 하위이므로 통합 시 autopilot 플러그인 SemVer 범프 + 루트 `marketplace.json` 미러 동기가 필요하다. 버전 범프는 `rules/engineering/versioning.md`를 따른다.
 - SKILL.md 편집은 `superpowers:writing-skills` 관례를 따르고, 남는 셸 스크립트는 bash 3.2+ 호환을 유지한다.
 
@@ -91,4 +87,4 @@ ears_language: ko
 - 한 서브에이전트가 loop·review 스킬을 호출하는 형태는 그 스킬들이 서브에이전트 컨텍스트에서 호출 가능해야 성립한다 — 중첩 호출 가능성은 확인됐으나, 호출 불가 환경에서는 거짓 성공 없이 에스컬레이션으로 안전 처리한다(완료 조건 8).
 - 기존 bash 통합(review-loop.sh의 iterate-until-approved 드레인·merge 게이트 구동 등)을 오케스트레이터·서브에이전트 절차로 대체하는 범위가 크다 — 결정적 스케줄링·가드·버전 범프·ff 머지 의미를 회귀 없이 보존해야 한다(완료 조건 9·12).
 - 전역 락 없이 git 메커니즘에만 의존하는 동시 머지는, 충돌 해결을 서브에이전트가 책임지므로 잘못 해결하면 잘못된 머지가 될 수 있다 — 충돌 해결도 리뷰·가드의 적용을 받고, 해결 불가는 에스컬레이션한다(완료 조건 6·8).
-- 두 변형에 일관 적용하지 못하면 한 변형만 새 계약으로 흐른다 — 완료 조건 10이 두 SKILL.md 정합을 고정한다.
+- **이 변경은 scope 밖 `fsd`의 헤드리스 자율 파이프라인을 깨뜨린다 — 알려진·수용된 결정이다.** dispatch가 셋업 전용(모델 주도)이 되면 fsd.poll이 done을 못 봐 hang하므로, fsd 적응은 **별도 후속 SPEC**으로 처리하고 그 머지 전까지 fsd 완전자율은 비활성으로 둔다(범위 "비-목표" 참조). dispatch 변경 자체의 완료 조건(1–12)은 이와 독립으로 green이다.

@@ -4,8 +4,7 @@ set -u
 
 ROOT="$(cd "$(dirname "$0")/../../../../.." && pwd)"
 SHARED="$ROOT/plugins/project-init/shared/bootstrap"
-CODEX_SKILL="$ROOT/plugins/project-init/skills/bootstrap/SKILL.md"
-CLAUDE_SKILL="$ROOT/plugins/project-init/claude-skills/bootstrap/SKILL.md"
+BOOTSTRAP_SKILL="$ROOT/plugins/project-init/skills/bootstrap/SKILL.md"
 CODEX_MANIFEST="$ROOT/plugins/project-init/.codex-plugin/plugin.json"
 CLAUDE_MANIFEST="$ROOT/plugins/project-init/.claude-plugin/plugin.json"
 CLAUDE_MARKETPLACE="$ROOT/.claude-plugin/marketplace.json"
@@ -20,18 +19,15 @@ check() {
   fi
 }
 
-for skill in "$CODEX_SKILL" "$CLAUDE_SKILL"; do
-  check "$(basename "$(dirname "$(dirname "$skill")")") bootstrap references shared assets" grep -qF 'shared/bootstrap/' "$skill"
-  check "$skill requires at least one vendor" grep -qF '최소 1개' "$skill"
-  check "$skill retries empty vendor selection at most three times" grep -qE '3회|세 번' "$skill"
-  check "$skill aborts before creating files after three empty selections" grep -qF '아무 파일도 생성·변경하지 않은 채 bootstrap을 중단' "$skill"
-  check "$skill documents both recommended vendors" bash -c "grep -qF 'Claude Code (Recommended)' '$skill' && grep -qF 'Codex (Recommended)' '$skill'"
-  check "$skill preserves existing files" grep -qF '덮어쓰지' "$skill"
-  check "$skill gates existing CLAUDE.md import behind diff approval" bash -c "grep -qF '@AGENTS.md' '$skill' && grep -qF 'diff' '$skill' && grep -qE '승인|물어' '$skill'"
-done
-
-check "both bootstraps use skill-relative shared path" bash -c "grep -qF '../../shared/bootstrap/' '$CODEX_SKILL' && grep -qF '../../shared/bootstrap/' '$CLAUDE_SKILL'"
-check "Claude bootstrap can create vendor directories" grep -qF 'Bash(mkdir:*)' "$CLAUDE_SKILL"
+check "bootstrap references shared assets" grep -qF 'shared/bootstrap/' "$BOOTSTRAP_SKILL"
+check "bootstrap requires at least one vendor" grep -qF '최소 1개' "$BOOTSTRAP_SKILL"
+check "bootstrap retries empty vendor selection at most three times" grep -qE '3회|세 번' "$BOOTSTRAP_SKILL"
+check "bootstrap aborts before creating files after three empty selections" grep -qF '아무 파일도 생성·변경하지 않은 채 bootstrap을 중단' "$BOOTSTRAP_SKILL"
+check "bootstrap documents both recommended vendors" bash -c "grep -qF 'Claude Code (Recommended)' '$BOOTSTRAP_SKILL' && grep -qF 'Codex (Recommended)' '$BOOTSTRAP_SKILL'"
+check "bootstrap preserves existing files" grep -qF '덮어쓰지' "$BOOTSTRAP_SKILL"
+check "bootstrap gates existing CLAUDE.md import behind diff approval" bash -c "grep -qF '@AGENTS.md' '$BOOTSTRAP_SKILL' && grep -qF 'diff' '$BOOTSTRAP_SKILL' && grep -qE '승인|물어' '$BOOTSTRAP_SKILL'"
+check "bootstrap uses skill-relative shared path" grep -qF '../../shared/bootstrap/' "$BOOTSTRAP_SKILL"
+check "bootstrap can create vendor directories" grep -qF 'Bash(mkdir:*)' "$BOOTSTRAP_SKILL"
 
 check "shared AGENTS base exists" test -f "$SHARED/AGENTS.md"
 check "shared interaction asset exists" test -f "$SHARED/assets/interaction-rules.ko.md"
@@ -46,12 +42,12 @@ check "Claude entrypoint imports AGENTS.md" grep -qxF '@AGENTS.md' "$SHARED/vend
 check "Claude settings skeleton is an empty object" bash -c "[ \"\$(jq -c . '$SHARED/vendors/claude/settings.json')\" = '{}' ]"
 check "Codex config contains comments only" bash -c "! grep -qE '^[[:space:]]*[^#[:space:]][^#]*=' '$SHARED/vendors/codex/config.toml'"
 
-check "legacy Codex bootstrap assets removed" test ! -e "$ROOT/plugins/project-init/skills/bootstrap/AGENTS.md"
-check "legacy Claude bootstrap assets removed" test ! -e "$ROOT/plugins/project-init/claude-skills/bootstrap/CLAUDE.md"
-check "legacy Codex interaction asset removed" test ! -e "$ROOT/plugins/project-init/skills/bootstrap/assets/interaction-rules.ko.md"
-check "legacy Claude interaction asset removed" test ! -e "$ROOT/plugins/project-init/claude-skills/bootstrap/assets/interaction-rules.ko.md"
+check "legacy local bootstrap base removed" test ! -e "$ROOT/plugins/project-init/skills/bootstrap/CLAUDE.md"
+check "legacy local interaction asset removed" test ! -e "$ROOT/plugins/project-init/skills/bootstrap/assets/interaction-rules.ko.md"
+check "legacy duplicated bootstrap directory removed" test ! -e "$ROOT/plugins/project-init/claude-skills/bootstrap"
 
 check "Codex manifest version is 0.17.0" bash -c "[ \"\$(jq -r .version '$CODEX_MANIFEST')\" = '0.17.0' ]"
+
 check "Claude manifest version is 0.17.0" bash -c "[ \"\$(jq -r .version '$CLAUDE_MANIFEST')\" = '0.17.0' ]"
 check "Claude marketplace version is 0.17.0" bash -c "[ \"\$(jq -r '.plugins[] | select(.name == \"project-init\") | .version' '$CLAUDE_MARKETPLACE')\" = '0.17.0' ]"
 

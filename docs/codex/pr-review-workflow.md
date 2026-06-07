@@ -183,7 +183,19 @@ adapters/
 ## Context Modes
 
 - `full`: initial PR review. Sends full PR patch and existing comments.
-- `incremental`: synchronize event. Sends only previous head to current head patch when available.
+- `incremental`: synchronize event. Diffs from the commit **this reviewer last successfully reviewed** — the head SHA carried by its most recent formal-review marker (`<!-- <reviewer>-formal-review head_sha=… -->`), trusted only when the marker's review author is a recognized review bot — up to the current head. Falls back to `full` when no such marker exists or it is not an ancestor of the current head (first review, all prior reviews failed/unavailable, or force-push/rebase). This base is **not** the webhook `event.before` (previous push head): see "Incremental base 현행화" below for why.
 - `thread`: review-comment reply. Sends target thread metadata and the target file patch.
 
 If the model returns `needs_context`, the workflow fetches up to 5 requested files from the PR head and runs one follow-up pass.
+
+## Incremental base 현행화 — 커버리지 공백 차단 + 마커 위조 방지 — ✅ 구현됨
+
+> 적용: 2026-06-06. `incremental` 모드의 base 계산을 웹훅 `event.before` → "마지막 성공 리뷰 SHA"로 바꾸고, 그 마커의 신뢰를 리뷰 봇 작성자로 한정했다. 두 리뷰 워크플로(codex·claude) 대칭.
+
+**문제 — 리뷰 커버리지 공백.** 과거 `incremental` 모드는 base를 GitHub 웹훅의 `event.before`(직전 push의 head)로 잡았다. `event.before`는 직전 리뷰의 성공 여부와 무관하게 GitHub가 매 push마다 갱신하므로, 어떤 push의 리뷰가 실패하면(예: 사용량 한도로 리뷰 미게시) 다음 push의 증분 diff가 그 **미검토 커밋들을 건너뛰어 영구히 리뷰되지 않는데도 체크는 통과**했다.
+
+**해결 — 마지막 성공 리뷰 SHA 기준.** 각 워크플로는 실제로 리뷰를 제출할 때만(approve/comment) per-reviewer 마커 `<!-- <reviewer>-formal-review head_sha=<sha> … -->`를 남긴다(실패·unavailable·skipped 시엔 남기지 않음 = 성공 게이트). 이제 `incremental` base는 **그 리뷰어의 가장 최근 마커 head_sha 중 현재 head의 조상인 것**으로 잡는다 → 직전 리뷰가 실패했더라도 그 이후 모든 커밋이 다음 증분에 포함되어 공백이 메워진다. 적격 마커가 없으면(첫 리뷰·전부 실패·force-push) `full`로 떨어진다.
+
+**위조 방지 강화.** 마커는 리뷰 본문에 들어가므로 작성자 검증이 없으면 사람(예: PR 작성자)이나 다른 봇이 가짜 마커를 단 리뷰를 올려 미검토 head를 "마지막 성공 리뷰"로 위조해 base를 조작할 수 있다(자기 변경 리뷰 회피). 그래서 마커는 **신뢰된 리뷰 봇 작성자가 단 것만** 인정한다 — prep 단계에서 GitHub App 토큰 스텝으로 봇 신원(`<app-slug>[bot]`, 미구성 시 `github-actions[bot]`)을 동적으로 얻어 허용 작성자 목록으로 넘기고, 마커 추출이 그 목록의 작성자만 신뢰한다.
+
+**구현 위치.** 마커 파싱·정렬·작성자 검증은 공유 순수 모듈 `.github/scripts/pr-review-incremental-base.js`(hermetic 테스트 동봉)에 있고, base 계산을 수행하는 공유 스크립트 `.github/scripts/pr-review-context.sh`가 이를 호출한다. 신뢰 봇 신원은 prep의 GitHub App 토큰 스텝에서 동적으로 얻는다. 앵커 검증용 정본 diff(`gh pr diff`)는 모드와 무관하게 그대로다 — 모델용 `diff.patch`의 base만 바뀐다.

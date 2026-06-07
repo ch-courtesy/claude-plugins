@@ -1,6 +1,24 @@
 ---
 name: loop
-description: 단일 SPEC 파일을 격리 작업 공간에서 자율적으로 구현(랄프 루프)하고 싶을 때 사용. 호출 `loop <subcommand> [<args>]` (start/status/stop/list/cleanup/logs).
+description: 단일 SPEC 파일을 격리 작업 공간에서 자율적으로 구현(랄프 루프)하고 싶을 때 사용. 호출 'Skill(skill="loop", args="<subcommand> [<args>]")' (start/status/stop/list/cleanup/logs).
+allowed-tools:
+  - Read
+  - Bash(bash * loop.sh start:*)
+  - Bash(bash * loop.sh status:*)
+  - Bash(bash * loop.sh stop:*)
+  - Bash(bash * loop.sh list)
+  - Bash(bash * loop.sh cleanup:*)
+  - Bash(bash * loop.sh logs:*)
+  - Bash(bash * loop.sh env)
+  - Bash(bash * loop.sh gates)
+  - Bash(bash * loop.sh paths:*)
+  - Bash(bash * loop.sh deps)
+  - Bash(git -C * status:*)
+  - Bash(git -C * log:*)
+  - Bash(git -C * diff:*)
+  - Bash(git -C * stash list)
+  - Bash(git -C * stash show:*)
+  - Bash(git -C * stash pop:*)
 ---
 
 # loop
@@ -11,7 +29,7 @@ description: 단일 SPEC 파일을 격리 작업 공간에서 자율적으로 �
 
 ## 호출
 
-`loop <subcommand> [<args>]`
+`Skill(skill: "loop", args: "<subcommand> [<args>]")`
 
 loop은 어떤 도구가 만든 스펙이든 **임의의 스펙 파일 경로**를 받는다.
 
@@ -21,11 +39,11 @@ loop은 어떤 도구가 만든 스펙이든 **임의의 스펙 파일 경로**�
 
 > 위 bracket의 플래그(`--max-iterations`·`--wall-clock-minutes`)는 `loop.sh`가 받는 인자다.
 
-`bash $SKILL_DIR/references/loop.sh start <spec-path> [...flags]`로 **포그라운드(동기)** 실행한다. start 는 이터레이션 루프가 끝날 때까지 블로킹하고, 종료 후 호출자가 `signals/` 내용을 직접 검사한다.
+`Bash(bash $SKILL_DIR/references/loop.sh start <spec-path> [...flags])`로 **포그라운드(동기)**로 실행한다. start 는 이터레이션 루프가 끝날 때까지 블로킹하고, 종료 후 호출자가 `signals/` 내용을 직접 검사한다.
 
-**비차단(non-blocking)이 필요하면** loop 을 `run_in_background`로 직접 띄우지 말고, loop 스킬 워크플로를 별도 백그라운드 서브에이전트에 위임하고 그 서브에이전트가 위 명령으로 loop 을 **포그라운드** 실행하게 한다. 이유: 서브에이전트 안에서 loop 을 백그라운드 프로세스로 띄우면 서브에이전트 턴이 끝나는 순간 그 백그라운드 프로세스가 kill 되어 워커가 산출물 없이 실패한다(통제 실험으로 확인). 같은 서브에이전트라도 포그라운드 실행은 루프 종료까지 살아남아 정상 완료한다.
+**비차단(non-blocking)이 필요하면** loop 을 `run_in_background`로 직접 띄우지 말고, loop 스킬을 **백그라운드 서브에이전트로 dispatch**하고 그 서브에이전트가 위 명령으로 loop 을 **포그라운드**로 실행하게 한다. 이유: 서브에이전트 안에서 loop 을 백그라운드 프로세스로 띄우면 서브에이전트 턴이 끝나는 순간 그 백그라운드 프로세스가 kill 되어 워커가 산출물 없이 실패한다(통제 실험으로 확인). 같은 서브에이전트라도 포그라운드 실행은 루프 종료까지 살아남아 정상 완료한다.
 
-driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `AGENTS.md`로 복사) → 이터레이션 루프. 매 이터는 새 `codex exec` 프로세스. 계산된 경로는 `loop.sh paths <spec>`.
+driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `CLAUDE.md`로 복사) → 이터레이션 루프. 매 이터는 새 `claude --print` 프로세스. 계산된 경로는 `loop.sh paths <spec>`.
 
 #### 진행 관찰
 
@@ -37,7 +55,7 @@ driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `AGENTS
 
 ### status / stop / list / cleanup / logs
 
-각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `../../shared/loop/references/status-format.md`. `status --json [<spec>]`은 기계 판독 가능한 구조화 상태(JSON)를 출력해 호출 레이어(dispatch 등)가 컬럼 위치·부분 문자열 일치 없이 종료 상태를 판정하게 한다. lock은 워크트리 생성 전에 획득해 race 보호. 경로 상세는 `loop.sh paths <spec>`. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 `signals/` 비어있지 않음 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
+각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. `status --json [<spec>]`은 기계 판독 가능한 구조화 상태(JSON)를 출력해 호출 레이어(dispatch 등)가 컬럼 위치·부분 문자열 일치 없이 종료 상태를 판정하게 한다. lock은 워크트리 생성 전에 획득해 race 보호. 경로 상세는 `loop.sh paths <spec>`. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 `signals/` 비어있지 않음 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
 
 ### env / gates / paths / deps
 

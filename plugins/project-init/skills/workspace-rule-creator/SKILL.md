@@ -1,21 +1,30 @@
 ---
 name: workspace-rule-creator
 description: 현재 프로젝트에 맞는 작업공간 위생 sub-룰(임시 파일 등)을 `rules/workspace/<sub>.md`로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 작업공간 위생 sub-룰 지침을 새로 만들고 싶어 할 때.
+allowed-tools:
+  - AskUserQuestion
+  - Read
+  - Write
+  - Glob
+  - Bash(ls:*)
+  - Bash(mkdir -p:*)
+  - Bash(diff:*)
+  - Bash(git diff:*)
 ---
 
 # workspace-rule-creator
 
-공통 템플릿 디렉터리 `../../shared/workspace-rule-creator/templates/`의 `*.md` 중 하나를 `rules/workspace/<sub>.md`로 기록합니다. `<sub>`는 템플릿 파일명에서 확장자를 뺀 값입니다. 선택지, 입력값, 사후 작업은 템플릿 frontmatter에서 도출합니다.
+`templates/*.md` 중 하나를 `rules/workspace/<sub>.md`로 기록합니다. `<sub>`는 템플릿 파일명에서 확장자를 뺀 값입니다. 선택지, 입력값, 사후 작업은 템플릿 frontmatter에서 도출합니다.
 
 본 스킬은 **작업공간 위생 카테고리의 sub-룰 디스패처**입니다. 형제 스킬(`engineering-rule-creator`)과 동형으로, 같은 작업공간 카테고리 아래 여러 sub-룰(임시 파일·빌드 산출물·스크래치 데이터 등 — 후속 task에서 확장)을 호출마다 하나씩 디렉터리 구조로 누적합니다.
 
 본 스킬이 만드는 것은 작업공간 위생 sub-룰뿐입니다. 빌드 시스템·릴리스 산출물 위치(engineering)나 태스크 기록(context)의 기존 지침은 건드리지 않습니다.
 
-새 sub-룰을 추가하려면 공통 템플릿 디렉터리 `../../shared/workspace-rule-creator/templates/` 아래에 새 마크다운 파일을 두면 되고, 이 SKILL.md는 변경하지 않습니다.
+새 sub-룰을 추가하려면 `templates/` 아래에 새 마크다운 파일을 두면 되고, 이 SKILL.md는 변경하지 않습니다.
 
 ## 생성 절차
 
-1. **템플릿 열거.** 공통 템플릿 디렉터리 `../../shared/workspace-rule-creator/templates/*.md`만 읽습니다. 다른 경로를 탐색하지 않습니다. 파일명에서 확장자를 뺀 값이 sub-룰 ID입니다.
+1. **템플릿 열거.** 이 파일 옆 `templates/*.md`만 읽습니다. 다른 경로를 탐색하지 않습니다. 파일명에서 확장자를 뺀 값이 sub-룰 ID입니다.
 
 2. **frontmatter 파싱.**
    - `label` 필수, 옵션 라벨입니다.
@@ -27,7 +36,7 @@ description: 현재 프로젝트에 맞는 작업공간 위생 sub-룰(임시 �
 
    필수 필드가 없는 템플릿은 후보에서 제외하고 사용자에게 알립니다.
 
-3. **선택.** 후보가 하나면 자동 선택하고, 둘 이상이면 `request_user_input` single-select로 묻습니다.
+3. **선택.** 후보가 하나면 자동 선택하고, 둘 이상이면 `AskUserQuestion` single-select로 묻습니다.
 
 4. **정적 입력.** `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, 비어 있지 않은 "Other"도 허용합니다. 응답 누락·빈 값은 `{{name}}`을 보존합니다.
 

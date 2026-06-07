@@ -2,11 +2,11 @@
 
 한 작업의 변경(diff)을 리뷰할 때 워커가 **4개의 lens 서브에이전트를 병렬·독립**으로 dispatch 하는 brief. 각 lens 는 서로의 결론을 **보지 못한다**(합의 투표 아님). 각 lens 는 자기 관점의 **발견(findings)만 보고**하고, 판정·중복 제거·신뢰도 게이팅·최종 verdict 는 **결정적 중재 게이트(`review.sh`)**가 한다.
 
-> 적대 렌즈(contrarian·minimalist·constraint-auditor)가 필요할 때 그 정의는 `plugins/autopilot/shared/spec/references/personas.md`(단일 출처)를 **참조**한다 — 여기서 복제하지 않는다.
+> 적대 렌즈(contrarian·minimalist·constraint-auditor)가 필요할 때 그 정의는 `plugins/autopilot/skills/spec/references/personas.md`(단일 출처)를 **참조**한다 — 여기서 복제하지 않는다.
 
 ## 공통 출력 계약 (모든 lens)
 
-각 lens 는 `plugins/autopilot/shared/review/references/output-schema.json` 의 `findings[]` 항목 형식으로만 보고한다. **결정·승인·차단은 하지 않는다** — 발견만 낸다.
+각 lens 는 `references/output-schema.json` 의 `findings[]` 항목 형식으로만 보고한다. **결정·승인·차단은 하지 않는다** — 발견만 낸다.
 
 각 finding 은 4증거를 **모두** 갖춰야 하며, 하나라도 빠지면 finding 을 만들지 않는다(중재 게이트가 어차피 제외):
 
@@ -90,10 +90,10 @@ findings[] (history). 발견만 보고. 판정 금지.
 
 ## lens④ — 저장소 가이드라인 준수 (`review_perspective: guideline`)
 
-용도: `AGENTS.md`·`rules/`·워크플로 문서 등 명시적 지침과 변경의 충돌.
+용도: `CLAUDE.md`·`rules/`·워크플로 문서 등 명시적 지침과 변경의 충돌.
 
 ```text
-변경이 저장소 명시 지침(AGENTS.md·AGENTS.md·rules/·워크플로 문서)과 충돌하는지 확인하라.
+변경이 저장소 명시 지침(CLAUDE.md·AGENTS.md·rules/·워크플로 문서)과 충돌하는지 확인하라.
 
 ## 변경
 [diff + 적용되는 규칙 발췌]
