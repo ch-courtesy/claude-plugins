@@ -5,7 +5,7 @@ allowed-tools:
   - AskUserQuestion
   - Agent
   - Read
-  - Write
+  - Write(.roundtable/**)
   - Glob
   - Grep
   - WebSearch

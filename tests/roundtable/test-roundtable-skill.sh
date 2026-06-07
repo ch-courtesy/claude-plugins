@@ -47,6 +47,12 @@ ok "인터페이스와 상태 계약"
 
 echo ""
 echo "=== TEST 3: 메인 세션 책임과 승인 게이트 ==="
+FRONTMATTER="$(awk '/^---$/{n++; next} n==1' "$SKILL_MD")"
+printf '%s\n' "$FRONTMATTER" | grep -qxF '  - Write(.roundtable/**)' \
+  || fail "Write 권한이 .roundtable/**로 제한되지 않음"
+if printf '%s\n' "$FRONTMATTER" | grep -qxF '  - Write'; then
+  fail "제한 없는 Write 권한이 남아 있음"
+fi
 grep -qE '메인 세션.*회의 책임자|회의 책임자.*메인 세션' "$SKILL_MD" \
   || fail "메인 세션=회의 책임자 계약 누락"
 grep -qE '아젠다.*승인|승인.*아젠다' "$SKILL_MD" \
