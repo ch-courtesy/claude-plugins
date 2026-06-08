@@ -449,8 +449,11 @@ grep -qF 'filterFindingsAgainstPatch' "$WORKFLOW" \
   || fail "공유 검증 단위 호출(filterFindingsAgainstPatch) 부재 (AC1/AC5)"
 grep -qF 'repairFindingsFromContextLineNumbers' "$WORKFLOW" \
   || fail "Read 컨텍스트 줄 번호를 source RIGHT-side 줄로 복구하는 공유 함수 호출 부재"
-grep -qF '.codex-review/context.chunk-${chunk}.md' "$WORKFLOW" \
-  || fail "청크별 리뷰 결과의 컨텍스트 파일을 읽어 앵커 복구에 사용하지 않음"
+# 앵커 복구의 컨텍스트는 모델이 실제로 본 청크 프롬프트(prompt.chunk-<i>.md)다.
+# plan 단계는 context.chunk-* 를 생성하지 않으므로 그 경로를 읽으면 항상 비어
+# 복구가 동작하지 않는다 — prompt.chunk-* 를 읽어야 한다.
+grep -qF '.codex-review/prompt.chunk-${chunk}.md' "$WORKFLOW" \
+  || fail "청크별 리뷰 결과의 모델-프롬프트(prompt.chunk-<i>.md)를 읽어 앵커 복구에 사용하지 않음"
 grep -qF 'Repaired context-line anchor' "$WORKFLOW" \
   || fail "컨텍스트 줄 번호 앵커 복구 로그 부재"
 # 검증 입력은 이미 생성된 diff.patch — 새로 diff 계산하지 않는다 (제약).

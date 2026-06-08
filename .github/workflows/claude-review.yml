@@ -70,6 +70,7 @@ jobs:
       chunk_count: ${{ steps.plan.outputs.chunk_count }}
       pr_number: ${{ steps.pr.outputs.number }}
       base_ref: ${{ steps.pr.outputs.base_ref }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
       claude_workflow_changed: ${{ steps.workflow-change.outputs.changed }}
     steps:
@@ -491,17 +492,31 @@ jobs:
         if: ${{ needs.prep.outputs.claude_workflow_changed == 'true' }}
         env:
           CHUNK: ${{ matrix.chunk }}
+          PR_BASE_SHA: ${{ needs.prep.outputs.base_sha }}
+          PR_HEAD_SHA: ${{ needs.prep.outputs.head_sha }}
         run: |
           set -euo pipefail
+          # Must conform to the shared review schema (codex-pr-review.schema.json)
+          # so downstream consumers of the structured result do not reject it:
+          # eligibility.status='skipped' makes the merge step treat this chunk as
+          # not-reviewed (it posts a skip-reason comment, never an approval), while
+          # verdict stays within the schema enum ('skipped' is NOT a valid verdict)
+          # and reviewed_context carries every required key with no extras
+          # (additionalProperties:false — comments_considered is not allowed).
           jq -n \
             --arg reason "Claude review workflow changed in this PR; skipped claude-code-action because OAuth validation requires the workflow file to match the default branch." \
+            --arg base_sha "$PR_BASE_SHA" \
+            --arg head_sha "$PR_HEAD_SHA" \
             '{
-              verdict: "skipped",
+              verdict: "unavailable",
+              confidence: "high",
               eligibility: { status: "skipped", reason: $reason },
               reviewed_context: {
-                files_reviewed: [],
+                base_sha: $base_sha,
+                head_sha: $head_sha,
                 diff_truncated: false,
-                comments_considered: false,
+                files_reviewed: [],
+                related_files_reviewed: [],
                 skipped_files: []
               },
               automation_safety: {
