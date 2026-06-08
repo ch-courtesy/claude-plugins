@@ -47,8 +47,22 @@ LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../loop/references/loop.sh"
 LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 WATCH_DIRS="${WATCH_DIRS:-plugins/}"
+MERGE_APPROVAL_CMD="${MERGE_APPROVAL_CMD:-mg_approval_gh}"
 
 mg_die() { echo "merge: $*" >&2; return 1; }
+
+# ===== forge 승인 게이트 — PR 호스팅 리뷰 승인 확인(승인 전 머지 차단) =====
+# mg_approval_gh <pr> — PR 의 reviewDecision(APPROVED 등)을 출력. 주입 가능(MERGE_APPROVAL_CMD).
+mg_approval_gh() {
+  # shellcheck disable=SC2086
+  $FORGE_CMD pr view "$1" --json reviewDecision --jq '.reviewDecision' 2>/dev/null
+}
+# mg_approval_gate <pr> — forge PR 의 호스팅 리뷰가 APPROVED 면 0, 아니면 1(차단).
+mg_approval_gate() {
+  local decision
+  decision="$($MERGE_APPROVAL_CMD "$1" 2>/dev/null | tr -d '[:space:]')"
+  [[ "$decision" == "APPROVED" ]]
+}
 
 # ===== 1) 버전 범프 게이트 — versioning.md 실행자 =====
 mg_merge_changed_files() {
@@ -182,6 +196,16 @@ mg_merge_finish() {
     return 1
   fi
 
+  # 1b) forge 승인 게이트 — PR 의 호스팅 리뷰가 APPROVED 일 때만 머지(승인 전 머지 차단).
+  #     direct 는 PR 없이 동작하는 계약이라 적용하지 않는다(direct 승인은 review-loop 가 phase 로 보증).
+  if [[ "$direct" != "1" ]] && ! mg_approval_gate "$pr"; then
+    int_set_phase "$rd" "$key" blocked
+    int_log "$rd" "$key" "승인 게이트 차단: PR($pr) reviewDecision!=APPROVED — 승인 전 머지 안 함(비완료 종착)"
+    echo "key:     $key"
+    echo "blocked: not-approved — PR 이 APPROVED 가 아닙니다(승인 전 머지하지 않습니다)."
+    return 1
+  fi
+
   # 2) 버전 범프 게이트(비완료 종착).
   if ! mg_version_gate "$branch"; then
     int_set_phase "$rd" "$key" blocked
@@ -254,7 +278,8 @@ mg_selftest() {
   }
   mock_forge() { echo "forge $*" >> "$trace"; return 0; }
   mock_loop() { echo "loop $*" >> "$trace"; return 0; }
-  GIT_CMD=mock_git; FORGE_CMD=mock_forge; LOOP_CMD=mock_loop
+  mock_approval() { echo "${MOCK_APPROVED:-APPROVED}"; }
+  GIT_CMD=mock_git; FORGE_CMD=mock_forge; LOOP_CMD=mock_loop; MERGE_APPROVAL_CMD=mock_approval
   DEFAULT_BRANCH=main
 
   local spec="$TMP/SPEC.md"; printf '# T\n' > "$spec"
@@ -275,6 +300,14 @@ mg_selftest() {
   has 'git push origin main' && ok "base push(가용 토큰)" || bad "base push(가용 토큰)"
   chk "phase=merged" "$(int_get_phase "$rd" k1)" "merged"
   has 'loop cleanup' && ok "cleanup 위임" || bad "cleanup 위임"
+
+  # ---- forge: PR 미승인(reviewDecision!=APPROVED) → 차단(승인 전 머지 차단, PR #353 회귀 가드) ----
+  reset; setup knapp
+  MOCK_FILES="README.md" MOCK_APPROVED="REVIEW_REQUIRED" \
+    mg_merge_finish "$spec" "$rd" knapp >/dev/null 2>&1; rc=$?
+  chk "forge 미승인 rc=1(차단)" "$rc" "1"
+  if has 'git merge --ff-only'; then bad "미승인인데 머지함"; else ok "미승인 → 머지 안 함"; fi
+  chk "미승인 phase=blocked" "$(int_get_phase "$rd" knapp)" "blocked"
 
   # ---- forge: plugins/ 변경 + 범프 없음 → 차단(비완료 종착 rc=1) ----
   reset; setup k4
