@@ -42,6 +42,16 @@ grep -q 'REVIEW_SCHEMA="\.github/prompts/codex-pr-review\.schema\.json"' "$WORKF
   || fail "공통 structured review schema 파일 참조 부재"
 grep -q '\.github/scripts/pr-review-context\.sh' "$WORKFLOW" \
   || fail "shared review context helper 호출 부재"
+grep -q 'claude_workflow_changed: \${{ steps.workflow-change.outputs.changed }}' "$WORKFLOW" \
+  || fail "Claude workflow 변경 여부 prep output 부재"
+grep -q 'name: Detect Claude workflow changes' "$WORKFLOW" \
+  || fail "Claude workflow 변경 감지 스텝 부재"
+grep -q 'OAuth validation requires the workflow file to match the default branch' "$WORKFLOW" \
+  || fail "Claude workflow 변경 PR 에서 claude-code-action self-validation 실패를 설명하는 skip 사유 부재"
+grep -q 'name: Save skipped result for workflow-change PR' "$WORKFLOW" \
+  || fail "Claude workflow 변경 PR 에서 모델 호출 대신 구조화된 skipped 결과를 저장하는 경로 부재"
+grep -q "needs.prep.outputs.claude_workflow_changed != 'true'" "$WORKFLOW" \
+  || fail "Claude workflow 변경 PR 에서 claude-code-action 호출을 skip 하는 조건 부재"
 grep -qF 'PR_BASE_SHA="$PR_BASE_SHA"' "$WORKFLOW" \
   || fail "helper 호출에 PR_BASE_SHA 미전달 — thread/incremental diff base 가 HEAD~1 로 추락함"
 grep -q 'source \.review-context/context-mode\.env' "$WORKFLOW" \

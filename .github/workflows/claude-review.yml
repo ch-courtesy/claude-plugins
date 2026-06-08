@@ -71,6 +71,7 @@ jobs:
       pr_number: ${{ steps.pr.outputs.number }}
       base_ref: ${{ steps.pr.outputs.base_ref }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
+      claude_workflow_changed: ${{ steps.workflow-change.outputs.changed }}
     steps:
       - name: Resolve pull request context
         id: pr
@@ -118,6 +119,21 @@ jobs:
           git fetch --no-tags origin \
             "$PR_BASE_REF" \
             "+refs/pull/$PR_NUMBER/head:refs/remotes/pull/$PR_NUMBER/head"
+
+      - name: Detect Claude workflow changes
+        id: workflow-change
+        env:
+          PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+          review_base="$(git merge-base "origin/$PR_BASE_REF" "refs/remotes/pull/$PR_NUMBER/head")"
+          if git diff --name-only "$review_base" "refs/remotes/pull/$PR_NUMBER/head" -- .github/workflows/claude-review.yml | grep -q .; then
+            echo "Claude review workflow changed in this PR; skipping claude-code-action because OAuth validation requires the workflow file to match the default branch."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
@@ -371,6 +387,7 @@ jobs:
 
       - name: Load chunk prompt
         id: load-prompt
+        if: ${{ needs.prep.outputs.claude_workflow_changed != 'true' }}
         # The per-chunk prompt (already small — diff is in the context file) is
         # passed inline to the action's `prompt` input via a step output, the same
         # way the pre-Phase-4 single pass did.
@@ -386,6 +403,7 @@ jobs:
 
       - name: Run Claude review
         id: claude-review
+        if: ${{ needs.prep.outputs.claude_workflow_changed != 'true' }}
         uses: anthropics/claude-code-action@20c8abf165d5f85ab3fc970db9498436377dc9d1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -411,6 +429,7 @@ jobs:
             --disallowedTools Bash Edit Write WebFetch WebSearch Glob Grep
 
       - name: Save Claude review result
+        if: ${{ needs.prep.outputs.claude_workflow_changed != 'true' }}
         env:
           CLAUDE_EXECUTION_FILE: ${{ steps.claude-review.outputs.execution_file }}
           CHUNK: ${{ matrix.chunk }}
@@ -468,8 +487,39 @@ jobs:
           PY
           jq empty ".claude-review/result.chunk-${CHUNK}.json"
 
+      - name: Save skipped result for workflow-change PR
+        if: ${{ needs.prep.outputs.claude_workflow_changed == 'true' }}
+        env:
+          CHUNK: ${{ matrix.chunk }}
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg reason "Claude review workflow changed in this PR; skipped claude-code-action because OAuth validation requires the workflow file to match the default branch." \
+            '{
+              verdict: "skipped",
+              eligibility: { status: "skipped", reason: $reason },
+              reviewed_context: {
+                files_reviewed: [],
+                diff_truncated: false,
+                comments_considered: false,
+                skipped_files: []
+              },
+              automation_safety: {
+                may_approve: false,
+                may_request_changes: false,
+                reason: $reason
+              },
+              findings: [],
+              resolved_threads: [],
+              unresolved_threads: [],
+              skipped_duplicates: [],
+              context_requests: []
+            }' > ".claude-review/result.chunk-${CHUNK}.json"
+          jq empty ".claude-review/result.chunk-${CHUNK}.json"
+
       - name: Prepare Claude follow-up context
         id: prepare-claude-follow-up
+        if: ${{ needs.prep.outputs.claude_workflow_changed != 'true' }}
         env:
           PR_HEAD_SHA: ${{ needs.prep.outputs.head_sha }}
           CHUNK: ${{ matrix.chunk }}
