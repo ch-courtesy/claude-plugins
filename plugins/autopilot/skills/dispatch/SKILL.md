@@ -1,6 +1,6 @@
 ---
 name: dispatch
-description: "하나 이상의 SPEC 파일을 구현·머지 단계로 넘기고 싶을 때 사용 — depends_on 준비도를 풀어 **준비된 SPEC마다 서브에이전트를 1개 띄우는 모델 주도 오케스트레이터**. 각 서브에이전트가 자기 컨텍스트에서 그 SPEC 의 구현→리뷰→머지를 소유하고, dispatch 는 의존성·동시성·실패 격리만 총괄해 머지(=done)되면 의존자를 해제한다. fan-out 드라이버는 실행 환경 자동 감지 또는 DISPATCH_DRIVER override(strong-parallel|background|foreground-batch)로 선택되며 안전 강등 사슬(강한 병렬→백그라운드→포그라운드 배치)을 따른다. 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch/driver)."
+description: "하나 이상의 SPEC 파일을 구현·머지 단계로 넘기고 싶을 때 사용 — depends_on 준비도를 풀어 **준비된 SPEC마다 서브에이전트를 1개 띄우는 모델 주도 오케스트레이터**. 각 서브에이전트가 자기 컨텍스트에서 그 SPEC 의 구현→리뷰→머지를 소유하고, dispatch 는 의존성·동시성·실패 격리만 총괄해 머지(=done)되면 의존자를 해제한다. 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch)."
 allowed-tools:
   - Read
   - Bash(bash * dispatch.sh start:*)
@@ -8,7 +8,6 @@ allowed-tools:
   - Bash(bash * dispatch.sh status:*)
   - Bash(bash * dispatch.sh stop:*)
   - Bash(bash * dispatch.sh watch:*)
-  - Bash(bash * dispatch.sh driver:*)
   - Bash(bash * dispatch.sh selftest:*)
 ---
 
@@ -42,24 +41,6 @@ dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispa
 - **대상 브랜치**: `--target-branch <branch>`(미지정 시 기본 브랜치 또는 주입된 `DEFAULT_BRANCH`). run 전역으로 결정돼 모든 서브에이전트의 base 동기화·리뷰·ff 머지에 일관 적용되고, run-dir 마커(`TARGET_BRANCH`)로 영속해 `--resume` 에서 sticky 하다(마커가 현재 env·플래그보다 우선).
 - **주입 가능 인터페이스(mock 검증)**: 결정적 헬퍼의 외부 인터페이스(`LOOP_CMD`·`GIT_CMD`·`FORGE_CMD`(기본 gh)·`FORGE_BIN`(서브모드 판정)·`DEFAULT_BRANCH`·`REVIEW_ROUNDS_MAX`(3)·`WATCH_DIRS`(plugins/) 등)는 주입 가능해 실제 PR·머지 없이 mock 으로 독립 검증된다.
 
-## fan-out 드라이버
-
-dispatch 의 fan-out 단계(준비된 SPEC마다 워커를 진행시키는 부분)는 실행 환경의 역량에 따라 세 가지 드라이버 중 하나로 구동된다. 드라이버 선택은 dispatch 내부에서 일어나며 기존 시작 인터페이스는 변하지 않는다.
-
-| 드라이버 | 설명 |
-|---|---|
-| `strong-parallel` | dynamic Workflow 실행 메커니즘 — 임의 depends_on DAG를 promise 기반으로 표현, 의존성 충족 즉시 워커 시작(준비도 스트리밍 완전). |
-| `background` | 워커를 비동기로 띄우고 개별 완료 신호에 반응해 의존자를 즉시 해제. 완료 신호가 오케스트레이터를 재호출 못하면 `foreground-batch` 로 강등. |
-| `foreground-batch` | 한 턴에 동시 시작 → 배리어 → 준비도 재평가. 안전 폴백(기본값). |
-
-**드라이버 선택 방법**:
-1. `DISPATCH_DRIVER` 환경 변수로 override(`strong-parallel`|`background`|`foreground-batch`).
-2. 미설정이면 자동 감지: `DISPATCH_STRONG_PARALLEL=1` → `strong-parallel`, `DISPATCH_BACKGROUND=1` → `background`, 그 외 → `foreground-batch`.
-3. 선택된 드라이버는 `DRIVER` run-dir 마커로 영속해 `--resume` 에서 sticky 하다.
-4. `dispatch driver <run-id>` 로 실제 선택된 드라이버를 관찰할 수 있다.
-
-**안전 강등 사슬**: `strong-parallel` → `background` → `foreground-batch`. 환경 판정에 따라 강등된 드라이버는 `driver` 서브커맨드로 관찰 가능하다. 어느 드라이버에서든 결정적 코어(의존성 그래프·준비도·상태 전이·skip 전파·머지/리뷰 게이트)와 안전 불변식(승인 후에만 머지·force 금지·ff-only)은 동일하게 성립한다.
-
 ## Subcommands
 
 ### dispatch start `<spec...>` [--max-parallel N] [--resume `<run-id>`] [--target-branch `<branch>`]
@@ -73,10 +54,6 @@ dispatch 의 fan-out 단계(준비된 SPEC마다 워커를 진행시키는 부�
 - `--resume <run-id>` 이면 보관된 manifest 로 재개. `done` 인 SPEC 은 재호출하지 않고 나머지(미완)만 다시 스케줄한다. 서브모드(forge/direct)와 대상 브랜치는 run-dir 마커로 보존되어 재개 시 현재 env·플래그보다 우선한다(sticky).
 - 한 child 가 `DISPATCH_WAVE_TIMEOUT_SECONDS`(기본 7200) 를 초과하면(per-SPEC runtime cap) 그 child 를 SIGTERM→SIGKILL 으로 정리하고 `failed` 로 마킹한다(이미 done 이면 보존).
 - exit code: `0`=전부 done, `1`=failed/skipped 있음, `2`=timeout.
-
-### dispatch driver `<run-id>`
-
-run 의 fan-out 드라이버(`strong-parallel`|`background`|`foreground-batch`)를 출력한다. 안전 강등 결과를 포함해 어느 드라이버로 실행 중인지 관찰할 때 사용한다.
 
 ### dispatch list
 
@@ -98,7 +75,7 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 
 | 파일 | 역할 |
 |---|---|
-| `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·드라이버 감지/마커·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
+| `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
 | `spec-subagent.md` | **SPEC 서브에이전트 계약** — 한 컨텍스트에서 loop·review 반복→머지→보고(완료 조건 2–8 단일 출처) |
 | `lib-integration.sh` | per-SPEC 통합 상태 헬퍼(run-dir + 키: branch/pr/head/review-round/verdict/phase) — 서브에이전트 공유 |
 | `integration.sh` | base sync → push → PR 생성/재사용(forge) / PR 없이 작업 브랜치 식별(direct) — 서브에이전트 호출 헬퍼 |
@@ -109,7 +86,7 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 
 ## 의존성
 
-- **결정적 헬퍼(`dispatch.sh`)**: `git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `yq`(mikefarah). `yq` 는 SPEC frontmatter 의 `depends_on` 파싱(DAG 구성)에 쓰며 `start` 가 요구한다(없으면 awk 폴백이 있으나 신·구 레이아웃·인라인/블록 형식의 견고한 파싱을 위해 명시 요구). `ready`/`mark`/`status`/`stop`/`watch`/`driver` 는 결정적 상태 헬퍼로 yq 비의존. 드라이버 감지는 `DISPATCH_DRIVER`(override), `DISPATCH_STRONG_PARALLEL`=1, `DISPATCH_BACKGROUND`=1 환경 변수로 제어한다.
+- **결정적 헬퍼(`dispatch.sh`)**: `git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `yq`(mikefarah). `yq` 는 SPEC frontmatter 의 `depends_on` 파싱(DAG 구성)에 쓰며 `start` 가 요구한다(없으면 awk 폴백이 있으나 신·구 레이아웃·인라인/블록 형식의 견고한 파싱을 위해 명시 요구). `ready`/`mark`/`status`/`stop`/`watch` 는 결정적 상태 헬퍼로 yq 비의존.
 - **서브에이전트가 호출하는 스킬·도구**: `autopilot:loop`·`autopilot:review`(판정 JSON 파싱에 `jq`). forge 서브모드는 추가로 forge CLI(`gh`, 주입 가능)를 쓰고, direct 서브모드는 forge CLI·원격 push 가 필요 없다. 서브모드 절차는 `references/spec-subagent.md`.
 
 ## 규칙
