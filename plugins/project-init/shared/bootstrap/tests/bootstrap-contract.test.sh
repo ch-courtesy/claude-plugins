@@ -20,11 +20,12 @@ check() {
 }
 
 check "bootstrap references shared assets" grep -qF 'shared/bootstrap/' "$BOOTSTRAP_SKILL"
-check "bootstrap requires at least one vendor" grep -qF '최소 1개' "$BOOTSTRAP_SKILL"
+check "bootstrap auto-includes the current running vendor" grep -qF '자동 포함' "$BOOTSTRAP_SKILL"
+check "bootstrap asks remaining vendors as one multiSelect question" grep -qF '나머지 벤더' "$BOOTSTRAP_SKILL"
 check "bootstrap retries empty vendor selection at most three times" grep -qE '3회|세 번' "$BOOTSTRAP_SKILL"
 check "bootstrap aborts before creating files after three empty selections" grep -qF '아무 파일도 생성·변경하지 않은 채 bootstrap을 중단' "$BOOTSTRAP_SKILL"
-check "bootstrap documents recommended both-vendor option" grep -qF 'Claude Code + Codex (Recommended)' "$BOOTSTRAP_SKILL"
-check "bootstrap does not require unsupported multiSelect" bash -c "! grep -qF 'multiSelect' '$BOOTSTRAP_SKILL'"
+check "bootstrap uses multiSelect for item-wise selection" grep -qF 'multiSelect' "$BOOTSTRAP_SKILL"
+check "bootstrap presents common blocks as recommended default-on" grep -qF '기본 포함' "$BOOTSTRAP_SKILL"
 check "bootstrap preserves existing files" grep -qF '덮어쓰지' "$BOOTSTRAP_SKILL"
 check "bootstrap gates existing CLAUDE.md import behind diff approval" bash -c "grep -qF '@AGENTS.md' '$BOOTSTRAP_SKILL' && grep -qF 'diff' '$BOOTSTRAP_SKILL' && grep -qE '승인|물어' '$BOOTSTRAP_SKILL'"
 check "bootstrap uses skill-relative shared path" grep -qF '../../shared/bootstrap/' "$BOOTSTRAP_SKILL"
