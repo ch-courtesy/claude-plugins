@@ -1,0 +1,43 @@
+{
+  "eligibility": {
+    "status": "reviewed",
+    "reason": "리뷰 수행됨"
+  },
+  "pipeline_verdict": "approve",
+  "verdict": "approve",
+  "confidence": "high",
+  "reviewed_context": {
+    "base_sha": "d6312977c87316a534d193e0c3f107de329538be",
+    "head_sha": "3d9b850f99558993c5f425d64b7f2b567aefc718",
+    "diff_truncated": false,
+    "files_reviewed": [
+      "plugins/project-init/skills/bootstrap/SKILL.md",
+      "plugins/project-init/shared/bootstrap/tests/bootstrap-contract.test.sh",
+      "plugins/project-init/.claude-plugin/plugin.json",
+      "plugins/project-init/.codex-plugin/plugin.json",
+      ".claude-plugin/marketplace.json"
+    ],
+    "related_files_reviewed": [],
+    "skipped_files": []
+  },
+  "automation_safety": {
+    "may_approve": true,
+    "may_request_changes": false,
+    "reason": "blocking 없음·전 수용기준 검증·컨텍스트 온전"
+  },
+  "acceptance_coverage": {
+    "total": 9,
+    "verified": 9,
+    "unverified": []
+  },
+  "findings": [],
+  "rework_brief": {
+    "must_adopt": [],
+    "defer": [],
+    "wont_adopt": []
+  },
+  "skipped_duplicates": [],
+  "resolved_threads": [],
+  "unresolved_threads": [],
+  "context_requests": []
+}
