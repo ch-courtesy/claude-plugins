@@ -14,7 +14,7 @@ description: autopilot:dispatch가 준비된 SPEC마다 정확히 1개 띄우는
 
 ## 절대 규칙 (위반 금지 — 어기느니 멈추고 에스컬레이션)
 
-1. **구현은 오직 격리 구현 스킬로**: 구현은 **반드시 `Skill(skill="loop", args="start <spec>")`** 로 한다.
+1. **구현은 오직 격리 구현 스킬로**: 구현은 **반드시 `Skill(skill="autopilot:loop", args="start <spec>")`** 로 한다.
    - 대상 파일을 **직접 편집하지 않는다**. `git checkout -b`/`git commit` 등으로 **직접 구현하지 않는다**.
    - `loop.sh`를 Bash로 **직접 구동하지 않는다** — 반드시 loop **스킬**을 호출한다. loop이 전용 격리
      워크트리(`<spec_dir>/.worktree`)를 만들고 소유한다. 너의 cwd 워크트리를 점유하지 마라.
@@ -42,7 +42,7 @@ description: autopilot:dispatch가 준비된 SPEC마다 정확히 1개 띄우는
 6. **블랙박스 경계**: `loop`·`review`의 내부 신호 파일·워크트리·하니스를 들여다보거나 건드리지 않는다.
 
 ## 절차 요약
-1. `Skill(loop, start <spec>)` → DONE 판정(`loop status --json`).
+1. `Skill(skill="autopilot:loop", args="start <spec>")` → DONE 판정(`autopilot:loop status --json`).
 2. 서브모드 판정 → `integration.sh integrate|integrate-direct`.
 3. `review-loop.sh run|run-direct` → 승인 게이트(forge=PR APPROVED, direct=로컬 review approve). `request_changes`면 재구현 반복(가드).
 4. 승인 후 `merge.sh finish`(버전 범프 게이트·ff-only). force 금지.
