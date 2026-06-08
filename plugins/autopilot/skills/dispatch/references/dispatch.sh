@@ -8,33 +8,53 @@
 #
 # 책임(결정적):
 #   - start: SPEC 입력 검증·frontmatter depends_on 으로 DAG 구성·WAVES.txt(진단)·초기 pending
-#            상태·run 전역 마커(서브모드 INTEGRATE / 대상 브랜치 TARGET_BRANCH / MAX_PARALLEL)를
-#            만드는 **셋업 전용**. 스스로 spawn·드레인하지 않는다.
+#            상태·run 전역 마커(서브모드 INTEGRATE / 대상 브랜치 TARGET_BRANCH / MAX_PARALLEL /
+#            드라이버 DRIVER)를 만드는 **셋업 전용**. 스스로 spawn·드레인하지 않는다.
 #   - ready: 지금 서브에이전트를 띄울 준비된 SPEC(모든 dep done & pending & 동시성 상한 이내)을
 #            출력(skip 전파 적용). 모델이 각 SPEC 에 서브에이전트 1개를 spawn.
 #   - mark:  SPEC 상태 전이(running=spawn 직전 / done=서브에이전트 머지 보고=의존자 해제 /
-#            failed=비완료 보고 → 이행적 의존자 skipped 전파).
-#   - list / status / stop / watch / --resume 운영 인터페이스(읽기 위주). done 의 의미는
-#     "대상 브랜치에 머지됨"이며, 의존자 해제는 머지(done) 뒤로 미뤄진다.
+#            failed=비완료 보고 → 이행적 의존자 skipped 전파). running 에 --task-id 를
+#            넘기면 백그라운드 드라이버의 task-id 를 run-dir 에 기록(stop 위임 경로).
+#   - list / status / stop / watch / driver / --resume 운영 인터페이스(읽기 위주). done 의
+#     의미는 "대상 브랜치에 머지됨"이며, 의존자 해제는 머지(done) 뒤로 미뤄진다.
 #
 # **하지 않는 일**:
 #   - 입력 SPEC 의 frontmatter 형식·내용 검증 (서브에이전트/loop 책임).
 #   - 통합·리뷰·머지의 직접 수행(bash 드레인). 그것은 서브에이전트가 소유한다.
 #   - 서브에이전트가 호출하는 loop·review 의 내부 신호 파일·worktree 열람(블랙박스 경계).
+#   - 드라이버 자동 감지(모델·실행환경 판정): 드라이버 선택은 모델이 DRIVER 마커로 넘기고,
+#     override 는 DISPATCH_DRIVER 환경 변수로 주입한다. bash 코드로는 probe 불가.
 #
-# 모델 루프(스킬이 구동): start → 반복{ ready → 각 SPEC: mark running + 서브에이전트 spawn →
-#   보고 시 mark done(머지)·mark failed(에스컬레이션) } → ready 가 비고 running 없을 때까지.
+# 모델 루프(스킬이 구동): start → 반복{ ready → 각 SPEC: mark running [--task-id <id>] +
+#   서브에이전트 spawn → 보고 시 mark done(머지)·mark failed(에스컬레이션) } →
+#   ready 가 비고 running 없을 때까지.
 #
 # 사용:
 #   bash dispatch.sh start <spec...> [--max-parallel N] [--resume <run-id>] [--target-branch <b>]
 #   bash dispatch.sh ready <run-id> [--max-parallel N]
-#   bash dispatch.sh mark <run-id> <running|done|failed> <spec>
+#   bash dispatch.sh mark <run-id> <running|done|failed> <spec> [--task-id <id>]
 #   bash dispatch.sh list | status <run-id> | stop <run-id> | watch <run-id>
+#   bash dispatch.sh driver <run-id>
 #
 # 환경 변수:
 #   DISPATCH_POLL_SECONDS          watch 폴링 간격 (기본 2)
 #   DISPATCH_WAVE_TIMEOUT_SECONDS  watch 최대 대기 (기본 7200 = 2 시간)
+#   DISPATCH_DRIVER                드라이버 override (strong-parallel|background|foreground-batch).
+#                                  미설정이면 모델이 DRIVER 마커로 기록한 값을 쓴다.
 #   FORGE_BIN DEFAULT_BRANCH  서브모드·대상 브랜치 판정(주입 가능, mock 검증).
+#
+# 드라이버 abstraction (모델 주도, 결정적 코어 공유):
+#   strong-parallel    — dynamic Workflow: promise-per-node DAG, SPEC당 워커 1개.
+#                        의존자가 충족되는 즉시 무관한 형제를 기다리지 않고 시작(스트리밍 준비도).
+#   background         — 워커를 비동기 run_in_background 로 spawn, 완료마다 개별 재호출(reconcile).
+#                        mark running --task-id 로 task-id 기록; stop 시 TaskStop 위임.
+#   foreground-batch   — 한 턴에 ready 목록 동시 시작 → 배리어 → 준비도 재평가. 안전 강등 종착점.
+#
+#   자동 감지 순서: strong-parallel 가용이면 선택, 아니면 background 가능 여부 판정, 아니면
+#     foreground-batch 로 강등. override: DISPATCH_DRIVER 환경 변수.
+#   강등 사슬: strong-parallel → background → foreground-batch.
+#   어느 드라이버든 결정적 코어(DAG 준비도·상태 전이·skip 전파·머지/리뷰 게이트)는 공유한다.
+#   드라이버 선택은 run-dir DRIVER 마커로 영속(--resume sticky).
 #
 # bash 3.2 호환 (assoc array 사용 안 함).
 
@@ -45,24 +65,40 @@ POLL_SECONDS="${DISPATCH_POLL_SECONDS:-2}"
 WAVE_TIMEOUT_SECONDS="${DISPATCH_WAVE_TIMEOUT_SECONDS:-7200}"
 
 # ----- 서브모드·대상 브랜치 (모델 주도 — 서브에이전트가 리뷰·머지를 소유) -----
-# 통합·리뷰·머지는 서브에이전트가 SPEC당 한 컨텍스트에서 소유한다(계약: references/spec-subagent.md).
-# dispatch.sh 는 결정적 셋업·스케줄링 헬퍼만 제공하고 통합 모듈을 드레인하지 않는다.
-# 서브모드(forge/direct)와 대상 브랜치는 run 전역 사실로 cmd_start 가 결정·영속(run-dir 마커)해
-# 서브에이전트가 일관되게 읽고 --resume 에서 sticky 하다.
-#   서브모드: forge(forge CLI 백엔드 가용 → PR 적대 리뷰·가용 토큰 ff 머지, approver 불필요) |
-#             direct(백엔드 미가용 → 로컬 적대 리뷰·ff 직접 머지). cmd_start 가 INTEGRATE 마커로 영속.
 INTEGRATE_SUBMODE=""
-# 대상 브랜치(--target-branch, 미지정 시 기본 브랜치). cmd_start 가 TARGET_BRANCH 마커로 영속하고
-# 서브에이전트에 DEFAULT_BRANCH 로 export 한다.
 TARGET_BRANCH=""
-# forge CLI 바이너리(서브모드 판정용). '사용 가능' 판정에만 쓴다.
 FORGE_BIN="${FORGE_BIN:-gh}"
 
-# forge_backend_available — 서브모드 판정: forge CLI(FORGE_BIN)가 사용 가능하면 0(forge),
-#   아니면 1(백엔드 미가용 → direct). forge 백엔드가 있으면 분리 승인 신원(approver) 구성
-#   여부와 무관하게 forge 경로(작업 브랜치 push→PR)를 쓰고, 머지는 가용 토큰으로 수행한다
-#   (분리 approver 요구 없음 — merge.sh 참조). cmd_start 가 run 전역 서브모드를 결정할 때 쓴다
-#   (서브에이전트는 이 마커를 읽어 리뷰·머지 대상을 정한다).
+# ----- 드라이버 선택 (모델 주도, 결정적 코어 공유) -----
+DISPATCH_DRIVER="${DISPATCH_DRIVER:-}"
+
+# drv_valid <driver> — 유효한 드라이버 이름이면 0, 아니면 1.
+drv_valid() {
+  case "${1:-}" in
+    strong-parallel|background|foreground-batch) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# drv_choose <current_marker> — DISPATCH_DRIVER override 있으면 그것, 아니면
+#   current_marker(마커에 저장된 값), 둘 다 없거나 invalid 면 foreground-batch.
+drv_choose() {
+  local current="${1:-}"
+  local chosen=""
+  if [[ -n "$DISPATCH_DRIVER" ]]; then
+    if drv_valid "$DISPATCH_DRIVER"; then chosen="$DISPATCH_DRIVER"
+    else
+      echo "WARN: DISPATCH_DRIVER='$DISPATCH_DRIVER' 은 유효하지 않은 드라이버 — foreground-batch 로 강등" >&2
+      chosen="foreground-batch"
+    fi
+  elif [[ -n "$current" ]] && drv_valid "$current"; then
+    chosen="$current"
+  else
+    chosen="foreground-batch"
+  fi
+  printf '%s\n' "$chosen"
+}
+
 forge_backend_available() {
   command -v "${FORGE_BIN%% *}" >/dev/null 2>&1
 }
@@ -71,8 +107,6 @@ forge_backend_available() {
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-# yq 는 SPEC frontmatter 의 depends_on 파싱에 쓴다(없으면 awk 폴백이 있으나, 신·구 레이아웃·
-# 인라인/블록 형식의 견고한 파싱을 위해 start 에서 명시적으로 요구한다).
 require_yq() {
   command -v yq >/dev/null 2>&1 \
     || die "'yq' 가 필요합니다 — SPEC depends_on 파싱(DAG 구성)에 사용됩니다."
@@ -86,23 +120,15 @@ require_git_root() {
   RUNS_DIR="$PROJECT_ROOT/.dispatch/runs"
 }
 
-# abspath — 절대·정규화 경로(.. 압축)를 반환. 호출처는 항상 존재하는 경로를 넘긴다
-# (cmd_start 은 -f 검사 후, resolve_dep 은 매칭된 후보). 절대 경로라도 `..` 가 섞일 수
-# 있으므로(신 레이아웃 형제 매칭 `<dir>/../*-<slug>/SPEC.md`) dirname+pwd 로 정규화한다.
 abspath() {
   local p="$1"
   (cd "$(dirname "$p")" 2>/dev/null && printf '%s/%s\n' "$(pwd)" "$(basename "$p")")
 }
 
-# spec_slug — SPEC 경로에서 slug 도출.
-#   구 형식 <date>-<slug>.md      → 파일명에서 .md·YYYY-MM-DD- prefix 제거.
-#   신 형식 <date>-<slug>/SPEC.md → 본문 파일(SPEC.md)이므로 부모 디렉토리명에서 도출.
-# 신·구 형식 모두 같은 의미의 slug 를 도출한다(레이아웃 전환 호환).
 spec_slug() {
   local b
   b="$(basename "$1")"
   if [[ "$b" == "SPEC.md" ]]; then
-    # 신 디렉토리 레이아웃: 본문은 <date>-<slug>/SPEC.md → 부모 디렉토리명 사용.
     b="$(basename "$(dirname "$1")")"
   else
     b="${b%.md}"
@@ -110,7 +136,6 @@ spec_slug() {
   echo "$b" | sed -E 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}-//'
 }
 
-# hash7 — sort 된 인자들의 sha256 첫 7 자.
 hash7() {
   local hasher=""
   if command -v sha256sum >/dev/null 2>&1; then
@@ -123,8 +148,6 @@ hash7() {
   printf '%s\n' "$@" | sort -u | $hasher | cut -c1-7
 }
 
-# extract_depends_on <spec_path> — depends_on 항목을 한 줄에 하나씩 출력.
-# yq 가 있으면 yq, 없으면 awk 폴백 (인라인 [a,b] 및 블록 - a 형식 모두 지원).
 extract_depends_on() {
   local spec="$1"
   if command -v yq >/dev/null 2>&1; then
@@ -153,17 +176,6 @@ extract_depends_on() {
   ' "$spec"
 }
 
-# resolve_dep <from_spec_abspath> <dep_string> — 절대 경로 또는 ""(미해결).
-# 해석 순서:
-#   1) 절대 경로
-#   2) project-root 상대 경로
-#   3) from_spec 디렉토리 상대 경로
-#   4) slug 매칭 — 구·신 레이아웃 형제 모두 탐색:
-#        구 형식: <container>/*-<slug>.md      또는 <container>/<slug>.md
-#        신 형식: <container>/*-<slug>/SPEC.md 또는 <container>/<slug>/SPEC.md
-#      container 후보: from_dir (from 이 구 형식일 때 형제 위치) 와
-#                      from_dir/.. (from 이 신 형식 <slug>/SPEC.md 일 때 형제 위치).
-#      신·구 혼합 입력에서도 형제 의존을 올바르게 찾는다(레이아웃 전환 호환).
 resolve_dep() {
   local from="$1"; local dep="$2"
   local from_dir; from_dir="$(dirname "$from")"
@@ -172,7 +184,6 @@ resolve_dep() {
     abspath "$PROJECT_ROOT/$dep"; return
   fi
   if [[ -f "$from_dir/$dep" ]]; then abspath "$from_dir/$dep"; return; fi
-  # slug 매칭 — container 후보별로 구·신 패턴 탐색.
   local container cand
   for container in "$from_dir" "$from_dir/.."; do
     for cand in \
@@ -205,16 +216,11 @@ read_manifest() {
   cat "$rd/MANIFEST.txt"
 }
 
-# write_waves <run_dir> < topo_output ("wave=N\t<spec>" lines)
 write_waves() {
   local rd="$1"
   cat > "$rd/WAVES.txt"
 }
 
-# state 파일 — slug+abspath sha7 단위. pending|running|done|failed.
-# spec_slug 만으로는 (a) 다른 날짜 같은 이름 (2026-05-29-x.md vs 2026-05-28-x.md)
-# 와 (b) 다른 디렉토리 같은 basename 입력에서 같은 파일로 덮어쓴다. abspath sha7
-# 을 suffix 로 붙여 unique 보장. log_event 용 spec_slug 는 가독성용으로 유지.
 state_path() {
   local rd="$1"; local spec="$2"
   echo "$rd/state.$(spec_slug "$spec")-$(hash7 "$spec")"
@@ -237,22 +243,43 @@ log_event() {
   printf '[%s] %s\n' "$(now_iso)" "$*" >> "$rd/LOG.md"
 }
 
+# ----- task-id IO (백그라운드 드라이버용) -----
+# mark running --task-id <id> 로 기록, stop 이 TaskStop 위임에 사용한다.
+
+taskid_path() {
+  local rd="$1"; local spec="$2"
+  echo "$rd/taskid.$(spec_slug "$spec")-$(hash7 "$spec")"
+}
+
+set_taskid() {
+  local rd="$1" spec="$2" id="$3"
+  [[ -n "$id" ]] || return 0
+  mkdir -p "$rd"
+  printf '%s\n' "$id" > "$(taskid_path "$rd" "$spec")"
+}
+
+get_taskid() {
+  local f; f="$(taskid_path "$1" "$2")"
+  [[ -f "$f" ]] && cat "$f" || echo ""
+}
+
+del_taskid() {
+  local f; f="$(taskid_path "$1" "$2")"
+  rm -f "$f" 2>/dev/null || true
+}
+
 # ----- DAG / wave 구성 -----
 
-# build_dag <spec1> <spec2> ... → stdout 에 "wave=N\t<abspath>" 줄.
-# bash 3.2 호환: 인덱스 기반 indeg/graph.
-# graph 는 "i->j i->k" 문자열로 인코딩, indeg 는 평행 배열.
 build_dag() {
   local -a SPECS=()
   local s
   for s in "$@"; do SPECS+=("$s"); done
   local n=${#SPECS[@]}
   local -a INDEG=()
-  local -a EDGES=()  # "i,j" pairs
+  local -a EDGES=()
   local i j
   for ((i=0; i<n; i++)); do INDEG[i]=0; done
 
-  # deps 해석 → edges
   local dep dep_path
   for ((i=0; i<n; i++)); do
     while IFS= read -r dep; do
@@ -262,13 +289,11 @@ build_dag() {
         echo "WARN: ${SPECS[i]}: depends_on '$dep' 해석 실패 (무시)" >&2
         continue
       fi
-      # 입력 SPECS 안에서 인덱스 찾기
       local found=-1
       for ((j=0; j<n; j++)); do
         if [[ "${SPECS[j]}" == "$dep_path" ]]; then found=$j; break; fi
       done
       if [[ $found -lt 0 ]]; then
-        # 외부 의존성은 dispatch 범위 밖, 무시.
         continue
       fi
       EDGES+=("$found,$i")
@@ -276,7 +301,6 @@ build_dag() {
     done < <(extract_depends_on "${SPECS[i]}")
   done
 
-  # Kahn's algorithm
   local wave=1
   local done_count=0
   while (( done_count < n )); do
@@ -285,7 +309,6 @@ build_dag() {
       if [[ "${INDEG[i]}" -eq 0 ]]; then current+=("$i"); fi
     done
     if [[ ${#current[@]} -eq 0 ]]; then
-      # cycle — 남은 인덱스 보고
       local -a cyc=()
       for ((i=0; i<n; i++)); do
         [[ "${INDEG[i]}" -gt 0 ]] && cyc+=("${SPECS[i]}")
@@ -298,7 +321,6 @@ build_dag() {
       printf 'wave=%d\t%s\n' "$wave" "${SPECS[idx]}"
       INDEG[idx]=-1
       done_count=$((done_count+1))
-      # 영향받는 노드 indeg 감소. bash 3.2 set -u 호환: 빈 배열 가드.
       local e a b
       for e in "${EDGES[@]+"${EDGES[@]}"}"; do
         a="${e%,*}"; b="${e#*,}"
@@ -310,10 +332,6 @@ build_dag() {
   return 0
 }
 
-# compute_dep_idx <spec...> — 호출자 스코프의 DEP_IDX[i] 에 spec i 의 (입력 집합 내)
-# 의존 인덱스 목록을 공백 구분 문자열로 채운다(bash 동적 스코프). build_dag 의 edge
-# 도출과 동일 기법(extract_depends_on + resolve_dep)을 재사용하되, wave 가 아니라
-# 준비도 스케줄링용 인접 정보를 만든다. 입력 집합 밖 의존성은 무시(dispatch 범위 밖).
 compute_dep_idx() {
   local -a SP=()
   local s
@@ -334,10 +352,6 @@ compute_dep_idx() {
   done
 }
 
-# propagate_skips <run_dir> <spec...> — fixpoint skip 전파(결정적). pending 인데 dep 중
-# failed/skipped 가 있으면 skipped 로 차단한다(이행적). 전제: 호출 전에 compute_dep_idx 로
-# 호출자 scope 의 DEP_IDX(MANIFEST 순서 평행 인덱스)를 채워 둔다 — bash 동적 스코프로 참조.
-# cmd_start(스트리밍 스케줄러)·cmd_ready·cmd_mark 가 공유하는 단일 출처.
 propagate_skips() {
   local rd="$1"; shift
   local -a SP=("$@"); local n=${#SP[@]}
@@ -359,11 +373,7 @@ propagate_skips() {
 }
 
 # ----- 결정적 오케스트레이션 헬퍼(모델 주도) -----
-# 모델(dispatch 스킬)이 ready 로 "지금 서브에이전트를 띄울 SPEC"을 묻고, 각각에 서브에이전트
-# 1개를 Agent 도구로 spawn 한 뒤 mark 로 상태를 전이한다. 스케줄링·동시성·skip 전파의
-# 결정적 로직은 여기(코드)에 있고, spawn·구현·리뷰·머지는 서브에이전트(모델)가 소유한다.
 
-# load_run <run-id> → RD(전역) 설정 + SP(전역 배열) 채움 + DEP_IDX 계산. 없으면 die.
 load_run() {
   local rid="$1"
   [[ -n "$rid" ]] || die "run-id 필요"
@@ -377,10 +387,6 @@ load_run() {
   compute_dep_idx "${SP[@]}"
 }
 
-# cmd_ready <run-id> [--max-parallel N] — 지금 서브에이전트를 띄울 준비가 된 SPEC abspath 를
-# 한 줄씩 출력한다. skip 전파를 먼저 적용한 뒤, state==pending & 모든 dep done & (상한 미설정
-# 또는 running 수 < 상한)인 SPEC 을 고른다. 한 호출 안에서 상한을 넘지 않도록 선택분을 센다.
-# 출력이 비면 "지금 띄울 것 없음"(아직 running 중이거나 모두 terminal).
 cmd_ready() {
   require_git_root
   local rid="" max_parallel=0
@@ -393,7 +399,6 @@ cmd_ready() {
   done
   local RD; local -a SP=() DEP_IDX=()
   load_run "$rid"
-  # --max-parallel 미지정이면 start 가 영속한 MAX_PARALLEL 마커를 기본값으로(sticky).
   if (( max_parallel == 0 )) && [[ -f "$RD/MAX_PARALLEL" ]]; then
     max_parallel="$(cat "$RD/MAX_PARALLEL" 2>/dev/null || echo 0)"
     [[ "$max_parallel" =~ ^[0-9]+$ ]] || max_parallel=0
@@ -416,22 +421,31 @@ cmd_ready() {
   done
 }
 
-# cmd_mark <run-id> <running|done|failed> <spec> — SPEC 상태 전이(결정적).
-#   running: 서브에이전트 spawn 직전(중복 spawn 방지 — ready 에서 빠짐).
-#   done   : 서브에이전트가 대상 브랜치 머지를 보고(= 의존자 해제 게이트).
-#   failed : 서브에이전트가 비완료(에스컬레이션) 보고 → 이행적 의존자만 skipped 전파.
+# cmd_mark <run-id> <running|done|failed> <spec> [--task-id <id>]
 cmd_mark() {
   require_git_root
-  local rid="$1" st="${2:-}" spec="${3:-}"
-  [[ -n "$rid" && -n "$st" && -n "$spec" ]] || die "사용: $0 mark <run-id> <running|done|failed> <spec>"
+  local rid="${1:-}" st="${2:-}" spec="${3:-}" task_id=""
+  shift 3 2>/dev/null || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --task-id) task_id="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  [[ -n "$rid" && -n "$st" && -n "$spec" ]] || die "사용: $0 mark <run-id> <running|done|failed> <spec> [--task-id <id>]"
   case "$st" in running|done|failed) ;; *) die "알 수 없는 상태: $st (running|done|failed)" ;; esac
   local RD; local -a SP=() DEP_IDX=()
   load_run "$rid"
   local ap; ap="$(abspath "$spec")"
   set_state "$RD" "$ap" "$st"
-  log_event "$RD" "mark $(spec_slug "$ap") $st"
-  if [[ "$st" == "failed" ]]; then
-    propagate_skips "$RD" "${SP[@]}"
+  log_event "$RD" "mark $(spec_slug "$ap") $st${task_id:+ task-id=$task_id}"
+  if [[ "$st" == "running" ]]; then
+    set_taskid "$RD" "$ap" "$task_id"
+  elif [[ "$st" == "done" || "$st" == "failed" ]]; then
+    del_taskid "$RD" "$ap"
+    if [[ "$st" == "failed" ]]; then
+      propagate_skips "$RD" "${SP[@]}"
+    fi
   fi
 }
 
@@ -449,7 +463,6 @@ cmd_start() {
       --resume) resume="$2"; shift 2 ;;
       --max-parallel) max_parallel="$2"; shift 2 ;;
       --target-branch) target_branch_opt="$2"; shift 2 ;;
-      # 통합은 항상 활성(토글 제거). 하위호환을 위해 두 플래그를 받되 아무 효과 없이 무시한다.
       --integrate|--no-integrate) shift ;;
       --) shift; while [[ $# -gt 0 ]]; do inputs+=("$1"); shift; done ;;
       -*) die "알 수 없는 옵션: $1" ;;
@@ -461,12 +474,10 @@ cmd_start() {
   if [[ -n "$resume" ]]; then
     rd="$(run_dir "$resume")"
     [[ -d "$rd" ]] || die "run-id 없음: $resume"
-    # 기존 manifest 로 입력 복원. 호출자 명시 inputs 가 있으면 무시 (resume 일관성).
     while IFS= read -r p; do specs_abs+=("$p"); done < "$rd/MANIFEST.txt"
     log_event "$rd" "resume start"
   else
     [[ ${#inputs[@]} -ge 1 ]] || die "사용: $0 start <spec...> [--max-parallel N] [--resume <run-id>]"
-    # 입력 SPEC 검증
     local p ap
     for p in "${inputs[@]}"; do
       [[ -f "$p" ]] || die "SPEC 파일을 찾을 수 없음: $p"
@@ -474,7 +485,6 @@ cmd_start() {
       ap="$(abspath "$p")"
       specs_abs+=("$ap")
     done
-    # run-id 계산 — 타임스탬프 + 입력 sha7.
     local ts h rid
     ts="$(date -u +%Y%m%dT%H%M%S)"
     h="$(hash7 "${specs_abs[@]}")"
@@ -484,7 +494,6 @@ cmd_start() {
     mkdir -p "$rd"
     write_manifest "$rd" "${specs_abs[@]}"
     log_event "$rd" "fresh start specs=${#specs_abs[@]}"
-    # DAG 구성 + WAVES.txt 기록. cycle 시 abort + run dir 삭제.
     local waves_out
     if ! waves_out="$(build_dag "${specs_abs[@]}" 2>&1)"; then
       local cyc
@@ -493,27 +502,20 @@ cmd_start() {
       die "depends_on cycle 감지 — 구성 요소: $cyc"
     fi
     printf '%s\n' "$waves_out" > "$rd/WAVES.txt"
-    # 초기 상태 = pending
     local s
     for s in "${specs_abs[@]}"; do set_state "$rd" "$s" "pending"; done
   fi
 
-  # ----- 통합 서브모드 판정 (통합은 항상 활성 — 토글 없음) -----
-  # 서브모드(forge/direct)는 run-dir 마커($rd/INTEGRATE, 내용=서브모드)로 보존해 --resume 에서
-  # sticky 하다(최초 시작 결정을 그대로 재개). 마커가 있으면(=재개) 현재 env/플래그보다 우선.
+  # ----- 통합 서브모드 판정 -----
   if [[ -f "$rd/INTEGRATE" ]]; then
     INTEGRATE_SUBMODE="$(cat "$rd/INTEGRATE" 2>/dev/null || true)"
   fi
-  # 서브모드 미정(최초 시작 또는 빈 마커)이면 forge 백엔드 가용 여부로 결정.
   if [[ -z "$INTEGRATE_SUBMODE" ]]; then
     if forge_backend_available; then INTEGRATE_SUBMODE=forge; else INTEGRATE_SUBMODE=direct; fi
   fi
   printf '%s\n' "$INTEGRATE_SUBMODE" > "$rd/INTEGRATE"
 
-  # ----- 대상 브랜치 판정 (--target-branch, 미지정 시 기본 브랜치) -----
-  # run-dir 마커($rd/TARGET_BRANCH)로 영속해 --resume 에서 sticky 하다. 마커가 있으면(=재개)
-  # 현재 env(DEFAULT_BRANCH)·--target-branch 플래그보다 마커가 우선한다. 결정된 대상은 모든
-  # 통합 모듈(base sync·승인 요청 base·ff 머지·base push)에 DEFAULT_BRANCH 로 export 된다.
+  # ----- 대상 브랜치 판정 -----
   if [[ -f "$rd/TARGET_BRANCH" ]]; then
     TARGET_BRANCH="$(cat "$rd/TARGET_BRANCH" 2>/dev/null || true)"
   elif [[ -n "$target_branch_opt" ]]; then
@@ -526,24 +528,15 @@ cmd_start() {
   export DEFAULT_BRANCH="$TARGET_BRANCH"
   log_event "$rd" "integration submode=$INTEGRATE_SUBMODE target-branch=$TARGET_BRANCH (done=머지됨)"
 
-  # ----- max-parallel 마커(동시성 상한, resume sticky) -----
-  # 모델 주도 ready 가 기본값으로 읽는다(모델이 --max-parallel 을 매번 주지 않아도 일관).
-  # 마커가 있으면(=재개) 현재 플래그보다 우선(sticky).
+  # ----- max-parallel 마커 -----
   [[ -f "$rd/MAX_PARALLEL" ]] || printf '%s\n' "$max_parallel" > "$rd/MAX_PARALLEL"
 
-  # ----- 셋업 완료 — 모델 주도 오케스트레이션으로 인계 -----
-  # dispatch.sh 는 결정적 셋업(run-dir·DAG·markers·pending 상태)만 수행한다. 준비된 SPEC당
-  # 서브에이전트 spawn·구현·리뷰·머지는 모델(dispatch 스킬)이 ready/mark 헬퍼 + Agent 도구로
-  # 소유한다(서브에이전트 계약: references/spec-subagent.md). bash 무인 드레인 루프는 없다.
-  #
-  # 모델 루프:
-  #   1. ready <run-id> [--max-parallel N] → 지금 띄울 준비된 SPEC 목록.
-  #   2. 각 SPEC: mark <run-id> running <spec> → 서브에이전트 1개 spawn(Agent 도구).
-  #   3. 서브에이전트 보고: 머지됨→mark done(=의존자 해제), 비완료→mark failed(이행적 skip).
-  #   4. ready 가 비고 running 이 없을 때까지 반복.
-  #
-  # resume: done 이 아닌 모든 상태(failed/skipped/running/pending)를 pending 으로 되돌려
-  #   미완 SPEC 을 다시 스케줄 대상에 올린다(이미 done 인 SPEC 은 보존).
+  # ----- 드라이버 선택 -----
+  local current_driver=""
+  [[ -f "$rd/DRIVER" ]] && current_driver="$(cat "$rd/DRIVER" 2>/dev/null || true)"
+  local chosen_driver; chosen_driver="$(drv_choose "$current_driver")"
+  printf '%s\n' "$chosen_driver" > "$rd/DRIVER"
+
   local n=${#specs_abs[@]} i
   if [[ -n "$resume" ]]; then
     for ((i=0; i<n; i++)); do
@@ -551,9 +544,25 @@ cmd_start() {
         || set_state "$rd" "${specs_abs[i]}" "pending"
     done
   fi
-  log_event "$rd" "setup done specs=$n submode=$INTEGRATE_SUBMODE target-branch=$TARGET_BRANCH max_parallel=$(cat "$rd/MAX_PARALLEL" 2>/dev/null) (모델 주도; done=머지됨)"
+  log_event "$rd" "setup done specs=$n submode=$INTEGRATE_SUBMODE target-branch=$TARGET_BRANCH max_parallel=$(cat "$rd/MAX_PARALLEL" 2>/dev/null) driver=$chosen_driver (모델 주도; done=머지됨)"
   echo "run-id: $(basename "$rd")"
+  echo "driver: $chosen_driver"
   return 0
+}
+
+# ----- subcommand: driver -----
+
+cmd_driver() {
+  local rid="${1:-}"
+  [[ -z "$rid" ]] && die "사용: $0 driver <run-id>"
+  require_git_root
+  local rd; rd="$(run_dir "$rid")"
+  [[ -d "$rd" ]] || die "run-id 없음: $rid"
+  local drv=""
+  [[ -f "$rd/DRIVER" ]] && drv="$(cat "$rd/DRIVER" 2>/dev/null || true)"
+  [[ -z "$drv" ]] && drv="(unset — foreground-batch 기본값)"
+  echo "run-id: $rid"
+  echo "driver: $drv"
 }
 
 # ----- subcommand: list -----
@@ -564,8 +573,8 @@ cmd_list() {
     echo "(no runs yet — 새 run: $0 start <spec...>)"
     return 0
   fi
-  printf "%-32s %-6s %-6s %-6s %-6s %s\n" "RUN-ID" "SPECS" "DONE" "FAIL" "WAVES" "STARTED"
-  local rd rid waves specs done_n fail_n started
+  printf "%-32s %-6s %-6s %-6s %-6s %-20s %s\n" "RUN-ID" "SPECS" "DONE" "FAIL" "WAVES" "DRIVER" "STARTED"
+  local rd rid waves specs done_n fail_n started drv
   for rd in "$RUNS_DIR"/*/; do
     [[ -d "$rd" ]] || continue
     rid="$(basename "$rd")"
@@ -574,8 +583,10 @@ cmd_list() {
     [[ -z "$waves" ]] && waves=0
     done_n=$(grep -lE '^done$' "$rd"/state.* 2>/dev/null | wc -l | tr -d ' ' || echo 0)
     fail_n=$(grep -lE '^failed$' "$rd"/state.* 2>/dev/null | wc -l | tr -d ' ' || echo 0)
+    drv=$(cat "$rd/DRIVER" 2>/dev/null | tr -d ' ' || echo "-")
+    [[ -z "$drv" ]] && drv="-"
     started=$(head -1 "$rd/LOG.md" 2>/dev/null | cut -c2-21 || echo "-")
-    printf "%-32s %-6s %-6s %-6s %-6s %s\n" "$rid" "$specs" "$done_n" "$fail_n" "$waves" "$started"
+    printf "%-32s %-6s %-6s %-6s %-6s %-20s %s\n" "$rid" "$specs" "$done_n" "$fail_n" "$waves" "$drv" "$started"
   done
 }
 
@@ -589,9 +600,10 @@ cmd_status() {
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
   echo "run-id: $rid"
   echo "path:   $rd"
+  local drv=""
+  [[ -f "$rd/DRIVER" ]] && drv="$(cat "$rd/DRIVER" 2>/dev/null || true)"
+  [[ -n "$drv" ]] && echo "driver: $drv"
   echo ""
-  # 모델 주도: dispatch 는 서브에이전트의 결과만 받으므로 오케스트레이션 상태(STATE)만 보고한다.
-  # (loop 은 서브에이전트가 자기 컨텍스트에서 호출하므로 dispatch 가 직접 들여다보지 않는다.)
   printf "%-6s %-10s %s\n" "WAVE" "STATE" "SPEC"
   printf "%-6s %-10s %s\n" "----" "------" "----"
   local w sp st
@@ -608,17 +620,17 @@ cmd_stop() {
   local rid="${1:-}"
   [[ -z "$rid" ]] && die "사용: $0 stop <run-id>"
   require_git_root
-  # 모델 주도: 서브에이전트는 모델이 spawn/stop 한다. dispatch.sh 의 stop 은 오케스트레이션
-  # 상태에서 running SPEC 을 failed 로 표시하고, 그 이행적 의존자는 skipped 로 전파한다
-  # (모델이 이 신호를 보고 그 SPEC 의 서브에이전트를 멈춘다).
   local RD; local -a SP=() DEP_IDX=()
   load_run "$rid"
-  local any=0 i st
+  local any=0 i st tid
   for ((i=0; i<${#SP[@]}; i++)); do
     st="$(get_state "$RD" "${SP[i]}")"
     if [[ "$st" == "running" ]]; then
+      tid="$(get_taskid "$RD" "${SP[i]}")"
+      [[ -n "$tid" ]] && echo "task-id: $tid ($(spec_slug "${SP[i]}"))"
       set_state "$RD" "${SP[i]}" "failed"
-      log_event "$RD" "stop $(spec_slug "${SP[i]}")"
+      del_taskid "$RD" "${SP[i]}"
+      log_event "$RD" "stop $(spec_slug "${SP[i]}")${tid:+ task-id=$tid}"
       any=1
     fi
   done
@@ -637,9 +649,6 @@ cmd_watch() {
   require_git_root
   local rd; rd="$(run_dir "$rid")"
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
-  # 읽기 전용 폴러: 상태를 전진시키지 않는다(전진은 모델의 ready/mark 가 소유). 모든 SPEC 이
-  # terminal(done/failed/skipped)에 도달할 때까지 대기하고 결과를 exit code 로 대표한다.
-  #   0=전부 done, 1=failed/skipped 있음, 2=timeout.
   local start; start=$(date +%s)
   while true; do
     local all_terminal=1 any_fail=0 sp st
@@ -647,7 +656,7 @@ cmd_watch() {
       st="$(get_state "$rd" "$sp")"
       case "$st" in
         done) ;;
-        failed|skipped) any_fail=1 ;;  # terminal(비완료).
+        failed|skipped) any_fail=1 ;;
         *) all_terminal=0 ;;
       esac
     done < "$rd/MANIFEST.txt"
@@ -663,24 +672,11 @@ cmd_watch() {
 
 # =====================================================================
 # selftest — 결정적 오케스트레이션 검증(모델 주도). 실제 spawn·머지·PR 미수행.
-#   dispatch.sh 는 결정적 셋업(start)·readiness(ready)·전이(mark) 헬퍼만 제공하고,
-#   서브에이전트 spawn·구현·리뷰·머지는 모델(Agent 도구)이 소유한다(계약: spec-subagent.md).
-#   따라서 여기서는 통합·리뷰·머지 bash 드레인을 검증하지 않는다(그 동작은 서브에이전트 소유
-#   이며 helper 모듈 integration/review-loop/merge.sh 의 자체 selftest 가 검증).
-#   완료 조건 1·9·12 의 결정적 부분을 검증:
-#     S1 start=셋업 전용(스스로 done 으로 드라이브하지 않음) + 마커 생성.
-#     S2 모델 루프(ready→mark): done(=머지)된 뒤에만 의존자 ready(의존자 해제 게이트).
-#     S3 이행적 실패 격리: A failed → B(dep A) skipped, 독립 가지 C 는 계속.
-#     S4 동시성 상한(MAX_PARALLEL 마커 + sticky + ready 가 존중).
-#     S5 대상 브랜치(기본/지정) + 서브모드(forge/direct) 마커 + --resume sticky.
-#     S6 depends_on cycle → abort(실행 셋업 안 함).
-#     S7 bash 드레인·레거시 경로 부재(integrating 상태·NO_INTEGRATE 마커 없음, no-op 플래그).
 # =====================================================================
 cmd_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
   local DSP="$SCRIPT_DIR/dispatch.sh"
 
-  # 격리 git 저장소 + SPEC: A(무dep), B(dep A), C(무dep 독립).
   local REPO="$TMP/repo"; mkdir -p "$REPO"
   ( cd "$REPO" && git init -q )
   printf -- '---\n---\n# Feature A\n' > "$REPO/feature-a.md"
@@ -690,7 +686,7 @@ cmd_selftest() {
   local fail=0
   ok()  { echo "PASS  $1"; }
   bad() { echo "FAIL  $1"; fail=1; }
-  run_state() { # <run_dir> <spec-basename>
+  run_state() {
     local rd="$1" sp key; sp="$REPO/$2"
     key="$(spec_slug "$sp")-$(hash7 "$sp")"
     cat "$rd/state.$key" 2>/dev/null || echo "MISSING"
@@ -699,14 +695,18 @@ cmd_selftest() {
   marker()  { cat "$1/INTEGRATE" 2>/dev/null; }
   tmarker() { cat "$1/TARGET_BRANCH" 2>/dev/null; }
   mpmarker(){ cat "$1/MAX_PARALLEL" 2>/dev/null; }
-  start_rid() { # cd repo 에서 start 하고 run-id 를 반환(stdout 의 "run-id: X" 파싱).
+  drvmarker(){ cat "$1/DRIVER" 2>/dev/null; }
+  start_rid() {
     ( cd "$REPO" && "$@" ) | sed -n 's/^run-id: //p'
+  }
+  start_drv() {
+    ( cd "$REPO" && "$@" ) | sed -n 's/^driver: //p'
   }
   dsp() { env DISPATCH_POLL_SECONDS=0 DISPATCH_WAVE_TIMEOUT_SECONDS=120 "$@"; }
   rdy() { ( cd "$REPO" && dsp bash "$DSP" ready "$@" 2>/dev/null ); }
   mk() { ( cd "$REPO" && dsp bash "$DSP" mark "$@" ) >/dev/null 2>&1; }
 
-  # ---- S1: start = 셋업 전용 (스스로 done 으로 드라이브하지 않음) + 마커 ----
+  # ---- S1 ----
   rm -rf "$REPO/.dispatch"
   local rid1; rid1="$( start_rid dsp bash "$DSP" start feature-a.md feature-b.md )"
   local rd1; rd1="$(latest_run)"
@@ -716,8 +716,9 @@ cmd_selftest() {
   [[ -f "$rd1/MANIFEST.txt" && -f "$rd1/WAVES.txt" ]] && ok "S1 start: MANIFEST·WAVES 생성" || bad "S1 start: MANIFEST·WAVES 생성"
   [[ "$(grep -c . "$rd1/MANIFEST.txt")" == "2" ]] && ok "S1 start: MANIFEST 2 SPEC" || bad "S1 start: MANIFEST 2"
   [[ -f "$rd1/MAX_PARALLEL" ]] && ok "S1 start: MAX_PARALLEL 마커" || bad "S1 start: MAX_PARALLEL 마커"
+  [[ -f "$rd1/DRIVER" ]] && ok "S1 start: DRIVER 마커 생성" || bad "S1 start: DRIVER 마커 생성"
 
-  # ---- S2: 모델 루프(ready→mark) — done(=머지)된 뒤에만 의존자 ready(의존자 해제) ----
+  # ---- S2 ----
   rm -rf "$REPO/.dispatch"
   local rid2; rid2="$( start_rid dsp bash "$DSP" start feature-a.md feature-b.md )"
   local rd2; rd2="$(latest_run)"
@@ -735,7 +736,7 @@ cmd_selftest() {
   r="$(rdy "$rid2")"
   [[ -z "$r" ]] && ok "S2 ready: 모두 terminal 이면 빈 출력(루프 종료)" || bad "S2 빈 ready got=[$r]"
 
-  # ---- S3: 이행적 실패 격리 — A failed → B skipped, 독립 C 는 계속 ----
+  # ---- S3 ----
   rm -rf "$REPO/.dispatch"
   local rid3; rid3="$( start_rid dsp bash "$DSP" start feature-a.md feature-b.md feature-c.md )"
   local rd3; rd3="$(latest_run)"
@@ -746,41 +747,34 @@ cmd_selftest() {
   printf '%s\n' "$r" | grep -q 'feature-c.md' && ok "S3 ready: 독립 C 는 준비됨(가지 격리)" || bad "S3 ready C got=[$r]"
   printf '%s\n' "$r" | grep -q 'feature-b.md' && bad "S3 ready: skipped B 는 미준비" || ok "S3 ready: skipped B 미준비"
 
-  # ---- S4: 동시성 상한 (MAX_PARALLEL 마커 + sticky + ready 존중) ----
+  # ---- S4 ----
   rm -rf "$REPO/.dispatch"
   local rid4; rid4="$( start_rid dsp bash "$DSP" start --max-parallel 1 feature-a.md feature-c.md )"
   local rd4; rd4="$(latest_run)"
   [[ "$(mpmarker "$rd4")" == "1" ]] && ok "S4 MAX_PARALLEL 마커=1" || bad "S4 MAX_PARALLEL got=$(mpmarker "$rd4")"
   r="$(rdy "$rid4")"
   [[ "$(printf '%s\n' "$r" | grep -c 'feature-')" == "1" ]] && ok "S4 ready: 상한 1 → 1개만(마커 기본값 존중)" || bad "S4 ready 상한 got=[$r]"
-  # 하나 running 표시 후 ready 는 비어야(상한 도달).
   mk "$rid4" running "$(printf '%s\n' "$r" | head -1)"
   r="$(rdy "$rid4")"
   [[ "$(printf '%s\n' "$r" | grep -c 'feature-')" == "0" ]] && ok "S4 ready: 상한 도달 시 빈 출력" || bad "S4 ready 상한도달 got=[$r]"
-  # --max-parallel 명시는 마커보다 우선(상한 2 → 둘 다, 단 running 1 제외 → 1).
   r="$( ( cd "$REPO" && dsp bash "$DSP" ready "$rid4" --max-parallel 2 2>/dev/null ) )"
   [[ "$(printf '%s\n' "$r" | grep -c 'feature-')" == "1" ]] && ok "S4 ready: 명시 상한 2 + running 1 → 1개" || bad "S4 명시 상한 got=[$r]"
-  # resume sticky: --max-parallel 미지정 재개해도 마커 1 유지.
   ( cd "$REPO" && dsp bash "$DSP" start --resume "$rid4" ) >/dev/null 2>&1 || true
   [[ "$(mpmarker "$rd4")" == "1" ]] && ok "S4 resume: MAX_PARALLEL sticky(마커 유지)" || bad "S4 resume sticky got=$(mpmarker "$rd4")"
 
-  # ---- S5: 대상 브랜치 + 서브모드 마커 + --resume sticky ----
-  # 기본 대상 = main.
+  # ---- S5 ----
   rm -rf "$REPO/.dispatch"
   local ridm; ridm="$( start_rid dsp bash "$DSP" start feature-a.md )"
   local rdm; rdm="$(latest_run)"
   [[ "$(tmarker "$rdm")" == "main" ]] && ok "S5 기본 대상 브랜치=main 마커" || bad "S5 기본 대상=main got=$(tmarker "$rdm")"
-  # 지정 대상 = release + 미구성(direct) 서브모드.
   rm -rf "$REPO/.dispatch"
   local ridr; ridr="$( start_rid dsp env FORGE_BIN=__noforge__ bash "$DSP" start --target-branch release feature-a.md feature-b.md )"
   local rdr; rdr="$(latest_run)"
   [[ "$(tmarker "$rdr")" == "release" ]] && ok "S5 지정 대상 브랜치=release 마커" || bad "S5 대상=release got=$(tmarker "$rdr")"
   [[ "$(marker "$rdr")" == "direct" ]] && ok "S5 forge 백엔드 미가용(FORGE_BIN) → submode=direct" || bad "S5 submode=direct got=$(marker "$rdr")"
-  # 대상 브랜치 resume sticky: 플래그 없이/다른 env 로 재개해도 release 유지.
   local ridr2; ridr2="$(basename "$rdr")"
   ( cd "$REPO" && dsp env DEFAULT_BRANCH=main bash "$DSP" start --resume "$ridr2" ) >/dev/null 2>&1 || true
   [[ "$(tmarker "$rdr")" == "release" ]] && ok "S5 resume: 대상 브랜치 release sticky(env 보다 우선)" || bad "S5 resume 대상 sticky got=$(tmarker "$rdr")"
-  # forge 백엔드 가용(forge CLI) → submode=forge — approver 불필요(정상화). + resume sticky.
   rm -rf "$REPO/.dispatch"
   local ridf; ridf="$( start_rid dsp env FORGE_BIN=bash bash "$DSP" start feature-a.md )"
   local rdf; rdf="$(latest_run)"
@@ -791,7 +785,7 @@ cmd_selftest() {
   ( cd "$REPO" && dsp env FORGE_BIN=bash bash "$DSP" start --resume "$riddb" ) >/dev/null 2>&1 || true
   [[ "$(marker "$rdd")" == "direct" ]] && ok "S5 resume: submode direct sticky(forge 가용 env 보다 마커 우선)" || bad "S5 resume submode sticky got=$(marker "$rdd")"
 
-  # ---- S6: depends_on cycle → abort(실행 셋업 안 함) ----
+  # ---- S6 ----
   rm -rf "$REPO/.dispatch"
   printf -- '---\ndepends_on: [cyc-y]\n---\n# X\n' > "$REPO/cyc-x.md"
   printf -- '---\ndepends_on: [cyc-x]\n---\n# Y\n' > "$REPO/cyc-y.md"
@@ -802,7 +796,7 @@ cmd_selftest() {
   fi
   rm -f "$REPO/cyc-x.md" "$REPO/cyc-y.md"
 
-  # ---- S8: watch(읽기 전용 폴러)·stop(running→failed + 이행적 skip) — 모델 주도 의미 ----
+  # ---- S8 ----
   rm -rf "$REPO/.dispatch"
   local rid8; rid8="$( start_rid dsp bash "$DSP" start feature-a.md feature-b.md )"
   mk "$rid8" done "$REPO/feature-a.md"; mk "$rid8" done "$REPO/feature-b.md"
@@ -817,15 +811,76 @@ cmd_selftest() {
   local wrc=0; ( cd "$REPO" && dsp bash "$DSP" watch "$rid9" ) >/dev/null 2>&1 || wrc=$?
   [[ "$wrc" -eq 1 ]] && ok "S8 watch: failed/skipped 있으면 exit 1" || bad "S8 watch failed exit1 got=$wrc"
 
-  # ---- S7: bash 드레인·레거시 경로 부재 ----
+  # ---- S7 ----
   rm -rf "$REPO/.dispatch"
   local rid7; rid7="$( start_rid dsp bash "$DSP" start --no-integrate --integrate feature-a.md feature-b.md )"
   local rd7; rd7="$(latest_run)"
   [[ -n "$rid7" ]] && ok "S7 --no-integrate/--integrate no-op(받되 셋업 진행)" || bad "S7 no-op 플래그 셋업"
   [[ ! -f "$rd7/NO_INTEGRATE" ]] && ok "S7 NO_INTEGRATE 마커 부재(레거시 경로 없음)" || bad "S7 NO_INTEGRATE 마커 부재"
-  # 셋업만 한 직후 어떤 SPEC 도 integrating/done 으로 자동 전이되지 않음(드레인 없음).
   if grep -rqx 'integrating' "$rd7"/state.* 2>/dev/null; then bad "S7 integrating 상태 부재(드레인 없음)"; else ok "S7 integrating 상태 부재(bash 드레인 없음)"; fi
   if grep -rqx 'done' "$rd7"/state.* 2>/dev/null; then bad "S7 셋업 직후 자동 done 부재"; else ok "S7 셋업 직후 자동 done 부재(start 미드라이브)"; fi
+
+  # ---- S9: 드라이버 선택·override·강등·task-id IO·stop TaskStop 위임·resume sticky ----
+
+  # S9a: 기본 드라이버 = foreground-batch
+  rm -rf "$REPO/.dispatch"
+  local rid9a; rid9a="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local rd9a; rd9a="$(latest_run)"
+  [[ "$(drvmarker "$rd9a")" == "foreground-batch" ]] && ok "S9a 기본 드라이버=foreground-batch" || bad "S9a 기본 드라이버 got=$(drvmarker "$rd9a")"
+
+  # S9b: DISPATCH_DRIVER=strong-parallel override
+  rm -rf "$REPO/.dispatch"
+  local d_out; d_out="$( start_drv dsp env DISPATCH_DRIVER=strong-parallel bash "$DSP" start feature-a.md )"
+  [[ "$d_out" == "strong-parallel" ]] && ok "S9b override strong-parallel: start 출력 확인" || bad "S9b override strong-parallel got=[$d_out]"
+  local rd9b; rd9b="$(latest_run)"
+  [[ "$(drvmarker "$rd9b")" == "strong-parallel" ]] && ok "S9b override: DRIVER 마커=strong-parallel" || bad "S9b override 마커 got=$(drvmarker "$rd9b")"
+
+  # S9c: DISPATCH_DRIVER=background override
+  rm -rf "$REPO/.dispatch"
+  d_out="$( start_drv dsp env DISPATCH_DRIVER=background bash "$DSP" start feature-a.md )"
+  [[ "$d_out" == "background" ]] && ok "S9c override background: start 출력 확인" || bad "S9c override background got=[$d_out]"
+
+  # S9d: DISPATCH_DRIVER=invalid → foreground-batch 강등
+  rm -rf "$REPO/.dispatch"
+  d_out="$( start_drv dsp env DISPATCH_DRIVER=invalid-driver bash "$DSP" start feature-a.md 2>/dev/null )"
+  [[ "$d_out" == "foreground-batch" ]] && ok "S9d invalid override → foreground-batch 강등" || bad "S9d 강등 got=[$d_out]"
+
+  # S9e: resume sticky — background 설정 후 DISPATCH_DRIVER 없이 재개해도 유지
+  rm -rf "$REPO/.dispatch"
+  local rid9e; rid9e="$( start_rid dsp env DISPATCH_DRIVER=background bash "$DSP" start feature-a.md )"
+  local rd9e; rd9e="$(latest_run)"
+  [[ "$(drvmarker "$rd9e")" == "background" ]] && ok "S9e background 마커 설정" || bad "S9e background 마커 got=$(drvmarker "$rd9e")"
+  ( cd "$REPO" && dsp bash "$DSP" start --resume "$rid9e" ) >/dev/null 2>&1 || true
+  [[ "$(drvmarker "$rd9e")" == "background" ]] && ok "S9e resume: DRIVER 마커 sticky(background 유지)" || bad "S9e resume sticky got=$(drvmarker "$rd9e")"
+
+  # S9f: task-id IO — mark running --task-id 기록, done 전이 시 삭제
+  rm -rf "$REPO/.dispatch"
+  local rid9f; rid9f="$( start_rid dsp env DISPATCH_DRIVER=background bash "$DSP" start feature-a.md )"
+  local rd9f; rd9f="$(latest_run)"
+  ( cd "$REPO" && dsp bash "$DSP" mark "$rid9f" running "$REPO/feature-a.md" --task-id "task-abc-123" ) >/dev/null 2>&1
+  local tid_key; tid_key="$(spec_slug "$REPO/feature-a.md")-$(hash7 "$REPO/feature-a.md")"
+  local tid_file="$rd9f/taskid.$tid_key"
+  [[ -f "$tid_file" ]] && ok "S9f mark running: task-id 파일 생성" || bad "S9f mark running: task-id 파일 생성 (expected $tid_file)"
+  [[ "$(cat "$tid_file" 2>/dev/null)" == "task-abc-123" ]] && ok "S9f task-id 값 정확" || bad "S9f task-id 값 got=$(cat "$tid_file" 2>/dev/null)"
+  ( cd "$REPO" && dsp bash "$DSP" mark "$rid9f" done "$REPO/feature-a.md" ) >/dev/null 2>&1
+  [[ ! -f "$tid_file" ]] && ok "S9f mark done: task-id 파일 삭제" || bad "S9f mark done: task-id 파일 삭제 안 됨"
+
+  # S9g: stop 시 task-id 출력
+  rm -rf "$REPO/.dispatch"
+  local rid9g; rid9g="$( start_rid dsp env DISPATCH_DRIVER=background bash "$DSP" start feature-a.md feature-b.md )"
+  local rd9g; rd9g="$(latest_run)"
+  ( cd "$REPO" && dsp bash "$DSP" mark "$rid9g" running "$REPO/feature-a.md" --task-id "bg-task-xyz" ) >/dev/null 2>&1
+  local stop_out; stop_out="$( cd "$REPO" && dsp bash "$DSP" stop "$rid9g" 2>/dev/null )"
+  case "$stop_out" in *"bg-task-xyz"*) ok "S9g stop: task-id 출력(TaskStop 위임)" ;; *) bad "S9g stop: task-id 출력 got=[$stop_out]" ;; esac
+  [[ "$(run_state "$rd9g" feature-a.md)" == "failed" ]] && ok "S9g stop: A running→failed" || bad "S9g stop A failed got=$(run_state "$rd9g" feature-a.md)"
+  local tid_key_g; tid_key_g="$(spec_slug "$REPO/feature-a.md")-$(hash7 "$REPO/feature-a.md")"
+  [[ ! -f "$rd9g/taskid.$tid_key_g" ]] && ok "S9g stop: task-id 파일 정리" || bad "S9g stop: task-id 파일 미정리"
+
+  # S9h: driver subcommand
+  rm -rf "$REPO/.dispatch"
+  local rid9h; rid9h="$( start_rid dsp env DISPATCH_DRIVER=strong-parallel bash "$DSP" start feature-a.md )"
+  local drv_out; drv_out="$( cd "$REPO" && dsp bash "$DSP" driver "$rid9h" 2>/dev/null )"
+  case "$drv_out" in *"strong-parallel"*) ok "S9h driver subcommand: strong-parallel 출력" ;; *) bad "S9h driver subcommand got=[$drv_out]" ;; esac
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
@@ -840,34 +895,28 @@ usage: dispatch.sh <subcommand> [args]
 
 Subcommands:
   start <spec...> [--max-parallel N] [--resume <run-id>] [--target-branch <b>]
-        결정적 셋업 전용: 1 개 이상의 SPEC 경로를 받아 depends_on 으로 DAG 를 만들고
-        run-dir·WAVES.txt(진단)·초기 pending 상태·run 전역 마커(서브모드 INTEGRATE /
-        대상 브랜치 TARGET_BRANCH / MAX_PARALLEL)를 생성한 뒤 run-id 를 출력한다.
-        스스로 spawn·드레인하지 않는다 — 준비된 SPEC당 서브에이전트 spawn·구현·리뷰·머지는
-        모델(dispatch 스킬)이 ready/mark + Agent 도구로 소유한다(계약: spec-subagent.md).
-        --target-branch 로 대상 브랜치 지정(미지정 시 기본 브랜치). 서브모드·대상 브랜치·
-        동시성 상한은 --resume 에서 sticky(run-dir 마커). 하위호환 --integrate/--no-integrate
-        는 받되 무시(no-op). cycle 이면 abort.
+        결정적 셋업 전용: run-dir·WAVES.txt·초기 pending 상태·run 전역 마커(INTEGRATE/
+        TARGET_BRANCH/MAX_PARALLEL/DRIVER)를 생성. 드라이버 override: DISPATCH_DRIVER.
+        --resume sticky. 하위호환 --integrate/--no-integrate no-op. cycle → abort.
   ready <run-id> [--max-parallel N]
-        지금 서브에이전트를 띄울 준비가 된 SPEC(모든 dep done & pending & 동시성 상한 이내)
-        abspath 를 한 줄씩 출력(결정적, skip 전파 적용). 모델이 각 SPEC 에 서브에이전트 1개 spawn.
-        --max-parallel 미지정이면 start 가 영속한 MAX_PARALLEL 마커를 기본값으로 쓴다(sticky).
-  mark <run-id> <running|done|failed> <spec>
-        SPEC 상태 전이(결정적). running=spawn 직전, done=서브에이전트 머지 보고(=의존자 해제),
-        failed=비완료 보고 → 이행적 의존자만 skipped 전파.
+        준비된 SPEC abspath 출력(skip 전파 적용, 동시성 상한 존중).
+  mark <run-id> <running|done|failed> <spec> [--task-id <id>]
+        상태 전이. running --task-id: 백그라운드 드라이버 task-id 기록.
+        done/failed: task-id 정리. failed: 이행적 skip 전파.
+  driver <run-id>
+        선택된 드라이버 출력(진단용).
   list
-        모든 run-id 와 진행 요약.
+        run-id 목록·요약(드라이버 컬럼 포함).
   status <run-id>
-        run-id 단위 per-SPEC state(진단용 wave 표시 포함).
+        per-SPEC state·드라이버 출력.
   stop <run-id>
-        running SPEC 을 failed 로 표시하고 이행적 의존자를 skipped 전파(모델이 그 서브에이전트
-        를 멈춘다). dispatch.sh 는 오케스트레이션 상태만 갱신한다.
+        running→failed + skip 전파. 백그라운드 task-id 있으면 출력(TaskStop 위임).
   watch <run-id>
-        per-SPEC 상태를 읽기 전용으로 폴링하며 모든 SPEC 이 terminal(done/failed/skipped)에
-        도달할 때까지 대기(상태 전진은 모델의 ready/mark 소유). exit 0=전부 done, 1=실패 있음, 2=timeout.
+        모든 SPEC terminal 까지 폴링. exit 0=전부 done, 1=실패, 2=timeout.
 
 환경 변수:
-  DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS, FORGE_BIN, DEFAULT_BRANCH
+  DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS, FORGE_BIN, DEFAULT_BRANCH,
+  DISPATCH_DRIVER (strong-parallel|background|foreground-batch)
 EOF
   exit 1
 }
@@ -880,6 +929,7 @@ case "$SUB" in
   start)  cmd_start  "$@" ;;
   ready)  cmd_ready  "$@" ;;
   mark)   cmd_mark   "$@" ;;
+  driver) cmd_driver "$@" ;;
   list)   cmd_list  ;;
   status) cmd_status "$@" ;;
   stop)   cmd_stop   "$@" ;;

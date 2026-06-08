@@ -1,6 +1,6 @@
 ---
 name: dispatch
-description: "하나 이상의 SPEC 파일을 구현·머지 단계로 넘기고 싶을 때 사용 — depends_on 준비도를 풀어 **준비된 SPEC마다 서브에이전트를 1개 띄우는 모델 주도 오케스트레이터**. 각 서브에이전트가 자기 컨텍스트에서 그 SPEC 의 구현→리뷰→머지를 소유하고, dispatch 는 의존성·동시성·실패 격리만 총괄해 머지(=done)되면 의존자를 해제한다. 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch)."
+description: "하나 이상의 SPEC 파일을 구현·머지 단계로 넘기고 싶을 때 사용 — depends_on 준비도를 풀어 **준비된 SPEC마다 서브에이전트를 1개 띄우는 모델 주도 오케스트레이터**. 각 서브에이전트가 자기 컨텍스트에서 그 SPEC 의 구현→리뷰→머지를 소유하고, dispatch 는 의존성·동시성·실패 격리만 총괄해 머지(=done)되면 의존자를 해제한다. 팬아웃 드라이버(strong-parallel/background/foreground-batch)로 서브에이전트 spawn 방식을 결정하며 DISPATCH_DRIVER 환경변수 또는 --driver 플래그로 오버라이드 가능. 호출 'Skill(skill=\"dispatch\", args=\"<subcommand> [<args>]\")' (start/list/status/stop/watch/driver)."
 allowed-tools:
   - Read
   - Bash(bash * dispatch.sh start:*)
@@ -9,6 +9,7 @@ allowed-tools:
   - Bash(bash * dispatch.sh stop:*)
   - Bash(bash * dispatch.sh watch:*)
   - Bash(bash * dispatch.sh selftest:*)
+  - Bash(bash * dispatch.sh driver:*)
 ---
 
 # dispatch
@@ -30,6 +31,28 @@ allowed-tools:
 - 호출마다 결정성 있는 `run-id`(타임스탬프 + 입력 SPEC 집합 sha7)를 만들고 진행 상태를 `<project_root>/.dispatch/runs/<run-id>/` 아래에 보관한다.
 - 기존 `run-id` 로 재호출되면 보관된 상태를 읽어 이미 `done` 인 SPEC 은 재실행하지 않고, 미완 SPEC 만 스트리밍 스케줄에 따라 이어 수행한다.
 
+## 팬아웃 드라이버
+
+서브에이전트 spawn 방식을 결정하는 드라이버는 **run 전역**으로 결정되어 run-dir 마커(`DRIVER`)로 영속해 `--resume` 에서 sticky 하다.
+
+### 드라이버 종류
+
+| 드라이버 | 설명 |
+|---|---|
+| `strong-parallel` | 동적 Workflow 기반, 준비된 SPEC마다 약속(promise) 1개를 프로미스-per-node DAG로 구성해 동시 실행. |
+| `background` | `run_in_background` 로 비동기 spawn + 완료 시 reconcile. mark running 시 task-id를 `taskid.<slug>-<hash7>` 파일로 영속해 `stop` 시 TaskStop 위임. |
+| `foreground-batch` | 최종 폴백. 준비된 SPEC 목록을 한 턴에 동시 시작 → 배리어 → 재평가. |
+
+### 드라이버 선택 (자동 감지 + 오버라이드)
+
+드라이버 선택은 **모델 판단**으로 수행하며 bash-probe 하지 않는다. 자동 감지 우선순위:
+
+1. `DISPATCH_DRIVER` 환경변수(유효하지 않으면 `foreground-batch` 로 강등, 경고 출력).
+2. `--resume` 시 run-dir 마커(`DRIVER`) — 마커가 현재 env·플래그보다 우선(sticky).
+3. 환경·마커 미설정 → `foreground-batch`(기본).
+
+**안전 강등 체인**: `strong-parallel` → `background` → `foreground-batch`. 선택된 드라이버를 사용할 수 없는 경우 다음 드라이버로 강등하며 절대 실패 없이 진행한다.
+
 ## 서브에이전트 위임 — 준비된 SPEC당 1개
 
 준비된(모든 dep 이 done) SPEC마다 서브에이전트를 **정확히 1개** 띄우고, 그 서브에이전트가 한 컨텍스트에서 그 SPEC 의 구현→리뷰→재구현→머지를 닫는다. **서브에이전트 절차의 단일 출처는 `references/spec-subagent.md`**(완료 조건 2–8: loop/review 블랙박스 호출·forge/direct 서브모드·무한루프 가드·approve 후 머지 게이트·force 금지·동시 머지 직렬화·에스컬레이션). dispatch 는 그 내부를 들여다보지 않고 결과(머지됨/비완료)만 받는다.
@@ -43,9 +66,9 @@ dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispa
 
 ## Subcommands
 
-### dispatch start `<spec...>` [--max-parallel N] [--resume `<run-id>`] [--target-branch `<branch>`]
+### dispatch start `<spec...>` [--max-parallel N] [--resume `<run-id>`] [--target-branch `<branch>`] [--driver `<driver>`]
 
-1 개 이상의 SPEC 파일 경로를 받아 새 run 을 시작한다. 준비된 SPEC마다 서브에이전트를 1개 띄워 그 서브에이전트가 구현→리뷰→머지를 소유하고(위 "서브에이전트 위임" 절), `done` 은 "대상 브랜치에 머지됨"을 뜻한다(서브에이전트의 머지 보고로 전이). `--target-branch` 로 머지·동기화 대상 브랜치를 지정한다(미지정 시 기본 브랜치). 하위 호환을 위해 `--no-integrate`·`--integrate` 를 받되 무시한다(no-op).
+1 개 이상의 SPEC 파일 경로를 받아 새 run 을 시작한다. 준비된 SPEC마다 서브에이전트를 1개 띄워 그 서브에이전트가 구현→리뷰→머지를 소유하고(위 "서브에이전트 위임" 절), `done` 은 "대상 브랜치에 머지됨"을 뜻한다(서브에이전트의 머지 보고로 전이). `--target-branch` 로 머지·동기화 대상 브랜치를 지정한다(미지정 시 기본 브랜치). `--driver` 로 팬아웃 드라이버를 명시(미지정 시 `DISPATCH_DRIVER` 환경변수 → `foreground-batch` 기본). 하위 호환을 위해 `--no-integrate`·`--integrate` 를 받되 무시한다(no-op).
 
 - 입력 검증: 각 경로가 파일로 존재하고 읽을 수 있어야 한다. 하나라도 누락이면 보고 후 즉시 abort.
 - DAG 구성: 각 SPEC frontmatter 의 `depends_on` 을 읽어 의존 인덱스를 만든다. cycle 이면 abort. 진단용 `WAVES.txt` 도 함께 기록(실행 스케줄은 준비도 기반).
@@ -70,6 +93,10 @@ run-id 안에서 진행 중(`running`)인 child 들에 대해 자율 실행기�
 ### dispatch watch `<run-id>`
 
 per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`done`/`failed`/`skipped`)에 도달하면 exit code 로 결과를 대표한다. `0`=전부 done, `1`=failed/skipped 있음, `2`=timeout.
+
+### dispatch driver `<run-id>`
+
+run-id 의 팬아웃 드라이버를 출력한다. DRIVER 마커가 없으면 `foreground-batch`(기본값)를 출력한다.
 
 ## references
 
