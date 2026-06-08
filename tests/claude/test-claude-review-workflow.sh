@@ -12,6 +12,7 @@ SCHEMA="$REPO_ROOT/.github/prompts/codex-pr-review.schema.json"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
+count() { awk -v needle="$1" 'index($0, needle) { c++ } END { print c + 0 }' "$2"; }
 
 [[ -f "$WORKFLOW" ]] || fail "$WORKFLOW 부재"
 [[ -f "$PROMPT" ]] || fail "$PROMPT 부재"
@@ -35,6 +36,8 @@ grep -q 'REVIEW_BASE="$(git merge-base "origin/\$PR_BASE_REF" "refs/remotes/pull
   || fail "PR head 와 base branch 의 merge-base 계산 부재"
 grep -q 'REVIEW_PROMPT="\.github/prompts/claude-pr-review\.ko\.md"' "$WORKFLOW" \
   || fail "Claude structured review prompt 파일 참조 부재"
+grep -qF '도구가 표시하는 컨텍스트 파일 줄 번호는 소스 파일 줄 번호가 아닙니다' "$PROMPT" \
+  || fail "Read 컨텍스트 줄 번호를 finding.line 으로 사용하지 말라는 앵커 지침 부재"
 grep -q 'REVIEW_SCHEMA="\.github/prompts/codex-pr-review\.schema\.json"' "$WORKFLOW" \
   || fail "공통 structured review schema 파일 참조 부재"
 grep -q '\.github/scripts/pr-review-context\.sh' "$WORKFLOW" \
@@ -182,13 +185,13 @@ grep -q 'name: Post Claude review comment' "$WORKFLOW" \
 if grep -qF '<!-- claude-api-pr-review -->' "$WORKFLOW"; then
   fail "관리형 이슈 코멘트 마커(<!-- claude-api-pr-review -->) 잔존 (AC6)"
 fi
-if grep -qF 'issues.createComment' "$WORKFLOW"; then
-  fail "issues.createComment 잔존 — 발견사항 이슈 코멘트 게시 금지 (AC6)"
-fi
-if grep -qF 'issues.updateComment' "$WORKFLOW"; then
-  fail "issues.updateComment 잔존 — 관리형 이슈 코멘트 갱신 경로 금지 (AC6)"
-fi
-ok "check 7: 마커 관리형 이슈 레벨 코멘트 게시 경로 부재"
+[[ "$(count 'issues.createComment' "$WORKFLOW")" -eq 1 ]] \
+  || fail "리뷰 skip 사유 외 issues.createComment 경로가 존재함 — finding 이슈 코멘트 게시 금지 (AC6)"
+[[ "$(count 'issues.updateComment' "$WORKFLOW")" -eq 1 ]] \
+  || fail "리뷰 skip 사유 외 issues.updateComment 경로가 존재함 — finding 이슈 코멘트 게시 금지 (AC6)"
+grep -qF '${prefix}-skipped' "$WORKFLOW" \
+  || fail "허용된 issue comment 경로가 리뷰 skip 사유 마커로 제한되지 않음"
+ok "check 7: finding 이슈 코멘트 게시 경로 부재 + skip 사유 코멘트만 허용"
 
 echo ""
 echo "=== check 7b: 인라인 리뷰 코멘트 게시 경로 존재 (AC1/AC2) ==="
@@ -371,6 +374,12 @@ grep -qF '.github/scripts/diff-anchor-filter.js' "$WORKFLOW" \
   || fail "워크플로가 공유 검증 모듈(.github/scripts/diff-anchor-filter.js)을 require 하지 않음 (AC5/제약)"
 grep -qF 'filterFindingsAgainstPatch' "$WORKFLOW" \
   || fail "공유 검증 단위 호출(filterFindingsAgainstPatch) 부재 (AC1/AC5)"
+grep -qF 'repairFindingsFromContextLineNumbers' "$WORKFLOW" \
+  || fail "Read 컨텍스트 줄 번호를 source RIGHT-side 줄로 복구하는 공유 함수 호출 부재"
+grep -qF '.claude-review/context.chunk-${chunk}.md' "$WORKFLOW" \
+  || fail "청크별 리뷰 결과의 컨텍스트 파일을 읽어 앵커 복구에 사용하지 않음"
+grep -qF 'Repaired context-line anchor' "$WORKFLOW" \
+  || fail "컨텍스트 줄 번호 앵커 복구 로그 부재"
 # 검증 입력은 이미 생성된 diff.patch — 새로 diff 계산하지 않는다 (제약).
 grep -qF ".review-context/diff.patch" "$WORKFLOW" \
   || fail "anchor 검증 입력으로 .review-context/diff.patch 소비 부재 (제약)"

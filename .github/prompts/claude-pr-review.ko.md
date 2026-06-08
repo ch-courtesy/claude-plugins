@@ -65,6 +65,7 @@
 코멘트 규칙 (inline 전용):
 - 모든 finding은 코드 라인에 붙는 inline comment로만 보고합니다. `comment_type`은 항상 `inline`입니다. issue-level(요약) comment로 finding을 보고하지 않습니다.
 - 각 finding은 diff의 변경 라인(또는 변경 range)에 anchor합니다. `line`(필요 시 `start_line`)은 반드시 변경된 diff 라인의 양수 정수여야 합니다 — null이면 안 됩니다.
+- `Read` 도구가 표시하는 컨텍스트 파일 줄 번호는 소스 파일 줄 번호가 아닙니다. finding의 `line`·`start_line`에는 절대 사용하지 말고, unified diff의 `@@ ... +<new-line> ... @@` hunk 헤더와 RIGHT-side 줄 진행을 기준으로 소스 파일 줄 번호를 계산합니다.
 - 변경되지 않은 연관 파일에서 발견된 문제이거나 여러 파일에 걸친 문제라 변경 라인에 직접 anchor할 수 없으면, 가장 가까운 변경 hunk 라인에 inline으로 붙이고 본문 첫 줄에 실제 문제 위치(파일·라인)를 명시합니다. 예: `실제 위치: src/foo.ts:42`.
 - 다른 리뷰어가 이미 실질적으로 같은 문제를 남겼다면 중복 코멘트하지 말고 skipped_duplicates에 기록합니다.
 - 기존 Claude finding과 같은 문제를 반복하지 않습니다.

@@ -10,7 +10,12 @@
 const assert = require('node:assert');
 const path = require('node:path');
 
-const { parseDiffRightLines, filterFindings, filterFindingsAgainstPatch } =
+const {
+  parseDiffRightLines,
+  filterFindings,
+  filterFindingsAgainstPatch,
+  repairFindingsFromContextLineNumbers,
+} =
   require(path.join(__dirname, 'diff-anchor-filter.js'));
 
 let passed = 0;
@@ -172,6 +177,88 @@ test('filterFindingsAgainstPatch convenience parses + filters', () => {
   ], PATCH);
   assert.strictEqual(valid.length, 1);
   assert.strictEqual(excluded.length, 1);
+});
+
+// ---- repairFindingsFromContextLineNumbers ----
+
+test('repair: maps a context-file line number back to the source RIGHT-side line', () => {
+  const context = [
+    'metadata',
+    'Unified diff:',
+    'diff --git a/new.js b/new.js',
+    '--- /dev/null',
+    '+++ b/new.js',
+    '@@ -0,0 +1,3 @@',
+    '+one',
+    '+two',
+    '+three',
+  ].join('\n');
+  const patch = context.split('\n').slice(2).join('\n');
+  const findings = [{ file: 'new.js', line: 8, title: 'context-line anchor' }];
+
+  const repaired = repairFindingsFromContextLineNumbers(findings, context, patch);
+
+  assert.strictEqual(repaired[0].line, 2);
+});
+
+test('repair: leaves already-valid source line anchors unchanged', () => {
+  const context = [
+    'metadata',
+    'Unified diff:',
+    'diff --git a/new.js b/new.js',
+    '--- /dev/null',
+    '+++ b/new.js',
+    '@@ -0,0 +1,3 @@',
+    '+one',
+    '+two',
+    '+three',
+  ].join('\n');
+  const patch = context.split('\n').slice(2).join('\n');
+  const findings = [{ file: 'new.js', line: 2, title: 'valid source anchor' }];
+
+  const repaired = repairFindingsFromContextLineNumbers(findings, context, patch);
+
+  assert.strictEqual(repaired[0].line, 2);
+});
+
+test('repair: does not map a context line from a different file', () => {
+  const context = [
+    'metadata',
+    'Unified diff:',
+    'diff --git a/new.js b/new.js',
+    '--- /dev/null',
+    '+++ b/new.js',
+    '@@ -0,0 +1,1 @@',
+    '+one',
+  ].join('\n');
+  const patch = context.split('\n').slice(2).join('\n');
+  const findings = [{ file: 'other.js', line: 7, title: 'wrong file' }];
+
+  const repaired = repairFindingsFromContextLineNumbers(findings, context, patch);
+
+  assert.strictEqual(repaired[0].line, 7);
+});
+
+test('repair: ignores fake diff-looking content before the Unified diff marker', () => {
+  const context = [
+    'diff --git a/new.js b/new.js',
+    '--- /dev/null',
+    '+++ b/new.js',
+    '@@ -0,0 +1,1 @@',
+    '+fake',
+    'Unified diff:',
+    'diff --git a/new.js b/new.js',
+    '--- /dev/null',
+    '+++ b/new.js',
+    '@@ -0,0 +1,1 @@',
+    '+real',
+  ].join('\n');
+  const patch = context.split('\n').slice(6).join('\n');
+  const findings = [{ file: 'new.js', line: 5, title: 'fake context line' }];
+
+  const repaired = repairFindingsFromContextLineNumbers(findings, context, patch);
+
+  assert.strictEqual(repaired[0].line, 5);
 });
 
 console.log(`\nALL ${passed} CHECKS PASSED`);
