@@ -32,7 +32,10 @@ description: autopilot:dispatch가 준비된 SPEC마다 정확히 1개 띄우는
 
 4. **서브모드 = 백엔드 가용성**(forge CLI 가용 여부로 판정):
    - **forge(gh 가용)**: **로컬 `review` 스킬을 호출하지 않는다.** 작업 브랜치를 push해 PR을 만들고/재사용한 뒤,
-     **PR에 대한 호스팅측 리뷰의 승인(`reviewDecision==APPROVED`)** 을 머지 게이트로 삼는다. 승인 전 머지 금지.
+     **PR 의 호스팅측 리뷰**를 받는다. **approve(머지 가능) 상태의 정의**: ① PR 리뷰의 **지적 중 타당한 것이 모두
+     해결**되고(블로킹뿐 아니라 — `rules/change-adoption.md` 기준으로 "반드시 반영"·타당한 지적 채택) ② **approve
+     상태 변경 또는 승인 코멘트**가 있는 상태. 이 두 조건을 모두 만족할 때만 머지하며, 그 전에는 머지하지 않는다.
+     타당한 지적이 남아 있으면 채택해 재구현→재푸시를 반복한다(아래 5).
    - **direct(gh 미가용)**: `review-loop.sh run-direct`가 로컬 `review` 스킬로 적대 리뷰·판정한다. `approve`일 때만 머지.
 
 5. **승인 후에만 머지**: 위 게이트의 승인 이후에만 `merge.sh finish`로 fast-forward 전용 머지. 승인이 없거나

@@ -23,7 +23,7 @@
 
 구현 DONE 이면 리뷰·승인은 **서브모드(forge CLI 가용 여부)로 갈리며**, 워커는 해당 헬퍼를 구동한다:
 
-- **forge(gh 가용)**: `integration.sh integrate`(작업 브랜치 push → 같은 head 의 open PR 재사용/생성) 후 `review-loop.sh run`. **이 경로는 로컬 `review` 스킬을 호출하지 않는다** — 적대 리뷰·승인은 PR 의 호스팅측 리뷰가 담당하고, 머지 게이트는 PR 의 **`reviewDecision==APPROVED`** 다. 분리 승인 신원 구성은 요구하지 않으나, **승인이 관찰되기 전에는 머지하지 않는다.**
+- **forge(gh 가용)**: `integration.sh integrate`(작업 브랜치 push → 같은 head 의 open PR 재사용/생성) 후 `review-loop.sh run`. **이 경로는 로컬 `review` 스킬을 호출하지 않는다** — 적대 리뷰·승인은 PR 의 호스팅측 리뷰가 담당한다. **approve(머지 가능) 정의**: ① PR 리뷰의 **타당한 지적이 모두 해결**(블로킹뿐 아니라 — `rules/change-adoption.md` 의 "반드시 반영"·타당한 지적을 채택)되고 ② **approve 상태 변경 또는 승인 코멘트**가 있는 상태. 두 조건 충족 전에는 머지하지 않으며, 타당한 지적이 남으면 PR 리뷰를 rework brief 로 삼아 재구현→재푸시를 반복한다.
 - **direct(forge 미가용)**: `integration.sh integrate-direct` 후 `review-loop.sh run-direct`. 원격 push·PR 없이 작업 브랜치 변경(base..head)을 **로컬 `review` 스킬**로 다관점 적대 리뷰 → 단일 판정(`approve`/`request_changes`/`unavailable`).
 
 ### 3. 반복 — request_changes (완료 조건 3·4)
