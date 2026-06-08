@@ -52,10 +52,29 @@ MERGE_APPROVAL_CMD="${MERGE_APPROVAL_CMD:-mg_approval_gh}"
 mg_die() { echo "merge: $*" >&2; return 1; }
 
 # ===== forge 승인 게이트 — PR 호스팅 리뷰 승인 확인(승인 전 머지 차단) =====
-# mg_approval_gh <pr> — PR 의 reviewDecision(APPROVED 등)을 출력. 주입 가능(MERGE_APPROVAL_CMD).
+# 승인 신호 두 가지(.github/workflows/{codex,claude}-review.yml 컨벤션):
+#   (a) 공식 APPROVE 리뷰 → reviewDecision==APPROVED.
+#   (b) App 토큰이 self-approve 불가해 APPROVE→COMMENT 로 강등된 경우 → 신뢰 봇이 현재 head 에
+#       남긴 본문 마커 `<!-- <prefix> head_sha=<sha> verdict=approve -->`(prefix=*-formal-review).
+# 신뢰 봇 로그인(App bot / github-actions[bot])만 마커를 신뢰한다(위조 마커 거부).
+REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtesy-bot)}"
+# mg_approval_gh <pr> — 승인이면 "APPROVED" 출력(없으면 빈 값). 주입 가능(MERGE_APPROVAL_CMD).
 mg_approval_gh() {
+  local pr="$1" decision head
   # shellcheck disable=SC2086
-  $FORGE_CMD pr view "$1" --json reviewDecision --jq '.reviewDecision' 2>/dev/null
+  decision="$($FORGE_CMD pr view "$pr" --json reviewDecision --jq '.reviewDecision' 2>/dev/null)"
+  if [[ "$decision" == "APPROVED" ]]; then echo "APPROVED"; return 0; fi
+  # 강등 승인: 신뢰 봇이 현재 head 에 남긴 verdict=approve 마커.
+  # shellcheck disable=SC2086
+  head="$($FORGE_CMD pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)"
+  [[ -n "$head" ]] || return 0
+  # shellcheck disable=SC2086
+  if $FORGE_CMD pr view "$pr" --json reviews \
+        --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
+       | grep -E "$REVIEW_BOT_LOGINS_RE" \
+       | grep -qE "head_sha=${head}[^>]*verdict=approve"; then
+    echo "APPROVED"
+  fi
 }
 # mg_approval_gate <pr> — forge PR 의 호스팅 리뷰가 APPROVED 면 0, 아니면 1(차단).
 mg_approval_gate() {
