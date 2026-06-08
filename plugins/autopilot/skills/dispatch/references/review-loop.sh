@@ -60,12 +60,33 @@ rl_die() { echo "review-loop: $*" >&2; return 1; }
 
 # ===== 기본(gh/생산자/loop) 구현 — self-referential 검증은 mock 으로, 이 경로 미호출 =====
 rl_review_fetch_gh() {
-  local pr="$1"
+  local pr="$1" head decision approve="" findings
   command -v gh >/dev/null 2>&1 || { rl_die "gh CLI 필요"; return 1; }
-  gh pr view "$pr" --json reviews,headRefOid --jq '
+  head="$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)"
+  decision="$(gh pr view "$pr" --json reviewDecision --jq '.reviewDecision' 2>/dev/null)"
+  # 최신 정식 리뷰 상태/작성자(사람 변경요청 게이트 전용).
+  gh pr view "$pr" --json reviews --jq '
     (.reviews | map(select(.state=="CHANGES_REQUESTED" or .state=="APPROVED" or .state=="COMMENTED")) | last) as $r
-    | "state: \($r.state // "NONE")\nauthor: \($r.author.login // "")\nhead: \(.headRefOid // "")"
+    | "state: \($r.state // "NONE")\nauthor: \($r.author.login // "")"
   ' 2>/dev/null
+  echo "head: ${head:-}"
+  # 승인: 공식 APPROVED 또는 신뢰 봇이 현재 head 에 남긴 승인 마커(verdict=approve, *-formal-review).
+  if [[ "$decision" == "APPROVED" ]]; then approve=1; fi
+  if [[ -z "$approve" && -n "$head" ]] && gh pr view "$pr" --json reviews \
+        --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
+       | grep -E "$REVIEW_BOT_LOGIN_RE" | grep -qE "head_sha=${head}[^>]*verdict=approve"; then approve=1; fi
+  # 현재 head 의 인라인 지적(타당성 판단은 워커가 change-adoption 으로 — 여기선 원천만 평탄화).
+  findings="$(gh api "repos/{owner}/{repo}/pulls/$pr/comments" \
+        --jq ".[] | select(.commit_id==\"$head\") | .body" 2>/dev/null \
+       | sed -E 's/<!--[^>]*-->//g' | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+  if [[ -n "$approve" ]]; then
+    echo "verdict: approve"
+  elif [[ -n "$findings" ]]; then
+    echo "verdict: changes"
+    echo "finding: $findings"
+  else
+    echo "verdict: pending"
+  fi
 }
 
 # 기본: autopilot:review 생산자를 per-SPEC 키(=--task)로 1회 호출.
@@ -95,6 +116,12 @@ rl_review_field() {
 rl_review_state()  { rl_review_field "$1" state; }
 rl_review_author() { rl_review_field "$1" author; }
 rl_review_head()   { rl_review_field "$1" head; }
+rl_review_verdict() { rl_review_field "$1" verdict; }
+# rl_review_findings <pr> — PR 인라인 지적을 한 줄씩(빈 줄 제외). forge rework brief(must_adopt) 원천.
+rl_review_findings() {
+  # shellcheck disable=SC2086
+  $REVIEW_FETCH_CMD "$1" 2>/dev/null | grep -i '^finding:' | sed -E 's/^[^:]*:[[:space:]]*//' | sed '/^$/d'
+}
 
 rl_is_change_request() {
   local s; s="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
@@ -195,49 +222,36 @@ rl_round() {
     return 20
   fi
 
-  # --- 리뷰 생산자 1회 호출 → 단일 판정 ---
-  local produce verdict
-  # shellcheck disable=SC2086
-  produce="$($REVIEW_PRODUCE_CMD "$key" 2>/dev/null)"
-  verdict="$(printf '%s' "$produce" | jq -r '.pipeline_verdict // ""' 2>/dev/null)"
-
+  # --- PR 리뷰 판정(로컬 review 스킬 미호출) — verdict 는 PR 승인 상태/마커, 지적은 PR 인라인 코멘트 ---
+  local verdict; verdict="$(rl_review_verdict "$pr")"
   case "$verdict" in
-    unavailable)
-      rl_escalate "$rd" "$key" "리뷰 판정 unavailable(diff 잘림·컨텍스트 불완전) — 자동수정 보류"
-      return 10 ;;
     approve)
       int_set_verdict "$rd" "$key" approve
       int_set_head "$rd" "$key" "$head"
       int_set_phase "$rd" "$key" approved
-      int_log "$rd" "$key" "리뷰 판정 approve — 머지 진행가능 전이(추가 라운드 미시작)"
+      int_log "$rd" "$key" "PR 승인(상태/마커) — 머지 진행가능 전이(추가 라운드 미시작)"
       return 30 ;;
-    request_changes) : ;;
+    changes) : ;;
     *)
-      if [[ -z "$produce" ]]; then
-        rl_escalate "$rd" "$key" "리뷰 생산자 출력 비었음(생산 실패·미설정) — 자동수정 보류"
-      else
-        rl_escalate "$rd" "$key" "리뷰 판정 미상(verdict='$verdict') — 생산자 출력 파싱 실패"
-      fi
-      return 10 ;;
+      int_log "$rd" "$key" "PR 리뷰 미판정(verdict='${verdict:-none}') — 대기(새 판정 없음)"
+      return 20 ;;
   esac
 
-  # --- request_changes: 재작업 라운드 ---
+  # --- changes: PR 인라인 지적을 rework brief(must_adopt)로 같은 브랜치 위 재구현 ---
+  # 타당성 분류(반드시 반영/후속/미반영)는 워커가 change-adoption 으로 판단한다(여기선 지적을 전달만).
   int_set_verdict "$rd" "$key" request_changes
   local round; round="$(int_bump_review_round "$rd" "$key")"
-  int_log "$rd" "$key" "재작업 라운드 $round 시작 (verdict=request_changes head=$head)"
+  int_log "$rd" "$key" "재작업 라운드 $round 시작 (PR 변경요청 head=$head)"
   if [[ "$round" -gt "$REVIEW_ROUNDS_MAX" ]]; then
     rl_escalate "$rd" "$key" "라운드 상한($REVIEW_ROUNDS_MAX) 초과 — 자동수정 중지"
     return 10
   fi
   int_set_head "$rd" "$key" "$head"
 
-  local mustfile deferfile
-  mustfile="$rd/must.$key.$pr"; deferfile="$rd/defer.$key.$pr"
-  rl_produce_extract "$produce" must_adopt "$mustfile"
-  rl_produce_extract "$produce" defer      "$deferfile"
-
+  local mustfile; mustfile="$rd/must.$key.$pr"
+  rl_review_findings "$pr" > "$mustfile"
   if [[ ! -s "$mustfile" ]]; then
-    rl_escalate "$rd" "$key" "must_adopt 0 인데 여전히 request_changes — 무진전"
+    rl_escalate "$rd" "$key" "변경요청인데 채택할 PR 인라인 지적 0 — 무진전"
     return 10
   fi
 
@@ -250,17 +264,15 @@ rl_round() {
   fi
   int_set_blocking_hash "$rd" "$key" "$bh"
 
-  rl_spinoff_backlog "$rd" "$key" "$pr" "$deferfile"
-
   local delta; delta="$(rl_spec_delta "$rd" "$key" "$base" "$pr" "$mustfile")"
-  # 구현이 대상 브랜치에서 실패하면 거짓 성공·엉뚱한 push 대신 에스컬레이션(자동수정 보류).
+  # 구현이 작업 브랜치에서 실패하면 거짓 성공·엉뚱한 push 대신 에스컬레이션(자동수정 보류).
   # shellcheck disable=SC2086
   if ! $IMPLEMENT_CMD "$delta" "$branch"; then
-    rl_escalate "$rd" "$key" "재구현 실패 — 대상 브랜치($branch) 워크트리에서 구현 불가(자동수정 보류)"
+    rl_escalate "$rd" "$key" "재구현 실패 — 작업 브랜치($branch) 워크트리에서 구현 불가(자동수정 보류)"
     return 10
   fi
   in_push_branch "$branch"
-  int_log "$rd" "$key" "라운드 $round: must 구현 → 같은 head 브랜치($branch) push(새 PR 미생성). 재리뷰는 다음 드레인."
+  int_log "$rd" "$key" "라운드 $round: PR 지적 구현 → 같은 head 브랜치($branch) push. 재리뷰는 다음 드레인."
   return 0
 }
 
@@ -443,7 +455,12 @@ rl_selftest() {
   bad() { echo "FAIL  $1"; fail=1; }
   chk() { if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$1 (want '$3' got '$2')"; fi; }
 
-  forge_meta() { printf 'state: NONE\nauthor: \nhead: %s\n' "$1"; }
+  # forge_review <head> <verdict:approve|changes|pending> [finding...] — PR 리뷰 구동 mock(로컬 review 미사용).
+  forge_review() {
+    local head="$1" verdict="$2"; shift 2
+    printf 'state: NONE\nauthor: \nhead: %s\nverdict: %s\n' "$head" "$verdict"
+    local f; for f in "$@"; do printf 'finding: %s\n' "$f"; done
+  }
   prod_rc() {
     local head="$1" must="$2" defer="${3:-}" mj dj='[]'
     mj="$(jq -n --arg t "$must" '[{title:$t, body:($t+" 상세"), severity:"blocking"}]')"
@@ -455,97 +472,76 @@ rl_selftest() {
   prod_rc_empty() { jq -n --arg h "$1" '{pipeline_verdict:"request_changes", reviewed_context:{head_sha:$h}, rework_brief:{must_adopt:[], defer:[], wont_adopt:[]}}'; }
   prod_simple()   { jq -n --arg h "$1" --arg v "$2" '{pipeline_verdict:$v, reviewed_context:{head_sha:$h}, rework_brief:{must_adopt:[], defer:[], wont_adopt:[]}}'; }
 
-  # ---- AC3: request_changes + 새 head → 재작업 라운드(구현·재푸시) ----
+  # ---- forge: changes(PR 인라인 지적) + 새 head → 재작업 라운드(구현·재푸시), 로컬 review 미호출 ----
   local kA="a-aaa1"
-  forge_meta sha-AAA > "$RV/101.review"; prod_rc sha-AAA '보안 입력 검증 추가' > "$RV/$kA.produce"
+  forge_review sha-AAA changes '보안 입력 검증 추가' > "$RV/101.review"
   rl_round "$rd" "$kA" "$base" 101 "feat/run1-a"; rc=$?
-  chk "AC3 라운드 수행(rc=0)" "$rc" "0"
-  chk "AC3 라운드 카운터=1" "$(int_review_round "$rd" "$kA")" "1"
-  [[ -s "$IMPLLOG" ]] && ok "AC3 구현 실행됨" || bad "AC3 구현 실행됨"
-  grep -q 'feat/run1-a' "$PUSHLOG" && ok "AC3 같은 head 브랜치 push" || bad "AC3 같은 head 브랜치 push"
-  chk "AC3 head 처리 표시" "$(int_get_head "$rd" "$kA")" "sha-AAA"
+  chk "changes 라운드 수행(rc=0)" "$rc" "0"
+  chk "라운드 카운터=1" "$(int_review_round "$rd" "$kA")" "1"
+  [[ -s "$IMPLLOG" ]] && ok "구현 실행됨" || bad "구현 실행됨"
+  grep -q 'feat/run1-a' "$PUSHLOG" && ok "같은 head 브랜치 push" || bad "같은 head 브랜치 push"
+  chk "head 처리 표시" "$(int_get_head "$rd" "$kA")" "sha-AAA"
   delta="$rd/delta.$kA.101.spec.md"
-  grep -q '보안 입력 검증' "$delta" && ok "AC3 must 델타 반영" || bad "AC3 must 델타 반영"
+  grep -q '보안 입력 검증' "$delta" && ok "PR 지적 델타 반영" || bad "PR 지적 델타 반영"
   # 같은 head 재호출 → no-op(rc=20).
-  rl_round "$rd" "$kA" "$base" 101 "feat/run1-a"; chk "AC5 동일 head 미시작(rc=20)" "$?" "20"
+  rl_round "$rd" "$kA" "$base" 101 "feat/run1-a"; chk "동일 head 미시작(rc=20)" "$?" "20"
 
-  # ---- 재구현 실패 → 거짓 성공·엉뚱한 push 대신 에스컬레이션 (Codex blocking 회귀 가드) ----
+  # ---- 재구현 실패 → 거짓 성공·엉뚱한 push 대신 에스컬레이션 ----
   local kF="f-fff9"
-  forge_meta sha-FFF > "$RV/119.review"; prod_rc sha-FFF '구현 불가 항목' > "$RV/$kF.produce"
+  forge_review sha-FFF changes '구현 불가 항목' > "$RV/119.review"
   IMPLEMENT_CMD='false' rl_round "$rd" "$kF" "$base" 119 "feat/run1-f" >/dev/null 2>&1; rc=$?
   chk "구현 실패 → 에스컬레이션(rc=10)" "$rc" "10"
   if grep -q 'feat/run1-f' "$PUSHLOG"; then bad "구현 실패인데 push 함"; else ok "구현 실패 → push 안 함"; fi
 
-  # ---- AC6: approve → 머지 진행가능, 추가 라운드 미시작 ----
+  # ---- approve(PR 상태/마커) → 머지 진행가능, 추가 라운드·구현 미시작(로컬 review 미호출) ----
   local kB="b-bbb2"; : > "$IMPLLOG"
-  forge_meta sha-B > "$RV/107.review"; prod_simple sha-B approve > "$RV/$kB.produce"
+  forge_review sha-B approve > "$RV/107.review"
   rl_round "$rd" "$kB" "$base" 107 "feat/run1-b"; rc=$?
-  chk "AC6 approve rc=30" "$rc" "30"
-  chk "AC6 판정 기록=approve" "$(int_get_verdict "$rd" "$kB")" "approve"
-  chk "AC6 phase=approved" "$(int_get_phase "$rd" "$kB")" "approved"
-  chk "AC6 추가 라운드 미시작" "$(int_review_round "$rd" "$kB")" "0"
-  [[ ! -s "$IMPLLOG" ]] && ok "AC6 approve 시 구현 미위임" || bad "AC6 approve 시 구현 미위임"
-  rl_round "$rd" "$kB" "$base" 107 "feat/run1-b"; chk "AC6 approve 멱등(rc=20)" "$?" "20"
+  chk "approve rc=30" "$rc" "30"
+  chk "판정 기록=approve" "$(int_get_verdict "$rd" "$kB")" "approve"
+  chk "phase=approved" "$(int_get_phase "$rd" "$kB")" "approved"
+  chk "추가 라운드 미시작" "$(int_review_round "$rd" "$kB")" "0"
+  [[ ! -s "$IMPLLOG" ]] && ok "approve 시 구현 미위임" || bad "approve 시 구현 미위임"
+  rl_round "$rd" "$kB" "$base" 107 "feat/run1-b"; chk "approve 멱등(rc=20)" "$?" "20"
 
-  # ---- AC4: unavailable → 에스컬레이션 ----
-  local kU="u-uuu3"
-  forge_meta sha-U > "$RV/108.review"; prod_simple sha-U unavailable > "$RV/$kU.produce"
-  out="$(rl_round "$rd" "$kU" "$base" 108 "feat/run1-u")"; rc=$?
-  chk "AC4 unavailable rc=10" "$rc" "10"
-  case "$out" in *escalate*) ok "AC4 escalate 출력";; *) bad "AC4 escalate 출력";; esac
-  chk "AC4 phase=escalated" "$(int_get_phase "$rd" "$kU")" "escalated"
-  chk "AC4 라운드 미증가" "$(int_review_round "$rd" "$kU")" "0"
+  # ---- pending(승인X·지적X) → 대기(rc=20), 로컬 review 미호출 ----
+  local kPd="pd-ppp0"
+  forge_review sha-PD pending > "$RV/110.review"
+  rl_round "$rd" "$kPd" "$base" 110 "feat/run1-pd"; rc=$?
+  chk "pending rc=20(대기)" "$rc" "20"
+  chk "pending 라운드 미증가" "$(int_review_round "$rd" "$kPd")" "0"
 
-  # ---- AC5: 사람 리뷰어 변경요청 → 생산자 미consult·에스컬레이션 ----
+  # ---- 사람 리뷰어 변경요청(state CHANGES_REQUESTED) → 에스컬레이션 ----
   local kH="h-hhh4"
-  printf 'state: CHANGES_REQUESTED\nauthor: human-dev\nhead: sha-H\n' > "$RV/102.review"
-  prod_simple sha-H approve > "$RV/$kH.produce"
+  printf 'state: CHANGES_REQUESTED\nauthor: human-dev\nhead: sha-H\nverdict: changes\nfinding: 사람 지적\n' > "$RV/102.review"
   out="$(rl_round "$rd" "$kH" "$base" 102 "feat/run1-h")"; rc=$?
-  chk "AC5 사람=에스컬레이션(rc=10)" "$rc" "10"
-  chk "AC5 phase=escalated" "$(int_get_phase "$rd" "$kH")" "escalated"
-  chk "AC5 라운드 미증가" "$(int_review_round "$rd" "$kH")" "0"
+  chk "사람=에스컬레이션(rc=10)" "$rc" "10"
+  chk "사람 phase=escalated" "$(int_get_phase "$rd" "$kH")" "escalated"
+  chk "사람 라운드 미증가" "$(int_review_round "$rd" "$kH")" "0"
 
-  # ---- AC3 defer: defer 지적 → 별도 백로그 분리(현 PR 미혼합) ----
-  local kD="d-ddd5"
-  forge_meta sha-D > "$RV/103.review"; prod_rc sha-D '보안 검증 추가' '후속으로 리팩터' > "$RV/$kD.produce"
-  rl_round "$rd" "$kD" "$base" 103 "feat/run1-d" >/dev/null; rc=$?
-  chk "AC3 defer 라운드 수행" "$rc" "0"
-  [[ -s "$rd/backlog.$kD.103.md" ]] && ok "AC3 백로그 분리 파일 생성" || bad "AC3 백로그 분리 파일 생성"
-  delta="$rd/delta.$kD.103.spec.md"
-  grep -q '보안 검증' "$delta" && ok "AC3 must 델타 반영" || bad "AC3 must 델타 반영"
-  if grep -q '리팩터' "$delta"; then bad "AC3 defer 현PR 미혼합"; else ok "AC3 defer 현PR 미혼합"; fi
-
-  # ---- AC4 가드: 라운드 상한(3) 초과 → 에스컬레이션 ----
+  # ---- 라운드 상한(3) 초과 → 에스컬레이션 ----
   local kC="c-ccc6"
   int_set "$rd" "$kC" review-round 3
-  forge_meta sha-C4 > "$RV/104.review"; prod_rc sha-C4 '보안 또 수정' > "$RV/$kC.produce"
+  forge_review sha-C4 changes '보안 또 수정' > "$RV/104.review"
   out="$(rl_round "$rd" "$kC" "$base" 104 "feat/run1-c")"; rc=$?
-  chk "AC4 캡 초과 에스컬레이션(rc=10)" "$rc" "10"
-  case "$out" in *상한*) ok "AC4 상한 사유";; *) bad "AC4 상한 사유";; esac
+  chk "캡 초과 에스컬레이션(rc=10)" "$rc" "10"
+  case "$out" in *상한*) ok "상한 사유";; *) bad "상한 사유";; esac
 
-  # ---- AC4 가드: must 0 인데 request_changes → 무진전 에스컬레이션 ----
+  # ---- changes 인데 채택할 인라인 지적 0 → 무진전 에스컬레이션 ----
   local kN="n-nnn7"
-  forge_meta sha-N > "$RV/105.review"; prod_rc_empty sha-N > "$RV/$kN.produce"
+  printf 'state: NONE\nauthor: \nhead: sha-N\nverdict: changes\n' > "$RV/105.review"
   out="$(rl_round "$rd" "$kN" "$base" 105 "feat/run1-n")"; rc=$?
-  chk "AC4 무진전 에스컬레이션(rc=10)" "$rc" "10"
-  case "$out" in *무진전*) ok "AC4 무진전 사유";; *) bad "AC4 무진전 사유";; esac
+  chk "무진전 에스컬레이션(rc=10)" "$rc" "10"
+  case "$out" in *무진전*) ok "무진전 사유";; *) bad "무진전 사유";; esac
 
-  # ---- AC4 가드: 빈 title/body must → 공백줄 무진전 우회 금지 ----
-  local kE="e-eee8"
-  forge_meta sha-E > "$RV/109.review"
-  jq -n '{pipeline_verdict:"request_changes", reviewed_context:{head_sha:"sha-E"}, rework_brief:{must_adopt:[{title:"",body:"",severity:"blocking"}], defer:[], wont_adopt:[]}}' > "$RV/$kE.produce"
-  out="$(rl_round "$rd" "$kE" "$base" 109 "feat/run1-e")"; rc=$?
-  chk "AC4 빈 must=무진전(rc=10)" "$rc" "10"
-  [[ ! -f "$rd/delta.$kE.109.spec.md" ]] && ok "AC4 공백 델타 미생성" || bad "AC4 공백 델타 미생성"
-
-  # ---- AC4 가드: 핑퐁(차단성 집합 직전과 동일) → 에스컬레이션 ----
+  # ---- 핑퐁(차단성 집합 직전과 동일) → 에스컬레이션 ----
   local kP="p-ppp9"
-  forge_meta sha-P1 > "$RV/106.review"; prod_rc sha-P1 '보안 입력 검증 누락' > "$RV/$kP.produce"
-  rl_round "$rd" "$kP" "$base" 106 "feat/run1-p" >/dev/null; chk "AC4 핑퐁 1라운드 수행" "$?" "0"
-  forge_meta sha-P2 > "$RV/106.review"; prod_rc sha-P2 '보안 입력 검증 누락' > "$RV/$kP.produce"
+  forge_review sha-P1 changes '보안 입력 검증 누락' > "$RV/106.review"
+  rl_round "$rd" "$kP" "$base" 106 "feat/run1-p" >/dev/null; chk "핑퐁 1라운드 수행" "$?" "0"
+  forge_review sha-P2 changes '보안 입력 검증 누락' > "$RV/106.review"
   out="$(rl_round "$rd" "$kP" "$base" 106 "feat/run1-p")"; rc=$?
-  chk "AC4 핑퐁 에스컬레이션(rc=10)" "$rc" "10"
-  case "$out" in *핑퐁*) ok "AC4 핑퐁 사유";; *) bad "AC4 핑퐁 사유";; esac
+  chk "핑퐁 에스컬레이션(rc=10)" "$rc" "10"
+  case "$out" in *핑퐁*) ok "핑퐁 사유";; *) bad "핑퐁 사유";; esac
 
   # =====================================================================
   # direct 서브모드 리뷰 게이트 — PR 없는 로컬 작업 브랜치 리뷰(원격 push 없음).
