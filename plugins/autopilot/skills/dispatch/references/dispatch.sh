@@ -2,7 +2,7 @@
 # dispatch.sh — autopilot:dispatch 결정적 오케스트레이션 헬퍼 (모델 주도)
 #
 # dispatch 는 준비된 SPEC마다 서브에이전트를 1개 띄우는 **모델 주도** 오케스트레이터다. 통합·
-# 리뷰·머지는 서브에이전트가 SPEC당 한 컨텍스트에서 소유한다(계약: references/spec-subagent.md).
+# 리뷰·머지는 서브에이전트가 SPEC당 한 컨텍스트에서 소유한다(계약: agents/dispatch-worker.md).
 # 이 셸 스크립트는 그 오케스트레이션의 **결정적 부분만** 제공하는 헬퍼다 — 오케스트레이션 주체가
 # 아니다(서브에이전트 spawn 은 Agent 도구를 쓰는 모델이 수행, bash 무인 드레인 루프 아님).
 #
@@ -45,7 +45,7 @@ POLL_SECONDS="${DISPATCH_POLL_SECONDS:-2}"
 WAVE_TIMEOUT_SECONDS="${DISPATCH_WAVE_TIMEOUT_SECONDS:-7200}"
 
 # ----- 서브모드·대상 브랜치 (모델 주도 — 서브에이전트가 리뷰·머지를 소유) -----
-# 통합·리뷰·머지는 서브에이전트가 SPEC당 한 컨텍스트에서 소유한다(계약: references/spec-subagent.md).
+# 통합·리뷰·머지는 서브에이전트가 SPEC당 한 컨텍스트에서 소유한다(계약: agents/dispatch-worker.md).
 # dispatch.sh 는 결정적 셋업·스케줄링 헬퍼만 제공하고 통합 모듈을 드레인하지 않는다.
 # 서브모드(forge/direct)와 대상 브랜치는 run 전역 사실로 cmd_start 가 결정·영속(run-dir 마커)해
 # 서브에이전트가 일관되게 읽고 --resume 에서 sticky 하다.
@@ -534,7 +534,7 @@ cmd_start() {
   # ----- 셋업 완료 — 모델 주도 오케스트레이션으로 인계 -----
   # dispatch.sh 는 결정적 셋업(run-dir·DAG·markers·pending 상태)만 수행한다. 준비된 SPEC당
   # 서브에이전트 spawn·구현·리뷰·머지는 모델(dispatch 스킬)이 ready/mark 헬퍼 + Agent 도구로
-  # 소유한다(서브에이전트 계약: references/spec-subagent.md). bash 무인 드레인 루프는 없다.
+  # 소유한다(서브에이전트 계약: agents/dispatch-worker.md). bash 무인 드레인 루프는 없다.
   #
   # 모델 루프:
   #   1. ready <run-id> [--max-parallel N] → 지금 띄울 준비된 SPEC 목록.
@@ -664,7 +664,7 @@ cmd_watch() {
 # =====================================================================
 # selftest — 결정적 오케스트레이션 검증(모델 주도). 실제 spawn·머지·PR 미수행.
 #   dispatch.sh 는 결정적 셋업(start)·readiness(ready)·전이(mark) 헬퍼만 제공하고,
-#   서브에이전트 spawn·구현·리뷰·머지는 모델(Agent 도구)이 소유한다(계약: spec-subagent.md).
+#   서브에이전트 spawn·구현·리뷰·머지는 모델(Agent 도구)이 소유한다(계약: agents/dispatch-worker.md).
 #   따라서 여기서는 통합·리뷰·머지 bash 드레인을 검증하지 않는다(그 동작은 서브에이전트 소유
 #   이며 helper 모듈 integration/review-loop/merge.sh 의 자체 selftest 가 검증).
 #   완료 조건 1·9·12 의 결정적 부분을 검증:
@@ -844,7 +844,7 @@ Subcommands:
         run-dir·WAVES.txt(진단)·초기 pending 상태·run 전역 마커(서브모드 INTEGRATE /
         대상 브랜치 TARGET_BRANCH / MAX_PARALLEL)를 생성한 뒤 run-id 를 출력한다.
         스스로 spawn·드레인하지 않는다 — 준비된 SPEC당 서브에이전트 spawn·구현·리뷰·머지는
-        모델(dispatch 스킬)이 ready/mark + Agent 도구로 소유한다(계약: spec-subagent.md).
+        모델(dispatch 스킬)이 ready/mark + Agent 도구로 소유한다(계약: agents/dispatch-worker.md).
         --target-branch 로 대상 브랜치 지정(미지정 시 기본 브랜치). 서브모드·대상 브랜치·
         동시성 상한은 --resume 에서 sticky(run-dir 마커). 하위호환 --integrate/--no-integrate
         는 받되 무시(no-op). cycle 이면 abort.
