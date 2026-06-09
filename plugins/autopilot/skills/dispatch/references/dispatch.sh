@@ -36,7 +36,8 @@
 #   DISPATCH_WAVE_TIMEOUT_SECONDS  watch 최대 대기 (기본 7200 = 2 시간)
 #   FORGE_BIN DEFAULT_BRANCH  서브모드·대상 브랜치 판정(주입 가능, mock 검증).
 #   DISPATCH_DRIVER  fan-out 드라이버 override(strong-parallel|background|foreground-batch).
-#   DISPATCH_STRONG_PARALLEL=1 / DISPATCH_BACKGROUND=1  모델 자동 감지 환경 신호(없으면 폴백).
+#   DISPATCH_NO_STRONG_PARALLEL=1 / DISPATCH_NO_BACKGROUND=1  강등 신호(기본은 동적 선호; 동적·백그라운드
+#                    실행 불가 판정 시에만 주입). 없으면 기본 선호 strong-parallel.
 #
 # bash 3.2 호환 (assoc array 사용 안 함).
 
@@ -80,11 +81,13 @@ forge_backend_available() {
 #   foreground-batch: 한 턴에 ready 동시 시작 → 배리어 → 준비도 재평가. 안전 폴백(사슬 종착).
 # 안전 강등 사슬: strong-parallel → background → foreground-batch.
 #
-# 자동 감지는 실행 환경(세션) 속성이라 대상 리포 파일로 결정적 probe 불가 — 실행 주체(모델)의
-# 환경 판정에 둔다. 모델은 세션 시작 시 가용 역량을 DISPATCH_STRONG_PARALLEL=1 /
-# DISPATCH_BACKGROUND=1 환경 신호로 주입하고, 신호가 없으면 안전 폴백(foreground-batch).
-# 운영자 override 는 기존 시작 CLI 를 바꾸지 않도록 DISPATCH_DRIVER 환경 변수로 받는다(DISPATCH_*
-# 주입 관례). 결정된 드라이버는 run-dir 마커(DRIVER)로 영속해 --resume 에서 sticky 하다.
+# 기본 선호는 strong-parallel(동적 Workflow): 신호가 없어도 기본으로 동적을 시도한다. 자동 감지는
+# 실행 환경(세션) 속성이라 대상 리포 파일로 결정적 probe 불가 — 실행 주체(모델)의 환경 판정에 둔다.
+# 동적 Workflow 를 실제로 실행할 수 없다고 판정될 때에만 모델이 강등 신호를 주입한다:
+# DISPATCH_NO_STRONG_PARALLEL=1(동적 불가) → background, 추가로 DISPATCH_NO_BACKGROUND=1(백그라운드도
+# 불가) → foreground-batch(강등 사슬 종착). 운영자 override 는 기존 시작 CLI 를 바꾸지 않도록
+# DISPATCH_DRIVER 환경 변수로 받는다(DISPATCH_* 주입 관례). 결정된 드라이버는 run-dir 마커(DRIVER)로
+# 영속해 --resume 에서 sticky 하다.
 DISPATCH_DRIVER="${DISPATCH_DRIVER:-}"   # 운영자 override(빈 값이면 자동 감지).
 FANOUT_DRIVER=""                         # cmd_start 가 결정 후 채운다.
 
@@ -98,9 +101,12 @@ valid_driver() {
 
 # detect_driver — 드라이버를 결정해 echo. 우선순위:
 #   1. DISPATCH_DRIVER override 가 유효하면 그대로(무효면 abort).
-#   2. 자동 감지(모델 환경 신호): DISPATCH_STRONG_PARALLEL=1 → strong-parallel.
-#   3. DISPATCH_BACKGROUND=1 → background.
-#   4. 그 외(신호 없음) → foreground-batch(안전 강등 사슬 종착).
+#   2. 기본 선호 = strong-parallel(동적 Workflow). 신호가 없으면 동적을 시도한다.
+#   3. 동적 실행 불가 판정 시에만 강등(모델 환경 신호):
+#        DISPATCH_NO_STRONG_PARALLEL=1 → background 로 강등.
+#        + DISPATCH_NO_BACKGROUND=1 도 있으면 → foreground-batch(강등 사슬 종착).
+#   강등 사슬은 strong-parallel → background → foreground-batch 순서를 지킨다(건너뛰기 없음):
+#   동적 가용이면(NO_STRONG_PARALLEL 미설정) NO_BACKGROUND 와 무관하게 strong-parallel.
 detect_driver() {
   if [[ -n "$DISPATCH_DRIVER" ]]; then
     if valid_driver "$DISPATCH_DRIVER"; then
@@ -108,13 +114,14 @@ detect_driver() {
     fi
     die "DISPATCH_DRIVER='$DISPATCH_DRIVER' 은 유효하지 않은 드라이버(strong-parallel|background|foreground-batch)"
   fi
-  if [[ "${DISPATCH_STRONG_PARALLEL:-}" == "1" ]]; then
-    echo "strong-parallel"; return
-  fi
-  if [[ "${DISPATCH_BACKGROUND:-}" == "1" ]]; then
+  # 기본 선호: 동적 Workflow(strong-parallel). 실행 불가로 판정될 때에만 안전 강등.
+  if [[ "${DISPATCH_NO_STRONG_PARALLEL:-}" == "1" ]]; then
+    if [[ "${DISPATCH_NO_BACKGROUND:-}" == "1" ]]; then
+      echo "foreground-batch"; return
+    fi
     echo "background"; return
   fi
-  echo "foreground-batch"
+  echo "strong-parallel"
 }
 
 # ----- helpers -----
@@ -908,45 +915,54 @@ cmd_selftest() {
   if grep -rqx 'integrating' "$rd7"/state.* 2>/dev/null; then bad "S7 integrating 상태 부재(드레인 없음)"; else ok "S7 integrating 상태 부재(bash 드레인 없음)"; fi
   if grep -rqx 'done' "$rd7"/state.* 2>/dev/null; then bad "S7 셋업 직후 자동 done 부재"; else ok "S7 셋업 직후 자동 done 부재(start 미드라이브)"; fi
 
-  # ---- S9: fan-out 드라이버 — 자동 감지(환경 신호)·override·resume sticky ----
-  # 자동 감지는 모델의 환경 판정에 둔다 → env 신호(DISPATCH_STRONG_PARALLEL/DISPATCH_BACKGROUND)
-  # 로 표현. override 는 DISPATCH_DRIVER(기존 시작 CLI 불변). 안전 폴백=foreground-batch.
+  # ---- S9: fan-out 드라이버 — 기본=동적 선호·강등 신호·override·resume sticky ----
+  # 기본 선호는 strong-parallel(동적 Workflow). 자동 감지는 모델의 환경 판정에 둔다 → 동적/백그라운드
+  # 실행 불가일 때만 강등 신호(DISPATCH_NO_STRONG_PARALLEL/DISPATCH_NO_BACKGROUND)로 표현.
+  # override 는 DISPATCH_DRIVER(기존 시작 CLI 불변). 강등 사슬: strong-parallel → background → foreground-batch.
   drv_marker() { cat "$1/DRIVER" 2>/dev/null; }
   drv_cmd()    { ( cd "$REPO" && dsp bash "$DSP" driver "$1" 2>/dev/null ); }
 
-  # S9a: 신호 없음 → 안전 폴백 foreground-batch.
+  # S9a: 신호 없음 → 기본 선호 strong-parallel(동적 선호로 역전; 과거 foreground-batch 폴백 아님).
   rm -rf "$REPO/.dispatch"
-  local rid9a; rid9a="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_STRONG_PARALLEL= DISPATCH_BACKGROUND= bash "$DSP" start feature-a.md )"
+  local rid9a; rid9a="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_NO_STRONG_PARALLEL= DISPATCH_NO_BACKGROUND= bash "$DSP" start feature-a.md )"
   local rd9a; rd9a="$(latest_run)"
-  [[ "$(drv_marker "$rd9a")" == "foreground-batch" ]] \
-    && ok "S9a 자동 감지 폴백=foreground-batch" \
-    || bad "S9a 폴백 got=$(drv_marker "$rd9a")"
-  [[ "$(drv_cmd "$rid9a")" == "foreground-batch" ]] \
-    && ok "S9a driver 서브커맨드=foreground-batch" \
+  [[ "$(drv_marker "$rd9a")" == "strong-parallel" ]] \
+    && ok "S9a 신호 없음 → 기본 strong-parallel(동적 선호)" \
+    || bad "S9a 기본 선호 got=$(drv_marker "$rd9a")"
+  [[ "$(drv_cmd "$rid9a")" == "strong-parallel" ]] \
+    && ok "S9a driver 서브커맨드=strong-parallel" \
     || bad "S9a driver 서브커맨드 got=$(drv_cmd "$rid9a")"
 
-  # S9b: DISPATCH_STRONG_PARALLEL=1 → strong-parallel.
+  # S9b: DISPATCH_NO_STRONG_PARALLEL=1(동적 불가) → background 로 강등.
   rm -rf "$REPO/.dispatch"
-  local rid9b; rid9b="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_STRONG_PARALLEL=1 DISPATCH_BACKGROUND= bash "$DSP" start feature-a.md )"
+  local rid9b; rid9b="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_NO_STRONG_PARALLEL=1 DISPATCH_NO_BACKGROUND= bash "$DSP" start feature-a.md )"
   local rd9b; rd9b="$(latest_run)"
-  [[ "$(drv_marker "$rd9b")" == "strong-parallel" ]] \
-    && ok "S9b 환경 신호 strong-parallel" \
-    || bad "S9b strong-parallel got=$(drv_marker "$rd9b")"
+  [[ "$(drv_marker "$rd9b")" == "background" ]] \
+    && ok "S9b 동적 불가 → background 강등" \
+    || bad "S9b background got=$(drv_marker "$rd9b")"
 
-  # S9c: DISPATCH_BACKGROUND=1 (STRONG_PARALLEL 없음) → background.
+  # S9c: DISPATCH_NO_STRONG_PARALLEL=1 + DISPATCH_NO_BACKGROUND=1(둘 다 불가) → foreground-batch 종착.
   rm -rf "$REPO/.dispatch"
-  local rid9c; rid9c="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_STRONG_PARALLEL= DISPATCH_BACKGROUND=1 bash "$DSP" start feature-a.md )"
+  local rid9c; rid9c="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_NO_STRONG_PARALLEL=1 DISPATCH_NO_BACKGROUND=1 bash "$DSP" start feature-a.md )"
   local rd9c; rd9c="$(latest_run)"
-  [[ "$(drv_marker "$rd9c")" == "background" ]] \
-    && ok "S9c 환경 신호 background" \
-    || bad "S9c background got=$(drv_marker "$rd9c")"
+  [[ "$(drv_marker "$rd9c")" == "foreground-batch" ]] \
+    && ok "S9c 동적·백그라운드 불가 → foreground-batch 종착" \
+    || bad "S9c foreground-batch got=$(drv_marker "$rd9c")"
 
-  # S9d: DISPATCH_DRIVER override → STRONG_PARALLEL 신호 무시하고 지정 드라이버 강제.
+  # S9c2: DISPATCH_NO_BACKGROUND=1 만(동적 가용) → 기본 strong-parallel 유지(동적 가용이면 강등 안 함).
   rm -rf "$REPO/.dispatch"
-  local rid9d; rid9d="$( start_rid dsp env DISPATCH_DRIVER=background DISPATCH_STRONG_PARALLEL=1 bash "$DSP" start feature-a.md )"
+  local rid9c2; rid9c2="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_NO_STRONG_PARALLEL= DISPATCH_NO_BACKGROUND=1 bash "$DSP" start feature-a.md )"
+  local rd9c2; rd9c2="$(latest_run)"
+  [[ "$(drv_marker "$rd9c2")" == "strong-parallel" ]] \
+    && ok "S9c2 동적 가용이면 NO_BACKGROUND 무관하게 strong-parallel" \
+    || bad "S9c2 strong-parallel got=$(drv_marker "$rd9c2")"
+
+  # S9d: DISPATCH_DRIVER override → 강등 신호 무시하고 지정 드라이버 강제.
+  rm -rf "$REPO/.dispatch"
+  local rid9d; rid9d="$( start_rid dsp env DISPATCH_DRIVER=background DISPATCH_NO_STRONG_PARALLEL=1 DISPATCH_NO_BACKGROUND=1 bash "$DSP" start feature-a.md )"
   local rd9d; rd9d="$(latest_run)"
   [[ "$(drv_marker "$rd9d")" == "background" ]] \
-    && ok "S9d override=background(STRONG_PARALLEL 무시)" \
+    && ok "S9d override=background(강등 신호 무시)" \
     || bad "S9d override got=$(drv_marker "$rd9d")"
 
   # S9e: resume sticky — 최초 결정이 마커로 영속돼 재개 시 다른 env override 보다 우선.
@@ -1029,9 +1045,9 @@ Subcommands:
   DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS, FORGE_BIN, DEFAULT_BRANCH
   DISPATCH_DRIVER       fan-out 드라이버 override(strong-parallel|background|foreground-batch).
                         기존 시작 CLI 불변 — override 는 이 env 로만 받는다.
-  DISPATCH_STRONG_PARALLEL=1  강한 병렬 드라이버 환경 신호(모델 자동 감지).
-  DISPATCH_BACKGROUND=1       백그라운드 드라이버 환경 신호(모델 자동 감지).
-                        신호가 없으면 안전 폴백 foreground-batch.
+  DISPATCH_NO_STRONG_PARALLEL=1  동적 불가 강등 신호(모델 자동 감지) → background.
+  DISPATCH_NO_BACKGROUND=1       추가 강등 신호(NO_STRONG_PARALLEL 과 함께) → foreground-batch.
+                        신호가 없으면 기본 선호 strong-parallel(동적 Workflow).
                         강등 사슬: strong-parallel → background → foreground-batch.
 EOF
   exit 1
