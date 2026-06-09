@@ -8,8 +8,8 @@
 #
 # 책임(결정적):
 #   - start: SPEC 입력 검증·frontmatter depends_on 으로 DAG 구성·WAVES.txt(진단)·초기 pending
-#            상태·run 전역 마커(서브모드 INTEGRATE / 대상 브랜치 TARGET_BRANCH / MAX_PARALLEL)를
-#            만드는 **셋업 전용**. 스스로 spawn·드레인하지 않는다.
+#            상태·run 전역 마커(서브모드 INTEGRATE / 대상 브랜치 TARGET_BRANCH / MAX_PARALLEL /
+#            fan-out 드라이버 DRIVER)를 만드는 **셋업 전용**. 스스로 spawn·드레인하지 않는다.
 #   - ready: 지금 서브에이전트를 띄울 준비된 SPEC(모든 dep done & pending & 동시성 상한 이내)을
 #            출력(skip 전파 적용). 모델이 각 SPEC 에 서브에이전트 1개를 spawn.
 #   - mark:  SPEC 상태 전이(running=spawn 직전 / done=서브에이전트 머지 보고=의존자 해제 /
@@ -29,12 +29,14 @@
 #   bash dispatch.sh start <spec...> [--max-parallel N] [--resume <run-id>] [--target-branch <b>]
 #   bash dispatch.sh ready <run-id> [--max-parallel N]
 #   bash dispatch.sh mark <run-id> <running|done|failed> <spec>
-#   bash dispatch.sh list | status <run-id> | stop <run-id> | watch <run-id>
+#   bash dispatch.sh list | status <run-id> | driver <run-id> | stop <run-id> | watch <run-id>
 #
 # 환경 변수:
 #   DISPATCH_POLL_SECONDS          watch 폴링 간격 (기본 2)
 #   DISPATCH_WAVE_TIMEOUT_SECONDS  watch 최대 대기 (기본 7200 = 2 시간)
 #   FORGE_BIN DEFAULT_BRANCH  서브모드·대상 브랜치 판정(주입 가능, mock 검증).
+#   DISPATCH_DRIVER  fan-out 드라이버 override(strong-parallel|background|foreground-batch).
+#   DISPATCH_STRONG_PARALLEL=1 / DISPATCH_BACKGROUND=1  모델 자동 감지 환경 신호(없으면 폴백).
 #
 # bash 3.2 호환 (assoc array 사용 안 함).
 
@@ -65,6 +67,54 @@ FORGE_BIN="${FORGE_BIN:-gh}"
 #   (서브에이전트는 이 마커를 읽어 리뷰·머지 대상을 정한다).
 forge_backend_available() {
   command -v "${FORGE_BIN%% *}" >/dev/null 2>&1
+}
+
+# ----- fan-out 드라이버 (강한 병렬 / 백그라운드 / 포그라운드 배치) -----
+# dispatch fan-out 단계(준비된 SPEC당 워커 1개 진행)는 실행 환경 역량에 따라 세 드라이버 중
+# 하나로 구동된다. 세 드라이버는 동일한 결정적 코어(ready 스트리밍·mark skip 전파·merge/review
+# 게이트)를 공유하고 fan-out 진행 방식만 다르다.
+#   strong-parallel : dynamic Workflow 실행 — 임의 depends_on DAG를 promise 기반으로 표현해
+#                     노드별 의존성 충족 즉시 워커 실행(SPEC당 워커 1). 런타임이 병렬·스트리밍·
+#                     동시성·재개를 네이티브로 소유.
+#   background      : 워커를 비동기로 띄우고 개별 완료 신호에 반응해 의존자를 즉시 해제.
+#   foreground-batch: 한 턴에 ready 동시 시작 → 배리어 → 준비도 재평가. 안전 폴백(사슬 종착).
+# 안전 강등 사슬: strong-parallel → background → foreground-batch.
+#
+# 자동 감지는 실행 환경(세션) 속성이라 대상 리포 파일로 결정적 probe 불가 — 실행 주체(모델)의
+# 환경 판정에 둔다. 모델은 세션 시작 시 가용 역량을 DISPATCH_STRONG_PARALLEL=1 /
+# DISPATCH_BACKGROUND=1 환경 신호로 주입하고, 신호가 없으면 안전 폴백(foreground-batch).
+# 운영자 override 는 기존 시작 CLI 를 바꾸지 않도록 DISPATCH_DRIVER 환경 변수로 받는다(DISPATCH_*
+# 주입 관례). 결정된 드라이버는 run-dir 마커(DRIVER)로 영속해 --resume 에서 sticky 하다.
+DISPATCH_DRIVER="${DISPATCH_DRIVER:-}"   # 운영자 override(빈 값이면 자동 감지).
+FANOUT_DRIVER=""                         # cmd_start 가 결정 후 채운다.
+
+# valid_driver <name> — 알려진 드라이버 이름이면 0.
+valid_driver() {
+  case "$1" in
+    strong-parallel|background|foreground-batch) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# detect_driver — 드라이버를 결정해 echo. 우선순위:
+#   1. DISPATCH_DRIVER override 가 유효하면 그대로(무효면 abort).
+#   2. 자동 감지(모델 환경 신호): DISPATCH_STRONG_PARALLEL=1 → strong-parallel.
+#   3. DISPATCH_BACKGROUND=1 → background.
+#   4. 그 외(신호 없음) → foreground-batch(안전 강등 사슬 종착).
+detect_driver() {
+  if [[ -n "$DISPATCH_DRIVER" ]]; then
+    if valid_driver "$DISPATCH_DRIVER"; then
+      echo "$DISPATCH_DRIVER"; return
+    fi
+    die "DISPATCH_DRIVER='$DISPATCH_DRIVER' 은 유효하지 않은 드라이버(strong-parallel|background|foreground-batch)"
+  fi
+  if [[ "${DISPATCH_STRONG_PARALLEL:-}" == "1" ]]; then
+    echo "strong-parallel"; return
+  fi
+  if [[ "${DISPATCH_BACKGROUND:-}" == "1" ]]; then
+    echo "background"; return
+  fi
+  echo "foreground-batch"
 }
 
 # ----- helpers -----
@@ -531,6 +581,19 @@ cmd_start() {
   # 마커가 있으면(=재개) 현재 플래그보다 우선(sticky).
   [[ -f "$rd/MAX_PARALLEL" ]] || printf '%s\n' "$max_parallel" > "$rd/MAX_PARALLEL"
 
+  # ----- fan-out 드라이버 판정 (DRIVER 마커, resume sticky) -----
+  # run-dir 마커($rd/DRIVER)로 영속해 --resume 에서 sticky(최초 시작 결정을 그대로 재개).
+  # 마커가 있으면(=재개) 현재 env(DISPATCH_DRIVER/신호)보다 우선. 자동 감지·override·안전 폴백은
+  # detect_driver 가 담당(강등 사슬: strong-parallel → background → foreground-batch).
+  if [[ -f "$rd/DRIVER" ]]; then
+    FANOUT_DRIVER="$(cat "$rd/DRIVER" 2>/dev/null || true)"
+  fi
+  if [[ -z "$FANOUT_DRIVER" ]] || ! valid_driver "$FANOUT_DRIVER"; then
+    FANOUT_DRIVER="$(detect_driver)"
+  fi
+  printf '%s\n' "$FANOUT_DRIVER" > "$rd/DRIVER"
+  log_event "$rd" "fan-out driver=$FANOUT_DRIVER (override=${DISPATCH_DRIVER:-auto})"
+
   # ----- 셋업 완료 — 모델 주도 오케스트레이션으로 인계 -----
   # dispatch.sh 는 결정적 셋업(run-dir·DAG·markers·pending 상태)만 수행한다. 준비된 SPEC당
   # 서브에이전트 spawn·구현·리뷰·머지는 모델(dispatch 스킬)이 ready/mark 헬퍼 + Agent 도구로
@@ -589,6 +652,8 @@ cmd_status() {
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
   echo "run-id: $rid"
   echo "path:   $rd"
+  # fan-out 드라이버(관찰성: 자동 선택·override·안전 강등 결과). 마커 없으면 레거시 기본.
+  echo "driver: $(cat "$rd/DRIVER" 2>/dev/null || echo foreground-batch)"
   echo ""
   # 모델 주도: dispatch 는 서브에이전트의 결과만 받으므로 오케스트레이션 상태(STATE)만 보고한다.
   # (loop 은 서브에이전트가 자기 컨텍스트에서 호출하므로 dispatch 가 직접 들여다보지 않는다.)
@@ -600,6 +665,22 @@ cmd_status() {
     st="$(get_state "$rd" "$sp")"
     printf "wave=%-2s %-10s %s\n" "$w" "$st" "$sp"
   done < "$rd/WAVES.txt"
+}
+
+# ----- subcommand: driver -----
+# cmd_driver <run-id> — run 의 fan-out 드라이버(strong-parallel|background|foreground-batch)
+#   를 출력(관찰성: 자동 선택·override·안전 강등 결과). 마커 없는 레거시 run 은 foreground-batch.
+cmd_driver() {
+  local rid="${1:-}"
+  [[ -z "$rid" ]] && die "사용: $0 driver <run-id>"
+  require_git_root
+  local rd; rd="$(run_dir "$rid")"
+  [[ -d "$rd" ]] || die "run-id 없음: $rid"
+  if [[ -f "$rd/DRIVER" ]]; then
+    cat "$rd/DRIVER"
+  else
+    echo "foreground-batch"
+  fi
 }
 
 # ----- subcommand: stop -----
@@ -827,6 +908,81 @@ cmd_selftest() {
   if grep -rqx 'integrating' "$rd7"/state.* 2>/dev/null; then bad "S7 integrating 상태 부재(드레인 없음)"; else ok "S7 integrating 상태 부재(bash 드레인 없음)"; fi
   if grep -rqx 'done' "$rd7"/state.* 2>/dev/null; then bad "S7 셋업 직후 자동 done 부재"; else ok "S7 셋업 직후 자동 done 부재(start 미드라이브)"; fi
 
+  # ---- S9: fan-out 드라이버 — 자동 감지(환경 신호)·override·resume sticky ----
+  # 자동 감지는 모델의 환경 판정에 둔다 → env 신호(DISPATCH_STRONG_PARALLEL/DISPATCH_BACKGROUND)
+  # 로 표현. override 는 DISPATCH_DRIVER(기존 시작 CLI 불변). 안전 폴백=foreground-batch.
+  drv_marker() { cat "$1/DRIVER" 2>/dev/null; }
+  drv_cmd()    { ( cd "$REPO" && dsp bash "$DSP" driver "$1" 2>/dev/null ); }
+
+  # S9a: 신호 없음 → 안전 폴백 foreground-batch.
+  rm -rf "$REPO/.dispatch"
+  local rid9a; rid9a="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_STRONG_PARALLEL= DISPATCH_BACKGROUND= bash "$DSP" start feature-a.md )"
+  local rd9a; rd9a="$(latest_run)"
+  [[ "$(drv_marker "$rd9a")" == "foreground-batch" ]] \
+    && ok "S9a 자동 감지 폴백=foreground-batch" \
+    || bad "S9a 폴백 got=$(drv_marker "$rd9a")"
+  [[ "$(drv_cmd "$rid9a")" == "foreground-batch" ]] \
+    && ok "S9a driver 서브커맨드=foreground-batch" \
+    || bad "S9a driver 서브커맨드 got=$(drv_cmd "$rid9a")"
+
+  # S9b: DISPATCH_STRONG_PARALLEL=1 → strong-parallel.
+  rm -rf "$REPO/.dispatch"
+  local rid9b; rid9b="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_STRONG_PARALLEL=1 DISPATCH_BACKGROUND= bash "$DSP" start feature-a.md )"
+  local rd9b; rd9b="$(latest_run)"
+  [[ "$(drv_marker "$rd9b")" == "strong-parallel" ]] \
+    && ok "S9b 환경 신호 strong-parallel" \
+    || bad "S9b strong-parallel got=$(drv_marker "$rd9b")"
+
+  # S9c: DISPATCH_BACKGROUND=1 (STRONG_PARALLEL 없음) → background.
+  rm -rf "$REPO/.dispatch"
+  local rid9c; rid9c="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_STRONG_PARALLEL= DISPATCH_BACKGROUND=1 bash "$DSP" start feature-a.md )"
+  local rd9c; rd9c="$(latest_run)"
+  [[ "$(drv_marker "$rd9c")" == "background" ]] \
+    && ok "S9c 환경 신호 background" \
+    || bad "S9c background got=$(drv_marker "$rd9c")"
+
+  # S9d: DISPATCH_DRIVER override → STRONG_PARALLEL 신호 무시하고 지정 드라이버 강제.
+  rm -rf "$REPO/.dispatch"
+  local rid9d; rid9d="$( start_rid dsp env DISPATCH_DRIVER=background DISPATCH_STRONG_PARALLEL=1 bash "$DSP" start feature-a.md )"
+  local rd9d; rd9d="$(latest_run)"
+  [[ "$(drv_marker "$rd9d")" == "background" ]] \
+    && ok "S9d override=background(STRONG_PARALLEL 무시)" \
+    || bad "S9d override got=$(drv_marker "$rd9d")"
+
+  # S9e: resume sticky — 최초 결정이 마커로 영속돼 재개 시 다른 env override 보다 우선.
+  rm -rf "$REPO/.dispatch"
+  local rid9e; rid9e="$( start_rid dsp env DISPATCH_DRIVER=strong-parallel bash "$DSP" start feature-a.md )"
+  local rd9e; rd9e="$(latest_run)"
+  ( cd "$REPO" && dsp env DISPATCH_DRIVER=foreground-batch bash "$DSP" start --resume "$rid9e" ) >/dev/null 2>&1 || true
+  [[ "$(drv_marker "$rd9e")" == "strong-parallel" ]] \
+    && ok "S9e resume: driver sticky(override env 무시)" \
+    || bad "S9e resume sticky got=$(drv_marker "$rd9e")"
+
+  # S9f: 무효 override → 즉시 abort(비-0).
+  rm -rf "$REPO/.dispatch"
+  local rc9f=0; ( cd "$REPO" && dsp env DISPATCH_DRIVER=bogus bash "$DSP" start feature-a.md ) >/dev/null 2>&1 || rc9f=$?
+  [[ "$rc9f" -ne 0 ]] && ok "S9f 무효 override → abort(비-0)" || bad "S9f 무효 override abort got=$rc9f"
+
+  # ---- S10: 안전 강등 관찰 가능성 — 어느 드라이버로 갔는지 driver 커맨드/status 로 관찰 ----
+  rm -rf "$REPO/.dispatch"
+  local rid10; rid10="$( start_rid dsp env DISPATCH_DRIVER=strong-parallel bash "$DSP" start feature-a.md feature-b.md )"
+  [[ "$(drv_cmd "$rid10")" == "strong-parallel" ]] \
+    && ok "S10 driver 관찰(strong-parallel)" \
+    || bad "S10 driver 관찰 got=$(drv_cmd "$rid10")"
+  # 강등 종착(foreground-batch)도 관찰 가능.
+  rm -rf "$REPO/.dispatch"
+  local rid10b; rid10b="$( start_rid dsp env DISPATCH_DRIVER=foreground-batch bash "$DSP" start feature-a.md )"
+  [[ "$(drv_cmd "$rid10b")" == "foreground-batch" ]] \
+    && ok "S10 강등 종착 관찰(foreground-batch)" \
+    || bad "S10 강등 종착 관찰 got=$(drv_cmd "$rid10b")"
+  # status 출력에 driver 라인 포함(관찰성). 출력을 캡처 후 검사(grep -q 조기 종료에 의한
+  # SIGPIPE+pipefail 오탐 회피).
+  local s10status; s10status="$( cd "$REPO" && dsp bash "$DSP" status "$rid10b" 2>/dev/null )"
+  case "$s10status" in
+    *"driver: foreground-batch"*) ok "S10 status 에 driver 라인" ;;
+    *) bad "S10 status driver 라인 부재" ;;
+  esac
+
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
   return $fail
@@ -858,7 +1014,10 @@ Subcommands:
   list
         모든 run-id 와 진행 요약.
   status <run-id>
-        run-id 단위 per-SPEC state(진단용 wave 표시 포함).
+        run-id 단위 per-SPEC state(진단용 wave 표시 포함) + fan-out 드라이버.
+  driver <run-id>
+        run 의 fan-out 드라이버(strong-parallel|background|foreground-batch) 출력
+        (관찰성: 자동 선택·override·안전 강등 결과).
   stop <run-id>
         running SPEC 을 failed 로 표시하고 이행적 의존자를 skipped 전파(모델이 그 서브에이전트
         를 멈춘다). dispatch.sh 는 오케스트레이션 상태만 갱신한다.
@@ -868,6 +1027,12 @@ Subcommands:
 
 환경 변수:
   DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS, FORGE_BIN, DEFAULT_BRANCH
+  DISPATCH_DRIVER       fan-out 드라이버 override(strong-parallel|background|foreground-batch).
+                        기존 시작 CLI 불변 — override 는 이 env 로만 받는다.
+  DISPATCH_STRONG_PARALLEL=1  강한 병렬 드라이버 환경 신호(모델 자동 감지).
+  DISPATCH_BACKGROUND=1       백그라운드 드라이버 환경 신호(모델 자동 감지).
+                        신호가 없으면 안전 폴백 foreground-batch.
+                        강등 사슬: strong-parallel → background → foreground-batch.
 EOF
   exit 1
 }
@@ -882,6 +1047,7 @@ case "$SUB" in
   mark)   cmd_mark   "$@" ;;
   list)   cmd_list  ;;
   status) cmd_status "$@" ;;
+  driver) cmd_driver "$@" ;;
   stop)   cmd_stop   "$@" ;;
   watch)  cmd_watch  "$@" ;;
   selftest) cmd_selftest ;;
