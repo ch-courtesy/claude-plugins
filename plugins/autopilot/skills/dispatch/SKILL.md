@@ -100,6 +100,16 @@ run-id 안에서 진행 중(`running`)인 child 들에 대해 자율 실행기�
 
 per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`done`/`failed`/`skipped`)에 도달하면 exit code 로 결과를 대표한다. `0`=전부 done, `1`=failed/skipped 있음, `2`=timeout.
 
+### dispatch sweep [--target-branch `<branch>`]
+
+**dispatch 자신이 만든 작업 브랜치** 중 **대상 브랜치에 이미 머지된** 것을 소급해 **일괄 삭제**하는 정비 진입점이다. 머지 시점 단건 정리(머지가 삭제하는 한 브랜치)는 정책 이전·외부(수동) 머지로 원격에 누적된 dispatch 작업 브랜치를 청소하지 못하므로, **명시 요청으로만** 도는 일괄 정리를 둔다(자동 무인 파괴 아님).
+
+- **대상 식별 = dispatch 자기 출처(provenance)**: dispatch 전용 네이밍 시그니처(`feat/<run-id>-<slug>`, `<run-id>`=`<YYYYMMDDTHHMMSS>-<sha7>`)에 맞는 브랜치만 대상으로 한다. 단순히 `feat/*` 가 비슷하다는 이유로 삭제하지 않으며, **dispatch 가 만들지 않은 브랜치(사람·타 도구 생성)는 이름이 유사해도 제외**한다.
+- **머지 확인된 것만 삭제**: 대상 브랜치의 조상(=머지됨)인 것만 force 없이 일반 삭제(원격, 있으면 로컬)하고, **미머지 브랜치는 절대 삭제하지 않는다**(보존).
+- **결정적 헬퍼가 삭제 소유**: 식별·삭제는 `merge.sh sweep`(결정적 공용 삭제 경로)이 수행하고, 워커·dispatch 는 raw 원격 명령으로 직접 삭제하지 않는다.
+- **부분 실패 격리·관찰 가능**: 한 브랜치 삭제 실패는 경고로 표면화하되 다른 브랜치 처리를 막지 않으며, 어떤 브랜치를 지웠고 어떤 것을 건너뛰었는지(미머지·실패)를 보고한다.
+- `--target-branch` 미지정 시 `DEFAULT_BRANCH`(기본 브랜치)를 대상으로 한다.
+
 ## references
 
 | 파일 | 역할 |
@@ -109,7 +119,7 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 | `lib-integration.sh` | per-SPEC 통합 상태 헬퍼(run-dir + 키: branch/pr/head/review-round/verdict/phase) — 서브에이전트 공유 |
 | `integration.sh` | base sync → push → PR 생성/재사용(forge) / PR 없이 작업 브랜치 식별(direct) + 실패-경로 조건부 워크트리 정리(`cleanup-on-fail`: 원격 보존 시 loop cleanup 위임·미보존 시 보존) — 서브에이전트 호출 헬퍼 |
 | `review-loop.sh` | 리뷰 반복 가드(라운드 상한·무진전·핑퐁) 결정적 판정 헬퍼 — 서브에이전트가 재구현 반복 제어에 사용 |
-| `merge.sh` | 승인 게이트(forge)·버전 범프 게이트·직렬화 ff-only 머지(대상 브랜치) + 머지 확정 후 작업 브랜치 정리(원격·로컬, force 없는 일반 삭제) 결정적 헬퍼 — 서브에이전트가 머지에 사용 |
+| `merge.sh` | 승인 게이트(forge)·버전 범프 게이트·직렬화 ff-only 머지(대상 브랜치) + 머지 확정 후 작업 브랜치 정리(원격·로컬, force 없는 일반 삭제) + `sweep`=dispatch 자기 출처 머지 누적 브랜치 일괄 정리 결정적 헬퍼 — 서브에이전트가 머지에 사용, 일괄 정비는 `dispatch sweep` 진입 |
 
 각 헬퍼 모듈은 `bash <module>.sh selftest` 로 mock 인터페이스 기반 독립 검증을 제공한다(실제 PR·머지 미수행). 결정적 스케줄링 검증은 `bash dispatch.sh selftest`.
 
@@ -124,3 +134,4 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 - **통합·리뷰·머지 소유권은 SPEC 서브에이전트**(SPEC당 한 컨텍스트, `references/subagent-prompt.md`)에 있다 — dispatch 는 의존성·동시성·실패 격리만 총괄하고, 통합·리뷰·머지를 bash 드레인 파이프라인으로 직접 수행하지 않는다.
 - 분해(여러 SPEC 작성) 책임은 SPEC 작성 도구(`autopilot:spec` 등)에 있고, dispatch 는 이미 만들어진 SPEC 들만 받는다.
 - **워크트리·작업 브랜치 정리 정책(비대칭)의 단일 출처는 결정적 헬퍼**(`merge.sh`=머지 후 작업 브랜치 삭제, `integration.sh`=실패-경로 조건부 워크트리 정리)와 워커 계약(`references/subagent-prompt.md` 규칙 6)이다. 작업 브랜치는 **머지 성공 시에만** ff-머지 확정 이후 머지 헬퍼가 force 없이 삭제(실패/비완료=보존)하고, 워크트리는 터미널 도달 시 **원격 브랜치로 보존돼 있으면** loop 공개 cleanup 위임으로 정리·**미보존이면 보존**한다(비터미널=정리 금지). 워커·dispatch 모두 raw 원격 명령으로 직접 삭제하거나 워크트리를 직접 `rm` 하지 않으며, 정리 실패는 경고로 표면화하되 머지·완료 판정을 뒤집지 않는다.
+- **누적 stale 브랜치 일괄 정리(`dispatch sweep`)**: 머지 시점 단건 정리가 다루지 못하고 누적된(정책 이전·외부 수동 머지) dispatch 작업 브랜치는 **명시 요청** `dispatch sweep` 으로만 소급 청소한다. 같은 안전 불변식을 따른다 — **dispatch 자기 출처(네이밍 시그니처)만** 대상(사람·타 도구 브랜치 제외), **대상 브랜치 머지 확인된 것만** 삭제(미머지 보존), 결정적 헬퍼가 force 없이 삭제, 부분 실패는 경고로 격리, 결과(삭제·건너뜀)는 보고한다.

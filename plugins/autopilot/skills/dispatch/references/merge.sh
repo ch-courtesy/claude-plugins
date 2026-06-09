@@ -189,22 +189,96 @@ mg_cleanup_workspace() {
 #   머지 성공의 사후 단계: ff-머지 확정 이후에만 호출된다. 삭제 실패는 경고로 표면화(조용한 실패
 #   금지)하되 rc 0 을 유지해 머지·완료 판정을 뒤집지 않는다(고아 브랜치는 다음 정리 기회에).
 #   워커가 raw `gh`/`git push --delete` 로 직접 삭제하지 않고, 머지 확정 후 이 결정적 헬퍼만 삭제한다.
-mg_delete_merged_branch() {
-  local branch="$1"
+# mg_delete_branch_refs <branch> — 작업 브랜치 ref 삭제(원격 존재 시 + 로컬 존재 시), force 없는
+#   일반 삭제. 결정적 단일 삭제 경로(머지 후 단건 정리·sweep 일괄 정리 공용). 워커가 raw
+#   `gh`/`git push --delete` 로 직접 삭제하지 않고 이 헬퍼만 삭제한다.
+#   존재하는 ref 삭제가 실패하면 WARN(조용한 실패 금지) + rc=1, 아니면 rc=0. "없음"은 실패가
+#   아니다(미push·로컬 미존재를 삭제 실패로 오인해 spurious WARN 내지 않음).
+mg_delete_branch_refs() {
+  local branch="$1" rc=0
   [[ -n "$branch" ]] || return 0
-  # 원격(대상 리모트) 작업 브랜치 삭제 — force 아닌 일반 삭제. 원격에 존재할 때만 시도한다
-  # (direct 서브모드 등 미push 브랜치는 삭제할 대상이 없으므로 — "없음"을 "삭제 실패"로 오인해
-  # spurious WARN 을 내지 않는다). 존재하는데 삭제가 실패하면 그건 진짜 정리 실패 → WARN(조용한 실패 금지).
+  # 원격(대상 리모트) 작업 브랜치 삭제 — 원격에 존재할 때만 시도(미push 브랜치는 대상 없음).
   # shellcheck disable=SC2086
   if [[ -n "$($GIT_CMD ls-remote --heads origin "$branch" 2>/dev/null)" ]]; then
     # shellcheck disable=SC2086
     $GIT_CMD push origin --delete "$branch" >/dev/null 2>&1 \
-      || echo "WARN: 원격 작업 브랜치 삭제 실패(머지는 완료, 수동 정리 가능): origin/$branch" >&2
+      || { echo "WARN: 원격 작업 브랜치 삭제 실패(수동 정리 가능): origin/$branch" >&2; rc=1; }
   fi
-  # 로컬 작업 브랜치 삭제 — force(-D) 아닌 일반 삭제(-d). 머지 확인됨.
+  # 로컬 작업 브랜치 삭제 — force(-D) 아닌 일반 삭제(-d). 로컬에 존재할 때만 시도
+  # (sweep 은 원격 추적 브랜치 기준이라 로컬 사본이 없을 수 있음 — 없는 것을 실패로 오인 금지).
   # shellcheck disable=SC2086
-  $GIT_CMD branch -d "$branch" >/dev/null 2>&1 \
-    || echo "WARN: 로컬 작업 브랜치 삭제 실패(머지는 완료, 수동 정리 가능): $branch" >&2
+  if $GIT_CMD show-ref --verify --quiet "refs/heads/$branch" 2>/dev/null; then
+    # shellcheck disable=SC2086
+    $GIT_CMD branch -d "$branch" >/dev/null 2>&1 \
+      || { echo "WARN: 로컬 작업 브랜치 삭제 실패(수동 정리 가능): $branch" >&2; rc=1; }
+  fi
+  return $rc
+}
+
+mg_delete_merged_branch() {
+  local branch="$1"
+  [[ -n "$branch" ]] || return 0
+  # 머지 확정 후 사후 단계 — 삭제 실패는 WARN 으로 표면화하되 rc 0 을 유지해 머지·완료 판정을
+  # 뒤집지 않는다(고아 브랜치는 다음 정리 기회·sweep 에서). 실제 삭제는 결정적 공용 헬퍼가 수행.
+  mg_delete_branch_refs "$branch" || true
+  return 0
+}
+
+# ===== 4b) sweep — dispatch 자기 출처 작업 브랜치 중 대상 머지된 것 일괄 정리(명시 요청) =====
+# 머지 시점 단건 정리(#363)는 그 머지가 삭제하는 한 브랜치만 다룬다. 정책 이전·외부(수동) 머지로
+# 원격에 누적된 dispatch 작업 브랜치는 소급 정리되지 않으므로, 명시 요청으로 도는 일괄 정리를 둔다.
+# 안전 불변식: (1) dispatch 자기 출처(네이밍 시그니처)만 대상 — 사람·타 도구 브랜치는 이름이
+# 비슷해도 제외. (2) 대상 브랜치 조상(=머지 확인된) 것만 삭제, 미머지는 보존. (3) force 없는 일반
+# 삭제(공용 결정적 헬퍼). (4) 부분 실패는 경고로 격리해 다른 브랜치 처리를 막지 않음.
+
+# dispatch 전용 네이밍 시그니처: feat/<run-id>-<slug>, <run-id>=<YYYYMMDDTHHMMSS>-<sha7>.
+#   (dispatch.sh: ts=date -u +%Y%m%dT%H%M%S, h=sha256 첫 7자[0-9a-f]). 사람/타 도구 브랜치는 불일치.
+#   (주입 override 가능. `{n}` 인터벌은 ${:-default} 안에서 `}` 가 확장을 일찍 닫으므로 조건 대입으로 둔다.)
+if [[ -z "${SWEEP_BRANCH_SIGNATURE_RE:-}" ]]; then
+  SWEEP_BRANCH_SIGNATURE_RE='^feat/[0-9]{8}T[0-9]{6}-[0-9a-f]{7}-'
+fi
+
+# mg_sweep_remote_dispatch_branches — origin 원격 추적 브랜치 중 dispatch 출처 시그니처에 맞는
+#   브랜치명(origin/ 제거)만 출력. HEAD 포인터·기본 브랜치·사람 생성 feat/* 는 시그니처 불일치로 제외.
+mg_sweep_remote_dispatch_branches() {
+  # shellcheck disable=SC2086
+  $GIT_CMD branch -r 2>/dev/null \
+    | sed -E 's/^[[:space:]*+]*//; s#^origin/##' \
+    | grep -E "$SWEEP_BRANCH_SIGNATURE_RE" || true
+}
+
+# mg_sweep_is_merged <branch> <target> — 원격 추적 <branch> 가 <target> 의 조상(=머지됨)이면 0.
+mg_sweep_is_merged() {
+  local branch="$1" target="$2"
+  # shellcheck disable=SC2086
+  $GIT_CMD merge-base --is-ancestor "origin/$branch" "origin/$target" >/dev/null 2>&1
+}
+
+# mg_sweep_merged_branches [target] — dispatch 자기 출처 작업 브랜치 중 target 에 머지된 것 일괄 삭제.
+#   target 미지정 시 DEFAULT_BRANCH. 명시 요청(정비 진입점)으로만 돈다(자동 무인 파괴 아님).
+mg_sweep_merged_branches() {
+  local target="${1:-$DEFAULT_BRANCH}"
+  [[ -n "$target" ]] || { mg_die "sweep: 대상 브랜치 미정(DEFAULT_BRANCH 또는 인자 필요)"; return 1; }
+  # 최신 원격 상태 동기화 + 삭제된 원격 추적 ref prune(stale 추적 ref 로 오삭제 방지).
+  # shellcheck disable=SC2086
+  $GIT_CMD fetch --prune origin >/dev/null 2>&1 || true
+
+  local deleted=0 skipped=0 failed=0 b
+  echo "sweep: target=$target (dispatch 자기 출처 머지 브랜치 일괄 정리)"
+  while IFS= read -r b; do
+    [[ -n "$b" ]] || continue
+    if mg_sweep_is_merged "$b" "$target"; then
+      if mg_delete_branch_refs "$b"; then
+        echo "deleted: $b"; deleted=$((deleted+1))
+      else
+        echo "failed:  $b (삭제 실패 — 위 WARN 참조, 다른 브랜치 계속)"; failed=$((failed+1))
+      fi
+    else
+      echo "skipped: $b (미머지 — 보존)"; skipped=$((skipped+1))
+    fi
+  done < <(mg_sweep_remote_dispatch_branches)
+  echo "----"
+  echo "sweep done: target=$target deleted=$deleted skipped=$skipped failed=$failed"
   return 0
 }
 
@@ -287,8 +361,11 @@ Commands:
   finish <spec> <run_dir> <key> [pr] [direct]
                                    버전 게이트 통과 시 직렬화 ff-only 머지(가용 토큰) 후
                                    phase=merged + 작업 공간 정리 위임. direct=1 이면 PR 없이.
+  sweep [target]                   dispatch 자기 출처 작업 브랜치 중 target(미지정 시 DEFAULT_BRANCH)
+                                   에 머지된 것만 force 없이 일괄 삭제. 미머지·비-dispatch 브랜치는
+                                   보존. 부분 실패는 경고로 격리. 명시 요청 정비 진입점.
 
-환경 변수: GIT_CMD FORGE_CMD LOOP_CMD DEFAULT_BRANCH WATCH_DIRS
+환경 변수: GIT_CMD FORGE_CMD LOOP_CMD DEFAULT_BRANCH WATCH_DIRS SWEEP_BRANCH_SIGNATURE_RE
 EOF
   return 1
 }
@@ -466,6 +543,61 @@ mg_selftest() {
   MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" k7 >/dev/null 2>&1
   if grep -qiE 'force|(^| )-f( |$)' "$trace"; then bad "force 미사용"; else ok "force 미사용(git 인자에 force 없음)"; fi
 
+  # ---- sweep — dispatch 자기 출처 작업 브랜치 중 대상 머지된 것만 일괄 삭제 ----
+  #   원격 작업 브랜치 집합(dispatch 시그니처 + 사람 생성 혼재) 중:
+  #     aaaaaaa(머지됨)        → 삭제(원격 push --delete, force 없음)
+  #     bbbbbbb(미머지)        → 건너뜀(보존, 삭제 금지)
+  #     ccccccc(머지됨·삭제실패) → 실패로 보고(WARN, 다른 브랜치 계속)
+  #     feat/manual-feature   → dispatch 출처 아님 → 머지됐어도 절대 안 건드림(이름 유사해도 제외)
+  reset
+  mock_git_sweep() {
+    local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
+    echo "git $*" >> "$trace"
+    case "$1 $2" in
+      "branch -r")
+        cat <<'BR'
+  origin/HEAD -> origin/main
+  origin/main
+  origin/feat/manual-feature
+  origin/feat/20260101T010101-aaaaaaa-merged-spec
+  origin/feat/20260101T020202-bbbbbbb-unmerged-spec
+  origin/feat/20260101T030303-ccccccc-delfail
+BR
+        return 0 ;;
+      "merge-base --is-ancestor")
+        # $3=origin/<branch> $4=origin/main. 미머지 하나만 1, 나머지 머지됨(0).
+        case "$3" in *bbbbbbb-unmerged*) return 1;; *) return 0;; esac ;;
+      "show-ref --verify") return 1 ;;   # 로컬 작업 브랜치 없음(원격만) → branch -d 미호출(가드)
+    esac
+    case "$1" in
+      ls-remote) echo "deadbeef refs/heads/x"; return 0 ;;   # 원격 존재
+      push) case "$*" in *--delete*delfail*) return 1;; *--delete*) return 0;; esac ;;
+      fetch) return 0 ;;
+    esac
+    return 0
+  }
+  sweepout="$(GIT_CMD=mock_git_sweep DEFAULT_BRANCH=main mg_sweep_merged_branches 2>"$TMP/sweep_err")"; rc=$?
+  swerr="$(cat "$TMP/sweep_err" 2>/dev/null)"; rm -f "$TMP/sweep_err"
+  chk "sweep rc=0" "$rc" "0"
+  # 머지된 dispatch 브랜치 삭제(원격 push --delete, force 없음).
+  has 'push origin --delete feat/20260101T010101-aaaaaaa-merged-spec' \
+    && ok "sweep 머지 브랜치 삭제(원격)" || bad "sweep 머지 브랜치 삭제(원격)"
+  # 미머지 dispatch 브랜치는 절대 삭제 안 함(보존).
+  if has 'push origin --delete feat/20260101T020202-bbbbbbb-unmerged'; then
+    bad "sweep 미머지 브랜치 삭제함(보존 위반)"; else ok "sweep 미머지 → 보존(삭제 안 함)"; fi
+  # dispatch 출처 아닌 사람 생성 브랜치는 절대 안 건드림(이름 유사해도 제외).
+  if has 'push origin --delete feat/manual-feature'; then
+    bad "sweep 비-dispatch 브랜치 삭제함(출처 오인)"; else ok "sweep 비-dispatch 브랜치 제외"; fi
+  case "$sweepout" in *manual-feature*) bad "sweep 보고에 비-dispatch 브랜치 노출";; *) ok "sweep 보고 비-dispatch 제외";; esac
+  # 로컬 브랜치 없으면(show-ref 가드) branch -d 미호출.
+  if has 'branch -d'; then bad "sweep 로컬 미존재인데 branch -d 호출(가드 누락)"; else ok "sweep 로컬 미존재 → branch -d 미호출"; fi
+  # 관찰 가능 보고: deleted/skipped/failed 분류 + 요약.
+  case "$sweepout" in *"deleted=1 skipped=1 failed=1"*) ok "sweep 요약 보고(deleted=1 skipped=1 failed=1)";; *) bad "sweep 요약 보고(deleted=1 skipped=1 failed=1) got=[$sweepout]";; esac
+  # 부분 실패 격리: 삭제 실패 브랜치는 WARN, 다른 브랜치 처리 계속(aaaaaaa 삭제됨).
+  case "$swerr" in *WARN*) ok "sweep 부분 실패 WARN 표면화";; *) bad "sweep 부분 실패 WARN 표면화(조용한 실패 금지)";; esac
+  # force 미사용(sweep 경로).
+  if grep -qiE 'force|(^| )-f( |$)' "$trace"; then bad "sweep force 미사용"; else ok "sweep force 미사용"; fi
+
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
   return $fail
@@ -477,6 +609,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   case "$SUB" in
     version-gate) [[ $# -ge 1 ]] || mg_usage; mg_version_gate "$1" && echo pass || { echo block; exit 1; } ;;
     finish)       mg_merge_finish "$@" ;;
+    sweep)        mg_sweep_merged_branches "$@" ;;
     selftest)     mg_selftest ;;
     -h|--help|help) mg_usage ;;
     *) echo "알 수 없는 command: $SUB" >&2; mg_usage ;;

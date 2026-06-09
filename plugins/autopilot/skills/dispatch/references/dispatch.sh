@@ -749,6 +749,22 @@ cmd_watch() {
   done
 }
 
+# cmd_sweep [--target-branch <b>] — dispatch 자기 출처 작업 브랜치 중 대상에 머지된 것 일괄 정리.
+#   명시 요청 정비 진입점(자동 무인 파괴 아님). 실제 삭제·식별은 결정적 머지 헬퍼(merge.sh sweep)
+#   가 소유한다 — dispatch.sh 는 대상 브랜치 결정만 하고 raw 원격 명령으로 직접 삭제하지 않는다.
+cmd_sweep() {
+  local target=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --target-branch) target="${2:-}"; shift 2 || die "사용: $0 sweep [--target-branch <branch>]" ;;
+      -h|--help) echo "사용: $0 sweep [--target-branch <branch>]" >&2; return 0 ;;
+      *) die "sweep: 알 수 없는 인자: $1 (사용: $0 sweep [--target-branch <branch>])" ;;
+    esac
+  done
+  [[ -n "$target" ]] || target="${DEFAULT_BRANCH:-main}"
+  DEFAULT_BRANCH="$target" bash "$SCRIPT_DIR/merge.sh" sweep "$target"
+}
+
 # =====================================================================
 # selftest — 결정적 오케스트레이션 검증(모델 주도). 실제 spawn·머지·PR 미수행.
 #   dispatch.sh 는 결정적 셋업(start)·readiness(ready)·전이(mark) 헬퍼만 제공하고,
@@ -1040,6 +1056,11 @@ Subcommands:
   watch <run-id>
         per-SPEC 상태를 읽기 전용으로 폴링하며 모든 SPEC 이 terminal(done/failed/skipped)에
         도달할 때까지 대기(상태 전진은 모델의 ready/mark 소유). exit 0=전부 done, 1=실패 있음, 2=timeout.
+  sweep [--target-branch <b>]
+        dispatch 자기 출처 작업 브랜치 중 대상 브랜치(미지정 시 DEFAULT_BRANCH)에 이미 머지된
+        것만 force 없이 일괄 삭제(누적 stale 브랜치 소급 정리). dispatch 가 만들지 않은 브랜치·
+        미머지 브랜치는 보존하고, 부분 실패는 경고로 격리한다. 명시 요청 정비 진입점(merge.sh
+        결정적 헬퍼가 식별·삭제 소유). 어떤 브랜치를 지웠고 건너뛰었는지(미머지·실패) 보고한다.
 
 환경 변수:
   DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS, FORGE_BIN, DEFAULT_BRANCH
@@ -1066,6 +1087,7 @@ case "$SUB" in
   driver) cmd_driver "$@" ;;
   stop)   cmd_stop   "$@" ;;
   watch)  cmd_watch  "$@" ;;
+  sweep)  cmd_sweep  "$@" ;;
   selftest) cmd_selftest ;;
   -h|--help|help) usage ;;
   *) echo "알 수 없는 subcommand: $SUB" >&2; usage ;;
