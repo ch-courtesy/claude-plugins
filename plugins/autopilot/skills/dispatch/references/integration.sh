@@ -200,6 +200,55 @@ in_push_branch() {
 }
 
 # =====================================================================
+# 3b) 실패/터미널 경로 조건부 워크트리 정리 — "보존되면 정리, 아니면 보존"(비대칭).
+#   머지 성공 경로는 merge.sh 가 무조건 정리(머지=대상 브랜치에 보존)한다. 여기서는 실패/비완료
+#   터미널에서 #350 의 고아 워크트리를 정리하되, 그 작업이 다른 곳에 보존돼 있을 때만 정리한다.
+#   "보존됨" 판정 단일 출처 = 작업 브랜치가 대상 리모트(origin)에 존재(=통합 단계에서 push 됨).
+#   정리는 loop 공개 cleanup 위임으로만 수행(직접 rm 금지) — loop cleanup 의 신호 가드가
+#   비터미널(실행 중) 워크트리를 비파괴로 보존하므로, 실행 중 워크트리는 위임해도 지워지지 않는다.
+# =====================================================================
+
+# in_branch_on_remote <branch> — 작업 브랜치가 대상 리모트에 존재하면 0, 아니면 1.
+#   원격 ref 를 직접 조회(ls-remote)해 로컬 추적 ref 의 stale 가능성을 피한다. 빈 브랜치명은
+#   '미보존'으로 본다(보수적 — 의심 시 보존). 위험: 오판 시 미보존 WIP 를 지우지 않도록 보존 쪽.
+in_branch_on_remote() {
+  local branch="$1"
+  [[ -n "$branch" ]] || return 1
+  local out
+  # shellcheck disable=SC2086
+  out="$($GIT_CMD ls-remote --heads origin "$branch" 2>/dev/null)"
+  [[ -n "$out" ]]
+}
+
+# in_cleanup_worktree_if_preserved <spec> <branch> — 실패/터미널 경로 조건부 워크트리 정리.
+#   작업이 원격 브랜치로 보존돼 있으면 loop 공개 cleanup 위임으로 정리하고, 미보존(원격에 없음
+#   = 워크트리가 유일 사본)이면 보존한다(디버깅·재개). 정리 실패는 경고로 표면화(조용한 실패
+#   금지)하되 호출자의 머지·완료 판정(rc)을 뒤집지 않는다(정리는 터미널 판정의 사후 단계). rc 0 유지.
+in_cleanup_worktree_if_preserved() {
+  local spec="$1" branch="$2"
+  [[ -n "$spec" ]] || return 0
+  if in_branch_on_remote "$branch"; then
+    # shellcheck disable=SC2086
+    $LOOP_CMD cleanup "$spec" >/dev/null 2>&1 \
+      || echo "WARN: 워크트리 cleanup 위임 실패(수동 정리 가능, 머지·완료 판정 유지): $spec" >&2
+  else
+    echo "INFO: 작업 브랜치 원격 미보존 → 워크트리 보존(유일 사본·디버깅·재개): $spec" >&2
+  fi
+  return 0
+}
+
+# in_cleanup_failed_worktree <spec> <run_dir> — 실패-경로 진입점(브랜치명을 결정적으로 도출).
+#   작업 브랜치명은 rid(run_dir basename)+SPEC slug 로 결정적(in_work_branch). slug 도출 실패 시
+#   브랜치 미상 → 보존(보수적). in_handle_blocked(워커 자기 escalation)와 dispatch reap/timeout
+#   오케스트레이션(CLI: cleanup-on-fail)이 공유하는 단일 진입.
+in_cleanup_failed_worktree() {
+  local spec="$1" rd="$2" branch
+  local rid; rid="$(basename "$rd")"
+  branch="$(in_work_branch "$rid" "$spec" 2>/dev/null || true)"
+  in_cleanup_worktree_if_preserved "$spec" "$branch"
+}
+
+# =====================================================================
 # 4) PR 생성/재사용 — 같은 head 의 open PR 이 있으면 재사용.
 # =====================================================================
 
@@ -280,6 +329,9 @@ in_integrate() {
 in_handle_blocked() {
   local spec="$1" rd="$2" key="$3" cat
   cat="$(in_blocked_category "$spec")"
+  # 실패/터미널 사후 단계: 작업이 원격에 보존돼 있으면 고아 워크트리를 조건부 정리한다(#350).
+  #   미보존(유일 사본)이면 보존 — 정리는 판정의 사후 단계라 rc 를 바꾸지 않는다.
+  in_cleanup_failed_worktree "$spec" "$rd"
   if [[ "$cat" == "spec-gap" ]]; then
     int_set_phase "$rd" "$key" blocked-spec-gap
     int_log "$rd" "$key" "BLOCKED spec-gap → 스펙 보강 재개 경로 안내(push·PR 안 함)"
@@ -357,6 +409,9 @@ Commands:
                                         분기는 integrate 와 동일.
   terminal  <spec>                   child 종료 상태(done|failed|running|pending|unknown).
   category  <spec>                   BLOCKED 범주(spec-gap|...|other).
+  cleanup-on-fail <spec> <run_dir>   실패/터미널 경로 조건부 워크트리 정리(보존되면 정리, 아니면
+                                        보존). dispatch reap/timeout 으로 child 를 종료할 때
+                                        오케스트레이션이 호출하는 진입(워커 escalation 과 동일 정책).
 
 환경 변수: LOOP_CMD, GIT_CMD, FORGE_CMD, DEFAULT_BRANCH
 EOF
@@ -374,11 +429,14 @@ in_selftest() {
   #   paths: loop 공개 인터페이스 — 작업 트리(WT) 경로를 알려준다(브랜치 이식 다리 입력).
   local LP="$TMP/loop"; mkdir -p "$LP"
   local LOOPWT="$TMP/loopwt"; mkdir -p "$LOOPWT"   # mock loop 결과 워크트리 경로.
+  local CLEANUPLOG="$TMP/cleanuplog"; : > "$CLEANUPLOG"   # loop cleanup 위임 기록(워크트리 정리).
   mock_loop() {
     case "$1" in
       status) shift; [[ "$1" == "--json" ]] && shift; cat "$LP/$(basename "$1").json" 2>/dev/null || true ;;
       logs)   cat "$LP/$(basename "$2").logs" 2>/dev/null || true ;;
       paths)  printf 'SPEC_PATH   %s\nWT          %s\nLOOP_DIR    %s\n' "$2" "$LOOPWT" "$LOOPWT/.loop" ;;
+      # cleanup: 워크트리 정리 위임. MOCK_CLEANUP_FAIL=1 이면 실패(WARN 표면화 검증용).
+      cleanup) printf '%s\n' "$2" >> "$CLEANUPLOG"; [[ "${MOCK_CLEANUP_FAIL:-}" == "1" ]] && return 1 || return 0 ;;
     esac
   }
   export -f mock_loop 2>/dev/null || true
@@ -388,14 +446,19 @@ in_selftest() {
   #   브랜치 존재를 실제로 모사한다(BRANCHES 파일) — checkout 을 무조건 성공시키지 않는다(AC5).
   #   rev-parse --verify refs/heads/<b> = 브랜치 존재 검사, rev-parse HEAD = 결과 커밋,
   #   branch <name> [<commit>] = 브랜치 생성(force 금지 보장됨).
-  local PUSHLOG="$TMP/pushlog" GITLOG="$TMP/gitlog" BRANCHES="$TMP/branches"
-  : > "$PUSHLOG"; : > "$GITLOG"; : > "$BRANCHES"
+  local PUSHLOG="$TMP/pushlog" GITLOG="$TMP/gitlog" BRANCHES="$TMP/branches" REMOTE_BRANCHES="$TMP/remotebranches"
+  : > "$PUSHLOG"; : > "$GITLOG"; : > "$BRANCHES"; : > "$REMOTE_BRANCHES"
   mock_git() {
     # 선행 -C <dir> 흡수(loop 결과 워크트리에서 결과 커밋을 읽을 때 사용).
     if [[ "$1" == "-C" ]]; then shift 2; fi
     local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
     printf '%s\n' "$*" >> "$GITLOG"
     case "$1" in
+      # ls-remote --heads origin <branch> — 원격 작업 브랜치 존재 모사(REMOTE_BRANCHES 파일).
+      #   존재하면 "<sha>\trefs/heads/<branch>" 한 줄 출력(비어있지 않음 = 보존됨), 없으면 빈 출력.
+      ls-remote)
+        local rb="${@: -1}"   # 마지막 인자 = 브랜치명(ls-remote --heads origin <branch>).
+        if grep -Fxq "$rb" "$REMOTE_BRANCHES" 2>/dev/null; then printf 'deadbeef\trefs/heads/%s\n' "$rb"; fi ;;
       push) printf '%s\n' "$*" >> "$PUSHLOG" ;;
       # merge-base --is-ancestor: MOCK_ANCESTOR=1 이면 조상(0), 기본 비조상(1).
       merge-base) [[ "${MOCK_ANCESTOR:-0}" == "1" ]] && return 0 || return 1 ;;
@@ -518,6 +581,51 @@ in_selftest() {
   chk "AC3 direct phase=blocked-spec-gap" "$(int_get_phase "$rd" "$kDS")" "blocked-spec-gap"
   [[ ! -s "$PUSHLOG" && ! -s "$PRLOG" ]] && ok "AC3 direct spec-gap push·PR 미수행" || bad "AC3 direct spec-gap push·PR 미수행"
 
+  # ---- U2: 실패-경로 조건부 워크트리 정리 — 원격 브랜치 존재(보존됨) → loop cleanup 위임 ----
+  #   in_handle_blocked(워커 자기 escalation) 가 작업이 원격에 보존돼 있으면 고아 워크트리를 정리한다(#350).
+  local wbF="feat/20260604T000000-abc1234-x"
+  local kF="x-fff8888"; : > "$CLEANUPLOG"; : > "$PUSHLOG"; : > "$PRLOG"
+  st_blocked > "$LP/SPEC.md.json"; printf 'category: environment-gap\n' > "$LP/SPEC.md.logs"
+  printf '%s\n' "$wbF" > "$REMOTE_BRANCHES"   # 원격에 작업 브랜치 존재 = 보존됨.
+  in_integrate "$spec" "$rd" "$kF" >/dev/null; rc=$?
+  chk "U2 실패+원격보존 rc=4(하드 차단 유지)" "$rc" "4"
+  grep -Fxq "$spec" "$CLEANUPLOG" && ok "U2 원격보존 → 워크트리 cleanup 위임" || bad "U2 원격보존 → 워크트리 cleanup 위임"
+  [[ ! -s "$PUSHLOG" && ! -s "$PRLOG" ]] && ok "U2 실패경로 push·PR 미수행(보존)" || bad "U2 실패경로 push·PR 미수행(보존)"
+
+  # ---- U2: 원격 브랜치 없음(유일 사본) → 워크트리 보존(cleanup 미위임) ----
+  local kP2="x-ppp9999"; : > "$CLEANUPLOG"
+  st_blocked > "$LP/SPEC.md.json"; printf 'category: environment-gap\n' > "$LP/SPEC.md.logs"
+  : > "$REMOTE_BRANCHES"   # 원격에 브랜치 없음 = 미보존(유일 사본).
+  in_integrate "$spec" "$rd" "$kP2" >/dev/null; rc=$?
+  chk "U2 실패+원격없음 rc=4" "$rc" "4"
+  [[ ! -s "$CLEANUPLOG" ]] && ok "U2 미보존 → 워크트리 보존(cleanup 미위임)" || bad "U2 미보존 → 워크트리 보존(cleanup 미위임)"
+
+  # ---- U2: spec-gap(재개 경로)도 원격 미보존이면 워크트리 보존 ----
+  local kSG="x-sgg0000"; : > "$CLEANUPLOG"
+  st_blocked > "$LP/SPEC.md.json"; printf 'category: spec-gap\n' > "$LP/SPEC.md.logs"
+  : > "$REMOTE_BRANCHES"
+  in_integrate "$spec" "$rd" "$kSG" >/dev/null; rc=$?
+  chk "U2 spec-gap rc=3" "$rc" "3"
+  [[ ! -s "$CLEANUPLOG" ]] && ok "U2 spec-gap 미보존 → 워크트리 보존" || bad "U2 spec-gap 미보존 → 워크트리 보존"
+
+  # ---- U2: cleanup 위임 실패 → WARN 표면화, 머지·완료 판정(rc) 뒤집지 않음(정리는 사후 단계) ----
+  local kCF="x-cff1111"; : > "$CLEANUPLOG"
+  st_blocked > "$LP/SPEC.md.json"; printf 'category: environment-gap\n' > "$LP/SPEC.md.logs"
+  printf '%s\n' "$wbF" > "$REMOTE_BRANCHES"
+  err="$(MOCK_CLEANUP_FAIL=1 in_integrate "$spec" "$rd" "$kCF" 2>&1 >/dev/null)"; rc=$?
+  chk "U2 cleanup 실패해도 rc=4(판정 유지)" "$rc" "4"
+  case "$err" in *WARN*) ok "U2 cleanup 실패 경고 표면화(조용한 실패 금지)";; *) bad "U2 cleanup 실패 경고 표면화(조용한 실패 금지)";; esac
+
+  # ---- U2: cleanup-on-fail CLI 헬퍼(dispatch reap/timeout 경로 공유 진입) ----
+  #   dispatch 가 child 를 reap/stop 할 때 오케스트레이션이 호출하는 동일 정책 진입점.
+  local kCLI="x-cli2222"; : > "$CLEANUPLOG"
+  printf '%s\n' "$wbF" > "$REMOTE_BRANCHES"
+  in_cleanup_worktree_if_preserved "$spec" "$wbF"
+  grep -Fxq "$spec" "$CLEANUPLOG" && ok "U2 헬퍼: 원격보존 → cleanup" || bad "U2 헬퍼: 원격보존 → cleanup"
+  : > "$CLEANUPLOG"; : > "$REMOTE_BRANCHES"
+  in_cleanup_worktree_if_preserved "$spec" "$wbF"
+  [[ ! -s "$CLEANUPLOG" ]] && ok "U2 헬퍼: 미보존 → 보존" || bad "U2 헬퍼: 미보존 → 보존"
+
   # ---- AC2: loop 공개 paths 의 WT 값에 공백이 있어도 경로를 통째로 읽는다(첫 토큰 절단 금지) ----
   mock_loop_spaced() { [[ "$1" == "paths" ]] && printf 'WT          /tmp/my work/.worktree\n'; }
   ( LOOP_CMD=mock_loop_spaced
@@ -541,6 +649,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     integrate-direct) in_integrate_direct "$@" ;;
     terminal)  [[ $# -ge 1 ]] || in_usage; in_child_terminal_state "$1" ;;
     category)  [[ $# -ge 1 ]] || in_usage; in_blocked_category "$1" ;;
+    cleanup-on-fail) [[ $# -ge 2 ]] || in_usage; in_cleanup_failed_worktree "$1" "$2" ;;
     selftest)  in_selftest ;;
     -h|--help|help) in_usage ;;
     *) echo "알 수 없는 command: $SUB" >&2; in_usage ;;
