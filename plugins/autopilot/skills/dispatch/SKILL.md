@@ -34,7 +34,7 @@ allowed-tools:
 
 준비된(모든 dep 이 done) SPEC마다 서브에이전트를 **정확히 1개** 띄우고, 그 서브에이전트가 한 컨텍스트에서 그 SPEC 의 구현→리뷰→재구현→머지를 닫는다. **서브에이전트 절차의 단일 출처는 `references/spec-subagent.md`**(완료 조건 2–8: loop/review 블랙박스 호출·forge/direct 서브모드·무한루프 가드·approve 후 머지 게이트·force 금지·동시 머지 직렬화·에스컬레이션). dispatch 는 그 내부를 들여다보지 않고 결과(머지됨/비완료)만 받는다.
 
-- **워커 spawn 은 전용 agentType 으로(필수)**: 준비된 SPEC 의 워커는 **반드시 Agent 도구의 `agentType="dispatch-worker"`**(`plugins/autopilot/agents/dispatch-worker.md`) 로 띄운다 — 범용 에이전트로 띄우지 않는다. 그 타입의 시스템 프롬프트가 곧 `spec-subagent.md` 계약의 강제판(구현은 loop 스킬로만·통합/리뷰/머지는 결정적 헬퍼 구동·raw gh/force 금지·forge=PR 승인 게이트)이므로, 계약이 프로즈 권고가 아니라 워커 정의로 전달·강제된다. spawn 시 입력으로 `spec`·`target-branch`·`run-dir`·`key` 를 넘긴다.
+- **워커 spawn 은 전용 agentType 으로(필수)**: 준비된 SPEC 의 워커는 **반드시 Agent 도구의 `agentType="autopilot:dispatch-worker"`**(`plugins/autopilot/agents/dispatch-worker.md`, 플러그인 네임스페이스 포함) 로 띄운다 — 범용 에이전트로 띄우지 않는다. 그 타입의 시스템 프롬프트가 곧 `spec-subagent.md` 계약의 강제판(구현은 loop 스킬로만·통합/리뷰/머지는 결정적 헬퍼 구동·raw gh/force 금지·forge=PR 승인 게이트)이므로, 계약이 프로즈 권고가 아니라 워커 정의로 전달·강제된다. spawn 시 입력으로 `spec`·`target-branch`·`run-dir`·`key` 를 넘긴다.
 
 dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispatch.sh` 헬퍼로 분리되어 selftest 로 검증된다:
 
