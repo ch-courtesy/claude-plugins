@@ -192,10 +192,15 @@ mg_cleanup_workspace() {
 mg_delete_merged_branch() {
   local branch="$1"
   [[ -n "$branch" ]] || return 0
-  # 원격(대상 리모트) 작업 브랜치 삭제 — force 아닌 일반 삭제. direct 서브모드 등 원격에 없으면 WARN.
+  # 원격(대상 리모트) 작업 브랜치 삭제 — force 아닌 일반 삭제. 원격에 존재할 때만 시도한다
+  # (direct 서브모드 등 미push 브랜치는 삭제할 대상이 없으므로 — "없음"을 "삭제 실패"로 오인해
+  # spurious WARN 을 내지 않는다). 존재하는데 삭제가 실패하면 그건 진짜 정리 실패 → WARN(조용한 실패 금지).
   # shellcheck disable=SC2086
-  $GIT_CMD push origin --delete "$branch" >/dev/null 2>&1 \
-    || echo "WARN: 원격 작업 브랜치 삭제 실패(머지는 완료, 수동 정리 가능): origin/$branch" >&2
+  if [[ -n "$($GIT_CMD ls-remote --heads origin "$branch" 2>/dev/null)" ]]; then
+    # shellcheck disable=SC2086
+    $GIT_CMD push origin --delete "$branch" >/dev/null 2>&1 \
+      || echo "WARN: 원격 작업 브랜치 삭제 실패(머지는 완료, 수동 정리 가능): origin/$branch" >&2
+  fi
   # 로컬 작업 브랜치 삭제 — force(-D) 아닌 일반 삭제(-d). 머지 확인됨.
   # shellcheck disable=SC2086
   $GIT_CMD branch -d "$branch" >/dev/null 2>&1 \
@@ -301,6 +306,9 @@ mg_selftest() {
     local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
     echo "git $*" >> "$trace"
     case "$1" in
+      ls-remote)
+        # 기본 mock: 작업 브랜치가 원격에 존재한다고 본다(forge 머지 성공 경로의 원격 삭제 검증).
+        echo "deadbeef refs/heads/work"; return 0 ;;
       diff)
         if [[ "$*" == *"--name-only"* ]]; then printf '%s\n' ${MOCK_FILES:-}; return 0; fi
         ;;
@@ -417,6 +425,7 @@ mg_selftest() {
       "branch -d") return 1 ;;
     esac
     case "$1" in
+      ls-remote) echo "deadbeef refs/heads/work"; return 0 ;;  # 원격에 존재 → 삭제 시도되고 실패해 WARN
       show) case "$2" in origin/*) echo '  "version": "1.0.0"';; *) echo '  "version": "1.0.0"';; esac ;;
     esac
     return 0
@@ -425,6 +434,25 @@ mg_selftest() {
   chk "삭제 실패해도 머지 rc=0" "$rc" "0"
   chk "삭제 실패해도 phase=merged" "$(int_get_phase "$rd" kdelfail)" "merged"
   case "$err" in *WARN*) ok "브랜치 삭제 실패 경고 표면화";; *) bad "브랜치 삭제 실패 경고 표면화(조용한 실패 금지)";; esac
+
+  # ---- 원격에 작업 브랜치 없음(direct 등 미push) → 원격 삭제 시도 안 함, spurious WARN 없음 ----
+  #   삭제는 머지 성공의 사후 단계 — 원격에 없는 브랜치 삭제 실패를 "정리 실패"로 오인해 WARN 을
+  #   내면 조용한-실패-금지 신호가 흐려진다. ls-remote 로 존재 시에만 삭제·WARN.
+  reset; setup kdnoremote
+  mock_git_noremote() {
+    local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
+    echo "git $*" >> "$trace"
+    case "$1" in
+      ls-remote) return 0 ;;  # 원격에 브랜치 없음 = 빈 출력
+      push) case "$*" in *--delete*) return 1;; esac ;;  # 호출되면 실패(원격에 없으므로)
+      show) case "$2" in origin/*) echo '  "version": "1.0.0"';; *) echo '  "version": "1.0.0"';; esac ;;
+    esac
+    return 0
+  }
+  err="$(GIT_CMD=mock_git_noremote MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdnoremote "" 1 2>&1 >/dev/null)"; rc=$?
+  chk "원격 미존재 direct 머지 rc=0" "$rc" "0"
+  if has 'push origin --delete feat/run1-kdnoremote'; then bad "원격 미존재인데 원격 삭제 시도(불필요)"; else ok "원격 미존재 → 원격 삭제 미시도"; fi
+  case "$err" in *"원격 작업 브랜치 삭제 실패"*) bad "원격 미존재인데 spurious WARN 방출";; *) ok "원격 미존재 → spurious WARN 없음";; esac
 
   # ---- 머지 락 직렬화 — 점유 중엔 두 번째 획득 실패, 해제 후 성공 ----
   mg_try_lock "$rd" && ok "락 1차 획득" || bad "락 1차 획득"
