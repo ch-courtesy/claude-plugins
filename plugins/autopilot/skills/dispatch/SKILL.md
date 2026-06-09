@@ -13,7 +13,7 @@ allowed-tools:
 
 # dispatch
 
-`dispatch` 는 SPEC 파일 묶음을 받아 depends_on 의존성을 풀고, **준비된(모든 dep 이 done) SPEC마다 서브에이전트를 1개 띄우는 모델 주도 오케스트레이터**다. 각 SPEC 서브에이전트는 자기 컨텍스트에서 `loop`(구현)·`review`(리뷰) 스킬을 공개 인터페이스로 승인까지 반복 호출하고 대상 브랜치로 머지하기까지 그 SPEC 의 전 생애를 소유한다(서브에이전트 절차 계약: `references/spec-subagent.md`). dispatch 자신은 준비도 스케줄링·동시성 상한·서브에이전트 spawn/reap·done(=머지)이면 의존자 해제·실패 이행 격리만 책임지며, **통합·리뷰·머지를 더 이상 bash 드레인 파이프라인으로 직접 수행하지 않는다**. SPEC 작성 도구·작성 형식에 비결합 — **파일로 존재하고 읽을 수 있는 SPEC 이면** 무엇이든 입력으로 받는다.
+`dispatch` 는 SPEC 파일 묶음을 받아 depends_on 의존성을 풀고, **준비된(모든 dep 이 done) SPEC마다 서브에이전트를 1개 띄우는 모델 주도 오케스트레이터**다. 각 SPEC 서브에이전트는 자기 컨텍스트에서 `loop`(구현)·`review`(리뷰) 스킬을 공개 인터페이스로 승인까지 반복 호출하고 대상 브랜치로 머지하기까지 그 SPEC 의 전 생애를 소유한다(서브에이전트 절차 계약: 전용 워커 타입 `agents/dispatch-worker.md`). dispatch 자신은 준비도 스케줄링·동시성 상한·서브에이전트 spawn/reap·done(=머지)이면 의존자 해제·실패 이행 격리만 책임지며, **통합·리뷰·머지를 더 이상 bash 드레인 파이프라인으로 직접 수행하지 않는다**. SPEC 작성 도구·작성 형식에 비결합 — **파일로 존재하고 읽을 수 있는 SPEC 이면** 무엇이든 입력으로 받는다.
 
 ## 호출
 
@@ -32,9 +32,9 @@ allowed-tools:
 
 ## 서브에이전트 위임 — 준비된 SPEC당 1개
 
-준비된(모든 dep 이 done) SPEC마다 서브에이전트를 **정확히 1개** 띄우고, 그 서브에이전트가 한 컨텍스트에서 그 SPEC 의 구현→리뷰→재구현→머지를 닫는다. **서브에이전트 절차의 단일 출처는 `references/spec-subagent.md`**(완료 조건 2–8: loop/review 블랙박스 호출·forge/direct 서브모드·무한루프 가드·approve 후 머지 게이트·force 금지·동시 머지 직렬화·에스컬레이션). dispatch 는 그 내부를 들여다보지 않고 결과(머지됨/비완료)만 받는다.
+준비된(모든 dep 이 done) SPEC마다 서브에이전트를 **정확히 1개** 띄우고, 그 서브에이전트가 한 컨텍스트에서 그 SPEC 의 구현→리뷰→재구현→머지를 닫는다. **서브에이전트 절차의 단일 출처는 전용 워커 타입 `agents/dispatch-worker.md`**(loop/review 블랙박스 호출·forge/direct 서브모드·무한루프 가드·approve 후 머지 게이트·에스컬레이션). dispatch 는 그 내부를 들여다보지 않고 결과(머지됨/비완료)만 받는다.
 
-- **워커 spawn 은 전용 agentType 으로(필수)**: 준비된 SPEC 의 워커는 **반드시 Agent 도구의 `agentType="dispatch-worker"`**(`plugins/autopilot/agents/dispatch-worker.md`) 로 띄운다 — 범용 에이전트로 띄우지 않는다. 그 타입의 시스템 프롬프트가 곧 `spec-subagent.md` 계약의 강제판(구현은 loop 스킬로만·통합/리뷰/머지는 결정적 헬퍼 구동·raw gh/force 금지·forge=PR 승인 게이트)이므로, 계약이 프로즈 권고가 아니라 워커 정의로 전달·강제된다. spawn 시 입력으로 `spec`·`target-branch`·`run-dir`·`key` 를 넘긴다.
+- **워커 spawn 은 전용 agentType 으로(필수)**: 준비된 SPEC 의 워커는 **반드시 Agent 도구의 `agentType="autopilot:dispatch-worker"`**(`plugins/autopilot/agents/dispatch-worker.md`, 플러그인 네임스페이스 포함) 로 띄운다 — 범용 에이전트로 띄우지 않는다. 그 타입의 시스템 프롬프트가 곧 **워커 절차 계약의 단일 출처·강제판**(구현은 loop 스킬로만·통합/리뷰/머지는 결정적 헬퍼 구동·raw gh 금지·forge=PR 승인 게이트)이므로, 계약이 프로즈 권고가 아니라 워커 정의로 전달·강제된다. spawn 시 입력으로 `spec`·`target-branch`·`run-dir`·`key` 를 넘긴다.
 
 dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispatch.sh` 헬퍼로 분리되어 selftest 로 검증된다:
 
@@ -78,7 +78,6 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 | 파일 | 역할 |
 |---|---|
 | `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
-| `spec-subagent.md` | **SPEC 서브에이전트 계약** — 한 컨텍스트에서 loop·review 반복→머지→보고(완료 조건 2–8 단일 출처) |
 | `lib-integration.sh` | per-SPEC 통합 상태 헬퍼(run-dir + 키: branch/pr/head/review-round/verdict/phase) — 서브에이전트 공유 |
 | `integration.sh` | base sync → push → PR 생성/재사용(forge) / PR 없이 작업 브랜치 식별(direct) — 서브에이전트 호출 헬퍼 |
 | `review-loop.sh` | 리뷰 반복 가드(라운드 상한·무진전·핑퐁) 결정적 판정 헬퍼 — 서브에이전트가 재구현 반복 제어에 사용 |
@@ -89,10 +88,10 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 ## 의존성
 
 - **결정적 헬퍼(`dispatch.sh`)**: `git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `yq`(mikefarah). `yq` 는 SPEC frontmatter 의 `depends_on` 파싱(DAG 구성)에 쓰며 `start` 가 요구한다(없으면 awk 폴백이 있으나 신·구 레이아웃·인라인/블록 형식의 견고한 파싱을 위해 명시 요구). `ready`/`mark`/`status`/`stop`/`watch` 는 결정적 상태 헬퍼로 yq 비의존.
-- **서브에이전트가 호출하는 스킬·도구**: `autopilot:loop`·`autopilot:review`(판정 JSON 파싱에 `jq`). forge 서브모드는 추가로 forge CLI(`gh`, 주입 가능)를 쓰고, direct 서브모드는 forge CLI·원격 push 가 필요 없다. 서브모드 절차는 `references/spec-subagent.md`.
+- **서브에이전트가 호출하는 스킬·도구**: `autopilot:loop`·`autopilot:review`(판정 JSON 파싱에 `jq`). forge 서브모드는 추가로 forge CLI(`gh`, 주입 가능)를 쓰고, direct 서브모드는 forge CLI·원격 push 가 필요 없다. 서브모드 절차는 전용 워커 타입 `agents/dispatch-worker.md`.
 
 ## 규칙
 
 - 자체 작성·갱신 영역은 `<project_root>/.dispatch/runs/<run-id>/` 안의 파일들(SPEC 델타·백로그·통합 상태 포함)과 본 스킬 정의 파일뿐이다. 작업 브랜치·PR·머지 같은 forge 부수효과를 제외하면 이 외 경로를 만들지 않으며, run 디렉토리는 git 추적에서 제외한다(`.gitignore` 권장).
-- **통합·리뷰·머지 소유권은 SPEC 서브에이전트**(SPEC당 한 컨텍스트, `references/spec-subagent.md`)에 있다 — dispatch 는 의존성·동시성·실패 격리만 총괄하고, 통합·리뷰·머지를 bash 드레인 파이프라인으로 직접 수행하지 않는다.
+- **통합·리뷰·머지 소유권은 SPEC 서브에이전트**(SPEC당 한 컨텍스트, 전용 워커 타입 `agents/dispatch-worker.md`)에 있다 — dispatch 는 의존성·동시성·실패 격리만 총괄하고, 통합·리뷰·머지를 bash 드레인 파이프라인으로 직접 수행하지 않는다.
 - 분해(여러 SPEC 작성) 책임은 SPEC 작성 도구(`autopilot:spec` 등)에 있고, dispatch 는 이미 만들어진 SPEC 들만 받는다.
