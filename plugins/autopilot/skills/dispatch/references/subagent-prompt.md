@@ -34,6 +34,18 @@ dispatch 가 준비된(모든 `depends_on` 이 `done`) SPEC마다 띄우는 per-
    - 머지: `merge.sh finish`
    - **raw `gh pr create`/`gh pr merge`·`git push`·임의 머지를 직접 수행하지 않는다.**
 
+6. **정리(워크트리·작업 브랜치)는 결정적 헬퍼 소관 — 직접 정리 금지**(비대칭 정책):
+   - **작업 브랜치 삭제는 `merge.sh finish` 의 사후 단계**다. ff-머지가 확정된 **이후에만** 머지 헬퍼가 그 작업
+     브랜치(원격, 있으면 로컬)를 force 없는 일반 삭제로 정리한다. 너는 `git push origin --delete`/`git branch -d`/
+     `gh` 같은 raw 원격·로컬 브랜치 삭제 명령을 **직접 수행하지 않는다**. 머지가 실패/비완료로 끝나면 작업 브랜치는
+     **보존**된다(재개·디버깅).
+   - **실패/터미널 경로의 워크트리 정리는 통합 헬퍼가 loop 공개 cleanup 으로 위임 수행**한다. 네가 escalation 으로
+     종료하면 `integration.sh integrate|integrate-direct` 가 blocked 매핑 시 **조건부 워크트리 정리**를 자동 수행한다 —
+     작업이 **원격 브랜치로 보존돼 있으면**(대상 리모트에 작업 브랜치 존재) 그 고아 워크트리를 정리하고, **미보존
+     (원격 브랜치 없음 = 워크트리가 유일 사본)이면 보존**한다. 너는 워크트리를 **직접 `rm` 하지 않는다**(블랙박스 경계).
+   - **정리 실패는 경고로 표면화**되며(조용한 실패 금지) 머지·완료 판정 자체를 뒤집지 않는다(정리는 머지 성공의
+     사후 단계).
+
 3. **서브모드 = 백엔드 가용성**(forge CLI 가용 여부로 판정):
    - **forge(gh 가용)**: **로컬 `autopilot:review` 스킬을 호출하지 않는다.** 작업 브랜치를 push해 PR을 만들고/재사용한 뒤,
      **PR 의 호스팅측 리뷰**를 받는다. **호스팅 리뷰는 비동기로 도착한다(수 분 소요 가능)** — PR 생성 직후 리뷰가
@@ -58,7 +70,9 @@ dispatch 가 준비된(모든 `depends_on` 이 `done`) SPEC마다 띄우는 per-
 1. `Skill(skill="autopilot:loop", args="start <spec>")` — **포그라운드 블로킹 실행**(반환까지 턴 유지), 반환된 뒤 DONE 판정(`autopilot:loop status --json`).
 2. 서브모드 판정 → `integration.sh integrate|integrate-direct`.
 3. `review-loop.sh run|run-direct` → 승인 게이트(forge=호스팅 리뷰 **비동기 대기**·pending=transient·**자기승인 금지**·PR APPROVED, direct=로컬 review approve). `request_changes`면 재구현 반복(가드).
-4. 승인 후 `merge.sh finish`(버전 범프·승인 게이트).
+4. 승인 후 `merge.sh finish`(버전 범프·승인 게이트·**머지 확정 후 작업 브랜치 정리**). 머지 없이 escalation 하면
+   통합 헬퍼가 **조건부 워크트리 정리**(원격 보존 시 정리·미보존 시 보존)를 위임 수행한다 — 너는 브랜치·워크트리를
+   직접 정리하지 않는다(규칙 6).
 5. 보고.
 
 ## 보고 (너의 마지막 메시지 = 반환값, 사람 대상 산문 아님)

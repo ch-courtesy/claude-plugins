@@ -76,7 +76,7 @@ fan-out 단계(준비된 SPEC마다 워커 1개 진행)는 실행 환경 역량�
 - `<project_root>/.dispatch/runs/<run-id>/MANIFEST.txt` · `WAVES.txt` · `state.<slug>-<sha7>` · `LOG.md` 생성. (`<slug>` 는 가독용, `<sha7>` 는 SPEC abspath 해시로 다른 날짜·디렉토리 동명 SPEC 충돌 방지.) state 값: `pending`/`running`/`done`/`failed`/`skipped`.
 - 준비도 스트리밍: 각 SPEC 의 모든 dep 이 done 이 되는 즉시 동시성 상한 이내에서 서브에이전트 1개를 띄운다. 한 SPEC 이 failed 면 그 이행적 의존자만 `skipped`, 독립 가지는 계속.
 - `--resume <run-id>` 이면 보관된 manifest 로 재개. `done` 인 SPEC 은 재호출하지 않고 나머지(미완)만 다시 스케줄한다. 서브모드(forge/direct)와 대상 브랜치는 run-dir 마커로 보존되어 재개 시 현재 env·플래그보다 우선한다(sticky).
-- 한 child 가 `DISPATCH_WAVE_TIMEOUT_SECONDS`(기본 7200) 를 초과하면(per-SPEC runtime cap) 그 child 를 SIGTERM→SIGKILL 으로 정리하고 `failed` 로 마킹한다(이미 done 이면 보존).
+- 한 child 가 `DISPATCH_WAVE_TIMEOUT_SECONDS`(기본 7200) 를 초과하면(per-SPEC runtime cap) 그 child 를 SIGTERM→SIGKILL 으로 정리하고 `failed` 로 마킹한다(이미 done 이면 보존). child 를 `failed` 로 reap/timeout 종료한 직후, dispatch 는 그 SPEC 에 대해 **`integration.sh cleanup-on-fail <spec> <run-dir>` 를 호출해 실패-경로 조건부 워크트리 정리**(작업이 원격 브랜치로 보존돼 있으면 고아 워크트리 정리, 미보존이면 보존; loop 공개 cleanup 위임)를 적용한다 — 워커 자기 escalation 경로(`integration.sh integrate` 가 blocked 매핑 시 자동 수행)와 **동일 정책**이다. 정리 실패는 경고로 표면화되며 `failed` 판정을 뒤집지 않는다.
 - exit code: `0`=전부 done, `1`=failed/skipped 있음, `2`=timeout.
 
 ### dispatch list
@@ -93,7 +93,7 @@ run 의 fan-out 드라이버(`strong-parallel`/`background`/`foreground-batch`)�
 
 ### dispatch stop `<run-id>`
 
-run-id 안에서 진행 중(`running`)인 child 들에 대해 자율 실행기에 stop 을 위임한다.
+run-id 안에서 진행 중(`running`)인 child 들에 대해 자율 실행기에 stop 을 위임한다. stop 으로 한 child 가 `failed` 로 종료되면, dispatch 는 그 SPEC 에 대해 timeout 경로와 동일하게 **`integration.sh cleanup-on-fail <spec> <run-dir>`** 를 호출해 실패-경로 조건부 워크트리 정리(원격 보존 시 정리·미보존 시 보존)를 적용한다.
 
 ### dispatch watch `<run-id>`
 
@@ -106,9 +106,9 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 | `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·fan-out 드라이버 판정/라우팅(자동 감지·override·강등 사슬·DRIVER 마커)·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
 | `subagent-prompt.md` | **per-SPEC 워커 지침(계약)** — dispatch 가 범용 서브에이전트 spawn 프롬프트에 embed(구현=autopilot:loop·통합/리뷰/머지=헬퍼 구동·approve 후 머지·구조화 보고) |
 | `lib-integration.sh` | per-SPEC 통합 상태 헬퍼(run-dir + 키: branch/pr/head/review-round/verdict/phase) — 서브에이전트 공유 |
-| `integration.sh` | base sync → push → PR 생성/재사용(forge) / PR 없이 작업 브랜치 식별(direct) — 서브에이전트 호출 헬퍼 |
+| `integration.sh` | base sync → push → PR 생성/재사용(forge) / PR 없이 작업 브랜치 식별(direct) + 실패-경로 조건부 워크트리 정리(`cleanup-on-fail`: 원격 보존 시 loop cleanup 위임·미보존 시 보존) — 서브에이전트 호출 헬퍼 |
 | `review-loop.sh` | 리뷰 반복 가드(라운드 상한·무진전·핑퐁) 결정적 판정 헬퍼 — 서브에이전트가 재구현 반복 제어에 사용 |
-| `merge.sh` | 승인 게이트(forge)·버전 범프 게이트·직렬화 ff-only 머지(대상 브랜치) 결정적 헬퍼 — 서브에이전트가 머지에 사용 |
+| `merge.sh` | 승인 게이트(forge)·버전 범프 게이트·직렬화 ff-only 머지(대상 브랜치) + 머지 확정 후 작업 브랜치 정리(원격·로컬, force 없는 일반 삭제) 결정적 헬퍼 — 서브에이전트가 머지에 사용 |
 
 각 헬퍼 모듈은 `bash <module>.sh selftest` 로 mock 인터페이스 기반 독립 검증을 제공한다(실제 PR·머지 미수행). 결정적 스케줄링 검증은 `bash dispatch.sh selftest`.
 
@@ -122,3 +122,4 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 - 자체 작성·갱신 영역은 `<project_root>/.dispatch/runs/<run-id>/` 안의 파일들(SPEC 델타·백로그·통합 상태 포함)과 본 스킬 정의 파일뿐이다. 작업 브랜치·PR·머지 같은 forge 부수효과를 제외하면 이 외 경로를 만들지 않으며, run 디렉토리는 git 추적에서 제외한다(`.gitignore` 권장).
 - **통합·리뷰·머지 소유권은 SPEC 서브에이전트**(SPEC당 한 컨텍스트, `references/subagent-prompt.md`)에 있다 — dispatch 는 의존성·동시성·실패 격리만 총괄하고, 통합·리뷰·머지를 bash 드레인 파이프라인으로 직접 수행하지 않는다.
 - 분해(여러 SPEC 작성) 책임은 SPEC 작성 도구(`autopilot:spec` 등)에 있고, dispatch 는 이미 만들어진 SPEC 들만 받는다.
+- **워크트리·작업 브랜치 정리 정책(비대칭)의 단일 출처는 결정적 헬퍼**(`merge.sh`=머지 후 작업 브랜치 삭제, `integration.sh`=실패-경로 조건부 워크트리 정리)와 워커 계약(`references/subagent-prompt.md` 규칙 6)이다. 작업 브랜치는 **머지 성공 시에만** ff-머지 확정 이후 머지 헬퍼가 force 없이 삭제(실패/비완료=보존)하고, 워크트리는 터미널 도달 시 **원격 브랜치로 보존돼 있으면** loop 공개 cleanup 위임으로 정리·**미보존이면 보존**한다(비터미널=정리 금지). 워커·dispatch 모두 raw 원격 명령으로 직접 삭제하거나 워크트리를 직접 `rm` 하지 않으며, 정리 실패는 경고로 표면화하되 머지·완료 판정을 뒤집지 않는다.
