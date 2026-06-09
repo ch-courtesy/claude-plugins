@@ -1,16 +1,5 @@
 {
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Skill|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/hooks/dispatch-worker-permit.sh"
-          }
-        ]
-      }
-    ],
     "SessionStart": [
       {
         "hooks": [
