@@ -6,6 +6,7 @@ allowed-tools:
   - Bash(bash * dispatch.sh start:*)
   - Bash(bash * dispatch.sh list)
   - Bash(bash * dispatch.sh status:*)
+  - Bash(bash * dispatch.sh driver:*)
   - Bash(bash * dispatch.sh stop:*)
   - Bash(bash * dispatch.sh watch:*)
   - Bash(bash * dispatch.sh selftest:*)
@@ -43,6 +44,22 @@ dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispa
 - **대상 브랜치**: `--target-branch <branch>`(미지정 시 기본 브랜치 또는 주입된 `DEFAULT_BRANCH`). run 전역으로 결정돼 모든 서브에이전트의 base 동기화·리뷰·ff 머지에 일관 적용되고, run-dir 마커(`TARGET_BRANCH`)로 영속해 `--resume` 에서 sticky 하다(마커가 현재 env·플래그보다 우선).
 - **주입 가능 인터페이스(mock 검증)**: 결정적 헬퍼의 외부 인터페이스(`LOOP_CMD`·`GIT_CMD`·`FORGE_CMD`(기본 gh)·`FORGE_BIN`(서브모드 판정)·`DEFAULT_BRANCH`·`REVIEW_ROUNDS_MAX`(3)·`WATCH_DIRS`(plugins/) 등)는 주입 가능해 실제 PR·머지 없이 mock 으로 독립 검증된다.
 
+## fan-out 드라이버 — 실행 환경 역량에 따른 라우팅
+
+fan-out 단계(준비된 SPEC마다 워커 1개 진행)는 실행 환경 역량에 따라 **세 드라이버** 중 하나로 구동된다. 세 드라이버는 동일한 **결정적 코어**(준비도·상태 전이·skip 전파·워커 계약·머지/리뷰 게이트)를 공유하고 fan-out 진행 방식만 다르다 — 호출자에게 노출된 **시작 인터페이스는 변하지 않으며**, 드라이버 선택은 dispatch 내부에서 일어난다.
+
+| 드라이버 | fan-out 진행 방식 | 모델 절차 |
+|---|---|---|
+| `strong-parallel` | 런타임이 병렬·스트리밍·동시성·재개를 네이티브로 소유 | **dynamic Workflow** 로 임의 `depends_on` DAG를 promise 기반(노드별 의존성 충족 즉시 워커 실행)으로 표현, SPEC당 워커 1개. 한 SPEC의 dep 이 모두 done 이면 **같은 배치의 더 느린 무관한 SPEC 이 진행 중이어도** 기다리지 않고 그 워커가 시작된다. 동시·항목 수는 런타임 상한(동시 ≤ min(16, cores−2), 단일 fan-out ≤ 4096, 총 워커 ≤ 1000) 내. |
+| `background` | 워커를 비동기로 띄우고 개별 완료 신호에 반응 | 준비된 SPEC 워커를 background 로 spawn 하고, **개별 완료 신호마다** `mark done`(머지) / `mark failed`(비완료) 후 `ready` 재평가로 의존자를 즉시 해제한다. 완료 신호가 오케스트레이터를 재호출하지 못하는 환경으로 판명되면 `foreground-batch` 로 강등. |
+| `foreground-batch` | 한 턴에 동시 시작 → 배리어 → 준비도 재평가 | `ready` 를 한 번에 spawn → 모두 보고될 때까지 배리어 → `mark` → 다시 `ready`. 안전 폴백(강등 사슬 종착). |
+
+- **자동 감지(시작 시)**: 자동 감지는 **실행 환경(세션) 속성**이라 대상 리포 파일로 결정적 probe 할 수 없다 — 모델이 세션 시작 시 가용 역량을 판정해 `DISPATCH_STRONG_PARALLEL=1` 또는 `DISPATCH_BACKGROUND=1` 환경 신호로 주입한다. 신호가 없으면 안전 폴백 `foreground-batch`.
+- **override(운영자 강제)**: 기존 시작 CLI 를 바꾸지 않도록 **`DISPATCH_DRIVER` 환경 변수**(`strong-parallel|background|foreground-batch`)로 받는다(`DISPATCH_*` 주입 관례). override 가 주어지면 자동 감지를 무시한다(무효 값이면 즉시 abort).
+- **안전 강등 사슬**: 선호 드라이버가 가용하지 않으면 `strong-parallel → background → foreground-batch` 순으로 강등한다. 어느 드라이버로 갔는지는 **관찰 가능**해야 한다 — `dispatch driver <run-id>` 와 `dispatch status` 의 `driver:` 라인으로 읽는다.
+- **resume sticky**: 최초 시작에서 결정된 드라이버는 run-dir 마커(`DRIVER`)로 영속해 `--resume` 에서 현재 env 보다 우선한다(sticky).
+- 워커 **내부 단계(구현→리뷰→재구현→머지)는 어느 드라이버에서든 데이터 의존 순서대로 동기** 진행된다(이 내부 순서를 병렬·백그라운드로 바꾸지 않는다 — 워커 계약 `references/subagent-prompt.md` 불변). 실패 이행 격리·승인 후 ff-only 머지 같은 안전 불변식도 드라이버와 무관하게 동일하다.
+
 ## Subcommands
 
 ### dispatch start `<spec...>` [--max-parallel N] [--resume `<run-id>`] [--target-branch `<branch>`]
@@ -63,7 +80,11 @@ dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispa
 
 ### dispatch status `<run-id>`
 
-run-id 단위로 per-SPEC state(`pending`/`running`/`done`/`failed`/`skipped`) 를 표로 출력한다(진단용 wave 번호 포함). loop driver 의 라이브 state 도 함께 보인다.
+run-id 단위로 per-SPEC state(`pending`/`running`/`done`/`failed`/`skipped`) 를 표로 출력한다(진단용 wave 번호 포함). 헤더에 선택된 fan-out 드라이버(`driver:`)도 함께 보인다. loop driver 의 라이브 state 도 함께 보인다.
+
+### dispatch driver `<run-id>`
+
+run 의 fan-out 드라이버(`strong-parallel`/`background`/`foreground-batch`)를 출력한다 — 자동 선택·override·안전 강등의 **결과를 관찰**하는 진입점(마커 없는 레거시 run 은 `foreground-batch`).
 
 ### dispatch stop `<run-id>`
 
@@ -77,7 +98,7 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 
 | 파일 | 역할 |
 |---|---|
-| `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
+| `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·fan-out 드라이버 판정/라우팅(자동 감지·override·강등 사슬·DRIVER 마커)·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
 | `subagent-prompt.md` | **per-SPEC 워커 지침(계약)** — dispatch 가 범용 서브에이전트 spawn 프롬프트에 embed(구현=autopilot:loop·통합/리뷰/머지=헬퍼 구동·approve 후 머지·구조화 보고) |
 | `lib-integration.sh` | per-SPEC 통합 상태 헬퍼(run-dir + 키: branch/pr/head/review-round/verdict/phase) — 서브에이전트 공유 |
 | `integration.sh` | base sync → push → PR 생성/재사용(forge) / PR 없이 작업 브랜치 식별(direct) — 서브에이전트 호출 헬퍼 |
