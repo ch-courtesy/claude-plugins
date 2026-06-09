@@ -185,6 +185,24 @@ mg_cleanup_workspace() {
   $LOOP_CMD cleanup "$1" >/dev/null 2>&1 || echo "WARN: cleanup 위임 실패(수동 정리 필요): $1" >&2
 }
 
+# mg_delete_merged_branch <branch> — 머지 확정된 작업 브랜치 정리(원격+로컬, force 없는 일반 삭제).
+#   머지 성공의 사후 단계: ff-머지 확정 이후에만 호출된다. 삭제 실패는 경고로 표면화(조용한 실패
+#   금지)하되 rc 0 을 유지해 머지·완료 판정을 뒤집지 않는다(고아 브랜치는 다음 정리 기회에).
+#   워커가 raw `gh`/`git push --delete` 로 직접 삭제하지 않고, 머지 확정 후 이 결정적 헬퍼만 삭제한다.
+mg_delete_merged_branch() {
+  local branch="$1"
+  [[ -n "$branch" ]] || return 0
+  # 원격(대상 리모트) 작업 브랜치 삭제 — force 아닌 일반 삭제. direct 서브모드 등 원격에 없으면 WARN.
+  # shellcheck disable=SC2086
+  $GIT_CMD push origin --delete "$branch" >/dev/null 2>&1 \
+    || echo "WARN: 원격 작업 브랜치 삭제 실패(머지는 완료, 수동 정리 가능): origin/$branch" >&2
+  # 로컬 작업 브랜치 삭제 — force(-D) 아닌 일반 삭제(-d). 머지 확인됨.
+  # shellcheck disable=SC2086
+  $GIT_CMD branch -d "$branch" >/dev/null 2>&1 \
+    || echo "WARN: 로컬 작업 브랜치 삭제 실패(머지는 완료, 수동 정리 가능): $branch" >&2
+  return 0
+}
+
 # ===== 5) 메인 진입 — 버전 게이트 통과 시 머지하고 phase=merged =====
 # mg_merge_finish <spec> <run_dir> <key> [pr] [direct]
 #   direct=1 이면 direct 서브모드(forge 백엔드 미가용 — PR 없이 로컬 머지) 계약으로, PR 보강·
@@ -239,10 +257,13 @@ mg_merge_finish() {
   int_log "$rd" "$key" "게이트 통과 → ff-only 머지(직렬화, 가용 토큰): $branch → $DEFAULT_BRANCH"
   mg_merge_ff_only "$rd" "$branch" || { int_set_phase "$rd" "$key" blocked; return 1; }
 
-  # 4) 완료.
+  # 4) 완료. 머지 확정 후 사후 단계로 정리한다(순서: 워크트리 정리 → 작업 브랜치 삭제).
+  #    워크트리를 먼저 위임 정리해야 그 워크트리에 체크아웃된 작업 브랜치를 로컬에서 삭제할 수 있다.
+  #    정리 실패는 경고로 표면화하되 머지·완료 판정을 뒤집지 않는다(아래 헬퍼들이 rc 0 유지).
   int_set_phase "$rd" "$key" merged
   mg_cleanup_workspace "$spec"
-  int_log "$rd" "$key" "완료: 머지 확인, phase=merged, 작업 공간 정리 위임."
+  mg_delete_merged_branch "$branch"
+  int_log "$rd" "$key" "완료: 머지 확인, phase=merged, 작업 공간 정리 위임 + 작업 브랜치 삭제."
   echo "key:     $key"
   echo "phase:   merged"
   echo "branch:  $branch → $DEFAULT_BRANCH (ff-only)"
@@ -319,6 +340,9 @@ mg_selftest() {
   has 'git push origin main' && ok "base push(가용 토큰)" || bad "base push(가용 토큰)"
   chk "phase=merged" "$(int_get_phase "$rd" k1)" "merged"
   has 'loop cleanup' && ok "cleanup 위임" || bad "cleanup 위임"
+  # 머지 성공 → 작업 브랜치 정리(원격+로컬, force 없는 일반 삭제). ff-머지 확정 이후.
+  has 'push origin --delete feat/run1-k1' && ok "머지후 원격 작업브랜치 삭제" || bad "머지후 원격 작업브랜치 삭제"
+  has 'branch -d feat/run1-k1' && ok "머지후 로컬 작업브랜치 삭제(force 없음)" || bad "머지후 로컬 작업브랜치 삭제(force 없음)"
 
   # ---- forge: PR 미승인(reviewDecision!=APPROVED) → 차단(승인 전 머지 차단, PR #353 회귀 가드) ----
   reset; setup knapp
@@ -327,6 +351,9 @@ mg_selftest() {
   chk "forge 미승인 rc=1(차단)" "$rc" "1"
   if has 'git merge --ff-only'; then bad "미승인인데 머지함"; else ok "미승인 → 머지 안 함"; fi
   chk "미승인 phase=blocked" "$(int_get_phase "$rd" knapp)" "blocked"
+  # 차단(비머지)에서는 작업 브랜치를 보존 — 삭제 금지(실패/비완료=보존).
+  if has 'push origin --delete'; then bad "차단인데 원격 브랜치 삭제함(보존 위반)"; else ok "차단 → 원격 브랜치 보존"; fi
+  if has 'branch -d'; then bad "차단인데 로컬 브랜치 삭제함(보존 위반)"; else ok "차단 → 로컬 브랜치 보존"; fi
 
   # ---- forge: plugins/ 변경 + 범프 없음 → 차단(비완료 종착 rc=1) ----
   reset; setup k4
@@ -378,6 +405,26 @@ mg_selftest() {
     mg_merge_finish "$spec" "$rd" kd2 "" 1 >/dev/null 2>&1; rc=$?
   chk "direct version gate 차단 rc=1" "$rc" "1"
   if has 'git merge --ff-only'; then bad "direct 범프없음 머지 안 함"; else ok "direct 범프없음 머지 안 함"; fi
+
+  # ---- 브랜치 삭제 실패 → 경고로 표면화, 머지 판정(merged)은 유지(정리는 사후 단계) ----
+  reset; setup kdelfail
+  # 삭제 명령만 실패시키는 mock — 머지/push 는 성공, delete 만 rc=1.
+  mock_git_delfail() {
+    local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
+    echo "git $*" >> "$trace"
+    case "$1 $2" in
+      "push origin") case "$*" in *--delete*) return 1;; esac ;;
+      "branch -d") return 1 ;;
+    esac
+    case "$1" in
+      show) case "$2" in origin/*) echo '  "version": "1.0.0"';; *) echo '  "version": "1.0.0"';; esac ;;
+    esac
+    return 0
+  }
+  err="$(GIT_CMD=mock_git_delfail MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdelfail 2>&1 >/dev/null)"; rc=$?
+  chk "삭제 실패해도 머지 rc=0" "$rc" "0"
+  chk "삭제 실패해도 phase=merged" "$(int_get_phase "$rd" kdelfail)" "merged"
+  case "$err" in *WARN*) ok "브랜치 삭제 실패 경고 표면화";; *) bad "브랜치 삭제 실패 경고 표면화(조용한 실패 금지)";; esac
 
   # ---- 머지 락 직렬화 — 점유 중엔 두 번째 획득 실패, 해제 후 성공 ----
   mg_try_lock "$rd" && ok "락 1차 획득" || bad "락 1차 획득"
