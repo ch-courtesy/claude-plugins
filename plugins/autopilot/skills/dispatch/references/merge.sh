@@ -165,18 +165,26 @@ mg_acquire_lock() {
 # mg_merge_ff_only <run_dir> <branch>
 mg_merge_ff_only() {
   local rd="$1" branch="$2"
+  local tries="${DISPATCH_MERGE_RETRIES:-3}" i=0 rc=1
   mg_acquire_lock "$rd" || { mg_die "머지 락 획득 실패(직렬화 대기 초과): $rd"; return 1; }
-  # 임계구간: main 체크아웃 + ff-only 머지 + base push(가용 토큰).
-  local rc=0
-  {
-    # shellcheck disable=SC2086
-    $GIT_CMD fetch origin "$DEFAULT_BRANCH" \
-      && $GIT_CMD checkout "$DEFAULT_BRANCH" \
-      && $GIT_CMD merge --ff-only "$branch" \
-      && $GIT_CMD push origin "$DEFAULT_BRANCH"
-  } || rc=$?
+  # 임계구간: main 체크아웃 + ff-only 머지 + base push(가용 토큰). 타겟이 fetch~push 사이
+  # 전진해 ff/push 가 깨지는 레이스는 non-force 재fetch 후 유한 횟수 재시도로 자가 치유한다
+  # (branch 가 여전히 갱신된 타겟의 자손이면 다음 시도에서 ff 성공). force 는 쓰지 않는다.
+  while [[ "$i" -lt "$tries" ]]; do
+    i=$((i+1)); rc=0
+    {
+      # shellcheck disable=SC2086
+      $GIT_CMD fetch origin "$DEFAULT_BRANCH" \
+        && $GIT_CMD checkout "$DEFAULT_BRANCH" \
+        && $GIT_CMD merge --ff-only "$branch" \
+        && $GIT_CMD push origin "$DEFAULT_BRANCH"
+    } || rc=$?
+    [[ "$rc" -eq 0 ]] && break
+  done
   mg_release_lock "$rd"
-  [[ "$rc" -eq 0 ]] || { mg_die "fast-forward 머지/푸시 실패(머지 커밋·force 금지): $branch → $DEFAULT_BRANCH"; return 1; }
+  # 재시도 후에도 실패면(branch base 가 stale = 타겟의 자손이 아님), 워커가 base 재동기화
+  # (integration.sh integrate 의 자율 충돌 해결)를 거쳐 finish 를 재시도하거나 에스컬레이션한다.
+  [[ "$rc" -eq 0 ]] || { mg_die "fast-forward 머지/푸시 실패($tries 회 재시도 후, 머지 커밋·force 금지): $branch → $DEFAULT_BRANCH — 워커 base 재동기화 후 재시도 필요"; return 1; }
 }
 
 # ===== 4) 정리 — loop 공개 cleanup 위임 =====

@@ -64,15 +64,32 @@ dispatch 가 준비된(모든 `depends_on` 이 `done`) SPEC마다 띄우는 per-
    리뷰가 `request_changes`면 같은 작업 브랜치에서 `autopilot:loop`으로 재구현→재리뷰를 반복하되, 무한루프 가드
    (`review-loop.sh`)에 걸리면 **머지 없이 에스컬레이션**한다. 거짓 green 금지.
 
+7. **머지 충돌은 헬퍼가 자율 해결 — 충돌만으로 즉시 에스컬레이션하지 않는다**: dispatch run 도중 대상 브랜치가
+   다른 머지로 전진하면 base sync(`integration.sh integrate` 의 rebase)·최종 머지(`merge.sh finish` 의 ff)에서
+   충돌·ff 실패가 난다. 결정적 헬퍼가 이를 **자율 해결**한다 — 너는 충돌·ff 실패만으로 곧장 에스컬레이션하지 않는다.
+   - **결정적 해소(버전 줄)**: plugin.json 버전-only 충돌은 헬퍼가 "타겟 위로 작업 브랜치 의도 범프 재적용"으로
+     결정적으로 해소한다 — 추가 검증 없이 진행한다(버전 게이트가 별도로 단언).
+   - **비결정(일반) 충돌 + 검증 게이트**: 코드 의미 충돌은 헬퍼가 전략(기본 `incoming`)으로 해소하되 **비결정
+     해소 표시**(`integration.sh integrate` 가 표면화하는 `autoresolve … needs-verify` 신호)를 남긴다. 이 표시가
+     있으면 머지 전에 **그 SPEC 의 검증(완료 조건/관련 결정적 selftest)을 재실행**한다 — 통과 시에만 머지로 진행하고,
+     **실패하면 머지하지 않고 에스컬레이션**한다(자동 해소가 타겟 변경을 깨뜨렸을 수 있음 — 거짓 green 금지).
+   - **최종 머지 레이스**: `merge.sh finish` 가 타겟 전진으로 ff 실패를 보고하면(헬퍼 내부 바운드 재시도 후에도),
+     `integration.sh integrate`(자율 재동기화)를 다시 돌린 뒤 `merge.sh finish` 를 재시도한다. **유한 횟수**
+     (기본 한도) 초과 시 에스컬레이션한다.
+   - 자동 해결·재동기화·재시도는 **어떤 경로에서도 non-force**다(force push/merge/rebase 금지). 검증으로 닫히지
+     않거나 한도를 넘는 충돌만 보수적으로 에스컬레이션한다.
+
 5. **블랙박스 경계**: `autopilot:loop`·`autopilot:review`의 내부 신호 파일·워크트리·하니스를 들여다보거나 건드리지 않는다.
 
 ## 절차 요약
 1. `Skill(skill="autopilot:loop", args="start <spec>")` — **포그라운드 블로킹 실행**(반환까지 턴 유지), 반환된 뒤 DONE 판정(`autopilot:loop status --json`).
 2. 서브모드 판정 → `integration.sh integrate|integrate-direct`.
 3. `review-loop.sh run|run-direct` → 승인 게이트(forge=호스팅 리뷰 **비동기 대기**·pending=transient·**자기승인 금지**·PR APPROVED, direct=로컬 review approve). `request_changes`면 재구현 반복(가드).
-4. 승인 후 `merge.sh finish`(버전 범프·승인 게이트·**머지 확정 후 작업 브랜치 정리**). 머지 없이 escalation 하면
-   통합 헬퍼가 **조건부 워크트리 정리**(원격 보존 시 정리·미보존 시 보존)를 위임 수행한다 — 너는 브랜치·워크트리를
-   직접 정리하지 않는다(규칙 6).
+4. 승인 후 `merge.sh finish`(버전 범프·승인 게이트·**머지 확정 후 작업 브랜치 정리**). **타겟 전진 충돌·ff 실패는
+   헬퍼가 자율 해결**한다(규칙 7) — 비결정 해소 표시(`needs-verify`)가 있으면 머지 전 검증 재실행, ff 레이스는
+   재동기화 후 유한 재시도, 검증 실패·한도 초과만 에스컬레이션(non-force). 머지 없이 escalation 하면 통합 헬퍼가
+   **조건부 워크트리 정리**(원격 보존 시 정리·미보존 시 보존)를 위임 수행한다 — 너는 브랜치·워크트리를 직접
+   정리하지 않는다(규칙 6).
 5. 보고.
 
 ## 보고 (너의 마지막 메시지 = 반환값, 사람 대상 산문 아님)
