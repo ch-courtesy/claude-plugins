@@ -166,10 +166,113 @@ in_ensure_work_branch() {
 
 # =====================================================================
 # 3) git 통합 — base sync(rebase, ff 가능 시) → push. force 금지.
+#    타겟 전진으로 인한 충돌은 워커가 자율 해결한다(결정적 버전 해소 + 일반 충돌은
+#    전략 해소 + 비결정 표시로 머지 전 재검증 유도). 자동 해결·재동기화·재시도는 non-force.
+#    정책 단일 출처: 본 절(결정적 헬퍼) + 워커 계약(subagent-prompt.md).
 # =====================================================================
+
+# INT_AUTORESOLVE_FLAG — 직전 base sync 에서 '비결정(일반) 충돌'을 전략으로 해소했으면
+#   'needs-verify'. 워커는 이 표시가 있으면 머지 전 검증(완료 조건/selftest)을 재실행하고
+#   통과할 때만 진행한다(거짓 green 방지). 결정적(버전-only) 해소만 있었으면 비어 있음.
+INT_AUTORESOLVE_FLAG=""
+
+# in_json_version <ref> <path> — ref 의 plugin.json version 값(예 0.39.0). 없으면 빈 문자열.
+in_json_version() {
+  # shellcheck disable=SC2086
+  $GIT_CMD show "$1:$2" 2>/dev/null \
+    | grep -m1 -E '"version"[[:space:]]*:' \
+    | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"?([0-9][0-9.]*)"?.*/\1/'
+}
+
+# in_reapply_bump <target> <base> <our> — base→our 의 최상위 증가 필드(major/minor/patch)를
+#   target 위에 재적용한 새 버전 echo. 범프 레벨을 못 가리면 target 의 patch+1(보수적 최소 증가).
+#   결과는 항상 target 보다 엄격히 크다(작업 브랜치 범프 의도 보존 + 타겟 전진 반영).
+in_reapply_bump() {
+  local tgt="$1" base="$2" our="$3" oldIFS="$IFS"
+  IFS=.; # shellcheck disable=SC2206
+  local -a t=($tgt) b=($base) o=($our); IFS="$oldIFS"
+  local lvl=2 i bi oi
+  for ((i=0;i<3;i++)); do
+    bi="${b[i]:-0}"; oi="${o[i]:-0}"; bi="${bi//[!0-9]/}"; oi="${oi//[!0-9]/}"
+    [[ -n "$bi" ]] || bi=0; [[ -n "$oi" ]] || oi=0
+    if (( 10#$oi > 10#$bi )); then lvl=$i; break; fi
+  done
+  local -a r=("${t[0]:-0}" "${t[1]:-0}" "${t[2]:-0}") j
+  for ((j=0;j<3;j++)); do r[j]="${r[j]//[!0-9]/}"; [[ -n "${r[j]}" ]] || r[j]=0; done
+  r[lvl]=$(( 10#${r[lvl]} + 1 ))
+  for ((j=lvl+1;j<3;j++)); do r[j]=0; done
+  printf '%s.%s.%s\n' "${r[0]}" "${r[1]}" "${r[2]}"
+}
+
+# in_conflict_version_only <file> — 충돌 블록(<<< ~ >>>) 안 비-마커 라인이 모두 "version" 라인이면 0.
+#   결정적(버전-only) 충돌 판정 — 그 외(코드 의미) 충돌과 구분한다.
+in_conflict_version_only() {
+  awk '
+    /^<<<<<<< /{inc=1; seen=1; next}
+    /^=======$/{next}
+    /^>>>>>>> /{inc=0; next}
+    inc && $0 !~ /"version"[[:space:]]*:/ { bad=1 }
+    END { exit ((seen && !bad)?0:1) }
+  ' "$1"
+}
+
+# in_resolve_version_conflict <file> — 진행 중 rebase 의 버전-only 충돌 결정적 해소.
+#   새 베이스(HEAD=origin/main) plugin.json 전체를 취하고 version 만 in_reapply_bump 값으로.
+in_resolve_version_conflict() {
+  local f="$1" tgt our base mb newv
+  tgt="$(in_json_version HEAD "$f")"          # rebase 중 HEAD = 새 베이스(origin/main)
+  our="$(in_json_version REBASE_HEAD "$f")"   # 재적용 중 작업 커밋
+  # shellcheck disable=SC2086
+  mb="$($GIT_CMD merge-base REBASE_HEAD HEAD 2>/dev/null)"
+  base="$(in_json_version "$mb" "$f")"
+  newv="$(in_reapply_bump "$tgt" "$base" "$our")"
+  [[ -n "$newv" ]] || return 1
+  # shellcheck disable=SC2086
+  $GIT_CMD show "HEAD:$f" 2>/dev/null \
+    | sed -E "s/(\"version\"[[:space:]]*:[[:space:]]*\")[0-9][0-9.]*(\")/\1$newv\2/" > "$f" || return 1
+  return 0
+}
+
+# in_autoresolve_rebase <branch> — 진행 중(충돌 정지) rebase 를 자율 해결.
+#   파일별: plugin.json 버전-only → 결정적 해소; 그 외 → DISPATCH_CONFLICT_STRATEGY
+#   (기본 incoming=재적용 중 작업 커밋 쪽 --theirs, base=새 베이스 쪽 --ours) + 비결정 표시.
+#   닫으면 rebase --continue 후 0, 닫지 못하면 abort 후 1. force 미사용.
+in_autoresolve_rebase() {
+  local branch="$1" f resolved_general=0 unmerged
+  # shellcheck disable=SC2086
+  unmerged="$($GIT_CMD diff --name-only --diff-filter=U 2>/dev/null)"
+  [[ -n "$unmerged" ]] || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    if [[ "$f" =~ (^|/)plugin\.json$ ]] && in_conflict_version_only "$f"; then
+      in_resolve_version_conflict "$f" || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
+    else
+      # shellcheck disable=SC2086
+      case "${DISPATCH_CONFLICT_STRATEGY:-incoming}" in
+        base) $GIT_CMD checkout --ours   -- "$f" 2>/dev/null || true ;;
+        *)    $GIT_CMD checkout --theirs -- "$f" 2>/dev/null || true ;;
+      esac
+      resolved_general=1
+    fi
+    # shellcheck disable=SC2086
+    $GIT_CMD add -- "$f" 2>/dev/null || true
+  done <<< "$unmerged"
+  # shellcheck disable=SC2086
+  if [[ -n "$($GIT_CMD diff --name-only --diff-filter=U 2>/dev/null)" ]]; then
+    $GIT_CMD rebase --abort 2>/dev/null || true; return 1
+  fi
+  [[ "$resolved_general" == "1" ]] && INT_AUTORESOLVE_FLAG="needs-verify"
+  printf 'autoresolve: base-sync rebase 자율 해결 (branch=%s general=%s flag=%s)\n' \
+    "$branch" "$resolved_general" "${INT_AUTORESOLVE_FLAG:-deterministic}" >&2
+  # shellcheck disable=SC2086
+  $GIT_CMD rebase --continue || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
+  return 0
+}
 
 in_base_sync() {
   local branch="$1"
+  local tries="${DISPATCH_BASESYNC_RETRIES:-3}" i=0 pre post
+  INT_AUTORESOLVE_FLAG=""
   # shellcheck disable=SC2086
   $GIT_CMD fetch origin "$DEFAULT_BRANCH" || { in_die "fetch 실패: origin/$DEFAULT_BRANCH"; return 1; }
   # shellcheck disable=SC2086
@@ -179,19 +282,31 @@ in_base_sync() {
   if $GIT_CMD merge-base --is-ancestor "origin/$DEFAULT_BRANCH" "$branch" 2>/dev/null; then
     return 0
   fi
-  # base 가 전진했고 원격 브랜치(open PR)가 이미 있으면, rebase 재작성은 SHA 를 바꿔
-  # force 없는 push 를 non-fast-forward 로 실패시킨다(force 금지). 따라서 재작성하지 않고
-  # 그대로 둔다 — base 정합은 머지 단계의 ff-only 게이트가 별도로 강제한다(여기서 force·
-  # 재작성하지 않는다). 최초 통합(원격 브랜치 미존재)에서만 rebase 후 새 브랜치 push(ff-safe).
+  # base 가 전진했고 원격 브랜치(open PR)가 이미 있으면, rebase 재작성은 SHA 를 바꿔 force 없는
+  # push 를 non-fast-forward 로 실패시킨다. 재작성하지 않고 그대로 둔다 — base 정합은 머지 단계의
+  # ff-only 게이트(그쪽도 자율 재동기화)가 강제한다.
   if [[ -n "$(in_existing_open_pr "$branch")" ]]; then
     return 0
   fi
-  # shellcheck disable=SC2086
-  if ! $GIT_CMD rebase "origin/$DEFAULT_BRANCH"; then
+  # 최초 통합(원격 브랜치 미존재): rebase 후 push(ff-safe). 충돌은 자율 해결하고, 해결 도중
+  # 타겟이 또 전진하면(레이스) 갱신된 origin/main 으로 유한 횟수 재rebase 한다(non-force).
+  while : ; do
     # shellcheck disable=SC2086
-    $GIT_CMD rebase --abort || true
-    in_die "rebase 충돌 — 사람 위임(force 금지): $branch ← origin/$DEFAULT_BRANCH"; return 1
-  fi
+    pre="$($GIT_CMD rev-parse "origin/$DEFAULT_BRANCH" 2>/dev/null)"
+    # shellcheck disable=SC2086
+    if ! $GIT_CMD rebase "origin/$DEFAULT_BRANCH"; then
+      in_autoresolve_rebase "$branch" \
+        || { in_die "rebase 충돌 자율 해결 실패 — 사람 위임(force 금지): $branch ← origin/$DEFAULT_BRANCH"; return 1; }
+    fi
+    # 레이스 감지: 자율 해결 도중 origin/main 이 전진했으면 재시도.
+    # shellcheck disable=SC2086
+    $GIT_CMD fetch origin "$DEFAULT_BRANCH" 2>/dev/null || true
+    # shellcheck disable=SC2086
+    post="$($GIT_CMD rev-parse "origin/$DEFAULT_BRANCH" 2>/dev/null)"
+    [[ "$pre" == "$post" ]] && return 0
+    i=$((i+1))
+    [[ "$i" -ge "$tries" ]] && { in_die "base sync 레이스 한도 초과($tries) — 사람 위임(force 금지): $branch"; return 1; }
+  done
 }
 
 in_push_branch() {
@@ -754,6 +869,42 @@ SPECEOF
   # ---- AC: force 미사용 (mock_git 은 force 보면 exit99; 여기 도달했으면 미사용) ----
   [[ -s "$PUSHLOG" || -s "$GITLOG" ]] && ok "git/push 실제 수행됨" || bad "git/push 실제 수행됨"
   if grep -qiE 'force|(^| )-f( |$)' "$GITLOG"; then bad "force 미사용"; else ok "force 미사용(git 인자에 force 없음)"; fi
+
+  # ---- AC: 자동 충돌 해결 — 결정적 버전 해소 산식(in_reapply_bump: 타겟 위 의도 범프 재적용) ----
+  chk "AC reapply minor"          "$(in_reapply_bump 0.38.1 0.38.0 0.39.0)" "0.39.0"
+  chk "AC reapply minor leapfrog" "$(in_reapply_bump 0.40.0 0.38.0 0.39.0)" "0.41.0"
+  chk "AC reapply patch"          "$(in_reapply_bump 0.38.5 0.38.0 0.38.1)" "0.38.6"
+  chk "AC reapply major"          "$(in_reapply_bump 1.2.3 0.38.0 1.0.0)"   "2.0.0"
+  chk "AC reapply no-bump→patch"  "$(in_reapply_bump 0.38.1 0.38.0 0.38.0)" "0.38.2"
+
+  # ---- AC: 버전-only 충돌 판정(결정적 vs 코드 의미 구분) ----
+  local cvf="$TMP/conf_ver.json" ccf="$TMP/conf_code.sh"
+  printf '{\n<<<<<<< HEAD\n  "version": "0.38.1",\n=======\n  "version": "0.39.0",\n>>>>>>> x\n}\n' > "$cvf"
+  printf 'f(){\n<<<<<<< HEAD\n  echo a\n=======\n  echo b\n>>>>>>> x\n}\n' > "$ccf"
+  in_conflict_version_only "$cvf" && ok "AC 버전-only 충돌 인식" || bad "AC 버전-only 충돌 인식"
+  in_conflict_version_only "$ccf" && bad "AC 코드 충돌을 버전-only 로 오인" || ok "AC 코드 충돌은 버전-only 아님(결정적 해소 제외)"
+
+  # ---- AC: in_autoresolve_rebase 일반(비결정) 충돌 → 전략 해소 + needs-verify 표시(워커 재검증 유도) ----
+  local U2LOG="$TMP/arlog"; : > "$U2LOG"; rm -f "$TMP/ar_done"
+  mock_git_ar() {
+    local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
+    printf '%s\n' "$*" >> "$U2LOG"
+    if [[ "$1" == "diff" && "$*" == *--diff-filter=U* ]]; then
+      [[ -f "$TMP/ar_done" ]] || echo "src/foo.sh"   # add 전엔 미해결, add 후엔 해결됨.
+      return 0
+    fi
+    [[ "$1" == "add" ]] && : > "$TMP/ar_done"
+    return 0
+  }
+  INT_AUTORESOLVE_FLAG=""
+  GIT_CMD=mock_git_ar DISPATCH_CONFLICT_STRATEGY=incoming in_autoresolve_rebase "feat/x" >/dev/null 2>&1; rc=$?
+  GIT_CMD=mock_git
+  chk "AC autoresolve 일반 충돌 rc=0" "$rc" "0"
+  chk "AC autoresolve 비결정→needs-verify" "$INT_AUTORESOLVE_FLAG" "needs-verify"
+  grep -q 'checkout --theirs' "$U2LOG" && ok "AC autoresolve incoming 전략=--theirs(작업 커밋 쪽)" || bad "AC autoresolve incoming 전략=--theirs"
+  grep -q 'rebase --continue' "$U2LOG" && ok "AC autoresolve rebase --continue 로 진행" || bad "AC autoresolve rebase --continue"
+  if grep -qiE 'force' "$U2LOG"; then bad "AC autoresolve force 미사용"; else ok "AC autoresolve force 미사용"; fi
+  INT_AUTORESOLVE_FLAG=""
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
