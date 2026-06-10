@@ -250,6 +250,7 @@ in_cleanup_failed_worktree() {
 
 # =====================================================================
 # 4) PR 생성/재사용 — 같은 head 의 open PR 이 있으면 재사용.
+#    본문은 정적 한 줄이 아니라 in_pr_body 의 구조화 본문(SPEC 추적성·요약·실행 컨텍스트).
 # =====================================================================
 
 in_existing_open_pr() {
@@ -258,15 +259,64 @@ in_existing_open_pr() {
     | awk 'NR==1 { print $1 }' | tr -d '#'
 }
 
-# in_ensure_pr <branch> <title> — open PR 재사용 또는 신규 생성. PR 번호 echo.
+# in_pr_summary <spec_path> — SPEC 의 '## 무엇을 만들 것인가' 섹션 본문(HTML 설명 주석 제거).
+#   섹션이 없으면 빈 출력(호출자가 요약 블록을 생략). 다음 헤딩(#/##)에서 경계를 닫는다.
+#   섹션 헤더 문자열에 과결합하지 않도록 정확 헤더 한 줄만 인식하고, 그 외 형식 변화엔
+#   "요약 생략 + 나머지 정상" 으로 강건하게 동작한다(SPEC 제약).
+in_pr_summary() {
+  awk '
+    /^##?[[:space:]]/ {
+      if (insec) exit
+      if ($0 ~ /^## 무엇을 만들 것인가[[:space:]]*$/) { insec = 1; next }
+    }
+    insec {
+      if (incmt) { if (index($0, "-->")) incmt = 0; next }
+      if ($0 ~ /^[[:space:]]*<!--/) { if (!index($0, "-->")) incmt = 1; next }
+      print
+    }
+  ' "$1"
+}
+
+# in_spec_issue <spec_path> — frontmatter 의 이슈 식별 정보(issue: 키). 없으면 빈 출력.
+#   forward-compatible: 키가 SPEC 에 존재할 때만 값을 내고, 따옴표·선행 '#' 표기를 정규화한다.
+in_spec_issue() {
+  awk '
+    NR == 1 && /^---[[:space:]]*$/ { fm = 1; next }
+    fm && /^---[[:space:]]*$/ { exit }
+    fm && /^issue:[[:space:]]*/ {
+      sub(/^issue:[[:space:]]*/, ""); gsub(/["'\''#[:space:]]/, ""); print; exit
+    }
+  ' "$1"
+}
+
+# in_pr_body <spec_path> <run-id> — 구조화 PR 본문(결정적) stdout.
+#   추적성(SPEC 경로) + 실행 컨텍스트(dispatch run-id) + 조건부 이슈 cross-reference(Refs #n,
+#   rules/context.md 형식) + 요약(SPEC 의도 섹션, 없으면 생략).
+in_pr_body() {
+  local spec="$1" rid="$2"
+  printf 'SPEC: %s\n' "$spec"
+  printf 'dispatch-run: %s\n' "$rid"
+  local issue; issue="$(in_spec_issue "$spec")"
+  [[ -n "$issue" ]] && printf 'Refs #%s\n' "$issue"
+  local summary; summary="$(in_pr_summary "$spec")"
+  if [[ -n "${summary//[$' \t\n']/}" ]]; then
+    printf '\n## 요약\n\n%s\n' "$summary"
+  fi
+}
+
+# in_ensure_pr <branch> <title> <spec> <run-id> — open PR 재사용 또는 신규 생성. PR 번호 echo.
+#   본문은 임시 파일 + --body-file 로 전달해 셸 인용·줄바꿈 손상 없이 멀티라인을 보존한다.
 in_ensure_pr() {
-  local branch="$1" title="$2" n
+  local branch="$1" title="$2" spec="$3" rid="$4" n
   n="$(in_existing_open_pr "$branch")"
   if [[ -n "$n" ]]; then printf '%s\n' "$n"; return 0; fi
+  local bodyf; bodyf="$(mktemp)" || { in_die "PR 본문 임시 파일 생성 실패"; return 1; }
+  in_pr_body "$spec" "$rid" > "$bodyf"
   # shellcheck disable=SC2086
   $FORGE_CMD pr create --head "$branch" --base "$DEFAULT_BRANCH" \
-    --title "$title" --body "dispatch 통합: 구현 완료, 승인 요청." \
-    >/dev/null 2>&1 || { in_die "PR 생성 실패: $branch"; return 1; }
+    --title "$title" --body-file "$bodyf" \
+    >/dev/null 2>&1 || { rm -f "$bodyf"; in_die "PR 생성 실패: $branch"; return 1; }
+  rm -f "$bodyf"
   in_existing_open_pr "$branch"
 }
 
@@ -297,7 +347,7 @@ in_integrate() {
       in_push_branch "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       local title pr
       title="$(in_spec_title "$spec")"
-      pr="$(in_ensure_pr "$branch" "$title")" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      pr="$(in_ensure_pr "$branch" "$title" "$spec" "$rid")" || { int_set_phase "$rd" "$key" blocked; return 4; }
       [[ -n "$pr" ]] && int_set_pr "$rd" "$key" "$pr"
       int_set_phase "$rd" "$key" review
       int_log "$rd" "$key" "PR=$pr 인계 — review 대기"
@@ -480,11 +530,16 @@ in_selftest() {
   GIT_CMD=mock_git
 
   # mock forge: pr list(재사용 제어 MOCK_PR), pr create 기록.
-  local PRLOG="$TMP/prlog"; : > "$PRLOG"
+  #   pr create 의 --body-file 내용을 PRBODY 로 캡처 — forge 전달 시점의 본문(줄바꿈 보존) 검증용.
+  local PRLOG="$TMP/prlog" PRBODY="$TMP/prbody"; : > "$PRLOG"; : > "$PRBODY"
   mock_forge() {
     case "$1 $2" in
       "pr list")   [[ -n "${MOCK_EXISTING_PR:-}" ]] && echo "$MOCK_EXISTING_PR" || true ;;
-      "pr create") printf '%s\n' "$*" >> "$PRLOG"; echo created ;;
+      "pr create")
+        printf '%s\n' "$*" >> "$PRLOG"
+        local _prev='' _a
+        for _a in "$@"; do [[ "$_prev" == "--body-file" ]] && cat "$_a" >> "$PRBODY" 2>/dev/null; _prev="$_a"; done
+        echo created ;;
     esac
     return 0
   }
@@ -625,6 +680,61 @@ in_selftest() {
   : > "$CLEANUPLOG"; : > "$REMOTE_BRANCHES"
   in_cleanup_worktree_if_preserved "$spec" "$wbF"
   [[ ! -s "$CLEANUPLOG" ]] && ok "U2 헬퍼: 미보존 → 보존" || bad "U2 헬퍼: 미보존 → 보존"
+
+  # ---- PR 본문 구조화(in_pr_body): SPEC 경로·run-id 포함, 요약 섹션 본문(주석 제거),
+  #   이슈 식별 정보 조건부 cross-reference, 정적 한 줄 부재. ----
+  local specB="$TMP/SPECB.md" body
+  cat > "$specB" <<'SPECEOF'
+---
+slug: pr-body-test
+---
+
+# 본문 기능 Y
+
+## 무엇을 만들 것인가
+<!-- 설명용 주석: 이 줄은 본문에 들어가면 안 된다. -->
+요약 첫 줄이다.
+요약 둘째 줄이다.
+
+## 목적 (왜)
+이유.
+SPECEOF
+  body="$(in_pr_body "$specB" "20260604T000000-abc1234")"
+  case "$body" in *"$specB"*) ok "본문 SPEC 경로 포함";; *) bad "본문 SPEC 경로 포함";; esac
+  case "$body" in *20260604T000000-abc1234*) ok "본문 run-id 포함";; *) bad "본문 run-id 포함";; esac
+  case "$body" in *"요약 첫 줄이다."*"요약 둘째 줄이다."*) ok "본문 요약 섹션 전체 포함";; *) bad "본문 요약 섹션 전체 포함";; esac
+  case "$body" in *"설명용 주석"*) bad "본문 요약 주석 제거";; *) ok "본문 요약 주석 제거";; esac
+  case "$body" in *"목적 (왜)"*) bad "본문 다음 섹션 미포함(요약 경계)";; *) ok "본문 다음 섹션 미포함(요약 경계)";; esac
+  case "$body" in *'Refs #'*) bad "이슈 없음 → cross-reference 미생성";; *) ok "이슈 없음 → cross-reference 미생성";; esac
+  case "$body" in *'dispatch 통합:'*) bad "정적 한 줄 본문 부재";; *) ok "정적 한 줄 본문 부재";; esac
+
+  # ---- 요약 섹션 부재 → 요약 블록 생략, 나머지 본문 정상 생성 ----
+  body="$(in_pr_body "$spec" "rid7777")"   # $spec 에는 '무엇을 만들 것인가' 섹션이 없다.
+  case "$body" in *"$spec"*) ok "요약 부재: SPEC 경로 정상";; *) bad "요약 부재: SPEC 경로 정상";; esac
+  case "$body" in *rid7777*) ok "요약 부재: run-id 정상";; *) bad "요약 부재: run-id 정상";; esac
+  case "$body" in *'## 요약'*) bad "요약 부재 시 요약 블록 생략";; *) ok "요약 부재 시 요약 블록 생략";; esac
+
+  # ---- 이슈 식별 정보(frontmatter issue:) 존재 → cross-reference 한 줄 ----
+  local specI="$TMP/SPECI.md"
+  printf -- '---\nissue: 42\n---\n\n# 이슈 기능 Z\n' > "$specI"
+  body="$(in_pr_body "$specI" "rid8888")"
+  case "$body" in *'Refs #42'*) ok "이슈 존재 → Refs #42 한 줄";; *) bad "이슈 존재 → Refs #42 한 줄";; esac
+  printf -- '---\nissue: "#43"\n---\n\n# 이슈 기능 W\n' > "$specI"
+  body="$(in_pr_body "$specI" "rid8888")"
+  case "$body" in *'Refs #43'*) ok "이슈 '#43' 표기 정규화";; *) bad "이슈 '#43' 표기 정규화";; esac
+
+  # ---- PR 생성이 --body-file 로 멀티라인 본문을 forge 에 전달(줄바꿈 보존) ----
+  local kB="x-bbb0000"; : > "$PRLOG"; : > "$PRBODY"; : > "$PUSHLOG"
+  st_done > "$LP/SPECB.md.json"; : > "$LP/SPECB.md.logs"
+  MOCK_EXISTING_PR="" in_integrate "$specB" "$rd" "$kB" >/dev/null; rc=$?
+  chk "본문 통합 rc=0" "$rc" "0"
+  grep -q -- '--body-file' "$PRLOG" && ok "PR 생성에 --body-file 사용" || bad "PR 생성에 --body-file 사용"
+  [[ "$(wc -l < "$PRBODY")" -gt 1 ]] && ok "forge 전달 본문 멀티라인(줄바꿈 보존)" || bad "forge 전달 본문 멀티라인(줄바꿈 보존)"
+  grep -Fq "$specB" "$PRBODY" && ok "forge 전달 본문에 SPEC 경로" || bad "forge 전달 본문에 SPEC 경로"
+  grep -q '20260604T000000-abc1234' "$PRBODY" && ok "forge 전달 본문에 run-id" || bad "forge 전달 본문에 run-id"
+  # 요약 두 줄이 각각 독립 줄로 존재 = 요약 내부 줄바꿈이 원형 그대로 보존됨(개수 단언 보강).
+  grep -Fxq '요약 첫 줄이다.' "$PRBODY" && grep -Fxq '요약 둘째 줄이다.' "$PRBODY" \
+    && ok "forge 전달 본문에 요약(각 줄 원형 보존)" || bad "forge 전달 본문에 요약(각 줄 원형 보존)"
 
   # ---- AC2: loop 공개 paths 의 WT 값에 공백이 있어도 경로를 통째로 읽는다(첫 토큰 절단 금지) ----
   mock_loop_spaced() { [[ "$1" == "paths" ]] && printf 'WT          /tmp/my work/.worktree\n'; }
