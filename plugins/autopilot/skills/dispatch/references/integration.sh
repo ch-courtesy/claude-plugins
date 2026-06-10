@@ -290,10 +290,12 @@ in_spec_issue() {
 }
 
 # in_pr_body <spec_path> <run-id> — 구조화 PR 본문(결정적) stdout.
-#   추적성(SPEC 경로) + 실행 컨텍스트(dispatch run-id) + 조건부 이슈 cross-reference(Refs #n,
-#   rules/context.md 형식) + 요약(SPEC 의도 섹션, 없으면 생략).
+#   자동 리뷰 식별 줄(dispatch 자동 생성·자동 적대 리뷰) + 추적성(SPEC 경로) + 실행 컨텍스트
+#   (dispatch run-id) + 조건부 이슈 cross-reference(Refs #n, rules/context.md 형식) + 요약
+#   (SPEC 의도 섹션, 없으면 생략).
 in_pr_body() {
   local spec="$1" rid="$2"
+  printf '🤖 이 PR 은 dispatch 가 자동 생성했으며 자동 적대 리뷰를 거칩니다.\n\n'
   printf 'SPEC: %s\n' "$spec"
   printf 'dispatch-run: %s\n' "$rid"
   local issue; issue="$(in_spec_issue "$spec")"
@@ -305,6 +307,8 @@ in_pr_body() {
 }
 
 # in_ensure_pr <branch> <title> <spec> <run-id> — open PR 재사용 또는 신규 생성. PR 번호 echo.
+#   신규 생성 PR 에만 자동 리뷰 표시를 단다(제목 '🤖 [자동 리뷰]' 접두 + 본문 식별 줄(in_pr_body)) —
+#   open PR 재사용(조기 반환) 경로는 기존 PR 제목·본문을 건드리지 않는다(수정 호출 없음).
 #   본문은 임시 파일 + --body-file 로 전달해 셸 인용·줄바꿈 손상 없이 멀티라인을 보존한다.
 in_ensure_pr() {
   local branch="$1" title="$2" spec="$3" rid="$4" n
@@ -314,7 +318,7 @@ in_ensure_pr() {
   in_pr_body "$spec" "$rid" > "$bodyf"
   # shellcheck disable=SC2086
   $FORGE_CMD pr create --head "$branch" --base "$DEFAULT_BRANCH" \
-    --title "$title" --body-file "$bodyf" \
+    --title "🤖 [자동 리뷰] $title" --body-file "$bodyf" \
     >/dev/null 2>&1 || { rm -f "$bodyf"; in_die "PR 생성 실패: $branch"; return 1; }
   rm -f "$bodyf"
   in_existing_open_pr "$branch"
@@ -581,6 +585,11 @@ in_selftest() {
   grep -q 'feat/20260604T000000-abc1234-x' "$PUSHLOG" && ok "AC2 작업 브랜치 push" || bad "AC2 작업 브랜치 push"
   grep -q 'pr create' "$PRLOG" && ok "AC2 PR 생성" || bad "AC2 PR 생성"
   grep -q 'rebase' "$GITLOG" && ok "AC2 base sync rebase" || bad "AC2 base sync rebase"
+  # ---- AC: 신규 생성 PR 의 자동 리뷰 표시(제목 접두 태그 + 본문 식별 줄) ----
+  grep -Fq -- '--title 🤖 [자동 리뷰] ' "$PRLOG" \
+    && ok "AC 신규 PR 제목 자동 리뷰 접두 태그" || bad "AC 신규 PR 제목 자동 리뷰 접두 태그"
+  grep -Fq '자동 적대 리뷰' "$PRBODY" \
+    && ok "AC 신규 PR 본문 자동 리뷰 식별 줄" || bad "AC 신규 PR 본문 자동 리뷰 식별 줄"
 
   # ---- AC: open PR 존재 → 재사용(새 PR 미생성) + 기존 브랜치 rebase 재작성 안 함 ----
   #   (Codex blocking 회귀 가드: base 전진+원격 브랜치 존재 시 rebase 는 non-ff push 를 부른다.)
