@@ -24,6 +24,7 @@ result raises on record rather than being silently coerced to a string.
 import hashlib
 import json
 import os
+from graphlib import TopologicalSorter
 
 from .nodes import CommandResult
 
@@ -43,23 +44,30 @@ def fingerprint_key(node):
 
 
 def _encode(value):
-    """Convert a node result into a JSON-serializable form, preserving type
-    information for the result kinds the harness produces itself."""
+    """Wrap a node result in a typed envelope ``{"t": kind, "v": payload}``.
+
+    Every value is wrapped, so a *raw* user value is always stored under
+    ``"v"`` and can never collide with the harness's own type tags — even a
+    user dict that happens to look like an encoded :class:`CommandResult`.
+    """
     if isinstance(value, CommandResult):
-        return {
-            "__wfr_type__": "CommandResult",
+        return {"t": "command", "v": {
             "returncode": value.returncode,
             "stdout": value.stdout,
             "stderr": value.stderr,
-        }
-    return value
+        }}
+    return {"t": "raw", "v": value}
 
 
-def _decode(value):
+def _decode(envelope):
     """Inverse of :func:`_encode`."""
-    if isinstance(value, dict) and value.get("__wfr_type__") == "CommandResult":
-        return CommandResult(value["returncode"], value["stdout"], value["stderr"])
-    return value
+    if isinstance(envelope, dict):
+        if envelope.get("t") == "command":
+            d = envelope["v"]
+            return CommandResult(d["returncode"], d["stdout"], d["stderr"])
+        if envelope.get("t") == "raw":
+            return envelope["v"]
+    return envelope
 
 
 class JsonlJournal:
@@ -96,25 +104,23 @@ class JsonlJournal:
 
     def _compute_keys(self, graph):
         """Transitive cache key per node: its leaf key folded with the sorted
-        keys of its dependencies. The graph is acyclic here (the scheduler
-        rejects cycles before loading), so the recursion terminates."""
-        keys = {}
+        keys of its dependencies.
 
-        def keyof(nid):
-            if nid in keys:
-                return keys[nid]
+        Computed iteratively in topological order (deps before dependents) so
+        a long serial DAG does not hit the recursion limit. The graph is
+        acyclic here (the scheduler rejects cycles before loading)."""
+        ts = TopologicalSorter()
+        for nid, node in graph.items():
+            ts.add(nid, *node.deps)
+        keys = {}
+        for nid in ts.static_order():
             node = graph[nid]
-            dep_keys = sorted(keyof(d) for d in node.deps)
+            dep_keys = sorted(keys[d] for d in node.deps)
             payload = json.dumps(
                 {"leaf": fingerprint_key(node), "deps": dep_keys},
                 sort_keys=True,
             ).encode("utf-8")
-            k = hashlib.sha256(payload).hexdigest()
-            keys[nid] = k
-            return k
-
-        for nid in graph:
-            keyof(nid)
+            keys[nid] = hashlib.sha256(payload).hexdigest()
         return keys
 
     def load(self, graph):

@@ -142,5 +142,34 @@ class TestPipelineConcurrencyCap(unittest.TestCase):
         self.assertGreater(wr.orchestrator.max_live, 1)
 
 
+class TestEnvelopeNoTypeTagCollision(unittest.TestCase):
+    # Finding #6 (re-review): a user result must not be misdecoded just because
+    # it resembles the harness's internal CommandResult encoding.
+    def test_user_dict_resembling_command_result_stays_a_dict(self):
+        path = os.path.join(tempfile.mkdtemp(), "j.jsonl")
+        payload = {"__wfr_type__": "CommandResult", "returncode": 0,
+                   "stdout": "x", "stderr": ""}
+        run([callable_node("U", lambda i: dict(payload))], journal=JsonlJournal(path))
+
+        r2 = run([callable_node("U", lambda i: dict(payload))],
+                 journal=JsonlJournal(path))
+        self.assertEqual(r2.cached, {"U"})
+        self.assertNotIsInstance(r2.results["U"], CommandResult)
+        self.assertEqual(r2.results["U"], payload)  # round-trips as the raw dict
+
+
+class TestDeepChainKeyComputation(unittest.TestCase):
+    # Finding #7 (re-review): a long serial DAG must not RecursionError while
+    # computing transitive cache keys.
+    def test_long_chain_load_no_recursion_error(self):
+        n = 1500  # well past Python's default recursion limit
+        graph = {}
+        for i in range(n):
+            deps = (f"n{i - 1}",) if i else ()
+            graph[f"n{i}"] = Node(f"n{i}", deps=deps, runner=lambda inp: 1)
+        cached = JsonlJournal(os.path.join(tempfile.mkdtemp(), "j.jsonl")).load(graph)
+        self.assertEqual(cached, {})  # empty journal, but computed without error
+
+
 if __name__ == "__main__":
     unittest.main()
