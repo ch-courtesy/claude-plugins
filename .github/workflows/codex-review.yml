@@ -557,8 +557,49 @@ jobs:
               // Older single-pass bundle (pre-Phase-4 artifact layout) fallback.
               try { fs.accessSync('.codex-review/result.json'); resultFiles = ['.codex-review/result.json']; } catch {}
             }
+            let repairFindingsFromContextLineNumbers = null;
+            try {
+              ({ repairFindingsFromContextLineNumbers } =
+                require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/diff-anchor-filter.js`));
+            } catch (e) {
+              core.warning(`Shared context-line anchor repair unavailable in trusted-base checkout (${e.message}); findings will use model-provided anchors.`);
+            }
+            let anchorPatch = '';
+            try {
+              try { anchorPatch = fs.readFileSync('.review-context/anchor.patch', 'utf8'); }
+              catch { anchorPatch = fs.readFileSync('.review-context/diff.patch', 'utf8'); }
+            } catch (e) {
+              core.warning(`Could not read anchor.patch/diff.patch for context-line repair (${e.message}); findings will use model-provided anchors.`);
+            }
             const chunkResults = resultFiles.map((p) => {
-              try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+              try {
+                const result = JSON.parse(fs.readFileSync(p, 'utf8'));
+                const chunkMatch = p.match(/result\.chunk-(\d+)\.json$/);
+                const chunk = chunkMatch ? chunkMatch[1] : '0';
+                // The model-facing prompt the chunk was reviewed against (prefix
+                // ends with the `Unified diff:` marker parseContextRightLineMap
+                // keys off, then the chunk diff body). This is the exact text whose
+                // 1-based line numbers a model may have copied into finding.line, so
+                // it — not a never-generated context.chunk file — is what the anchor
+                // repair must read. Restored into .codex-review/ via codex-review-prep.
+                const contextPath = `.codex-review/prompt.chunk-${chunk}.md`;
+                if (repairFindingsFromContextLineNumbers && anchorPatch && Array.isArray(result.findings)) {
+                  let contextText = '';
+                  try { contextText = fs.readFileSync(contextPath, 'utf8'); }
+                  catch (e) { core.warning(`Could not read ${contextPath} for context-line repair (${e.message}).`); }
+                  if (contextText) {
+                    const original = result.findings;
+                    result.findings = repairFindingsFromContextLineNumbers(original, contextText, anchorPatch);
+                    for (let i = 0; i < original.length; i += 1) {
+                      if (original[i].line !== result.findings[i].line
+                          || original[i].start_line !== result.findings[i].start_line) {
+                        core.info(`Repaired context-line anchor ${original[i].file}:${original[i].line} → ${result.findings[i].line}.`);
+                      }
+                    }
+                  }
+                }
+                return result;
+              } catch { return null; }
             }).filter(Boolean);
             if (chunkResults.length === 0) {
               core.setFailed('No chunk review results were produced; failing to avoid a false-green review.');
