@@ -17,10 +17,13 @@ REFS = os.path.dirname(HERE)  # .../references
 FLOW = os.path.join(REFS, "flow.sh")
 
 
-def _write(src):
+def _write(tc, src):
+    """Write a temp workflow-definition file and register its removal so a
+    repeated `selftest` does not leak files into the OS temp dir."""
     fd, path = tempfile.mkstemp(suffix=".py")
     with os.fdopen(fd, "w") as f:
         f.write(src)
+    tc.addCleanup(os.unlink, path)
     return path
 
 
@@ -32,7 +35,7 @@ def _run(path):
 
 class TestRunnerContract(unittest.TestCase):
     def test_bad_concurrency_emits_json_not_traceback(self):  # finding #1
-        path = _write(
+        path = _write(self,
             "from workflow_replica import Node\n"
             "NODES=[Node('a',deps=(),runner=lambda i:1)]\n"
             "CONCURRENCY='oops'\n"
@@ -44,7 +47,7 @@ class TestRunnerContract(unittest.TestCase):
         self.assertNotEqual(rc, 0)
 
     def test_both_entry_points_rejected(self):  # finding #2
-        path = _write(
+        path = _write(self,
             "from workflow_replica import Node\n"
             "NODES=[Node('a',deps=(),runner=lambda i:1)]\n"
             "async def WORKFLOW(wf):\n    return 1\n"
@@ -54,13 +57,13 @@ class TestRunnerContract(unittest.TestCase):
         self.assertIn("exactly one", out["error"])
 
     def test_neither_entry_point_rejected(self):  # finding #2
-        path = _write("X = 1\n")
+        path = _write(self,"X = 1\n")
         rc, out = _run(path)
         self.assertFalse(out["ok"])
         self.assertIn("exactly one", out["error"])
 
     def test_valid_nodes_definition_runs(self):
-        path = _write(
+        path = _write(self,
             "from workflow_replica import Node\n"
             "async def f(i): return 5\n"
             "NODES=[Node('a',deps=(),runner=f)]\n"

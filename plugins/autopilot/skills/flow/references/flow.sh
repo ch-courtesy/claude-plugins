@@ -43,14 +43,18 @@ case "$cmd" in
     if ! command -v "$PY" >/dev/null 2>&1; then
       printf '{"python3": null, "available": false}\n'; exit 1
     fi
-    ver="$("$PY" --version 2>&1)"
-    # The engine requires Python 3.9+ (graphlib). Verify the actual version,
-    # not mere presence, so callers are not told an unsupported runtime is usable.
-    if "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
-      printf '{"python3": "%s", "available": true}\n' "$ver"
-    else
-      printf '{"python3": "%s", "available": false, "reason": "python 3.9+ required"}\n' "$ver"; exit 1
-    fi
+    # The engine requires Python 3.9+ (graphlib). Verify the *actual* version
+    # (not mere presence) and emit the JSON from Python's json.dumps so the
+    # version string can never produce malformed JSON, whatever it contains.
+    "$PY" - <<'PYEOF'
+import json, sys
+ok = sys.version_info >= (3, 9)
+obj = {"python3": sys.version.split()[0], "available": ok}
+if not ok:
+    obj["reason"] = "python 3.9+ required"
+print(json.dumps(obj))
+sys.exit(0 if ok else 1)
+PYEOF
     ;;
   ""|-h|--help)
     die "usage: flow.sh <run|selftest|deps> [args]"

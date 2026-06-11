@@ -3,7 +3,6 @@ scope:
   include:
     - plugins/autopilot/**
     - .claude-plugin/marketplace.json
-    - tools/workflow-replica/**
   exclude:
     - rules/**
     - milestones/**
