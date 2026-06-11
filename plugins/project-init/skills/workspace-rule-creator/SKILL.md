@@ -38,7 +38,7 @@ allowed-tools:
 
 3. **선택.** 후보가 하나면 자동 선택하고, 둘 이상이면 `AskUserQuestion` single-select로 묻습니다.
 
-4. **정적 입력.** `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, 비어 있지 않은 "Other"(임의 경로 직접 입력 포함)도 허용합니다. 응답 누락·빈 값은 `{{name}}`을 보존합니다 — 단, `temp-files`의 `temp_path`는 응답 누락·빈 값이면 placeholder 대신 기본값 `.tmp/`로 치환합니다.
+4. **정적 입력.** `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, 비어 있지 않은 "Other"(임의 경로 직접 입력 포함)도 허용합니다. 응답 누락·빈 값은 `{{name}}`을 보존합니다 — 단, `temp-files`의 `temp_path`는 응답 누락·빈 값이면 placeholder 대신 기본값 `.tmp/`로 치환하고, 입력값("Other" 자유 입력 포함)은 치환 전에 항상 **후행 `/`로 끝나도록 정규화**합니다(예: `.scratch` → `.scratch/`). 이래야 본문의 `{{temp_path}}<주제>/`·`{{temp_path}}.gitkeep`이 선택한 디렉터리의 하위 경로로 바르게 결합됩니다.
 
 4-bis. **동적 입력.** `dynamic_inputs`가 있으면 target 프로젝트 디스크에서 후보를 산출합니다.
    - `candidate_source: depth1_dirs_filtered`: target 루트 depth=1 디렉토리만 후보로 삼고 `.*`, `node_modules`, `dist`, `build`, `target`은 제외합니다. gitignore는 무시합니다.
