@@ -10,10 +10,12 @@ Public surface (slice 1):
 * :class:`RunResult` — run outcome (per-node states, results, errors).
 * :func:`command_node` / :func:`callable_node` — worker node factories.
 """
+from .agent import SubprocessAgentCaller, agent_node, run_agent
 from .errors import (
     CommandFailed,
     CyclicGraphError,
     DuplicateNodeError,
+    SchemaValidationError,
     UnknownDependencyError,
     WorkflowError,
 )
@@ -21,6 +23,7 @@ from .graph import Node
 from .journal import JsonlJournal, fingerprint_key
 from .nodes import CommandResult, callable_node, command_node
 from .scheduler import RunResult, run, run_graph
+from .schema import validate as validate_schema
 
 __all__ = [
     "Node",
@@ -32,6 +35,11 @@ __all__ = [
     "CommandResult",
     "JsonlJournal",
     "fingerprint_key",
+    "agent_node",
+    "run_agent",
+    "SubprocessAgentCaller",
+    "validate_schema",
+    "SchemaValidationError",
     "WorkflowError",
     "CyclicGraphError",
     "DuplicateNodeError",

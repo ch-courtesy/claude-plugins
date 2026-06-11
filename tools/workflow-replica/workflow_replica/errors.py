@@ -27,6 +27,18 @@ class UnknownDependencyError(WorkflowError):
     """A node declares a dependency on an id that is not in the graph."""
 
 
+class SchemaValidationError(WorkflowError):
+    """An agent node's output failed schema validation after all retries."""
+
+    def __init__(self, errors, last_response):
+        self.errors = list(errors)
+        self.last_response = last_response
+        super().__init__(
+            "agent output failed schema validation after retries: "
+            + "; ".join(self.errors)
+        )
+
+
 class CommandFailed(WorkflowError):
     """A command node exited with a non-zero status."""
 
