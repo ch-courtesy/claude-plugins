@@ -40,10 +40,16 @@ case "$cmd" in
     fi
     ;;
   deps)
-    if command -v "$PY" >/dev/null 2>&1; then
-      printf '{"python3": "%s", "available": true}\n' "$("$PY" --version 2>&1)"
-    else
+    if ! command -v "$PY" >/dev/null 2>&1; then
       printf '{"python3": null, "available": false}\n'; exit 1
+    fi
+    ver="$("$PY" --version 2>&1)"
+    # The engine requires Python 3.9+ (graphlib). Verify the actual version,
+    # not mere presence, so callers are not told an unsupported runtime is usable.
+    if "$PY" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' 2>/dev/null; then
+      printf '{"python3": "%s", "available": true}\n' "$ver"
+    else
+      printf '{"python3": "%s", "available": false, "reason": "python 3.9+ required"}\n' "$ver"; exit 1
     fi
     ;;
   ""|-h|--help)

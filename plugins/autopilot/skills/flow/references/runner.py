@@ -47,9 +47,22 @@ def run(path):
     except Exception as e:  # import/syntax error in the definition
         _emit({"ok": False, "error": f"failed to import workflow definition: {e}"}, 1)
 
-    concurrency = int(getattr(mod, "CONCURRENCY", 4))
+    # Exactly one entry point must be exposed — reject both/neither rather than
+    # silently picking one (which would drop the other definition's work).
+    has_nodes = hasattr(mod, "NODES")
+    has_workflow = hasattr(mod, "WORKFLOW")
+    if has_nodes == has_workflow:
+        which = "both NODES and WORKFLOW" if has_nodes else "neither NODES nor WORKFLOW"
+        _emit({"ok": False, "error": f"workflow definition must expose exactly one entry point; found {which}"}, 1)
 
-    if hasattr(mod, "WORKFLOW"):
+    # Validate CONCURRENCY inside the JSON-contract boundary: a bad value must
+    # produce the single error JSON, not a raw traceback.
+    try:
+        concurrency = int(getattr(mod, "CONCURRENCY", 4))
+    except (ValueError, TypeError) as e:
+        _emit({"ok": False, "error": f"invalid CONCURRENCY: {e}"}, 1)
+
+    if has_workflow:
         try:
             wrun = wr.workflow(mod.WORKFLOW, concurrency=concurrency)
         except Exception as e:
@@ -62,26 +75,22 @@ def run(path):
             "max_concurrency": wrun.orchestrator.max_live,
         })
 
-    if hasattr(mod, "NODES"):
-        journal = None
-        jpath = getattr(mod, "JOURNAL", None)
-        if jpath:
-            journal = wr.JsonlJournal(jpath)
-        try:
-            res = wr.run(mod.NODES, concurrency=concurrency, journal=journal)
-        except Exception as e:
-            _emit({"ok": False, "mode": "nodes", "error": str(e)}, 1)
-        _emit({
-            "ok": True,
-            "mode": "nodes",
-            "succeeded": sorted(res.succeeded),
-            "failed": sorted(res.failed),
-            "skipped": sorted(res.skipped),
-            "cached": sorted(res.cached),
-            "results": res.results,
-        })
-
-    _emit({"ok": False, "error": "workflow definition exposes neither NODES nor WORKFLOW"}, 1)
+    # has_nodes
+    jpath = getattr(mod, "JOURNAL", None)
+    try:
+        journal = wr.JsonlJournal(jpath) if jpath else None
+        res = wr.run(mod.NODES, concurrency=concurrency, journal=journal)
+    except Exception as e:
+        _emit({"ok": False, "mode": "nodes", "error": str(e)}, 1)
+    _emit({
+        "ok": True,
+        "mode": "nodes",
+        "succeeded": sorted(res.succeeded),
+        "failed": sorted(res.failed),
+        "skipped": sorted(res.skipped),
+        "cached": sorted(res.cached),
+        "results": res.results,
+    })
 
 
 def main(argv):
