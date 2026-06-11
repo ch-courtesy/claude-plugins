@@ -11,6 +11,7 @@ Public surface (slice 1):
 * :func:`command_node` / :func:`callable_node` — worker node factories.
 """
 from .agent import SubprocessAgentCaller, agent_node, run_agent
+from .api import Orchestrator, WorkflowRun, workflow
 from .errors import (
     CommandFailed,
     CyclicGraphError,
@@ -40,6 +41,9 @@ __all__ = [
     "SubprocessAgentCaller",
     "validate_schema",
     "SchemaValidationError",
+    "workflow",
+    "Orchestrator",
+    "WorkflowRun",
     "WorkflowError",
     "CyclicGraphError",
     "DuplicateNodeError",

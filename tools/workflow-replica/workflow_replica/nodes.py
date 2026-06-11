@@ -30,6 +30,29 @@ class CommandResult:
         return f"CommandResult(returncode={self.returncode})"
 
 
+async def run_command(argv, cwd=None, env=None, node_id=None):
+    """Run ``argv`` as a subprocess; return :class:`CommandResult` on exit 0,
+    else raise :class:`CommandFailed`. Shared by command nodes and the
+    imperative API."""
+    argv = list(argv)
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        cwd=cwd,
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    out, err = await proc.communicate()
+    res = CommandResult(
+        proc.returncode,
+        out.decode("utf-8", "replace"),
+        err.decode("utf-8", "replace"),
+    )
+    if proc.returncode != 0:
+        raise CommandFailed(node_id if node_id is not None else argv, res)
+    return res
+
+
 def command_node(id, argv, deps=(), cwd=None, env=None, fingerprint=None):
     """A node that runs ``argv`` as a subprocess.
 
@@ -45,22 +68,7 @@ def command_node(id, argv, deps=(), cwd=None, env=None, fingerprint=None):
         fingerprint = argv
 
     async def runner(inputs):
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
-            cwd=cwd,
-            env=env,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await proc.communicate()
-        res = CommandResult(
-            proc.returncode,
-            out.decode("utf-8", "replace"),
-            err.decode("utf-8", "replace"),
-        )
-        if proc.returncode != 0:
-            raise CommandFailed(id, res)
-        return res
+        return await run_command(argv, cwd=cwd, env=env, node_id=id)
 
     return Node(
         id,
