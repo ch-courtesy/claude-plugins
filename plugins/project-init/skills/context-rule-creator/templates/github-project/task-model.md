@@ -1,19 +1,8 @@
 ---
 label: GitHub Project
 description: Issue + Project로 저장. 원격 협업·이슈 트래킹 통합이 필요할 때.
-inputs:
-  - name: project_url
-    header: "Project URL"
-    question: "이 프로젝트가 사용할 GitHub Project URL/번호?"
-    options:
-      - label: "건너뛰기 (나중에 채움)"
-        description: "본문에 TODO 마커만 남기고 진행"
-        value: "<TODO: GitHub Project URL/번호>"
-      - label: "이 레포 기본 Project 사용"
-        description: "본문에 'gh project list로 확인 후 채움' TODO를 남깁니다"
-        value: "<TODO: gh project list --owner <소유자> 결과로 확인 후 채움>"
 on_create: |
-  추가 파일은 만들지 않는다. TODO 마커가 남았으면 사용자가 직접 채워야 한다고 안내한다.
+  추가 파일은 만들지 않는다. `{{project_url}}` 은 스킬이 `gh` 로 직접 조회해 채우며, 조회 실패로 TODO 마커가 남았으면 사용자가 직접 채워야 한다고 안내한다.
   Status field 옵션은 GitHub UI 또는 `gh` CLI로 설정해야 한다고 안내한다.
   `[decision]`/`[handoff]`는 comment prefix이므로 별도 라벨 셋업이 필요 없다고 안내한다.
 ---
