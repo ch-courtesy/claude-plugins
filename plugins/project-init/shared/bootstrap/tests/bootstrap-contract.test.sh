@@ -48,10 +48,10 @@ check "legacy local bootstrap base removed" test ! -e "$ROOT/plugins/project-ini
 check "legacy local interaction asset removed" test ! -e "$ROOT/plugins/project-init/skills/bootstrap/assets/interaction-rules.ko.md"
 check "legacy duplicated bootstrap directory removed" test ! -e "$ROOT/plugins/project-init/claude-skills/bootstrap"
 
-check "Codex manifest version is 0.18.0" bash -c "[ \"\$(jq -r .version '$CODEX_MANIFEST')\" = '0.18.0' ]"
+check "Codex manifest version is 0.19.0" bash -c "[ \"\$(jq -r .version '$CODEX_MANIFEST')\" = '0.19.0' ]"
 
-check "Claude manifest version is 0.18.0" bash -c "[ \"\$(jq -r .version '$CLAUDE_MANIFEST')\" = '0.18.0' ]"
-check "Claude marketplace version is 0.18.0" bash -c "[ \"\$(jq -r '.plugins[] | select(.name == \"project-init\") | .version' '$CLAUDE_MARKETPLACE')\" = '0.18.0' ]"
+check "Claude manifest version is 0.19.0" bash -c "[ \"\$(jq -r .version '$CLAUDE_MANIFEST')\" = '0.19.0' ]"
+check "Claude marketplace version is 0.19.0" bash -c "[ \"\$(jq -r '.plugins[] | select(.name == \"project-init\") | .version' '$CLAUDE_MARKETPLACE')\" = '0.19.0' ]"
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS"; exit 0
