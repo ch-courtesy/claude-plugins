@@ -39,6 +39,7 @@ class RunResult:
         self.results = {}   # node_id -> return value (success only)
         self.states = {}    # node_id -> SUCCESS | FAILED | SKIPPED
         self.errors = {}    # node_id -> exception (failed only)
+        self.cached = set() # node_ids whose result was reused from the journal
 
     def _ids(self, state):
         return {k for k, v in self.states.items() if v == state}
@@ -120,6 +121,7 @@ async def run_graph(nodes, concurrency=1, journal=None):
         for nid in ts.get_ready():
             node = graph[nid]
             if nid in cached:
+                result.cached.add(nid)
                 settle(nid, SUCCESS, value=cached[nid])
                 continue
             if any(result.states.get(d) in (FAILED, SKIPPED) for d in node.deps):

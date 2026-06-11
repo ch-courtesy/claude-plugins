@@ -18,6 +18,7 @@ from .errors import (
     WorkflowError,
 )
 from .graph import Node
+from .journal import JsonlJournal, fingerprint_key
 from .nodes import CommandResult, callable_node, command_node
 from .scheduler import RunResult, run, run_graph
 
@@ -29,6 +30,8 @@ __all__ = [
     "command_node",
     "callable_node",
     "CommandResult",
+    "JsonlJournal",
+    "fingerprint_key",
     "WorkflowError",
     "CyclicGraphError",
     "DuplicateNodeError",

@@ -30,14 +30,19 @@ class CommandResult:
         return f"CommandResult(returncode={self.returncode})"
 
 
-def command_node(id, argv, deps=(), cwd=None, env=None):
+def command_node(id, argv, deps=(), cwd=None, env=None, fingerprint=None):
     """A node that runs ``argv`` as a subprocess.
 
     Exit status 0 -> success (returns a :class:`CommandResult`); non-zero ->
     failure (raises :class:`CommandFailed`, which the scheduler isolates). No
     LLM is involved.
+
+    ``fingerprint`` (default: the argv) keys the resume journal; changing the
+    command changes the fingerprint and invalidates any cached result.
     """
     argv = list(argv)
+    if fingerprint is None:
+        fingerprint = argv
 
     async def runner(inputs):
         proc = await asyncio.create_subprocess_exec(
@@ -57,14 +62,23 @@ def command_node(id, argv, deps=(), cwd=None, env=None):
             raise CommandFailed(id, res)
         return res
 
-    return Node(id, deps=deps, runner=runner, meta={"type": "command", "argv": argv})
+    return Node(
+        id,
+        deps=deps,
+        runner=runner,
+        meta={"type": "command", "argv": argv, "fingerprint": fingerprint},
+    )
 
 
-def callable_node(id, fn, deps=()):
+def callable_node(id, fn, deps=(), fingerprint=None):
     """Wrap a Python callable ``fn(inputs) -> result`` as a node.
 
     ``fn`` may be async (awaited) or sync (run in a worker thread so blocking
     calls do not stall the scheduler's event loop).
+
+    ``fingerprint`` keys the resume journal. A Python callable's identity cannot
+    be derived reliably, so callers that journal callable nodes should pass an
+    explicit fingerprint that changes when the node's behaviour changes.
     """
 
     async def runner(inputs):
@@ -73,4 +87,9 @@ def callable_node(id, fn, deps=()):
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, fn, inputs)
 
-    return Node(id, deps=deps, runner=runner, meta={"type": "callable"})
+    return Node(
+        id,
+        deps=deps,
+        runner=runner,
+        meta={"type": "callable", "fingerprint": fingerprint},
+    )
