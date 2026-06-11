@@ -496,26 +496,28 @@ jobs:
           PR_HEAD_SHA: ${{ needs.prep.outputs.head_sha }}
         run: |
           set -euo pipefail
+          # Must conform to the shared review schema (codex-pr-review.schema.json)
+          # so downstream consumers of the structured result do not reject it:
+          # eligibility.status='skipped' makes the merge step treat this chunk as
+          # not-reviewed (it posts a skip-reason comment, never an approval), while
+          # verdict stays within the schema enum ('skipped' is NOT a valid verdict)
+          # and reviewed_context carries every required key with no extras
+          # (additionalProperties:false — comments_considered is not allowed).
           jq -n \
             --arg reason "이 PR에서 Claude 리뷰 워크플로가 변경되어 Claude 리뷰를 생략했습니다. OAuth 검증을 통과하려면 워크플로 파일이 기본 브랜치와 동일해야 합니다." \
             --arg base_sha "$PR_BASE_SHA" \
             --arg head_sha "$PR_HEAD_SHA" \
             '{
               verdict: "unavailable",
+              confidence: "high",
               eligibility: { status: "skipped", reason: $reason },
-              confidence: "low",
               reviewed_context: {
                 base_sha: $base_sha,
                 head_sha: $head_sha,
                 diff_truncated: false,
                 files_reviewed: [],
                 related_files_reviewed: [],
-                skipped_files: [
-                  {
-                    file: ".github/workflows/claude-review.yml",
-                    reason: "other"
-                  }
-                ]
+                skipped_files: []
               },
               automation_safety: {
                 may_approve: false,

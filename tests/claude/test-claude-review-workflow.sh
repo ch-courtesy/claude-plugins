@@ -60,7 +60,7 @@ grep -qF 'PR_HEAD_SHA: ${{ needs.prep.outputs.head_sha }}' "$WORKFLOW" \
   || fail "workflow-change skipped 결과에 head_sha 전달 부재"
 grep -qF 'verdict: "unavailable"' "$WORKFLOW" \
   || fail "workflow-change skipped 결과 verdict 가 공용 schema enum(unavailable)을 사용하지 않음"
-grep -qF 'confidence: "low"' "$WORKFLOW" \
+grep -qF 'confidence: "high"' "$WORKFLOW" \
   || fail "workflow-change skipped 결과에 공용 schema 필수 confidence 부재"
 grep -qF 'base_sha: $base_sha' "$WORKFLOW" \
   || fail "workflow-change skipped 결과 reviewed_context.base_sha 부재"
@@ -68,9 +68,6 @@ grep -qF 'head_sha: $head_sha' "$WORKFLOW" \
   || fail "workflow-change skipped 결과 reviewed_context.head_sha 부재"
 grep -qF 'related_files_reviewed: []' "$WORKFLOW" \
   || fail "workflow-change skipped 결과 reviewed_context.related_files_reviewed 부재"
-if grep -qF 'comments_considered' "$WORKFLOW"; then
-  fail "workflow-change skipped 결과에 공용 schema가 금지한 comments_considered 잔존"
-fi
 grep -qF 'PR_BASE_SHA="$PR_BASE_SHA"' "$WORKFLOW" \
   || fail "helper 호출에 PR_BASE_SHA 미전달 — thread/incremental diff base 가 HEAD~1 로 추락함"
 grep -q 'source \.review-context/context-mode\.env' "$WORKFLOW" \
@@ -118,6 +115,61 @@ done
 grep -q 'steps\.claude-follow-up-review\.outputs\.execution_file' "$WORKFLOW" \
   || fail "2차(follow-up) 리뷰도 execution_file 결과 텍스트 파싱을 쓰지 않음"
 ok "check 2c: 결과 텍스트 JSON 추출 + 핵심 필드 검증 (1차/2차 동일)"
+
+echo ""
+echo "=== check 2d: workflow-change skipped result 가 공유 schema 를 충족 ==="
+# Run the actual jq program from the "Save skipped result" step and validate the
+# emitted object against the shared schema (codex-pr-review.schema.json): verdict
+# must stay within the schema enum ("skipped" is NOT a valid verdict), every
+# required top-level key must be present with no extras, and reviewed_context must
+# carry exactly its required keys (additionalProperties:false → no
+# comments_considered). Guards the workflow-change skip path from drifting back
+# out of schema and breaking downstream consumers of the structured result.
+skip_jq="$(awk '
+  /name: Save skipped result for workflow-change PR/ { instep = 1 }
+  instep && /jq -n/ { cap = 1 }
+  cap { print }
+  cap && /result\.chunk-/ { exit }
+' "$WORKFLOW")"
+[[ -n "$skip_jq" ]] || fail "skipped-result jq 프로그램을 추출하지 못함"
+# Drop the redirect so the program writes to stdout for capture.
+skip_jq="$(printf '%s\n' "$skip_jq" | sed 's/> "\.claude-review.*//')"
+skip_json="$(PR_BASE_SHA="base-sha-test" PR_HEAD_SHA="head-sha-test" eval "$skip_jq")" \
+  || fail "skipped-result jq 실행 실패"
+
+verdict="$(printf '%s' "$skip_json" | jq -r '.verdict')"
+[[ "$verdict" != "skipped" ]] || fail 'verdict:"skipped" 는 공유 schema verdict enum 위반'
+jq -e --arg v "$verdict" '.properties.verdict.enum | index($v)' "$SCHEMA" >/dev/null \
+  || fail "skipped result verdict '$verdict' 이 공유 schema verdict enum 에 없음"
+
+estatus="$(printf '%s' "$skip_json" | jq -r '.eligibility.status')"
+jq -e --arg s "$estatus" '.properties.eligibility.properties.status.enum | index($s)' "$SCHEMA" >/dev/null \
+  || fail "eligibility.status '$estatus' 이 공유 schema enum 에 없음"
+[[ "$estatus" == "skipped" ]] \
+  || fail "merge 가 이 청크를 미-리뷰로 처리하려면 eligibility.status 가 'skipped' 여야 함 (현재 '$estatus')"
+
+# Top-level additionalProperties:false + 모든 필드 required → 키 집합이 정확히 일치해야 함.
+top_req="$(jq -r '.required[]' "$SCHEMA" | sort)"
+top_got="$(printf '%s' "$skip_json" | jq -r 'keys[]' | sort)"
+[[ "$top_req" == "$top_got" ]] \
+  || fail "top-level 키가 공유 schema required 집합과 불일치
+required:
+$top_req
+got:
+$top_got"
+
+# reviewed_context 도 additionalProperties:false → 필수 키 집합과 정확히 일치해야 함.
+rc_req="$(jq -r '.properties.reviewed_context.required[]' "$SCHEMA" | sort)"
+rc_got="$(printf '%s' "$skip_json" | jq -r '.reviewed_context | keys[]' | sort)"
+[[ "$rc_req" == "$rc_got" ]] \
+  || fail "reviewed_context 키가 공유 schema 와 불일치
+required:
+$rc_req
+got:
+$rc_got"
+printf '%s' "$skip_json" | jq -e '.reviewed_context | has("comments_considered") | not' >/dev/null \
+  || fail "reviewed_context 에 schema 미허용 키 comments_considered 가 남아 있음"
+ok "check 2d: skipped result 가 공유 schema 를 충족 (verdict enum·필수 키·closed reviewed_context)"
 
 echo ""
 echo "=== check 2b: claude workflow supports targeted context follow-up ==="

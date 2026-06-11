@@ -576,7 +576,13 @@ jobs:
                 const result = JSON.parse(fs.readFileSync(p, 'utf8'));
                 const chunkMatch = p.match(/result\.chunk-(\d+)\.json$/);
                 const chunk = chunkMatch ? chunkMatch[1] : '0';
-                const contextPath = `.codex-review/context.chunk-${chunk}.md`;
+                // The model-facing prompt the chunk was reviewed against (prefix
+                // ends with the `Unified diff:` marker parseContextRightLineMap
+                // keys off, then the chunk diff body). This is the exact text whose
+                // 1-based line numbers a model may have copied into finding.line, so
+                // it — not a never-generated context.chunk file — is what the anchor
+                // repair must read. Restored into .codex-review/ via codex-review-prep.
+                const contextPath = `.codex-review/prompt.chunk-${chunk}.md`;
                 if (repairFindingsFromContextLineNumbers && anchorPatch && Array.isArray(result.findings)) {
                   let contextText = '';
                   try { contextText = fs.readFileSync(contextPath, 'utf8'); }
