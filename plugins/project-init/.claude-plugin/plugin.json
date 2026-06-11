@@ -1,11 +1,16 @@
 {
   "name": "project-init",
-  "version": "0.16.1",
+  "version": "0.18.0",
   "description": "새 프로젝트 시작 시 필요한 기본 지침과 도구를 자동으로 설정해주는 플러그인",
   "author": {
     "name": "예의상",
     "email": "ch.courtesy@gmail.com"
   },
   "license": "MIT",
-  "keywords": ["scaffold", "init", "bootstrap", "project-setup"]
+  "keywords": [
+    "scaffold",
+    "init",
+    "bootstrap",
+    "project-setup"
+  ]
 }

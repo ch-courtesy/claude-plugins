@@ -166,10 +166,113 @@ in_ensure_work_branch() {
 
 # =====================================================================
 # 3) git 통합 — base sync(rebase, ff 가능 시) → push. force 금지.
+#    타겟 전진으로 인한 충돌은 워커가 자율 해결한다(결정적 버전 해소 + 일반 충돌은
+#    전략 해소 + 비결정 표시로 머지 전 재검증 유도). 자동 해결·재동기화·재시도는 non-force.
+#    정책 단일 출처: 본 절(결정적 헬퍼) + 워커 계약(subagent-prompt.md).
 # =====================================================================
+
+# INT_AUTORESOLVE_FLAG — 직전 base sync 에서 '비결정(일반) 충돌'을 전략으로 해소했으면
+#   'needs-verify'. 워커는 이 표시가 있으면 머지 전 검증(완료 조건/selftest)을 재실행하고
+#   통과할 때만 진행한다(거짓 green 방지). 결정적(버전-only) 해소만 있었으면 비어 있음.
+INT_AUTORESOLVE_FLAG=""
+
+# in_json_version <ref> <path> — ref 의 plugin.json version 값(예 0.39.0). 없으면 빈 문자열.
+in_json_version() {
+  # shellcheck disable=SC2086
+  $GIT_CMD show "$1:$2" 2>/dev/null \
+    | grep -m1 -E '"version"[[:space:]]*:' \
+    | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"?([0-9][0-9.]*)"?.*/\1/'
+}
+
+# in_reapply_bump <target> <base> <our> — base→our 의 최상위 증가 필드(major/minor/patch)를
+#   target 위에 재적용한 새 버전 echo. 범프 레벨을 못 가리면 target 의 patch+1(보수적 최소 증가).
+#   결과는 항상 target 보다 엄격히 크다(작업 브랜치 범프 의도 보존 + 타겟 전진 반영).
+in_reapply_bump() {
+  local tgt="$1" base="$2" our="$3" oldIFS="$IFS"
+  IFS=.; # shellcheck disable=SC2206
+  local -a t=($tgt) b=($base) o=($our); IFS="$oldIFS"
+  local lvl=2 i bi oi
+  for ((i=0;i<3;i++)); do
+    bi="${b[i]:-0}"; oi="${o[i]:-0}"; bi="${bi//[!0-9]/}"; oi="${oi//[!0-9]/}"
+    [[ -n "$bi" ]] || bi=0; [[ -n "$oi" ]] || oi=0
+    if (( 10#$oi > 10#$bi )); then lvl=$i; break; fi
+  done
+  local -a r=("${t[0]:-0}" "${t[1]:-0}" "${t[2]:-0}") j
+  for ((j=0;j<3;j++)); do r[j]="${r[j]//[!0-9]/}"; [[ -n "${r[j]}" ]] || r[j]=0; done
+  r[lvl]=$(( 10#${r[lvl]} + 1 ))
+  for ((j=lvl+1;j<3;j++)); do r[j]=0; done
+  printf '%s.%s.%s\n' "${r[0]}" "${r[1]}" "${r[2]}"
+}
+
+# in_conflict_version_only <file> — 충돌 블록(<<< ~ >>>) 안 비-마커 라인이 모두 "version" 라인이면 0.
+#   결정적(버전-only) 충돌 판정 — 그 외(코드 의미) 충돌과 구분한다.
+in_conflict_version_only() {
+  awk '
+    /^<<<<<<< /{inc=1; seen=1; next}
+    /^=======$/{next}
+    /^>>>>>>> /{inc=0; next}
+    inc && $0 !~ /"version"[[:space:]]*:/ { bad=1 }
+    END { exit ((seen && !bad)?0:1) }
+  ' "$1"
+}
+
+# in_resolve_version_conflict <file> — 진행 중 rebase 의 버전-only 충돌 결정적 해소.
+#   새 베이스(HEAD=origin/main) plugin.json 전체를 취하고 version 만 in_reapply_bump 값으로.
+in_resolve_version_conflict() {
+  local f="$1" tgt our base mb newv
+  tgt="$(in_json_version HEAD "$f")"          # rebase 중 HEAD = 새 베이스(origin/main)
+  our="$(in_json_version REBASE_HEAD "$f")"   # 재적용 중 작업 커밋
+  # shellcheck disable=SC2086
+  mb="$($GIT_CMD merge-base REBASE_HEAD HEAD 2>/dev/null)"
+  base="$(in_json_version "$mb" "$f")"
+  newv="$(in_reapply_bump "$tgt" "$base" "$our")"
+  [[ -n "$newv" ]] || return 1
+  # shellcheck disable=SC2086
+  $GIT_CMD show "HEAD:$f" 2>/dev/null \
+    | sed -E "s/(\"version\"[[:space:]]*:[[:space:]]*\")[0-9][0-9.]*(\")/\1$newv\2/" > "$f" || return 1
+  return 0
+}
+
+# in_autoresolve_rebase <branch> — 진행 중(충돌 정지) rebase 를 자율 해결.
+#   파일별: plugin.json 버전-only → 결정적 해소; 그 외 → DISPATCH_CONFLICT_STRATEGY
+#   (기본 incoming=재적용 중 작업 커밋 쪽 --theirs, base=새 베이스 쪽 --ours) + 비결정 표시.
+#   닫으면 rebase --continue 후 0, 닫지 못하면 abort 후 1. force 미사용.
+in_autoresolve_rebase() {
+  local branch="$1" f resolved_general=0 unmerged
+  # shellcheck disable=SC2086
+  unmerged="$($GIT_CMD diff --name-only --diff-filter=U 2>/dev/null)"
+  [[ -n "$unmerged" ]] || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    if [[ "$f" =~ (^|/)plugin\.json$ ]] && in_conflict_version_only "$f"; then
+      in_resolve_version_conflict "$f" || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
+    else
+      # shellcheck disable=SC2086
+      case "${DISPATCH_CONFLICT_STRATEGY:-incoming}" in
+        base) $GIT_CMD checkout --ours   -- "$f" 2>/dev/null || true ;;
+        *)    $GIT_CMD checkout --theirs -- "$f" 2>/dev/null || true ;;
+      esac
+      resolved_general=1
+    fi
+    # shellcheck disable=SC2086
+    $GIT_CMD add -- "$f" 2>/dev/null || true
+  done <<< "$unmerged"
+  # shellcheck disable=SC2086
+  if [[ -n "$($GIT_CMD diff --name-only --diff-filter=U 2>/dev/null)" ]]; then
+    $GIT_CMD rebase --abort 2>/dev/null || true; return 1
+  fi
+  [[ "$resolved_general" == "1" ]] && INT_AUTORESOLVE_FLAG="needs-verify"
+  printf 'autoresolve: base-sync rebase 자율 해결 (branch=%s general=%s flag=%s)\n' \
+    "$branch" "$resolved_general" "${INT_AUTORESOLVE_FLAG:-deterministic}" >&2
+  # shellcheck disable=SC2086
+  $GIT_CMD rebase --continue || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
+  return 0
+}
 
 in_base_sync() {
   local branch="$1"
+  local tries="${DISPATCH_BASESYNC_RETRIES:-3}" i=0 pre post
+  INT_AUTORESOLVE_FLAG=""
   # shellcheck disable=SC2086
   $GIT_CMD fetch origin "$DEFAULT_BRANCH" || { in_die "fetch 실패: origin/$DEFAULT_BRANCH"; return 1; }
   # shellcheck disable=SC2086
@@ -179,19 +282,31 @@ in_base_sync() {
   if $GIT_CMD merge-base --is-ancestor "origin/$DEFAULT_BRANCH" "$branch" 2>/dev/null; then
     return 0
   fi
-  # base 가 전진했고 원격 브랜치(open PR)가 이미 있으면, rebase 재작성은 SHA 를 바꿔
-  # force 없는 push 를 non-fast-forward 로 실패시킨다(force 금지). 따라서 재작성하지 않고
-  # 그대로 둔다 — base 정합은 머지 단계의 ff-only 게이트가 별도로 강제한다(여기서 force·
-  # 재작성하지 않는다). 최초 통합(원격 브랜치 미존재)에서만 rebase 후 새 브랜치 push(ff-safe).
+  # base 가 전진했고 원격 브랜치(open PR)가 이미 있으면, rebase 재작성은 SHA 를 바꿔 force 없는
+  # push 를 non-fast-forward 로 실패시킨다. 재작성하지 않고 그대로 둔다 — base 정합은 머지 단계의
+  # ff-only 게이트(그쪽도 자율 재동기화)가 강제한다.
   if [[ -n "$(in_existing_open_pr "$branch")" ]]; then
     return 0
   fi
-  # shellcheck disable=SC2086
-  if ! $GIT_CMD rebase "origin/$DEFAULT_BRANCH"; then
+  # 최초 통합(원격 브랜치 미존재): rebase 후 push(ff-safe). 충돌은 자율 해결하고, 해결 도중
+  # 타겟이 또 전진하면(레이스) 갱신된 origin/main 으로 유한 횟수 재rebase 한다(non-force).
+  while : ; do
     # shellcheck disable=SC2086
-    $GIT_CMD rebase --abort || true
-    in_die "rebase 충돌 — 사람 위임(force 금지): $branch ← origin/$DEFAULT_BRANCH"; return 1
-  fi
+    pre="$($GIT_CMD rev-parse "origin/$DEFAULT_BRANCH" 2>/dev/null)"
+    # shellcheck disable=SC2086
+    if ! $GIT_CMD rebase "origin/$DEFAULT_BRANCH"; then
+      in_autoresolve_rebase "$branch" \
+        || { in_die "rebase 충돌 자율 해결 실패 — 사람 위임(force 금지): $branch ← origin/$DEFAULT_BRANCH"; return 1; }
+    fi
+    # 레이스 감지: 자율 해결 도중 origin/main 이 전진했으면 재시도.
+    # shellcheck disable=SC2086
+    $GIT_CMD fetch origin "$DEFAULT_BRANCH" 2>/dev/null || true
+    # shellcheck disable=SC2086
+    post="$($GIT_CMD rev-parse "origin/$DEFAULT_BRANCH" 2>/dev/null)"
+    [[ "$pre" == "$post" ]] && return 0
+    i=$((i+1))
+    [[ "$i" -ge "$tries" ]] && { in_die "base sync 레이스 한도 초과($tries) — 사람 위임(force 금지): $branch"; return 1; }
+  done
 }
 
 in_push_branch() {
@@ -200,7 +315,57 @@ in_push_branch() {
 }
 
 # =====================================================================
+# 3b) 실패/터미널 경로 조건부 워크트리 정리 — "보존되면 정리, 아니면 보존"(비대칭).
+#   머지 성공 경로는 merge.sh 가 무조건 정리(머지=대상 브랜치에 보존)한다. 여기서는 실패/비완료
+#   터미널에서 #350 의 고아 워크트리를 정리하되, 그 작업이 다른 곳에 보존돼 있을 때만 정리한다.
+#   "보존됨" 판정 단일 출처 = 작업 브랜치가 대상 리모트(origin)에 존재(=통합 단계에서 push 됨).
+#   정리는 loop 공개 cleanup 위임으로만 수행(직접 rm 금지) — loop cleanup 의 신호 가드가
+#   비터미널(실행 중) 워크트리를 비파괴로 보존하므로, 실행 중 워크트리는 위임해도 지워지지 않는다.
+# =====================================================================
+
+# in_branch_on_remote <branch> — 작업 브랜치가 대상 리모트에 존재하면 0, 아니면 1.
+#   원격 ref 를 직접 조회(ls-remote)해 로컬 추적 ref 의 stale 가능성을 피한다. 빈 브랜치명은
+#   '미보존'으로 본다(보수적 — 의심 시 보존). 위험: 오판 시 미보존 WIP 를 지우지 않도록 보존 쪽.
+in_branch_on_remote() {
+  local branch="$1"
+  [[ -n "$branch" ]] || return 1
+  local out
+  # shellcheck disable=SC2086
+  out="$($GIT_CMD ls-remote --heads origin "$branch" 2>/dev/null)"
+  [[ -n "$out" ]]
+}
+
+# in_cleanup_worktree_if_preserved <spec> <branch> — 실패/터미널 경로 조건부 워크트리 정리.
+#   작업이 원격 브랜치로 보존돼 있으면 loop 공개 cleanup 위임으로 정리하고, 미보존(원격에 없음
+#   = 워크트리가 유일 사본)이면 보존한다(디버깅·재개). 정리 실패는 경고로 표면화(조용한 실패
+#   금지)하되 호출자의 머지·완료 판정(rc)을 뒤집지 않는다(정리는 터미널 판정의 사후 단계). rc 0 유지.
+in_cleanup_worktree_if_preserved() {
+  local spec="$1" branch="$2"
+  [[ -n "$spec" ]] || return 0
+  if in_branch_on_remote "$branch"; then
+    # shellcheck disable=SC2086
+    $LOOP_CMD cleanup "$spec" >/dev/null 2>&1 \
+      || echo "WARN: 워크트리 cleanup 위임 실패(수동 정리 가능, 머지·완료 판정 유지): $spec" >&2
+  else
+    echo "INFO: 작업 브랜치 원격 미보존 → 워크트리 보존(유일 사본·디버깅·재개): $spec" >&2
+  fi
+  return 0
+}
+
+# in_cleanup_failed_worktree <spec> <run_dir> — 실패-경로 진입점(브랜치명을 결정적으로 도출).
+#   작업 브랜치명은 rid(run_dir basename)+SPEC slug 로 결정적(in_work_branch). slug 도출 실패 시
+#   브랜치 미상 → 보존(보수적). in_handle_blocked(워커 자기 escalation)와 dispatch reap/timeout
+#   오케스트레이션(CLI: cleanup-on-fail)이 공유하는 단일 진입.
+in_cleanup_failed_worktree() {
+  local spec="$1" rd="$2" branch
+  local rid; rid="$(basename "$rd")"
+  branch="$(in_work_branch "$rid" "$spec" 2>/dev/null || true)"
+  in_cleanup_worktree_if_preserved "$spec" "$branch"
+}
+
+# =====================================================================
 # 4) PR 생성/재사용 — 같은 head 의 open PR 이 있으면 재사용.
+#    본문은 정적 한 줄이 아니라 in_pr_body 의 구조화 본문(SPEC 추적성·요약·실행 컨텍스트).
 # =====================================================================
 
 in_existing_open_pr() {
@@ -209,15 +374,68 @@ in_existing_open_pr() {
     | awk 'NR==1 { print $1 }' | tr -d '#'
 }
 
-# in_ensure_pr <branch> <title> — open PR 재사용 또는 신규 생성. PR 번호 echo.
+# in_pr_summary <spec_path> — SPEC 의 '## 무엇을 만들 것인가' 섹션 본문(HTML 설명 주석 제거).
+#   섹션이 없으면 빈 출력(호출자가 요약 블록을 생략). 다음 헤딩(#/##)에서 경계를 닫는다.
+#   섹션 헤더 문자열에 과결합하지 않도록 정확 헤더 한 줄만 인식하고, 그 외 형식 변화엔
+#   "요약 생략 + 나머지 정상" 으로 강건하게 동작한다(SPEC 제약).
+in_pr_summary() {
+  awk '
+    /^##?[[:space:]]/ {
+      if (insec) exit
+      if ($0 ~ /^## 무엇을 만들 것인가[[:space:]]*$/) { insec = 1; next }
+    }
+    insec {
+      if (incmt) { if (index($0, "-->")) incmt = 0; next }
+      if ($0 ~ /^[[:space:]]*<!--/) { if (!index($0, "-->")) incmt = 1; next }
+      print
+    }
+  ' "$1"
+}
+
+# in_spec_issue <spec_path> — frontmatter 의 이슈 식별 정보(issue: 키). 없으면 빈 출력.
+#   forward-compatible: 키가 SPEC 에 존재할 때만 값을 내고, 따옴표·선행 '#' 표기를 정규화한다.
+in_spec_issue() {
+  awk '
+    NR == 1 && /^---[[:space:]]*$/ { fm = 1; next }
+    fm && /^---[[:space:]]*$/ { exit }
+    fm && /^issue:[[:space:]]*/ {
+      sub(/^issue:[[:space:]]*/, ""); gsub(/["'\''#[:space:]]/, ""); print; exit
+    }
+  ' "$1"
+}
+
+# in_pr_body <spec_path> <run-id> — 구조화 PR 본문(결정적) stdout.
+#   자동 리뷰 식별 줄(dispatch 자동 생성·자동 적대 리뷰) + 추적성(SPEC 경로) + 실행 컨텍스트
+#   (dispatch run-id) + 조건부 이슈 cross-reference(Refs #n, rules/context.md 형식) + 요약
+#   (SPEC 의도 섹션, 없으면 생략).
+in_pr_body() {
+  local spec="$1" rid="$2"
+  printf '🤖 이 PR 은 dispatch 가 자동 생성했으며 자동 적대 리뷰를 거칩니다.\n\n'
+  printf 'SPEC: %s\n' "$spec"
+  printf 'dispatch-run: %s\n' "$rid"
+  local issue; issue="$(in_spec_issue "$spec")"
+  [[ -n "$issue" ]] && printf 'Refs #%s\n' "$issue"
+  local summary; summary="$(in_pr_summary "$spec")"
+  if [[ -n "${summary//[$' \t\n']/}" ]]; then
+    printf '\n## 요약\n\n%s\n' "$summary"
+  fi
+}
+
+# in_ensure_pr <branch> <title> <spec> <run-id> — open PR 재사용 또는 신규 생성. PR 번호 echo.
+#   신규 생성 PR 에만 자동 리뷰 표시를 단다(제목 '🤖 [자동 리뷰]' 접두 + 본문 식별 줄(in_pr_body)) —
+#   open PR 재사용(조기 반환) 경로는 기존 PR 제목·본문을 건드리지 않는다(수정 호출 없음).
+#   본문은 임시 파일 + --body-file 로 전달해 셸 인용·줄바꿈 손상 없이 멀티라인을 보존한다.
 in_ensure_pr() {
-  local branch="$1" title="$2" n
+  local branch="$1" title="$2" spec="$3" rid="$4" n
   n="$(in_existing_open_pr "$branch")"
   if [[ -n "$n" ]]; then printf '%s\n' "$n"; return 0; fi
+  local bodyf; bodyf="$(mktemp)" || { in_die "PR 본문 임시 파일 생성 실패"; return 1; }
+  in_pr_body "$spec" "$rid" > "$bodyf"
   # shellcheck disable=SC2086
   $FORGE_CMD pr create --head "$branch" --base "$DEFAULT_BRANCH" \
-    --title "$title" --body "dispatch 통합: 구현 완료, 승인 요청." \
-    >/dev/null 2>&1 || { in_die "PR 생성 실패: $branch"; return 1; }
+    --title "🤖 [자동 리뷰] $title" --body-file "$bodyf" \
+    >/dev/null 2>&1 || { rm -f "$bodyf"; in_die "PR 생성 실패: $branch"; return 1; }
+  rm -f "$bodyf"
   in_existing_open_pr "$branch"
 }
 
@@ -248,7 +466,7 @@ in_integrate() {
       in_push_branch "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       local title pr
       title="$(in_spec_title "$spec")"
-      pr="$(in_ensure_pr "$branch" "$title")" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      pr="$(in_ensure_pr "$branch" "$title" "$spec" "$rid")" || { int_set_phase "$rd" "$key" blocked; return 4; }
       [[ -n "$pr" ]] && int_set_pr "$rd" "$key" "$pr"
       int_set_phase "$rd" "$key" review
       int_log "$rd" "$key" "PR=$pr 인계 — review 대기"
@@ -280,6 +498,9 @@ in_integrate() {
 in_handle_blocked() {
   local spec="$1" rd="$2" key="$3" cat
   cat="$(in_blocked_category "$spec")"
+  # 실패/터미널 사후 단계: 작업이 원격에 보존돼 있으면 고아 워크트리를 조건부 정리한다(#350).
+  #   미보존(유일 사본)이면 보존 — 정리는 판정의 사후 단계라 rc 를 바꾸지 않는다.
+  in_cleanup_failed_worktree "$spec" "$rd"
   if [[ "$cat" == "spec-gap" ]]; then
     int_set_phase "$rd" "$key" blocked-spec-gap
     int_log "$rd" "$key" "BLOCKED spec-gap → 스펙 보강 재개 경로 안내(push·PR 안 함)"
@@ -357,6 +578,9 @@ Commands:
                                         분기는 integrate 와 동일.
   terminal  <spec>                   child 종료 상태(done|failed|running|pending|unknown).
   category  <spec>                   BLOCKED 범주(spec-gap|...|other).
+  cleanup-on-fail <spec> <run_dir>   실패/터미널 경로 조건부 워크트리 정리(보존되면 정리, 아니면
+                                        보존). dispatch reap/timeout 으로 child 를 종료할 때
+                                        오케스트레이션이 호출하는 진입(워커 escalation 과 동일 정책).
 
 환경 변수: LOOP_CMD, GIT_CMD, FORGE_CMD, DEFAULT_BRANCH
 EOF
@@ -374,11 +598,14 @@ in_selftest() {
   #   paths: loop 공개 인터페이스 — 작업 트리(WT) 경로를 알려준다(브랜치 이식 다리 입력).
   local LP="$TMP/loop"; mkdir -p "$LP"
   local LOOPWT="$TMP/loopwt"; mkdir -p "$LOOPWT"   # mock loop 결과 워크트리 경로.
+  local CLEANUPLOG="$TMP/cleanuplog"; : > "$CLEANUPLOG"   # loop cleanup 위임 기록(워크트리 정리).
   mock_loop() {
     case "$1" in
       status) shift; [[ "$1" == "--json" ]] && shift; cat "$LP/$(basename "$1").json" 2>/dev/null || true ;;
       logs)   cat "$LP/$(basename "$2").logs" 2>/dev/null || true ;;
       paths)  printf 'SPEC_PATH   %s\nWT          %s\nLOOP_DIR    %s\n' "$2" "$LOOPWT" "$LOOPWT/.loop" ;;
+      # cleanup: 워크트리 정리 위임. MOCK_CLEANUP_FAIL=1 이면 실패(WARN 표면화 검증용).
+      cleanup) printf '%s\n' "$2" >> "$CLEANUPLOG"; [[ "${MOCK_CLEANUP_FAIL:-}" == "1" ]] && return 1 || return 0 ;;
     esac
   }
   export -f mock_loop 2>/dev/null || true
@@ -388,14 +615,19 @@ in_selftest() {
   #   브랜치 존재를 실제로 모사한다(BRANCHES 파일) — checkout 을 무조건 성공시키지 않는다(AC5).
   #   rev-parse --verify refs/heads/<b> = 브랜치 존재 검사, rev-parse HEAD = 결과 커밋,
   #   branch <name> [<commit>] = 브랜치 생성(force 금지 보장됨).
-  local PUSHLOG="$TMP/pushlog" GITLOG="$TMP/gitlog" BRANCHES="$TMP/branches"
-  : > "$PUSHLOG"; : > "$GITLOG"; : > "$BRANCHES"
+  local PUSHLOG="$TMP/pushlog" GITLOG="$TMP/gitlog" BRANCHES="$TMP/branches" REMOTE_BRANCHES="$TMP/remotebranches"
+  : > "$PUSHLOG"; : > "$GITLOG"; : > "$BRANCHES"; : > "$REMOTE_BRANCHES"
   mock_git() {
     # 선행 -C <dir> 흡수(loop 결과 워크트리에서 결과 커밋을 읽을 때 사용).
     if [[ "$1" == "-C" ]]; then shift 2; fi
     local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
     printf '%s\n' "$*" >> "$GITLOG"
     case "$1" in
+      # ls-remote --heads origin <branch> — 원격 작업 브랜치 존재 모사(REMOTE_BRANCHES 파일).
+      #   존재하면 "<sha>\trefs/heads/<branch>" 한 줄 출력(비어있지 않음 = 보존됨), 없으면 빈 출력.
+      ls-remote)
+        local rb="${@: -1}"   # 마지막 인자 = 브랜치명(ls-remote --heads origin <branch>).
+        if grep -Fxq "$rb" "$REMOTE_BRANCHES" 2>/dev/null; then printf 'deadbeef\trefs/heads/%s\n' "$rb"; fi ;;
       push) printf '%s\n' "$*" >> "$PUSHLOG" ;;
       # merge-base --is-ancestor: MOCK_ANCESTOR=1 이면 조상(0), 기본 비조상(1).
       merge-base) [[ "${MOCK_ANCESTOR:-0}" == "1" ]] && return 0 || return 1 ;;
@@ -417,11 +649,16 @@ in_selftest() {
   GIT_CMD=mock_git
 
   # mock forge: pr list(재사용 제어 MOCK_PR), pr create 기록.
-  local PRLOG="$TMP/prlog"; : > "$PRLOG"
+  #   pr create 의 --body-file 내용을 PRBODY 로 캡처 — forge 전달 시점의 본문(줄바꿈 보존) 검증용.
+  local PRLOG="$TMP/prlog" PRBODY="$TMP/prbody"; : > "$PRLOG"; : > "$PRBODY"
   mock_forge() {
     case "$1 $2" in
       "pr list")   [[ -n "${MOCK_EXISTING_PR:-}" ]] && echo "$MOCK_EXISTING_PR" || true ;;
-      "pr create") printf '%s\n' "$*" >> "$PRLOG"; echo created ;;
+      "pr create")
+        printf '%s\n' "$*" >> "$PRLOG"
+        local _prev='' _a
+        for _a in "$@"; do [[ "$_prev" == "--body-file" ]] && cat "$_a" >> "$PRBODY" 2>/dev/null; _prev="$_a"; done
+        echo created ;;
     esac
     return 0
   }
@@ -463,6 +700,11 @@ in_selftest() {
   grep -q 'feat/20260604T000000-abc1234-x' "$PUSHLOG" && ok "AC2 작업 브랜치 push" || bad "AC2 작업 브랜치 push"
   grep -q 'pr create' "$PRLOG" && ok "AC2 PR 생성" || bad "AC2 PR 생성"
   grep -q 'rebase' "$GITLOG" && ok "AC2 base sync rebase" || bad "AC2 base sync rebase"
+  # ---- AC: 신규 생성 PR 의 자동 리뷰 표시(제목 접두 태그 + 본문 식별 줄) ----
+  grep -Fq -- '--title 🤖 [자동 리뷰] ' "$PRLOG" \
+    && ok "AC 신규 PR 제목 자동 리뷰 접두 태그" || bad "AC 신규 PR 제목 자동 리뷰 접두 태그"
+  grep -Fq '자동 적대 리뷰' "$PRBODY" \
+    && ok "AC 신규 PR 본문 자동 리뷰 식별 줄" || bad "AC 신규 PR 본문 자동 리뷰 식별 줄"
 
   # ---- AC: open PR 존재 → 재사용(새 PR 미생성) + 기존 브랜치 rebase 재작성 안 함 ----
   #   (Codex blocking 회귀 가드: base 전진+원격 브랜치 존재 시 rebase 는 non-ff push 를 부른다.)
@@ -518,6 +760,106 @@ in_selftest() {
   chk "AC3 direct phase=blocked-spec-gap" "$(int_get_phase "$rd" "$kDS")" "blocked-spec-gap"
   [[ ! -s "$PUSHLOG" && ! -s "$PRLOG" ]] && ok "AC3 direct spec-gap push·PR 미수행" || bad "AC3 direct spec-gap push·PR 미수행"
 
+  # ---- U2: 실패-경로 조건부 워크트리 정리 — 원격 브랜치 존재(보존됨) → loop cleanup 위임 ----
+  #   in_handle_blocked(워커 자기 escalation) 가 작업이 원격에 보존돼 있으면 고아 워크트리를 정리한다(#350).
+  local wbF="feat/20260604T000000-abc1234-x"
+  local kF="x-fff8888"; : > "$CLEANUPLOG"; : > "$PUSHLOG"; : > "$PRLOG"
+  st_blocked > "$LP/SPEC.md.json"; printf 'category: environment-gap\n' > "$LP/SPEC.md.logs"
+  printf '%s\n' "$wbF" > "$REMOTE_BRANCHES"   # 원격에 작업 브랜치 존재 = 보존됨.
+  in_integrate "$spec" "$rd" "$kF" >/dev/null; rc=$?
+  chk "U2 실패+원격보존 rc=4(하드 차단 유지)" "$rc" "4"
+  grep -Fxq "$spec" "$CLEANUPLOG" && ok "U2 원격보존 → 워크트리 cleanup 위임" || bad "U2 원격보존 → 워크트리 cleanup 위임"
+  [[ ! -s "$PUSHLOG" && ! -s "$PRLOG" ]] && ok "U2 실패경로 push·PR 미수행(보존)" || bad "U2 실패경로 push·PR 미수행(보존)"
+
+  # ---- U2: 원격 브랜치 없음(유일 사본) → 워크트리 보존(cleanup 미위임) ----
+  local kP2="x-ppp9999"; : > "$CLEANUPLOG"
+  st_blocked > "$LP/SPEC.md.json"; printf 'category: environment-gap\n' > "$LP/SPEC.md.logs"
+  : > "$REMOTE_BRANCHES"   # 원격에 브랜치 없음 = 미보존(유일 사본).
+  in_integrate "$spec" "$rd" "$kP2" >/dev/null; rc=$?
+  chk "U2 실패+원격없음 rc=4" "$rc" "4"
+  [[ ! -s "$CLEANUPLOG" ]] && ok "U2 미보존 → 워크트리 보존(cleanup 미위임)" || bad "U2 미보존 → 워크트리 보존(cleanup 미위임)"
+
+  # ---- U2: spec-gap(재개 경로)도 원격 미보존이면 워크트리 보존 ----
+  local kSG="x-sgg0000"; : > "$CLEANUPLOG"
+  st_blocked > "$LP/SPEC.md.json"; printf 'category: spec-gap\n' > "$LP/SPEC.md.logs"
+  : > "$REMOTE_BRANCHES"
+  in_integrate "$spec" "$rd" "$kSG" >/dev/null; rc=$?
+  chk "U2 spec-gap rc=3" "$rc" "3"
+  [[ ! -s "$CLEANUPLOG" ]] && ok "U2 spec-gap 미보존 → 워크트리 보존" || bad "U2 spec-gap 미보존 → 워크트리 보존"
+
+  # ---- U2: cleanup 위임 실패 → WARN 표면화, 머지·완료 판정(rc) 뒤집지 않음(정리는 사후 단계) ----
+  local kCF="x-cff1111"; : > "$CLEANUPLOG"
+  st_blocked > "$LP/SPEC.md.json"; printf 'category: environment-gap\n' > "$LP/SPEC.md.logs"
+  printf '%s\n' "$wbF" > "$REMOTE_BRANCHES"
+  err="$(MOCK_CLEANUP_FAIL=1 in_integrate "$spec" "$rd" "$kCF" 2>&1 >/dev/null)"; rc=$?
+  chk "U2 cleanup 실패해도 rc=4(판정 유지)" "$rc" "4"
+  case "$err" in *WARN*) ok "U2 cleanup 실패 경고 표면화(조용한 실패 금지)";; *) bad "U2 cleanup 실패 경고 표면화(조용한 실패 금지)";; esac
+
+  # ---- U2: cleanup-on-fail CLI 헬퍼(dispatch reap/timeout 경로 공유 진입) ----
+  #   dispatch 가 child 를 reap/stop 할 때 오케스트레이션이 호출하는 동일 정책 진입점.
+  local kCLI="x-cli2222"; : > "$CLEANUPLOG"
+  printf '%s\n' "$wbF" > "$REMOTE_BRANCHES"
+  in_cleanup_worktree_if_preserved "$spec" "$wbF"
+  grep -Fxq "$spec" "$CLEANUPLOG" && ok "U2 헬퍼: 원격보존 → cleanup" || bad "U2 헬퍼: 원격보존 → cleanup"
+  : > "$CLEANUPLOG"; : > "$REMOTE_BRANCHES"
+  in_cleanup_worktree_if_preserved "$spec" "$wbF"
+  [[ ! -s "$CLEANUPLOG" ]] && ok "U2 헬퍼: 미보존 → 보존" || bad "U2 헬퍼: 미보존 → 보존"
+
+  # ---- PR 본문 구조화(in_pr_body): SPEC 경로·run-id 포함, 요약 섹션 본문(주석 제거),
+  #   이슈 식별 정보 조건부 cross-reference, 정적 한 줄 부재. ----
+  local specB="$TMP/SPECB.md" body
+  cat > "$specB" <<'SPECEOF'
+---
+slug: pr-body-test
+---
+
+# 본문 기능 Y
+
+## 무엇을 만들 것인가
+<!-- 설명용 주석: 이 줄은 본문에 들어가면 안 된다. -->
+요약 첫 줄이다.
+요약 둘째 줄이다.
+
+## 목적 (왜)
+이유.
+SPECEOF
+  body="$(in_pr_body "$specB" "20260604T000000-abc1234")"
+  case "$body" in *"$specB"*) ok "본문 SPEC 경로 포함";; *) bad "본문 SPEC 경로 포함";; esac
+  case "$body" in *20260604T000000-abc1234*) ok "본문 run-id 포함";; *) bad "본문 run-id 포함";; esac
+  case "$body" in *"요약 첫 줄이다."*"요약 둘째 줄이다."*) ok "본문 요약 섹션 전체 포함";; *) bad "본문 요약 섹션 전체 포함";; esac
+  case "$body" in *"설명용 주석"*) bad "본문 요약 주석 제거";; *) ok "본문 요약 주석 제거";; esac
+  case "$body" in *"목적 (왜)"*) bad "본문 다음 섹션 미포함(요약 경계)";; *) ok "본문 다음 섹션 미포함(요약 경계)";; esac
+  case "$body" in *'Refs #'*) bad "이슈 없음 → cross-reference 미생성";; *) ok "이슈 없음 → cross-reference 미생성";; esac
+  case "$body" in *'dispatch 통합:'*) bad "정적 한 줄 본문 부재";; *) ok "정적 한 줄 본문 부재";; esac
+
+  # ---- 요약 섹션 부재 → 요약 블록 생략, 나머지 본문 정상 생성 ----
+  body="$(in_pr_body "$spec" "rid7777")"   # $spec 에는 '무엇을 만들 것인가' 섹션이 없다.
+  case "$body" in *"$spec"*) ok "요약 부재: SPEC 경로 정상";; *) bad "요약 부재: SPEC 경로 정상";; esac
+  case "$body" in *rid7777*) ok "요약 부재: run-id 정상";; *) bad "요약 부재: run-id 정상";; esac
+  case "$body" in *'## 요약'*) bad "요약 부재 시 요약 블록 생략";; *) ok "요약 부재 시 요약 블록 생략";; esac
+
+  # ---- 이슈 식별 정보(frontmatter issue:) 존재 → cross-reference 한 줄 ----
+  local specI="$TMP/SPECI.md"
+  printf -- '---\nissue: 42\n---\n\n# 이슈 기능 Z\n' > "$specI"
+  body="$(in_pr_body "$specI" "rid8888")"
+  case "$body" in *'Refs #42'*) ok "이슈 존재 → Refs #42 한 줄";; *) bad "이슈 존재 → Refs #42 한 줄";; esac
+  printf -- '---\nissue: "#43"\n---\n\n# 이슈 기능 W\n' > "$specI"
+  body="$(in_pr_body "$specI" "rid8888")"
+  case "$body" in *'Refs #43'*) ok "이슈 '#43' 표기 정규화";; *) bad "이슈 '#43' 표기 정규화";; esac
+
+  # ---- PR 생성이 --body-file 로 멀티라인 본문을 forge 에 전달(줄바꿈 보존) ----
+  local kB="x-bbb0000"; : > "$PRLOG"; : > "$PRBODY"; : > "$PUSHLOG"
+  st_done > "$LP/SPECB.md.json"; : > "$LP/SPECB.md.logs"
+  MOCK_EXISTING_PR="" in_integrate "$specB" "$rd" "$kB" >/dev/null; rc=$?
+  chk "본문 통합 rc=0" "$rc" "0"
+  grep -q -- '--body-file' "$PRLOG" && ok "PR 생성에 --body-file 사용" || bad "PR 생성에 --body-file 사용"
+  [[ "$(wc -l < "$PRBODY")" -gt 1 ]] && ok "forge 전달 본문 멀티라인(줄바꿈 보존)" || bad "forge 전달 본문 멀티라인(줄바꿈 보존)"
+  grep -Fq "$specB" "$PRBODY" && ok "forge 전달 본문에 SPEC 경로" || bad "forge 전달 본문에 SPEC 경로"
+  grep -q '20260604T000000-abc1234' "$PRBODY" && ok "forge 전달 본문에 run-id" || bad "forge 전달 본문에 run-id"
+  # 요약 두 줄이 각각 독립 줄로 존재 = 요약 내부 줄바꿈이 원형 그대로 보존됨(개수 단언 보강).
+  grep -Fxq '요약 첫 줄이다.' "$PRBODY" && grep -Fxq '요약 둘째 줄이다.' "$PRBODY" \
+    && ok "forge 전달 본문에 요약(각 줄 원형 보존)" || bad "forge 전달 본문에 요약(각 줄 원형 보존)"
+
   # ---- AC2: loop 공개 paths 의 WT 값에 공백이 있어도 경로를 통째로 읽는다(첫 토큰 절단 금지) ----
   mock_loop_spaced() { [[ "$1" == "paths" ]] && printf 'WT          /tmp/my work/.worktree\n'; }
   ( LOOP_CMD=mock_loop_spaced
@@ -527,6 +869,42 @@ in_selftest() {
   # ---- AC: force 미사용 (mock_git 은 force 보면 exit99; 여기 도달했으면 미사용) ----
   [[ -s "$PUSHLOG" || -s "$GITLOG" ]] && ok "git/push 실제 수행됨" || bad "git/push 실제 수행됨"
   if grep -qiE 'force|(^| )-f( |$)' "$GITLOG"; then bad "force 미사용"; else ok "force 미사용(git 인자에 force 없음)"; fi
+
+  # ---- AC: 자동 충돌 해결 — 결정적 버전 해소 산식(in_reapply_bump: 타겟 위 의도 범프 재적용) ----
+  chk "AC reapply minor"          "$(in_reapply_bump 0.38.1 0.38.0 0.39.0)" "0.39.0"
+  chk "AC reapply minor leapfrog" "$(in_reapply_bump 0.40.0 0.38.0 0.39.0)" "0.41.0"
+  chk "AC reapply patch"          "$(in_reapply_bump 0.38.5 0.38.0 0.38.1)" "0.38.6"
+  chk "AC reapply major"          "$(in_reapply_bump 1.2.3 0.38.0 1.0.0)"   "2.0.0"
+  chk "AC reapply no-bump→patch"  "$(in_reapply_bump 0.38.1 0.38.0 0.38.0)" "0.38.2"
+
+  # ---- AC: 버전-only 충돌 판정(결정적 vs 코드 의미 구분) ----
+  local cvf="$TMP/conf_ver.json" ccf="$TMP/conf_code.sh"
+  printf '{\n<<<<<<< HEAD\n  "version": "0.38.1",\n=======\n  "version": "0.39.0",\n>>>>>>> x\n}\n' > "$cvf"
+  printf 'f(){\n<<<<<<< HEAD\n  echo a\n=======\n  echo b\n>>>>>>> x\n}\n' > "$ccf"
+  in_conflict_version_only "$cvf" && ok "AC 버전-only 충돌 인식" || bad "AC 버전-only 충돌 인식"
+  in_conflict_version_only "$ccf" && bad "AC 코드 충돌을 버전-only 로 오인" || ok "AC 코드 충돌은 버전-only 아님(결정적 해소 제외)"
+
+  # ---- AC: in_autoresolve_rebase 일반(비결정) 충돌 → 전략 해소 + needs-verify 표시(워커 재검증 유도) ----
+  local U2LOG="$TMP/arlog"; : > "$U2LOG"; rm -f "$TMP/ar_done"
+  mock_git_ar() {
+    local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
+    printf '%s\n' "$*" >> "$U2LOG"
+    if [[ "$1" == "diff" && "$*" == *--diff-filter=U* ]]; then
+      [[ -f "$TMP/ar_done" ]] || echo "src/foo.sh"   # add 전엔 미해결, add 후엔 해결됨.
+      return 0
+    fi
+    [[ "$1" == "add" ]] && : > "$TMP/ar_done"
+    return 0
+  }
+  INT_AUTORESOLVE_FLAG=""
+  GIT_CMD=mock_git_ar DISPATCH_CONFLICT_STRATEGY=incoming in_autoresolve_rebase "feat/x" >/dev/null 2>&1; rc=$?
+  GIT_CMD=mock_git
+  chk "AC autoresolve 일반 충돌 rc=0" "$rc" "0"
+  chk "AC autoresolve 비결정→needs-verify" "$INT_AUTORESOLVE_FLAG" "needs-verify"
+  grep -q 'checkout --theirs' "$U2LOG" && ok "AC autoresolve incoming 전략=--theirs(작업 커밋 쪽)" || bad "AC autoresolve incoming 전략=--theirs"
+  grep -q 'rebase --continue' "$U2LOG" && ok "AC autoresolve rebase --continue 로 진행" || bad "AC autoresolve rebase --continue"
+  if grep -qiE 'force' "$U2LOG"; then bad "AC autoresolve force 미사용"; else ok "AC autoresolve force 미사용"; fi
+  INT_AUTORESOLVE_FLAG=""
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
@@ -541,6 +919,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     integrate-direct) in_integrate_direct "$@" ;;
     terminal)  [[ $# -ge 1 ]] || in_usage; in_child_terminal_state "$1" ;;
     category)  [[ $# -ge 1 ]] || in_usage; in_blocked_category "$1" ;;
+    cleanup-on-fail) [[ $# -ge 2 ]] || in_usage; in_cleanup_failed_worktree "$1" "$2" ;;
     selftest)  in_selftest ;;
     -h|--help|help) in_usage ;;
     *) echo "알 수 없는 command: $SUB" >&2; in_usage ;;

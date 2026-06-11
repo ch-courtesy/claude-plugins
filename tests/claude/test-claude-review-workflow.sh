@@ -46,12 +46,31 @@ grep -q 'claude_workflow_changed: \${{ steps.workflow-change.outputs.changed }}'
   || fail "Claude workflow 변경 여부 prep output 부재"
 grep -q 'name: Detect Claude workflow changes' "$WORKFLOW" \
   || fail "Claude workflow 변경 감지 스텝 부재"
-grep -q 'OAuth validation requires the workflow file to match the default branch' "$WORKFLOW" \
-  || fail "Claude workflow 변경 PR 에서 claude-code-action self-validation 실패를 설명하는 skip 사유 부재"
+grep -q 'OAuth 검증을 통과하려면 워크플로 파일이 기본 브랜치와 동일해야 합니다' "$WORKFLOW" \
+  || fail "Claude workflow 변경 PR 에서 claude-code-action self-validation 실패를 설명하는 한국어 skip 사유 부재"
 grep -q 'name: Save skipped result for workflow-change PR' "$WORKFLOW" \
   || fail "Claude workflow 변경 PR 에서 모델 호출 대신 구조화된 skipped 결과를 저장하는 경로 부재"
 grep -q "needs.prep.outputs.claude_workflow_changed != 'true'" "$WORKFLOW" \
   || fail "Claude workflow 변경 PR 에서 claude-code-action 호출을 skip 하는 조건 부재"
+grep -qF 'base_sha: ${{ steps.pr.outputs.base_sha }}' "$WORKFLOW" \
+  || fail "workflow-change skipped 결과용 base_sha prep output 부재"
+grep -qF 'PR_BASE_SHA: ${{ needs.prep.outputs.base_sha }}' "$WORKFLOW" \
+  || fail "workflow-change skipped 결과에 base_sha 전달 부재"
+grep -qF 'PR_HEAD_SHA: ${{ needs.prep.outputs.head_sha }}' "$WORKFLOW" \
+  || fail "workflow-change skipped 결과에 head_sha 전달 부재"
+grep -qF 'verdict: "unavailable"' "$WORKFLOW" \
+  || fail "workflow-change skipped 결과 verdict 가 공용 schema enum(unavailable)을 사용하지 않음"
+grep -qF 'confidence: "low"' "$WORKFLOW" \
+  || fail "workflow-change skipped 결과에 공용 schema 필수 confidence 부재"
+grep -qF 'base_sha: $base_sha' "$WORKFLOW" \
+  || fail "workflow-change skipped 결과 reviewed_context.base_sha 부재"
+grep -qF 'head_sha: $head_sha' "$WORKFLOW" \
+  || fail "workflow-change skipped 결과 reviewed_context.head_sha 부재"
+grep -qF 'related_files_reviewed: []' "$WORKFLOW" \
+  || fail "workflow-change skipped 결과 reviewed_context.related_files_reviewed 부재"
+if grep -qF 'comments_considered' "$WORKFLOW"; then
+  fail "workflow-change skipped 결과에 공용 schema가 금지한 comments_considered 잔존"
+fi
 grep -qF 'PR_BASE_SHA="$PR_BASE_SHA"' "$WORKFLOW" \
   || fail "helper 호출에 PR_BASE_SHA 미전달 — thread/incremental diff base 가 HEAD~1 로 추락함"
 grep -q 'source \.review-context/context-mode\.env' "$WORKFLOW" \
