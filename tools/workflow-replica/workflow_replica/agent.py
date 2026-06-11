@@ -129,10 +129,25 @@ def _balanced_span(text):
         if start == -1:
             continue
         depth = 0
+        in_str = False
+        esc = False
         for i in range(start, len(text)):
-            if text[i] == opener:
+            c = text[i]
+            if in_str:
+                # Inside a JSON string: only an unescaped quote ends it, and
+                # braces here are data, not structure.
+                if esc:
+                    esc = False
+                elif c == "\\":
+                    esc = True
+                elif c == '"':
+                    in_str = False
+                continue
+            if c == '"':
+                in_str = True
+            elif c == opener:
                 depth += 1
-            elif text[i] == closer:
+            elif c == closer:
                 depth -= 1
                 if depth == 0:
                     return text[start:i + 1]

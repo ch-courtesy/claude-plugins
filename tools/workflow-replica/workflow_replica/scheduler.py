@@ -64,6 +64,7 @@ class RunResult:
 
 
 def _build_graph(nodes):
+    nodes = list(nodes)  # materialize: the input may be a one-shot iterable
     graph = {}
     for n in nodes:
         if n.id in graph:

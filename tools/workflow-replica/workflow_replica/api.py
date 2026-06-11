@@ -14,9 +14,17 @@ async *script* ``async def script(wf): ...`` and drives work with the
 * ``wf.phase(title)`` / ``wf.log(msg)`` — progress events.
 
 Because the script is ordinary imperative async code, it can ``await`` a result
-and then decide which nodes to run next — a runtime-determined graph. All
-leaf primitives (call/command/agent) acquire a shared semaphore, so concurrency
-stays bounded no matter how primitives are composed.
+and then decide which nodes to run next — a runtime-determined graph.
+
+Concurrency cap: the **leaf primitives** (call/command/agent) are the bounded
+units of work — each acquires the shared semaphore, so no more than
+``concurrency`` of them run at once, however parallel()/pipeline() fan them out.
+The composites (parallel/pipeline) only orchestrate; they must NOT themselves
+take the semaphore (a stage that holds it and then calls a leaf would deadlock
+at ``concurrency=1``). Build stage and thunk bodies out of the leaf primitives
+so their work stays bounded; raw blocking work placed directly in a stage —
+rather than via ``call`` — runs outside the cap and on the event loop, exactly
+as a thunk's body does, and is the author's responsibility.
 
 The scheduler's determinism contract still holds: scheduling/branch decisions
 depend only on recorded results, never on wall-clock or randomness.
