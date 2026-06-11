@@ -1,11 +1,11 @@
 {
   "name": "roundtable",
-  "version": "0.1.0",
-  "description": "의뢰자 인터뷰, 중앙 리서치, 다중 관점 숙의, 합의서 또는 불합의 보고서를 제공하는 구조화 원탁회의 플러그인",
+  "version": "0.2.0",
+  "description": "구조화 원탁회의와 추적 가능한 브레인스토밍을 제공하는 다중 관점 협업 플러그인",
   "author": {
     "name": "예의상",
     "email": "ch.courtesy@gmail.com"
   },
   "license": "MIT",
-  "keywords": ["roundtable", "deliberation", "consensus", "decision-making", "research"]
+  "keywords": ["roundtable", "brainstorming", "deliberation", "consensus", "ideation", "research"]
 }

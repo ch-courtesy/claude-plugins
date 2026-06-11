@@ -158,9 +158,101 @@ function filterFindingsAgainstPatch(findings, patch) {
   return filterFindings(findings, parseDiffRightLines(patch));
 }
 
+// Build a map from the model-facing context file's 1-based line number to the
+// corresponding RIGHT-side source file line. Review models sometimes copy the
+// Read tool's context-file line number into `finding.line`; when that line is
+// inside the unified diff, this lets callers repair the anchor deterministically
+// before the final GitHub diff-anchor filter runs.
+function parseContextRightLineMap(contextText) {
+  const map = new Map();
+  if (typeof contextText !== 'string' || contextText.length === 0) return map;
+
+  const lines = contextText.split('\n');
+  const markerIndex = lines.findIndex((line) => line === 'Unified diff:');
+  if (markerIndex === -1) return map;
+
+  let currentFile = null;
+  let newLine = 0;
+  let inHunk = false;
+  const hunkRe = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
+
+  for (let i = markerIndex + 1; i < lines.length; i += 1) {
+    const contextLine = i + 1;
+    const line = lines[i];
+
+    if (line.startsWith('diff --git ')) {
+      currentFile = null;
+      inHunk = false;
+      continue;
+    }
+    if (line.startsWith('+++ ')) {
+      currentFile = parseNewPath(line.slice(4));
+      inHunk = false;
+      continue;
+    }
+    if (line.startsWith('--- ')) continue;
+
+    const hunk = line.match(hunkRe);
+    if (hunk) {
+      newLine = Number(hunk[1]);
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk || currentFile === null) continue;
+
+    const c = line[0];
+    if (c === '+' || c === ' ') {
+      map.set(contextLine, { file: currentFile, line: newLine });
+      newLine += 1;
+    } else if (c === '-') {
+      // old-file only; no RIGHT-side source line to map.
+    } else if (c === '\\') {
+      // hunk metadata.
+    } else {
+      inHunk = false;
+    }
+  }
+
+  return map;
+}
+
+function isFindingValidForLineMap(finding, lineMap) {
+  return filterFindings([finding], lineMap).valid.length === 1;
+}
+
+// Repair findings whose line/start_line accidentally refer to the model-facing
+// context file's line numbers rather than source file RIGHT-side line numbers.
+// A repair is applied only when the current anchor is invalid, the context line
+// maps to the same file as the finding, and the repaired anchor passes the
+// normal diff-anchor validation. Otherwise the finding is returned unchanged.
+function repairFindingsFromContextLineNumbers(findings, contextText, patch) {
+  const list = Array.isArray(findings) ? findings : [];
+  const sourceLineMap = parseDiffRightLines(patch);
+  const contextLineMap = parseContextRightLineMap(contextText);
+
+  return list.map((finding) => {
+    if (isFindingValidForLineMap(finding, sourceLineMap)) return finding;
+
+    const repaired = { ...finding };
+    const lineMap = contextLineMap.get(finding.line);
+    if (lineMap && lineMap.file === finding.file) {
+      repaired.line = lineMap.line;
+    }
+
+    const startMap = contextLineMap.get(finding.start_line);
+    if (startMap && startMap.file === finding.file) {
+      repaired.start_line = startMap.line;
+    }
+
+    return isFindingValidForLineMap(repaired, sourceLineMap) ? repaired : finding;
+  });
+}
+
 module.exports = {
   parseDiffRightLines,
+  parseContextRightLineMap,
   findingAnchorEnds,
   filterFindings,
   filterFindingsAgainstPatch,
+  repairFindingsFromContextLineNumbers,
 };
