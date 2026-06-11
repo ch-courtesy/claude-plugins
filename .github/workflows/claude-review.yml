@@ -101,10 +101,6 @@ jobs:
             core.setOutput('base_sha', pr.base.sha);
             core.setOutput('head_sha', pr.head.sha);
             core.setOutput('title', pr.title || '');
-            // Repository default branch — the ref the review action's App-token
-            // exchange validates the workflow file against server-side. Falls
-            // back to the PR base ref when the base-repo object is unavailable.
-            core.setOutput('default_branch', pr.base.repo?.default_branch || pr.base.ref);
 
       - name: Check out trusted base
         # Privileged job: check out the base ref so the helper script, prompt,
@@ -119,29 +115,35 @@ jobs:
       - name: Fetch review base
         env:
           PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
-          DEFAULT_BRANCH: ${{ steps.pr.outputs.default_branch }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           git fetch --no-tags origin \
             "$PR_BASE_REF" \
-            "$DEFAULT_BRANCH" \
             "+refs/pull/$PR_NUMBER/head:refs/remotes/pull/$PR_NUMBER/head"
 
       - name: Detect Claude workflow changes
         id: workflow-change
         env:
-          DEFAULT_BRANCH: ${{ steps.pr.outputs.default_branch }}
+          PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
         run: |
           set -euo pipefail
-          # Compare the PR head's review-workflow file against the CURRENT default
-          # branch tip — not the PR merge-base. The review action's App-token
-          # exchange validates this file server-side against the default branch,
-          # so ANY difference hard-fails that exchange: whether the PR modified the
-          # file, OR the PR is merely stale (default advanced the file underneath an
-          # otherwise-untouched PR). Both cases must take the existing skip path.
-          if git diff --name-only "origin/$DEFAULT_BRANCH" "refs/remotes/pull/$PR_NUMBER/head" -- .github/workflows/claude-review.yml | grep -q .; then
-            echo "이 PR의 Claude 리뷰 워크플로 파일이 현재 기본 브랜치와 달라(수정되었거나 stale) Claude 리뷰를 생략합니다. OAuth 검증을 통과하려면 워크플로 파일이 기본 브랜치와 동일해야 합니다."
+          # Decide skip vs review by whether THIS PR actually MODIFIED the review
+          # workflow file — compared at the PR branch point (merge-base of base and
+          # head), NOT against the current default-branch tip. Two cases must be
+          # kept distinct (SPEC 완료조건 1·2):
+          #   - PR modified the file → changed=true → existing skip path. The
+          #     trust boundary differs, so a privileged review is not performed.
+          #   - PR is merely stale (default advanced the file underneath an
+          #     otherwise-untouched PR) → merge-base==head for this file → diff is
+          #     empty → changed=false → normal review path. That path checks out the
+          #     trusted base ref and reads the PR diff by PR number, so the review
+          #     action validates the workflow against the base (current default) and
+          #     still reviews this PR's changes. Comparing against the default tip
+          #     would wrongly fold stale PRs into the skip path and drop their review.
+          review_base="$(git merge-base "origin/$PR_BASE_REF" "refs/remotes/pull/$PR_NUMBER/head")"
+          if git diff --name-only "$review_base" "refs/remotes/pull/$PR_NUMBER/head" -- .github/workflows/claude-review.yml | grep -q .; then
+            echo "이 PR에서 Claude 리뷰 워크플로가 변경되어 Claude 리뷰를 생략합니다. OAuth 검증을 통과하려면 워크플로 파일이 기본 브랜치와 동일해야 합니다."
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
