@@ -1,0 +1,11 @@
+{
+  "name": "skill-rubric",
+  "version": "0.1.0",
+  "description": "토스 기술블로그 '스킬 품질 루브릭' 30항목(규칙 17 + 모델 13)으로 SKILL.md를 평가해 등급(S/A/B/C/F)과 지적 목록을 산출하는 평가 도구. 결정적 결함은 Python 규칙 검사기가, 의미적 판정은 스킬을 실행하는 에이전트가 담당.",
+  "author": {
+    "name": "예의상",
+    "email": "ch.courtesy@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": ["quality", "rubric", "skill-review", "evaluation", "linting"]
+}

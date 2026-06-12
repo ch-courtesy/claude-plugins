@@ -14,3 +14,10 @@ milestones/**/loops/**/.lock
 
 # dispatch run artifacts
 .dispatch/
+
+# 임시·스크래치 파일 (rules/workspace/temp-files.md)
+.tmp/
+
+# Python 바이트코드 캐시
+__pycache__/
+*.pyc
