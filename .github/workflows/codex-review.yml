@@ -11,6 +11,12 @@ on:
     types: [created]
   pull_request_review:
     types: [submitted]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'PR number to (re-)review'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -56,6 +62,7 @@ jobs:
           && github.event.review.user.login != 'github-actions[bot]'
           && github.event.review.user.type != 'Bot'
           && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
+      || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -82,6 +89,17 @@ jobs:
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: context.payload.issue.number,
+              });
+              pr = response.data;
+            }
+
+            // workflow_dispatch: no PR in the payload — fetch by the `pr` input
+            // (used for the resolve→re-review sequential trigger).
+            if (!pr && context.eventName === 'workflow_dispatch' && context.payload.inputs?.pr) {
+              const response = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: Number(context.payload.inputs.pr),
               });
               pr = response.data;
             }
