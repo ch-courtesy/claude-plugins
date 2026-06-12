@@ -9,7 +9,9 @@
     python3 rule_checker.py <SKILL.md 경로>
     python3 rule_checker.py all [repo_root]
 
-stdout 에 JSON 출력. exit code: 0(clean) / 1(BLOCKER) / 2(MAJOR) / 3(MINOR).
+평가에 성공하면 stdout 에 JSON 을 내고 exit code 0 으로 끝난다. 발견된 결함은
+종료 코드가 아니라 각 결과의 grade·blocker_count·major_count·minor_count 에 담긴다.
+입력 오류(단일 모드에서 경로가 없거나 읽을 수 없음)일 때만 exit code 4 로 끝낸다.
 """
 
 import datetime
@@ -25,8 +27,8 @@ SCHEMA_VERSION = "1.0"
 ALLOWED_KEYS = {"name", "description", "allowed-tools", "argument-hint"}
 RESERVED_WORDS = re.compile(r"(claude|anthropic)", re.IGNORECASE)
 NAME_FORMAT = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
-# 대문자로 시작하는 XML 류 태그(여는/닫는). 소문자 HTML(<br>,<code>)은 오탐 방지를 위해 제외.
-XML_TAG = re.compile(r"</?[A-Z][A-Z0-9_-]*\s*>")
+# 대문자로 시작하는 XML 류 태그(여는/닫는, 속성 포함). 소문자 HTML(<br>,<code>)은 오탐 방지를 위해 제외.
+XML_TAG = re.compile(r"</?[A-Z][A-Z0-9_-]*(?:\s[^>]*)?>")
 TIMING = re.compile(
     r"(\buse\b|when|whenever|before|after|during|trigger|"
     r"사용|활성화|요청|할 때|할때|때|시작)",
@@ -105,6 +107,8 @@ def parse_frontmatter(text):
         if val == "":
             fm[key] = []  # 시퀀스 시작(다음 줄들이 채움)
         else:
+            if val[0] in "\"'" and (len(val) < 2 or val[-1] != val[0]):
+                ok = False  # 따옴표 짝이 맞지 않음 → 유효하지 않은 YAML
             fm[key] = _unquote(val)
     body = "\n".join(lines[end + 1:])
     return fm, body, ok
@@ -290,7 +294,11 @@ def main(argv):
         repo_root = argv[1] if len(argv) > 1 else os.getcwd()
         paths = _find_skills(repo_root)
     else:
-        paths = [argv[0]]
+        path = argv[0]
+        if not os.path.isfile(path) or not os.access(path, os.R_OK):
+            sys.stderr.write(f"error: 파일이 없거나 읽을 수 없습니다: {path}\n")
+            return 4
+        paths = [path]
     results = [evaluate(p) for p in paths]
     grades = {g: 0 for g in "SABCF"}
     for r in results:
@@ -302,10 +310,7 @@ def main(argv):
         "summary": {"total_skills": len(results), "grades": grades},
     }
     print(json.dumps(out, ensure_ascii=False, indent=2))
-    any_b = any(r["blocker_count"] for r in results)
-    any_mj = any(r["major_count"] for r in results)
-    any_mn = any(r["minor_count"] for r in results)
-    return 1 if any_b else 2 if any_mj else 3 if any_mn else 0
+    return 0  # 평가 성공. 발견된 결함은 grade·*_count 에 있다(종료 코드 아님).
 
 
 if __name__ == "__main__":

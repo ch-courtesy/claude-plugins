@@ -63,10 +63,10 @@ assert_json "good-fixture는 S 0/0/0 이어야 함" grade=S blocker=0 major=0 mi
 [ "$EC" -eq 0 ] || fail "good-fixture exit code 0 기대(실제 $EC)"
 ok "good-fixture: 규칙 17 전부 통과(S)"
 
-# TEST 2: blocker-xml-tag → S-NO-XML BLOCKER → F, exit 1
+# TEST 2: blocker-xml-tag → S-NO-XML BLOCKER → F. 평가 성공이므로 exit 0(결함은 JSON에).
 run "$FIXTURES/blocker-xml-tag/SKILL.md"
 assert_json "blocker-xml-tag는 F + S-NO-XML FAIL" grade=F pass:S-NO-XML=false
-[ "$EC" -eq 1 ] || fail "blocker-xml-tag exit code 1 기대(실제 $EC)"
+[ "$EC" -eq 0 ] || fail "blocker-xml-tag exit code 0 기대(결함은 JSON에, 실제 $EC)"
 ok "blocker-xml-tag: S-NO-XML BLOCKER → F"
 
 # TEST 3: blocker-no-yaml → S-YAML BLOCKER → F
@@ -126,5 +126,41 @@ assert d["summary"]["total_skills"] >= 15, d["summary"]["total_skills"]
 assert any(r["skill_name"] == "rubric" for r in d["results"]), "rubric 미포함"
 PY
 ok "all 모드: 저장소 전체 평가($(python3 -c "import json;print(json.load(open('$tmp/out.json'))['summary']['total_skills'])")개 스킬)"
+
+# TEST 10: 존재하지 않는 입력 경로 → 입력 오류 exit 4(가짜 F 보고 금지)
+run "$FIXTURES/__does-not-exist__/SKILL.md"
+[ "$EC" -eq 4 ] || fail "존재하지 않는 경로는 exit 4 기대(실제 $EC)"
+ok "존재하지 않는 경로: 입력 오류 exit 4"
+
+# TEST 11: 속성 있는 XML 태그 → S-NO-XML BLOCKER(런타임 생성)
+mkdir -p "$tmp/attr-xml"
+{
+  echo '---'
+  echo 'name: attr-xml'
+  echo 'description: "속성 있는 XML 태그가 본문에 있을 때 S-NO-XML이 잡는지 확인하는 픽스처로 사용한다."'
+  echo 'allowed-tools:'
+  echo '  - Read'
+  echo '---'
+  echo '# attr-xml'
+  echo '<IMPORTANT level="high">속성 있는 태그</IMPORTANT>'
+} > "$tmp/attr-xml/SKILL.md"
+run "$tmp/attr-xml/SKILL.md"
+assert_json "속성 XML 태그는 S-NO-XML FAIL" grade=F pass:S-NO-XML=false
+ok "속성 있는 XML 태그 검출(S-NO-XML)"
+
+# TEST 12: 닫히지 않은 따옴표 → S-YAML BLOCKER(런타임 생성)
+mkdir -p "$tmp/bad-quote"
+{
+  echo '---'
+  echo 'name: bad-quote'
+  printf 'description: "%s\n' '따옴표가 닫히지 않은 값'
+  echo 'allowed-tools:'
+  echo '  - Read'
+  echo '---'
+  echo '# bad-quote'
+} > "$tmp/bad-quote/SKILL.md"
+run "$tmp/bad-quote/SKILL.md"
+assert_json "닫히지 않은 따옴표는 S-YAML FAIL" pass:S-YAML=false
+ok "닫히지 않은 따옴표 검출(S-YAML)"
 
 echo "ALL CHECKS PASSED"
