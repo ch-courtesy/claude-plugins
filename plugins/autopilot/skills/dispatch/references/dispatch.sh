@@ -35,7 +35,8 @@
 #   DISPATCH_POLL_SECONDS          watch 폴링 간격 (기본 2)
 #   DISPATCH_WAVE_TIMEOUT_SECONDS  watch 최대 대기 (기본 7200 = 2 시간)
 #   FORGE_BIN DEFAULT_BRANCH  서브모드·대상 브랜치 판정(주입 가능, mock 검증).
-#   PYTHON3_BIN  flow 드라이버 전제 python3 판정용(주입 가능, 기본 python3). 3.9+ 미가용 시
+#   FLOW_PYTHON  flow 드라이버 전제 python3 판정용(주입 가능, 기본 python3) — flow.sh 가 실제
+#               실행에 쓰는 변수와 동일하게 맞춰 검증/실행 python 불일치를 막는다. 3.9+ 미가용 시
 #               강등 없이 hard-abort. fan-out 드라이버는 단일 flow 로 고정.
 #
 # bash 3.2 호환 (assoc array 사용 안 함).
@@ -77,9 +78,11 @@ forge_backend_available() {
 # 진입점(driver 커맨드·status 의 driver: 라인)은 항상 flow 를 일관 보고한다.
 FANOUT_DRIVER="flow"
 
-# flow 엔진은 python3 3.9+ 표준 라이브러리로 동작한다. 주입 가능(mock 검증)하도록 PYTHON3_BIN
-# 으로 받는다(기본 python3). '사용 가능' 판정에만 쓴다.
-PYTHON3_BIN="${PYTHON3_BIN:-python3}"
+# flow 엔진은 python3 3.9+ 표준 라이브러리로 동작한다. 전제 판정은 flow.sh 가 실제 실행에 쓰는
+# 변수와 동일한 FLOW_PYTHON(기본 python3)으로 받아, 검증한 python 과 flow 가 실행하는 python 이
+# 같은 실행 파일이 되게 한다(주입 가능, mock 검증). '사용 가능' 판정에만 쓰고, flow 호출 시 같은
+# FLOW_PYTHON 환경을 그대로 넘긴다.
+FLOW_PYTHON="${FLOW_PYTHON:-python3}"
 
 # ----- helpers -----
 
@@ -96,9 +99,9 @@ require_yq() {
 #   로 구동되므로, python3 3.9+ 가 사용 불가이면 다른 드라이버로 강등하지 않고 즉시 hard-abort
 #   한다(강등 사슬 자체를 제거하는 것이 이 통합의 핵심).
 require_python3() {
-  command -v "${PYTHON3_BIN%% *}" >/dev/null 2>&1 \
+  command -v "${FLOW_PYTHON%% *}" >/dev/null 2>&1 \
     || die "'python3' 3.9+ 가 필요합니다 — dispatch fan-out 은 flow 드라이버(python3 표준 라이브러리)로 구동되며 폴백이 없습니다(hard-abort)."
-  ${PYTHON3_BIN} -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 9) else 1)' 2>/dev/null \
+  ${FLOW_PYTHON} -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 9) else 1)' 2>/dev/null \
     || die "'python3' 3.9+ 가 필요합니다(버전 부족) — dispatch fan-out 은 flow 드라이버로 구동되며 폴백이 없습니다(hard-abort)."
 }
 
@@ -923,7 +926,7 @@ cmd_selftest() {
   esac
   # python3 미가용(주입) → 강등 없이 hard-abort(비-0).
   rm -rf "$REPO/.dispatch"
-  local rc10=0; ( cd "$REPO" && dsp env PYTHON3_BIN=__nopython__ bash "$DSP" start feature-a.md ) >/dev/null 2>&1 || rc10=$?
+  local rc10=0; ( cd "$REPO" && dsp env FLOW_PYTHON=__nopython__ bash "$DSP" start feature-a.md ) >/dev/null 2>&1 || rc10=$?
   [[ "$rc10" -ne 0 ]] && ok "S10 python3 미가용 → hard-abort(비-0, 강등 없음)" || bad "S10 python3 hard-abort got=$rc10"
 
   echo "----"
@@ -974,7 +977,8 @@ Subcommands:
 
 환경 변수:
   DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS, FORGE_BIN, DEFAULT_BRANCH
-  PYTHON3_BIN           flow 드라이버 전제 python3 판정용(주입 가능, 기본 python3). 3.9+ 미가용
+  FLOW_PYTHON           flow 드라이버 전제 python3 판정용(주입 가능, 기본 python3) — flow.sh 와
+                        동일 변수라 검증/실행 python 이 일치한다. 3.9+ 미가용
                         시 강등 없이 hard-abort. fan-out 드라이버는 단일 flow 로 고정(선택·
                         override·강등 사슬 없음).
 EOF
