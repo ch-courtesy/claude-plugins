@@ -1,7 +1,5 @@
 # 안드레이 카파시 코딩 룰
 
-> 안드레이 카파시(Andrej Karpathy)의 코딩 룰 한국어 번역본. 원본: https://raw.githubusercontent.com/multica-ai/andrej-karpathy-skills/refs/heads/main/AGENTS.md (2026-05-30 시점 스냅샷)
-
 ## 코딩 전에 생각하기 (Think Before Coding)
 
 - 가정은 명시적으로 밝힙니다. 확실하지 않으면 묻습니다.

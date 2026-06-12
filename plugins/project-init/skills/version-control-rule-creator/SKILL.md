@@ -54,10 +54,10 @@ allowed-tools:
 
 3. **sub-룰 선택과 git 공통 동반 산출.** 후보 sub-룰을 두 부류로 나눠 처리합니다.
 
-   - **백엔드 변형 sub-룰과 그 밖의 sub-룰(`review-approval` 등).** sub-룰 ID가 하나면 자동 선택하고 둘 이상이면 `AskUserQuestion` single-select로 고릅니다. 이렇게 고른 sub-룰을 기록합니다. 단순 재실행으로 이 선택을 바꾸지 않습니다.
+   - **백엔드 변형 sub-룰과 그 밖의 sub-룰(`review-approval`·`branch-naming` 등).** 어느 것을 쓸지 묻는 **선택 질문 없이 적용 가능한 모든 sub-룰을 고정 순서로 생성**합니다 — 고정 순서(`review-approval` → `branch-naming`)로 각각 기록합니다. 백엔드 변형 sub-룰은 2단계에서 판별된 백엔드의 변형 본문을 씁니다. 단순 재실행으로 이 집합을 바꾸지 않습니다.
    - **git 계열 공통 sub-룰(`git`)은 사용자 선택지가 아닙니다.** `templates/git.md`(백엔드 변형 없음, 출력 `rules/version-control/git.md`)는 **2단계 판별이 git 계열일 때 자동으로 함께 산출되는 동반 출력**입니다. review-approval과 "둘 중 하나"로 고르게 하는 메뉴 항목으로 노출하지 않습니다.
      - 판별된 백엔드를 git 계열로 분류하는 **정적 매핑**만 둡니다: `github`·`gitlab`은 git 계열입니다. 이 정적 매핑이 git 계열 분류의 단일 출처이며, 매핑에 없는 백엔드의 기본값은 **"git 계열 아님"**입니다. 향후 비-git 백엔드는 이 매핑에 넣지 않는 것만으로 동반 산출에서 자연히 빠집니다.
-     - 2단계 판별이 **git 계열이면**: 위에서 고른 백엔드 변형 sub-룰(review-approval)과 git 공통 지침(`rules/version-control/git.md`)을 **함께 산출**합니다.
+     - 2단계 판별이 **git 계열이면**: 위에서 산출 대상이 된 백엔드 변형 sub-룰(review-approval 등)과 git 공통 지침(`rules/version-control/git.md`)을 **함께 산출**합니다.
      - **git 계열이 아니면**: git 공통 지침을 산출하지 않습니다. 사용자에게는 산출 대상이 무엇인지만 안내하고, git이 왜 공통으로 분리됐는지·분류 기준 같은 내부 사정은 노출하지 않습니다.
 
 4. **본문 조립.** 산출 대상인 각 sub-룰(백엔드 변형 sub-룰, 그리고 git 계열이면 동반 `git`)의 (백엔드 변형이 있으면 **2단계에서 판별된** 백엔드의) 템플릿에서 **frontmatter를 제거한 본문**을 그대로 취합니다. 본문은 placeholder 치환 외에 변형하지 않습니다.
@@ -66,6 +66,7 @@ allowed-tools:
 4-bis. **입력(inputs) 치환 — 정적 multi-select 집계 / single-select 단일 선택.** 산출 대상 템플릿 frontmatter에 `inputs`가 있으면 처리하고, 없으면 이 단계를 건너뜁니다. 한 입력은 `multi_select` 값에 따라 **다중 선택(집계)** 또는 **단일 선택** 두 모드 중 하나로 동작합니다. (현재 `git` 템플릿이 multi-select를, `review-approval` 템플릿의 `merge_method`가 single-select를 씁니다.)
    - **스키마.** 각 입력은 `name`, `header`, `question`, `multi_select`, `options[{label, description, value?, default?}]`를 가집니다. `multi_select: true`는 **한 질문에서 여러 정책을 다중 선택**함을 뜻하고, `multi_select: false`(또는 생략)는 **한 질문에서 정확히 하나를 고르는 단일 선택**을 뜻합니다.
    - **질문.** 입력을 `AskUserQuestion`으로 **한 번** 묻되, 다중 선택 입력은 **multi-select**로, 단일 선택 입력은 **single-select**로 제시합니다. 옵션 표시 순서는 frontmatter 순서를 따릅니다. `default: true`인 옵션은 **기본 선택(체크)** 상태로 제시합니다(추천·기본 옵션을 첫 번째에 둡니다). 사용자에게는 정책·방식 선택지만 노출하고, 정책이 공통으로 분리된 내부 사정·분류 기준은 노출하지 않습니다.
+   - **옵션 1개뿐인 다중 선택 폴백.** 다중 선택 입력의 제시 가능한 옵션이 정확히 1개뿐이면, 옵션 1개짜리 `multiSelect`를 `AskUserQuestion`이 거부하므로(옵션 최소 2개 요구) 그 정책을 **허용/금지 single-select**로 제시합니다 — '금지(적용)'를 고르면 그 옵션 값을 본문에 넣고(집계와 동일), '허용(미적용)'을 고르면 빈 값으로 처리해 절을 제거합니다(예: `git.md`의 force push 금지 정책).
    - **집계 치환 (다중 선택).** 본문의 **단일 집계 placeholder** `{{<name>}}`를, **선택된 옵션들의 값을 표시 순서대로 연결**한 텍스트로 치환합니다. 값은 `value`가 있으면 `value`, 없으면 `label`을 씁니다(value 우선). 비어 있지 않은 "Other" 자유 입력도 연결 대상에 포함합니다. 절과 절 사이는 빈 줄 하나로 구분해 마크다운 서식을 유지합니다. **정책별 개별 placeholder는 두지 않습니다.**
    - **단일 치환 (단일 선택).** 본문의 placeholder `{{<name>}}`를 **선택된 한 옵션의 값**으로 치환합니다(`value` 우선, 없으면 `label`). 연결은 일어나지 않습니다.
    - **빈 선택.** (다중 선택에서) 아무 옵션도 선택되지 않으면 집계 결과는 빈 문자열이고, placeholder가 놓인 줄을 절 단위로 정리·제거해 빈 줄·깨진 마크다운을 남기지 않습니다. 도입부(헤더 + git 계열 분류)는 그대로 남습니다.
@@ -81,8 +82,8 @@ allowed-tools:
 
 ## 규칙
 
-- 본 스킬은 `rules/version-control/` 아래 sub-룰 파일만 생성·갱신합니다. 한 실행에서 기록하는 백엔드 변형 sub-룰은 하나이며, 백엔드가 git 계열이면 git 공통 지침(`git.md`)을 그 **동반 출력**으로 함께 기록합니다. 카테고리 밖 파일이나 다른 카테고리의 기존 지침(범용 리뷰 원칙 `rules/review.md`·릴리스 버전 지침 `rules/engineering/versioning.md` 포함)은 변경하지 않습니다.
-- 백엔드 변형 sub-룰은 한 번의 호출에서 하나만 고릅니다. git 계열일 때 동반 산출되는 git 공통 지침은 그 예외로, 백엔드 변형 sub-룰과 `git.md`가 함께 기록됩니다. 템플릿 본문을 서로 합치지는 않습니다.
+- 본 스킬은 `rules/version-control/` 아래 sub-룰 파일만 생성·갱신합니다. 한 실행에서 적용 가능한 sub-룰을 고정 순서로 모두 기록하며, 백엔드가 git 계열이면 git 공통 지침(`git.md`)도 **동반 출력**으로 함께 기록합니다. 카테고리 밖 파일이나 다른 카테고리의 기존 지침(범용 리뷰 원칙 `rules/review.md`·릴리스 버전 지침 `rules/engineering/versioning.md` 포함)은 변경하지 않습니다.
+- sub-룰은 선택 질문 없이 적용 가능한 것을 고정 순서로 모두 기록합니다(백엔드 변형 sub-룰은 판별된 백엔드의 변형 본문을 씁니다). git 계열일 때는 git 공통 지침(`git.md`)도 동반 산출됩니다. 템플릿 본문을 서로 합치지는 않습니다.
 - 템플릿 본문은 그대로 복사합니다. SKILL.md에 본문별 로직을 추가하지 않습니다. 새 백엔드·새 sub-룰은 `templates/` 파일 추가만으로 확장하며 이 SKILL.md를 수정하지 않습니다.
 - 백엔드 판별은 **공식 도메인 호스트명 정밀 매칭(네트워크 없음) + self-hosted read-only API probe**로 수행합니다. 호스트명 substring 매칭은 쓰지 않으며, 정밀 매칭에도 probe에도 걸리지 않으면(inconclusive 포함) 추측 없이 중단하고 안내합니다.
 - 기존 sub-룰 파일은 사용자 명시 동의 없이는 절대 덮어쓰지 않습니다. 단순 재실행으로 sub-룰·백엔드를 바꾸지 않습니다.
