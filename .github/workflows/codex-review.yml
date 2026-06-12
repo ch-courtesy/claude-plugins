@@ -319,8 +319,105 @@ jobs:
           include-hidden-files: true
           retention-days: 1
 
-  review:
+  # Codex ChatGPT auth uses ROTATING (single-use) refresh tokens: codex rotates the
+  # refresh token on each access-token refresh and writes the new pair into the
+  # run-local auth.json — which is discarded at job end, leaving the static
+  # CODEX_AUTH_JSON secret holding the OLD (now consumed) refresh token. After the
+  # access token later expires, the secret's refresh token is already dead → 401
+  # "refresh token was already used" → the review produces no chunk results → the
+  # merge job fails the check (false-green guard). This job closes that gap: it
+  # refreshes once, SINGLE-THREADED (global job concurrency), and writes the rotated
+  # auth.json BACK to the secret so the credential never permanently dies. `review`
+  # needs it so the refresh happens before (not concurrently with) the matrix, and
+  # the matrix reads the freshened secret instead of racing the same refresh token.
+  #
+  # Out-of-band prerequisites (code alone does NOT fix it):
+  #  - The REVIEW_APP_ID GitHub App must be granted repo "Secrets: Read and write";
+  #    the default GITHUB_TOKEN cannot write Actions secrets.
+  #  - The CODEX_AUTH_JSON secret must be RE-SEEDED once by hand (local `codex login`
+  #    → copy ~/.codex/auth.json into the secret) to bootstrap a live refresh token;
+  #    write-back can only keep an already-live token alive, not revive a dead one.
+  auth-refresh:
     needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Global (run-spanning) group so concurrent runs never write the rotating
+    # secret at the same time. Distinct from the workflow-level per-PR group above.
+    concurrency:
+      group: codex-auth-writeback
+      cancel-in-progress: false
+    env:
+      REVIEW_APP_ID: ${{ secrets.REVIEW_APP_ID }}
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        if: ${{ env.REVIEW_APP_ID != '' }}
+        continue-on-error: true
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+        with:
+          app-id: ${{ secrets.REVIEW_APP_ID }}
+          private-key: ${{ secrets.REVIEW_APP_PRIVATE_KEY }}
+
+      - name: Bootstrap Codex auth.json
+        # Same seeding as the review job: secret → auth.json (chmod 600) in a
+        # dedicated codex-home, plus the placeholder server-info file the action's
+        # "Read server info" step expects. Empty secret fails fast.
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          if [ -z "$CODEX_AUTH_JSON" ]; then
+            echo "CODEX_AUTH_JSON secret is required for Codex ChatGPT authentication." >&2
+            exit 1
+          fi
+          umask 077
+          codex_home="$RUNNER_TEMP/codex-home"
+          mkdir -p "$codex_home"
+          printf '%s' "$CODEX_AUTH_JSON" > "$codex_home/auth.json"
+          chmod 600 "$codex_home/auth.json"
+          printf '{"port":1}' > "$codex_home/${GITHUB_RUN_ID}.json"
+          echo "CODEX_HOME_DIR=$codex_home" >> "$GITHUB_ENV"
+
+      - name: Refresh Codex token
+        # A trivial model call exercises auth; if the access token is expired codex
+        # refreshes it and rotates the refresh token into codex-home/auth.json.
+        # continue-on-error: a flaky/failed refresh must NOT block reviews — the
+        # matrix can still run on the existing secret, and the write-back step below
+        # no-ops when no fresh auth.json was produced.
+        id: refresh
+        continue-on-error: true
+        uses: openai/codex-action@e0fdf01220eb9a88167c4898839d273e3f2609d1
+        with:
+          codex-version: '0.132.0'
+          codex-home: ${{ env.CODEX_HOME_DIR }}
+          sandbox: read-only
+          effort: low
+          prompt: 'Reply with: ok'
+          output-file: ${{ runner.temp }}/codex-refresh-out.txt
+
+      - name: Write rotated auth.json back to the secret
+        # Single writer (this job is globally serialized). Only writes when an App
+        # token with secrets:write is available AND the rotated auth.json actually
+        # differs from the current secret (skip no-op churn).
+        if: ${{ steps.app-token.outputs.token != '' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OLD_AUTH: ${{ secrets.CODEX_AUTH_JSON }}
+        run: |
+          set -euo pipefail
+          new_auth="${CODEX_HOME_DIR}/auth.json"
+          if [ ! -s "$new_auth" ]; then
+            echo "No auth.json produced (refresh skipped/failed); nothing to write back."
+            exit 0
+          fi
+          if [ "$(cat "$new_auth")" = "$OLD_AUTH" ]; then
+            echo "auth.json unchanged (access token still valid); no write-back needed."
+            exit 0
+          fi
+          gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" --body "$(cat "$new_auth")"
+          echo "Rotated auth.json written back to CODEX_AUTH_JSON."
+
+  review:
+    needs: [prep, auth-refresh]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
