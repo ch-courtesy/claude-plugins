@@ -26,7 +26,7 @@ SKILL.md 파일을 토스 기술블로그 '[스킬 품질 루브릭](https://tos
 ## 범위에 포함
 
 - 새 플러그인 `skill-rubric` / 스킬 `rubric` (`plugin.json` 0.1.0, `marketplace.json` 등록)
-- Python(표준 라이브러리 전용) 규칙 검사기 17항목 + JSON 스키마
+- Python 규칙 검사기 17항목 + JSON 스키마 (frontmatter YAML 파싱은 yq(mikefarah)에 위임)
 - 모델 검사 13항목 기준 문서(`rubric-definitions.md`)
 - 스킬 오케스트레이션 본문(규칙 실행 → 모델 검사 → 병합·등급 → 리포트)
 - good/bad 픽스처 + bash 테스트
@@ -39,7 +39,8 @@ SKILL.md 파일을 토스 기술블로그 '[스킬 품질 루브릭](https://tos
 
 ## 제약
 
-- 구현 언어는 Python, 표준 라이브러리만 사용(외부 의존성 금지).
+- 구현 언어는 Python. frontmatter YAML 파싱·유효성 판정은 yq(mikefarah)에 위임한다
+  (직접 만든 YAML 파서의 문법 엣지 오판을 피하기 위함 — 이 저장소의 다른 스킬 검증 테스트와 동일한 의존성).
 - 형태는 새 플러그인 스킬이며 호출은 `Skill(skill="rubric", args="<SKILL.md 경로 | all>")`.
 - 루브릭은 토스 글 그대로(verbatim) 적용한다.
 - 기존 컨벤션을 따른다: 스킬은 `plugins/<plugin>/skills/<skill>/`, 스크립트·기준 문서는 `references/`,

@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""skill-rubric: SKILL.md 규칙 기반 검사기 (17항목, 표준 라이브러리 전용).
+"""skill-rubric: SKILL.md 규칙 기반 검사기 (17항목).
 
 토스 기술블로그 '스킬 품질 루브릭'의 6개 섹션 중 결정적으로 판정 가능한
 17개 항목을 정규식·카운트·AST(py_compile/bash -n)로 검사한다. 의미적 판정
 13개 항목은 이 도구가 다루지 않고 rubric 스킬을 실행하는 에이전트가 채운다.
+
+외부 의존성: frontmatter YAML 파싱·유효성 판정은 yq(mikefarah)에, 스크립트
+syntax 검사는 bash 에 위임한다. yq 는 이 저장소의 다른 스킬 검증 테스트와 동일한 의존성이다.
 
 사용법:
     python3 rule_checker.py <SKILL.md 경로>
@@ -11,7 +14,7 @@
 
 평가에 성공하면 stdout 에 JSON 을 내고 exit code 0 으로 끝난다. 발견된 결함은
 종료 코드가 아니라 각 결과의 grade·blocker_count·major_count·minor_count 에 담긴다.
-입력 오류(단일 모드에서 경로가 없거나 읽을 수 없음)일 때만 exit code 4 로 끝낸다.
+입력 오류(단일 모드에서 경로가 없거나 읽을 수 없음)는 exit code 4, yq 미설치는 exit code 5.
 """
 
 import datetime
@@ -20,6 +23,7 @@ import json
 import os
 import py_compile
 import re
+import shutil
 import subprocess
 import sys
 
@@ -69,31 +73,12 @@ RULE_META = [
 ]
 
 
-def _close_quote(val, q):
-    """val[0]==q 인 따옴표 스칼라에서 닫는 따옴표의 인덱스를 반환(없으면 -1).
-
-    큰따옴표는 `\\"` 백슬래시 이스케이프를, 작은따옴표는 `''` 이중 이스케이프를 건너뛴다.
-    """
-    i = 1
-    while i < len(val):
-        c = val[i]
-        if q == '"' and c == "\\":
-            i += 2  # 이스케이프 문자 건너뜀
-            continue
-        if c == q:
-            if q == "'" and i + 1 < len(val) and val[i + 1] == "'":
-                i += 2  # '' 는 작은따옴표 이스케이프
-                continue
-            return i
-        i += 1
-    return -1
-
-
 def parse_frontmatter(text):
     """첫 ---...--- frontmatter 를 (dict, body, ok) 로 반환.
 
-    name/description/allowed-tools 세 키 구조만 다루는 미니멀 파서. 펜스가 없거나
-    닫히지 않거나 최상위 라인 구문이 깨지면 ok=False, 가능한 만큼은 best-effort 로 파싱.
+    펜스 구간을 떼어 yq(mikefarah)로 진짜 YAML 파싱한다 — 손수 만든 파서 대신
+    실제 YAML 파서가 유효성을 판정하므로 인용·이스케이프·주석 같은 문법 엣지를 정확히 다룬다.
+    펜스가 없거나 닫히지 않거나 yq 파싱이 실패하면(유효하지 않은 YAML) ok=False.
     """
     lines = text.split("\n")
     if not lines or lines[0].strip() != "---":
@@ -105,42 +90,22 @@ def parse_frontmatter(text):
             break
     if end is None:
         return {}, "", False
-    fm = {}
-    ok = True
-    cur_key = None
-    for raw in lines[1:end]:
-        if raw.strip() == "" or raw.lstrip().startswith("#"):
-            continue
-        if raw.startswith((" ", "\t")):  # 시퀀스 아이템 또는 연속 라인
-            item = raw.strip()
-            if item.startswith("- ") and cur_key is not None:
-                fm.setdefault(cur_key, [])
-                if isinstance(fm[cur_key], list):
-                    fm[cur_key].append(item[2:].strip())
-            continue
-        m = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", raw)
-        if not m:
-            ok = False
-            continue
-        key, val = m.group(1), m.group(2).strip()
-        cur_key = key
-        if val == "":
-            fm[key] = []  # 시퀀스 시작(다음 줄들이 채움)
-        elif val[0] in "\"'":
-            q = val[0]
-            close = _close_quote(val, q)
-            if close == -1:
-                ok = False  # 닫는 따옴표 없음 → 유효하지 않은 YAML
-                fm[key] = val
-            else:
-                rest = val[close + 1:].strip()
-                if rest and not rest.startswith("#"):
-                    ok = False  # 닫는 따옴표 뒤에 주석 아닌 내용 → 유효하지 않은 YAML
-                fm[key] = val[1:close]  # 닫는 따옴표까지가 값(뒤 인라인 주석은 무시)
-        else:
-            fm[key] = val
+    block = "\n".join(lines[1:end])
     body = "\n".join(lines[end + 1:])
-    return fm, body, ok
+    proc = subprocess.run(
+        ["yq", "eval", "-o=json", "-"],
+        input=block, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return {}, body, False  # 유효하지 않은 YAML
+    out = proc.stdout.strip()
+    try:
+        fm = json.loads(out) if out and out != "null" else {}
+    except json.JSONDecodeError:
+        return {}, body, False
+    if not isinstance(fm, dict):
+        return {}, body, False  # 매핑이 아니면 frontmatter 로 부적합
+    return fm, body, True
 
 
 def _ref_files(skill_dir, exts):
@@ -313,6 +278,12 @@ def _find_skills(repo_root):
 
 
 def main(argv):
+    if not shutil.which("yq"):
+        sys.stderr.write(
+            "error: yq (mikefarah) 가 필요합니다 — frontmatter YAML 파싱용. "
+            "설치: https://github.com/mikefarah/yq/releases\n"
+        )
+        return 5
     if not argv or argv[0] == "all":
         repo_root = argv[1] if len(argv) > 1 else os.getcwd()
         paths = _find_skills(repo_root)
