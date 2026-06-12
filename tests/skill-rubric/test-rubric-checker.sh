@@ -163,4 +163,19 @@ run "$tmp/bad-quote/SKILL.md"
 assert_json "닫히지 않은 따옴표는 S-YAML FAIL" pass:S-YAML=false
 ok "닫히지 않은 따옴표 검출(S-YAML)"
 
+# TEST 13: 닫힌 따옴표 뒤 인라인 주석이 있는 정상 YAML → S-YAML PASS(거짓 실패 금지)
+mkdir -p "$tmp/inline-comment"
+{
+  echo '---'
+  echo 'name: inline-comment'
+  printf 'description: "%s" # %s\n' '인라인 주석이 있어도 정상 파싱되는지 확인할 때 사용하는 픽스처입니다.' '인라인 주석'
+  echo 'allowed-tools:'
+  echo '  - Read'
+  echo '---'
+  echo '# inline-comment'
+} > "$tmp/inline-comment/SKILL.md"
+run "$tmp/inline-comment/SKILL.md"
+assert_json "인라인 주석 있는 정상 YAML은 S-YAML PASS" pass:S-YAML=true
+ok "인라인 주석 포함 YAML: S-YAML 통과"
+
 echo "ALL CHECKS PASSED"

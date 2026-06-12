@@ -69,6 +69,26 @@ RULE_META = [
 ]
 
 
+def _close_quote(val, q):
+    """val[0]==q 인 따옴표 스칼라에서 닫는 따옴표의 인덱스를 반환(없으면 -1).
+
+    큰따옴표는 `\\"` 백슬래시 이스케이프를, 작은따옴표는 `''` 이중 이스케이프를 건너뛴다.
+    """
+    i = 1
+    while i < len(val):
+        c = val[i]
+        if q == '"' and c == "\\":
+            i += 2  # 이스케이프 문자 건너뜀
+            continue
+        if c == q:
+            if q == "'" and i + 1 < len(val) and val[i + 1] == "'":
+                i += 2  # '' 는 작은따옴표 이스케이프
+                continue
+            return i
+        i += 1
+    return -1
+
+
 def parse_frontmatter(text):
     """첫 ---...--- frontmatter 를 (dict, body, ok) 로 반환.
 
@@ -106,18 +126,18 @@ def parse_frontmatter(text):
         cur_key = key
         if val == "":
             fm[key] = []  # 시퀀스 시작(다음 줄들이 채움)
+        elif val[0] in "\"'":
+            q = val[0]
+            close = _close_quote(val, q)
+            if close == -1:
+                ok = False  # 닫는 따옴표 없음 → 유효하지 않은 YAML
+                fm[key] = val
+            else:
+                fm[key] = val[1:close]  # 닫는 따옴표까지가 값(뒤 인라인 주석은 무시)
         else:
-            if val[0] in "\"'" and (len(val) < 2 or val[-1] != val[0]):
-                ok = False  # 따옴표 짝이 맞지 않음 → 유효하지 않은 YAML
-            fm[key] = _unquote(val)
+            fm[key] = val
     body = "\n".join(lines[end + 1:])
     return fm, body, ok
-
-
-def _unquote(val):
-    if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
-        return val[1:-1]
-    return val
 
 
 def _ref_files(skill_dir, exts):
