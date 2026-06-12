@@ -48,6 +48,20 @@
         "ideation",
         "decision-making"
       ]
+    },
+    {
+      "name": "skill-rubric",
+      "source": "./plugins/skill-rubric",
+      "description": "토스 기술블로그 '스킬 품질 루브릭' 30항목(규칙 17 + 모델 13)으로 SKILL.md를 평가해 등급(S/A/B/C/F)과 지적 목록을 산출하는 평가 도구",
+      "version": "0.1.0",
+      "category": "quality",
+      "tags": [
+        "quality",
+        "rubric",
+        "skill-review",
+        "evaluation",
+        "linting"
+      ]
     }
   ]
 }
