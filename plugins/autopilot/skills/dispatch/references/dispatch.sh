@@ -29,7 +29,7 @@
 #   bash dispatch.sh start <spec...> [--max-parallel N] [--resume <run-id>] [--target-branch <b>]
 #   bash dispatch.sh ready <run-id> [--max-parallel N]
 #   bash dispatch.sh mark <run-id> <running|done|failed> <spec>
-#   bash dispatch.sh list | status <run-id> | driver <run-id> | stop <run-id> | watch <run-id>
+#   bash dispatch.sh list | status <run-id> | driver <run-id> | concurrency <run-id> | stop <run-id> | watch <run-id>
 #
 # 환경 변수:
 #   DISPATCH_POLL_SECONDS          watch 폴링 간격 (기본 2)
@@ -648,6 +648,26 @@ cmd_driver() {
   echo "$FANOUT_DRIVER"
 }
 
+# ----- subcommand: concurrency -----
+# cmd_concurrency <run-id> — flow CONCURRENCY 로 넘길 effective 동시성을 출력한다(양수 보장).
+#   MAX_PARALLEL>0 이면 그 값을, 0(=무제한)이면 SPEC 수로 결정적 변환한다(>=1). flow 스케줄러는
+#   0 을 1(순차)로 클램프하므로, 무제한을 SPEC 수로 펴서 0 직전달에 의한 병렬성 퇴행을 막는
+#   단일 출처다(SKILL.md 는 이 값을 참조만 한다).
+cmd_concurrency() {
+  local rid="${1:-}"
+  [[ -z "$rid" ]] && die "사용: $0 concurrency <run-id>"
+  require_git_root
+  local rd; rd="$(run_dir "$rid")"
+  [[ -d "$rd" ]] || die "run-id 없음: $rid"
+  local mp; mp="$(cat "$rd/MAX_PARALLEL" 2>/dev/null || echo 0)"
+  [[ "$mp" =~ ^[0-9]+$ ]] || mp=0
+  if (( mp > 0 )); then echo "$mp"; return; fi
+  local n; n="$(wc -l < "$rd/MANIFEST.txt" 2>/dev/null | tr -d ' ' || echo 0)"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  (( n < 1 )) && n=1
+  echo "$n"
+}
+
 # ----- subcommand: stop -----
 
 cmd_stop() {
@@ -828,6 +848,13 @@ cmd_selftest() {
   # resume sticky: --max-parallel 미지정 재개해도 마커 1 유지.
   ( cd "$REPO" && dsp bash "$DSP" start --resume "$rid4" ) >/dev/null 2>&1 || true
   [[ "$(mpmarker "$rd4")" == "1" ]] && ok "S4 resume: MAX_PARALLEL sticky(마커 유지)" || bad "S4 resume sticky got=$(mpmarker "$rd4")"
+  # concurrency 서브커맨드: flow CONCURRENCY 단일 출처. >0 이면 그 값, 0(무제한)이면 SPEC 수(>=1)로
+  # 결정적 변환해 0 직전달(=flow 의 max(1,·) 클램프로 인한 순차 퇴행)을 막는다.
+  conc(){ ( cd "$REPO" && dsp bash "$DSP" concurrency "$1" 2>/dev/null ); }
+  [[ "$(conc "$rid4")" == "1" ]] && ok "S4 concurrency: --max-parallel 1 → 1" || bad "S4 concurrency mp=1 got=$(conc "$rid4")"
+  rm -rf "$REPO/.dispatch"
+  local rid4b; rid4b="$( start_rid dsp bash "$DSP" start feature-a.md feature-c.md )"
+  [[ "$(conc "$rid4b")" == "2" ]] && ok "S4 concurrency: 무제한(MAX_PARALLEL=0)+2 SPEC → 2(0 직전달 방지)" || bad "S4 concurrency 무제한 got=$(conc "$rid4b")"
 
   # ---- S5: 대상 브랜치 + 서브모드 마커 + --resume sticky ----
   # 기본 대상 = main.
@@ -963,6 +990,8 @@ Subcommands:
         run-id 단위 per-SPEC state(진단용 wave 표시 포함) + fan-out 드라이버.
   driver <run-id>
         run 의 fan-out 드라이버 출력 — 단일 드라이버이므로 항상 flow.
+  concurrency <run-id>
+        flow CONCURRENCY 로 넘길 effective 동시성 출력(>0=그 값, 0=무제한이면 SPEC 수>=1).
   stop <run-id>
         running SPEC 을 failed 로 표시하고 이행적 의존자를 skipped 전파(모델이 그 서브에이전트
         를 멈춘다). dispatch.sh 는 오케스트레이션 상태만 갱신한다.
@@ -996,6 +1025,7 @@ case "$SUB" in
   list)   cmd_list  ;;
   status) cmd_status "$@" ;;
   driver) cmd_driver "$@" ;;
+  concurrency) cmd_concurrency "$@" ;;
   stop)   cmd_stop   "$@" ;;
   watch)  cmd_watch  "$@" ;;
   sweep)  cmd_sweep  "$@" ;;

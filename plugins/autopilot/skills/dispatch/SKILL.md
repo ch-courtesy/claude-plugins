@@ -7,6 +7,7 @@ allowed-tools:
   - Bash(bash * dispatch.sh list)
   - Bash(bash * dispatch.sh status:*)
   - Bash(bash * dispatch.sh driver:*)
+  - Bash(bash * dispatch.sh concurrency:*)
   - Bash(bash * dispatch.sh stop:*)
   - Bash(bash * dispatch.sh watch:*)
   - Bash(bash * dispatch.sh selftest:*)
@@ -53,7 +54,7 @@ dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispa
 
 fan-out 단계(준비된 SPEC마다 워커 1개 진행)는 **단일 `flow` 드라이버**로 구동된다 — `flow` 스킬의 **공개 계약**(`bash plugins/autopilot/skills/flow/references/flow.sh run <정의 파일>` → 단일 JSON)을 통해 임의 `depends_on` DAG를 **스트리밍 fan-out·동시성 상한·실패 이행 격리·저널 resume·결과 전달**로 실행한다. flow 엔진 내부는 **블랙박스**로 두고 입력→JSON 출력 계약으로만 호출한다. 드라이버 선택·자동 감지·운영자 override·안전 강등 사슬은 없으며, 호출자에게 노출된 **시작 인터페이스는 변하지 않는다**(flow 통합은 dispatch 내부에서 일어난다). dispatch 의 결정적 코어(준비도·상태 전이·skip 전파·워커 계약·머지/리뷰 게이트)는 그대로 보존하고, fan-out 을 무엇으로 구동하느냐만 flow 로 통합한다.
 
-- **flow 호출 경로**: `dispatch.sh start` 로 run·DAG·markers·pending 상태를 셋업한 뒤, 오케스트레이터가 준비된 SPEC 들을 flow **워크플로 정의**(각 노드의 `depends_on` 이 모두 충족되는 즉시 워커 실행, SPEC당 워커 1개)로 표현하고 `flow run` 으로 실행한다. 한 SPEC 의 dep 이 모두 done 이면 **같은 그래프의 더 느린 무관한 SPEC 이 진행 중이어도** 기다리지 않고 그 워커가 시작된다(런타임 스트리밍). 동시성 상한은 flow 정의의 `CONCURRENCY` 로 준다 — `--max-parallel N`(>0)이면 그 값을, **미지정(`MAX_PARALLEL=0`=무제한)이면 양수(그래프의 SPEC 수)로 변환**해 넘긴다(`0` 직전달 금지). **fan-out 항목이 하나(N=1)여도 같은 flow 경로로 구동**한다.
+- **flow 호출 경로**: `dispatch.sh start` 로 run·DAG·markers·pending 상태를 셋업한 뒤, 오케스트레이터가 준비된 SPEC 들을 flow **워크플로 정의**(각 노드의 `depends_on` 이 모두 충족되는 즉시 워커 실행, SPEC당 워커 1개)로 표현하고 `flow run` 으로 실행한다. 한 SPEC 의 dep 이 모두 done 이면 **같은 그래프의 더 느린 무관한 SPEC 이 진행 중이어도** 기다리지 않고 그 워커가 시작된다(런타임 스트리밍). 동시성 상한은 flow 정의의 `CONCURRENCY` 로 주되 그 값은 `dispatch.sh concurrency <run-id>` 가 산출한다(`0`=무제한을 SPEC 수로 결정적 변환 — 단일 출처). **fan-out 항목이 하나(N=1)여도 같은 flow 경로로 구동**한다.
 - **워커 노드 = flow 서브프로세스 에이전트**: 각 SPEC 워커는 flow 의 에이전트 노드(`wf.agent` + `SubprocessAgentCaller`)로 spawn 하고, spawn 프롬프트에 **워커 계약 전문(`references/subagent-prompt.md`)을 embed** 하며 `spec`·`target-branch`·`run-dir`·`key` 를 입력으로 넘긴다. caller argv 는 주입 가능하며 기본은 Claude(`claude --print`) — 특정 벤더 CLI 에 하드 종속하지 않는다(멀티벤더). 워커가 머지를 보고하면 `dispatch.sh mark done`, 비완료면 `mark failed` 후 `ready` 재평가로 의존자를 해제한다.
   - **워커 권한(서브프로세스는 부모 권한 비상속)**: 인세션 Agent 와 달리 flow 서브프로세스 워커는 **부모 세션의 런타임 권한 grant 를 상속하지 않는다**. 워커 계약(`references/subagent-prompt.md`)이 요구하는 명령 표면을 비대화형 `--print` 으로 무인 실행해야 하므로, caller 는 **격리 워크트리 전제로 `--dangerously-skip-permissions`** 를 기본으로 한다 — 더 좁은 정책이 필요하면 `--allowedTools`/프로젝트 settings allow 로 대체한다.
 - **`python3` hard-abort(폴백 없음)**: flow 는 `python3` 3.9+ 표준 라이브러리로 동작한다. **`python3` 3.9+ 가 사용 불가이면** dispatch 는 다른 드라이버로 강등하지 않고 **명확한 오류로 즉시 중단**한다(비-0 종료). 강등 사슬 자체를 두지 않는 것이 이 통합의 핵심이다(`dispatch.sh` 의 `require_python3` 가 `start` 진입부에서 강제).
@@ -85,6 +86,10 @@ run-id 단위로 per-SPEC state(`pending`/`running`/`done`/`failed`/`skipped`) �
 ### dispatch driver `<run-id>`
 
 run 의 fan-out 드라이버를 출력한다 — 단일 드라이버이므로 항상 `flow`(관찰 진입점).
+
+### dispatch concurrency `<run-id>`
+
+flow `CONCURRENCY` 로 넘길 effective 동시성을 출력한다 — `--max-parallel N`(>0)이면 N, 미지정(`MAX_PARALLEL=0`=무제한)이면 SPEC 수(≥1)로 결정적 변환. 오케스트레이터가 flow 정의의 `CONCURRENCY` 를 이 값으로 채워 `0` 직전달에 의한 순차 퇴행을 막는다(변환 로직의 단일 출처).
 
 ### dispatch stop `<run-id>`
 
