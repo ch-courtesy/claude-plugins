@@ -7,6 +7,7 @@ allowed-tools:
   - Bash(bash * dispatch.sh list)
   - Bash(bash * dispatch.sh status:*)
   - Bash(bash * dispatch.sh driver:*)
+  - Bash(bash * dispatch.sh concurrency:*)
   - Bash(bash * dispatch.sh stop:*)
   - Bash(bash * dispatch.sh watch:*)
   - Bash(bash * dispatch.sh selftest:*)
@@ -35,36 +36,30 @@ allowed-tools:
 
 준비된(모든 dep 이 done) SPEC마다 서브에이전트를 **정확히 1개** 띄우고, 그 서브에이전트가 한 컨텍스트에서 그 SPEC 의 구현→리뷰→재구현→머지를 닫는다. **서브에이전트 절차의 단일 출처는 `references/subagent-prompt.md`**(loop/review 블랙박스 호출·forge/direct 서브모드·무한루프 가드·approve 후 머지 게이트·에스컬레이션) — dispatch 가 워커 spawn 프롬프트에 그 전문을 embed 한다. dispatch 는 그 내부를 들여다보지 않고 결과(머지됨/비완료)만 받는다.
 
-- **워커 spawn 은 범용 서브에이전트 + 계약 프롬프트 embed**: 준비된 SPEC 의 워커는 **범용 서브에이전트(Agent 도구 기본 타입)로 띄우되, 워커 절차 계약 전문(`references/subagent-prompt.md`)을 spawn 프롬프트에 그대로 embed** 한다. 범용 타입이라 **부모 세션 권한을 상속**해 background 에서도 `autopilot:loop`·결정적 헬퍼를 권한 거부 없이 호출할 수 있다. spawn 시 입력으로 `spec`·`target-branch`·`run-dir`·`key` 를 넘긴다. (계약을 시스템 프롬프트로 강제하는 전용 agentType 은 독립 권한 컨텍스트라 background 도구 호출이 전부 거부돼 쓰지 않는다 — 강제가 프롬프트 전달로 약해지는 대신, dispatch 가 결과·격리를 관찰해 보완한다.)
+- **워커 spawn 은 flow 서브프로세스 에이전트 + 계약 프롬프트 embed**: 준비된 SPEC 의 워커는 **`flow` 의 에이전트 노드(`wf.agent` + `SubprocessAgentCaller`)로 띄우되, 워커 절차 계약 전문(`references/subagent-prompt.md`)을 spawn 프롬프트에 그대로 embed** 한다. flow 의 서브프로세스 caller(기본 `claude --print`, caller argv 주입으로 벤더 중립)가 워커를 **독립 서브프로세스**로 실행하므로, 워커는 자기 실행 환경에서 `autopilot:loop`·결정적 헬퍼를 호출해 구현→리뷰→머지를 완수한다. spawn 시 입력으로 `spec`·`target-branch`·`run-dir`·`key` 를 넘긴다. (인세션 Agent 도구의 부모 권한 상속 전제 대신 flow 서브프로세스 워커 모델이며 — 워커의 권한·스킬 가용성은 flow agent caller 설정·벤더 CLI 실행 환경에 의존한다. dispatch 는 그 결과·격리를 관찰해 보완한다.)
 
-- **백그라운드 워커 진행 모니터 자동 설치**: 워커를 **백그라운드로 띄울 때**, dispatch 는 그 워커의 진행을 **워커가 남기는 디스크 아티팩트**(구현 스킬 `autopilot:loop` 의 status/signals, 작업 브랜치 커밋, PR·리뷰 판정, dispatch SPEC state)에 기반해 관찰하는 **진행 모니터를 자동으로 설치**한다. 가용한 환경 수단(예: 주기 폴링 메커니즘)으로 설치하되 **특정 모니터링 하니스 도구에 하드 종속하지 않는다**.
+- **서브프로세스 워커 진행 모니터 자동 설치**: 워커를 **flow 서브프로세스 에이전트로 띄울 때**, dispatch 는 그 워커의 진행을 **워커가 남기는 디스크 아티팩트**(구현 스킬 `autopilot:loop` 의 status/signals, 작업 브랜치 커밋, PR·리뷰 판정, dispatch SPEC state)에 기반해 관찰하는 **진행 모니터를 자동으로 설치**한다. 가용한 환경 수단(예: 주기 폴링 메커니즘)으로 설치하되 **특정 모니터링 하니스 도구에 하드 종속하지 않는다**.
   - **read-only 관찰(블랙박스 보존)**: 모니터는 디스크 아티팩트를 **읽기만** 하며 워커·loop 워크트리·신호·하니스를 변경하지 않는다. 관찰 상태가 **바뀔 때만** 진행을 표면화하고(변화 없는 동안 중복 방출하지 않음), 워커가 **산출 없이 죽거나 정지한 경우·조용한 실패**가 드러나게 한다.
   - **수명주기 종료**: dispatch run(또는 해당 SPEC)이 **종료 상태**(머지됨=done / failed / 전부 done)에 도달하면 그 진행 모니터를 **종료**한다 — 고아(orphan) 모니터를 남기지 않는다.
   - **모니터 메커니즘이 없는 환경(오류 경로)**: 자동 설치는 **안전하게 생략**되고, 워커 진행은 여전히 위 디스크 아티팩트 폴링으로 관찰 가능하다(**아티팩트가 진행의 단일 출처**).
 
 dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispatch.sh` 헬퍼로 분리되어 selftest 로 검증된다:
 
-- **준비도·격리**: depends_on 준비도 스케줄링·동시성 상한·서브에이전트 spawn/reap·실패 이행 격리(spawn 은 Agent 도구를 쓰는 살아있는 컨텍스트가 수행 — bash 무인 파이프라인 아님).
+- **준비도·격리**: depends_on 준비도 스케줄링·동시성 상한·서브에이전트 spawn/reap·실패 이행 격리(spawn 은 `flow` 의 서브프로세스 에이전트 caller 가 수행 — bash 무인 드레인 파이프라인 아님).
 - **머지=done 전이**: 서브에이전트가 머지를 보고한 SPEC 만 `done`(=대상 브랜치 머지됨)으로 전이해 의존자를 해제하므로, 의존자는 의존성이 머지된 뒤에야 갱신된 대상 브랜치 위에서 분기한다. 비완료 보고는 `failed` 로 두고 **그 이행적 의존자만** `skipped`(독립 가지는 계속).
 - **대상 브랜치**: `--target-branch <branch>`(미지정 시 기본 브랜치 또는 주입된 `DEFAULT_BRANCH`). run 전역으로 결정돼 모든 서브에이전트의 base 동기화·리뷰·ff 머지에 일관 적용되고, run-dir 마커(`TARGET_BRANCH`)로 영속해 `--resume` 에서 sticky 하다(마커가 현재 env·플래그보다 우선).
 - **주입 가능 인터페이스(mock 검증)**: 결정적 헬퍼의 외부 인터페이스(`LOOP_CMD`·`GIT_CMD`·`FORGE_CMD`(기본 gh)·`FORGE_BIN`(서브모드 판정)·`DEFAULT_BRANCH`·`REVIEW_ROUNDS_MAX`(3)·`WATCH_DIRS`(plugins/) 등)는 주입 가능해 실제 PR·머지 없이 mock 으로 독립 검증된다.
 
-## fan-out 드라이버 — 실행 환경 역량에 따른 라우팅
+## fan-out 드라이버 — 단일 `flow` 드라이버
 
-fan-out 단계(준비된 SPEC마다 워커 1개 진행)는 실행 환경 역량에 따라 **세 드라이버** 중 하나로 구동된다. 세 드라이버는 동일한 **결정적 코어**(준비도·상태 전이·skip 전파·워커 계약·머지/리뷰 게이트)를 공유하고 fan-out 진행 방식만 다르다 — 호출자에게 노출된 **시작 인터페이스는 변하지 않으며**, 드라이버 선택은 dispatch 내부에서 일어난다.
+fan-out 단계(준비된 SPEC마다 워커 1개 진행)는 **단일 `flow` 드라이버**로 구동된다 — `flow` 스킬의 **공개 계약**(`bash plugins/autopilot/skills/flow/references/flow.sh run <정의 파일>` → 단일 JSON)을 통해 임의 `depends_on` DAG를 **스트리밍 fan-out·동시성 상한·실패 이행 격리·저널 resume·결과 전달**로 실행한다. flow 엔진 내부는 **블랙박스**로 두고 입력→JSON 출력 계약으로만 호출한다. 드라이버 선택·자동 감지·운영자 override·안전 강등 사슬은 없으며, 호출자에게 노출된 **시작 인터페이스는 변하지 않는다**(flow 통합은 dispatch 내부에서 일어난다). dispatch 의 결정적 코어(준비도·상태 전이·skip 전파·워커 계약·머지/리뷰 게이트)는 그대로 보존하고, fan-out 을 무엇으로 구동하느냐만 flow 로 통합한다.
 
-| 드라이버 | fan-out 진행 방식 | 모델 절차 |
-|---|---|---|
-| `strong-parallel` | 런타임이 병렬·스트리밍·동시성·재개를 네이티브로 소유 | **dynamic Workflow** 로 임의 `depends_on` DAG를 promise 기반(노드별 의존성 충족 즉시 워커 실행)으로 표현, SPEC당 워커 1개. 한 SPEC의 dep 이 모두 done 이면 **같은 배치의 더 느린 무관한 SPEC 이 진행 중이어도** 기다리지 않고 그 워커가 시작된다. 동시·항목 수는 런타임 상한(동시 ≤ min(16, cores−2), 단일 fan-out ≤ 4096, 총 워커 ≤ 1000) 내. |
-| `background` | 워커를 비동기로 띄우고 개별 완료 신호에 반응 | 준비된 SPEC 워커를 background 로 spawn 하고, **개별 완료 신호마다** `mark done`(머지) / `mark failed`(비완료) 후 `ready` 재평가로 의존자를 즉시 해제한다. 완료 신호가 오케스트레이터를 재호출하지 못하는 환경으로 판명되면 `foreground-batch` 로 강등. |
-| `foreground-batch` | 한 턴에 동시 시작 → 배리어 → 준비도 재평가 | `ready` 를 한 번에 spawn → 모두 보고될 때까지 배리어 → `mark` → 다시 `ready`. 안전 폴백(강등 사슬 종착). |
-
-- **기본 선호 = 동적(strong-parallel)**: 드라이버 선택의 기본은 **strong-parallel(동적 Workflow)** 이다 — **신호가 없어도 기본으로 동적을 시도**한다. 자동 감지는 **실행 환경(세션) 속성**이라 대상 리포 파일로 결정적 probe 할 수 없어 모델(오케스트레이터)이 세션 가용 역량으로 판정한다. **동적 Workflow 를 실제로 실행할 수 없다고 판정될 때에만**(Workflow 도구 미가용·하니스 opt-in 게이트 미충족) 모델이 강등 신호를 주입한다: `DISPATCH_NO_STRONG_PARALLEL=1`(동적 불가) → `background`, 추가로 `DISPATCH_NO_BACKGROUND=1`(백그라운드도 불가) → `foreground-batch`. 동적이 가용하면(`NO_STRONG_PARALLEL` 미설정) `NO_BACKGROUND` 와 무관하게 `strong-parallel`.
-- **override(운영자 강제)**: 기존 시작 CLI 를 바꾸지 않도록 **`DISPATCH_DRIVER` 환경 변수**(`strong-parallel|background|foreground-batch`)로 받는다(`DISPATCH_*` 주입 관례). override 가 주어지면 기본 선호·자동 판정을 무시한다(무효 값이면 즉시 abort).
-- **안전 강등 사슬**: 선호 드라이버가 가용하지 않으면 `strong-parallel → background → foreground-batch` 순으로 강등한다(건너뛰기 없음). 어느 드라이버로 갔는지는 **관찰 가능**해야 한다 — `dispatch driver <run-id>` 와 `dispatch status` 의 `driver:` 라인으로 읽는다.
-- **strong-parallel 실행 경로(이름만 고르지 않음)**: 드라이버가 `strong-parallel` 로 결정되면 오케스트레이터는 **실제로 동적 Workflow 를 구성**해 per-SPEC 워커를 fan-out 한다 — 이름만 마커에 기록하고 수동 background spawn 으로 빠지지 않는다. 구체적으로: `dispatch.sh start` 로 run·DAG·DRIVER 마커를 셋업한 뒤, 오케스트레이터가 **Workflow 도구**로 워크플로 스크립트를 띄워 SPEC 들을 `pipeline()`/`parallel()` 로 표현하고, 각 노드의 `depends_on` 이 모두 `done` 이 되는 즉시(런타임 promise 기반) 그 SPEC 의 워커를 `agent()` 로 시작한다. 각 `agent()` spawn 프롬프트에는 **워커 계약 전문(`references/subagent-prompt.md`)을 embed** 하고 `spec`·`target-branch`·`run-dir`·`key` 를 입력으로 넘긴다(범용 서브에이전트 — 부모 권한 상속). 워커가 머지를 보고하면 `dispatch.sh mark done`, 비완료면 `mark failed` 후 `ready` 재평가로 의존자를 해제한다. **fan-out 항목이 하나(N=1)여도 동적 Workflow 로 구동**한다(N≥2 에서만 동적으로 분기하지 않는다). 동적 실행에 진입할 수 없다고 판명되면(도구 미가용·opt-in 게이트) 위 **안전 강등 사슬**로 `background`→`foreground-batch` 로 내려간다.
-- **resume sticky**: 최초 시작에서 결정된 드라이버는 run-dir 마커(`DRIVER`)로 영속해 `--resume` 에서 현재 env 보다 우선한다(sticky).
-- 워커 **내부 단계(구현→리뷰→재구현→머지)는 어느 드라이버에서든 데이터 의존 순서대로 동기** 진행된다(이 내부 순서를 병렬·백그라운드로 바꾸지 않는다 — 워커 계약 `references/subagent-prompt.md` 불변). 실패 이행 격리·승인 후 ff-only 머지 같은 안전 불변식도 드라이버와 무관하게 동일하다.
+- **flow 호출 경로**: `dispatch.sh start` 로 run·DAG·markers·pending 상태를 셋업한 뒤, 오케스트레이터가 준비된 SPEC 들을 flow **워크플로 정의**(각 노드의 `depends_on` 이 모두 충족되는 즉시 워커 실행, SPEC당 워커 1개)로 표현하고 `flow run` 으로 실행한다. 한 SPEC 의 dep 이 모두 done 이면 **같은 그래프의 더 느린 무관한 SPEC 이 진행 중이어도** 기다리지 않고 그 워커가 시작된다(런타임 스트리밍). 동시성 상한은 flow 정의의 `CONCURRENCY` 로 주되 그 값은 `dispatch.sh concurrency <run-id>` 가 산출한다(`0`=무제한을 SPEC 수로 결정적 변환 — 단일 출처). **fan-out 항목이 하나(N=1)여도 같은 flow 경로로 구동**한다.
+- **워커 노드 = flow 서브프로세스 에이전트**: 각 SPEC 워커는 flow 의 에이전트 노드(`wf.agent` + `SubprocessAgentCaller`)로 spawn 하고, spawn 프롬프트에 **워커 계약 전문(`references/subagent-prompt.md`)을 embed** 하며 `spec`·`target-branch`·`run-dir`·`key` 를 입력으로 넘긴다. caller argv 는 주입 가능하며 기본은 Claude(`claude --print`) — 특정 벤더 CLI 에 하드 종속하지 않는다(멀티벤더). 워커가 머지를 보고하면 `dispatch.sh mark done`, 비완료면 `mark failed` 후 `ready` 재평가로 의존자를 해제한다.
+  - **워커 권한(서브프로세스는 부모 권한 비상속)**: 인세션 Agent 와 달리 flow 서브프로세스 워커는 **부모 세션의 런타임 권한 grant 를 상속하지 않는다**. 워커 계약(`references/subagent-prompt.md`)이 요구하는 명령 표면을 비대화형 `--print` 으로 무인 실행해야 하므로, caller 는 **격리 워크트리 전제로 `--dangerously-skip-permissions`** 를 기본으로 한다 — 더 좁은 정책이 필요하면 `--allowedTools`/프로젝트 settings allow 로 대체한다.
+- **`python3` hard-abort(폴백 없음)**: flow 는 `python3` 3.9+ 표준 라이브러리로 동작한다. **`python3` 3.9+ 가 사용 불가이면** dispatch 는 다른 드라이버로 강등하지 않고 **명확한 오류로 즉시 중단**한다(비-0 종료). 강등 사슬 자체를 두지 않는 것이 이 통합의 핵심이다(`dispatch.sh` 의 `require_python3` 가 `start` 진입부에서 강제).
+- **관찰**: 단일 드라이버이므로 `dispatch driver <run-id>` 와 `dispatch status` 의 `driver:` 라인은 항상 `flow` 를 일관되게 보고한다.
+- 워커 **내부 단계(구현→리뷰→재구현→머지)는 데이터 의존 순서대로 동기** 진행된다(이 내부 순서를 병렬·백그라운드로 바꾸지 않는다 — 워커 계약 `references/subagent-prompt.md` 불변). 실패 이행 격리·승인 후 ff-only 머지 같은 안전 불변식도 그대로다.
 
 ## Subcommands
 
@@ -86,11 +81,15 @@ fan-out 단계(준비된 SPEC마다 워커 1개 진행)는 실행 환경 역량�
 
 ### dispatch status `<run-id>`
 
-run-id 단위로 per-SPEC state(`pending`/`running`/`done`/`failed`/`skipped`) 를 표로 출력한다(진단용 wave 번호 포함). 헤더에 선택된 fan-out 드라이버(`driver:`)도 함께 보인다. loop driver 의 라이브 state 도 함께 보인다.
+run-id 단위로 per-SPEC state(`pending`/`running`/`done`/`failed`/`skipped`) 를 표로 출력한다(진단용 wave 번호 포함). 헤더에 fan-out 드라이버(`driver: flow`)도 함께 보인다. loop driver 의 라이브 state 도 함께 보인다.
 
 ### dispatch driver `<run-id>`
 
-run 의 fan-out 드라이버(`strong-parallel`/`background`/`foreground-batch`)를 출력한다 — 자동 선택·override·안전 강등의 **결과를 관찰**하는 진입점(마커 없는 레거시 run 은 `foreground-batch`).
+run 의 fan-out 드라이버를 출력한다 — 단일 드라이버이므로 항상 `flow`(관찰 진입점).
+
+### dispatch concurrency `<run-id>`
+
+flow `CONCURRENCY` 로 넘길 effective 동시성을 출력한다 — `--max-parallel N`(>0)이면 N, 미지정(`MAX_PARALLEL=0`=무제한)이면 SPEC 수(≥1)로 결정적 변환. 오케스트레이터가 flow 정의의 `CONCURRENCY` 를 이 값으로 채워 `0` 직전달에 의한 순차 퇴행을 막는다(변환 로직의 단일 출처).
 
 ### dispatch stop `<run-id>`
 
@@ -114,8 +113,8 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 
 | 파일 | 역할 |
 |---|---|
-| `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·fan-out 드라이버 판정/라우팅(자동 감지·override·강등 사슬·DRIVER 마커)·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
-| `subagent-prompt.md` | **per-SPEC 워커 지침(계약)** — dispatch 가 범용 서브에이전트 spawn 프롬프트에 embed(구현=autopilot:loop·통합/리뷰/머지=헬퍼 구동·approve 후 머지·구조화 보고) |
+| `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·`python3` 전제 강제(단일 flow 드라이버)·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
+| `subagent-prompt.md` | **per-SPEC 워커 지침(계약)** — dispatch 가 flow 서브프로세스 에이전트 spawn 프롬프트에 embed(구현=autopilot:loop·통합/리뷰/머지=헬퍼 구동·approve 후 머지·구조화 보고) |
 | `lib-integration.sh` | per-SPEC 통합 상태 헬퍼(run-dir + 키: branch/pr/head/review-round/verdict/phase) — 서브에이전트 공유 |
 | `integration.sh` | base sync → push → PR 생성/재사용(forge) / PR 없이 작업 브랜치 식별(direct) + 실패-경로 조건부 워크트리 정리(`cleanup-on-fail`: 원격 보존 시 loop cleanup 위임·미보존 시 보존) — 서브에이전트 호출 헬퍼 |
 | `review-loop.sh` | 리뷰 반복 가드(라운드 상한·무진전·핑퐁) 결정적 판정 헬퍼 — 서브에이전트가 재구현 반복 제어에 사용 |
@@ -126,6 +125,7 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 ## 의존성
 
 - **결정적 헬퍼(`dispatch.sh`)**: `git`, `bash` 3.2+, `sha256sum` 또는 `shasum`, `yq`(mikefarah). `yq` 는 SPEC frontmatter 의 `depends_on` 파싱(DAG 구성)에 쓰며 `start` 가 요구한다(없으면 awk 폴백이 있으나 신·구 레이아웃·인라인/블록 형식의 견고한 파싱을 위해 명시 요구). `ready`/`mark`/`status`/`stop`/`watch` 는 결정적 상태 헬퍼로 yq 비의존.
+- **fan-out 드라이버(`flow`)**: `python3` 3.9+(표준 라이브러리). dispatch 의 fan-out 은 단일 `flow` 드라이버의 공개 계약으로 구동되며, `start` 진입부에서 `python3` 3.9+ 가용 여부를 강제한다 — 미가용이면 **폴백 없이 hard-abort**(다른 드라이버로 강등하지 않음). `flow` 엔진은 블랙박스 공개 계약으로만 호출한다.
 - **서브에이전트가 호출하는 스킬·도구**: `autopilot:loop`·`autopilot:review`(판정 JSON 파싱에 `jq`). forge 서브모드는 추가로 forge CLI(`gh`, 주입 가능)를 쓰고, direct 서브모드는 forge CLI·원격 push 가 필요 없다. 서브모드 절차는 `references/subagent-prompt.md`.
 
 ## 규칙
