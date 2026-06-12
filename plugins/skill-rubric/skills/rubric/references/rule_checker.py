@@ -133,6 +133,9 @@ def parse_frontmatter(text):
                 ok = False  # 닫는 따옴표 없음 → 유효하지 않은 YAML
                 fm[key] = val
             else:
+                rest = val[close + 1:].strip()
+                if rest and not rest.startswith("#"):
+                    ok = False  # 닫는 따옴표 뒤에 주석 아닌 내용 → 유효하지 않은 YAML
                 fm[key] = val[1:close]  # 닫는 따옴표까지가 값(뒤 인라인 주석은 무시)
         else:
             fm[key] = val

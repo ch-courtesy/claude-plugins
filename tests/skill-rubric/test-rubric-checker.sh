@@ -178,4 +178,19 @@ run "$tmp/inline-comment/SKILL.md"
 assert_json "인라인 주석 있는 정상 YAML은 S-YAML PASS" pass:S-YAML=true
 ok "인라인 주석 포함 YAML: S-YAML 통과"
 
+# TEST 14: 닫는 따옴표 뒤에 주석 아닌 토큰 → S-YAML FAIL(잘못된 YAML)
+mkdir -p "$tmp/trailing-garbage"
+{
+  echo '---'
+  echo 'name: trailing-garbage'
+  printf 'description: "%s" %s\n' '닫는 따옴표 뒤에 주석이 아닌 토큰이 붙은 잘못된 값입니다 사용.' '잘못된-토큰'
+  echo 'allowed-tools:'
+  echo '  - Read'
+  echo '---'
+  echo '# trailing-garbage'
+} > "$tmp/trailing-garbage/SKILL.md"
+run "$tmp/trailing-garbage/SKILL.md"
+assert_json "닫는 따옴표 뒤 비주석 토큰은 S-YAML FAIL" pass:S-YAML=false
+ok "닫는 따옴표 뒤 비주석 토큰 검출(S-YAML)"
+
 echo "ALL CHECKS PASSED"
