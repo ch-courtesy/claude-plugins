@@ -8,8 +8,8 @@
 #
 # 책임(결정적):
 #   - start: SPEC 입력 검증·frontmatter depends_on 으로 DAG 구성·WAVES.txt(진단)·초기 pending
-#            상태·run 전역 마커(서브모드 INTEGRATE / 대상 브랜치 TARGET_BRANCH / MAX_PARALLEL /
-#            fan-out 드라이버 DRIVER)를 만드는 **셋업 전용**. 스스로 spawn·드레인하지 않는다.
+#            상태·run 전역 마커(서브모드 INTEGRATE / 대상 브랜치 TARGET_BRANCH / MAX_PARALLEL)를
+#            만드는 **셋업 전용**. 스스로 spawn·드레인하지 않는다.
 #   - ready: 지금 서브에이전트를 띄울 준비된 SPEC(모든 dep done & pending & 동시성 상한 이내)을
 #            출력(skip 전파 적용). 모델이 각 SPEC 에 서브에이전트 1개를 spawn.
 #   - mark:  SPEC 상태 전이(running=spawn 직전 / done=서브에이전트 머지 보고=의존자 해제 /
@@ -35,9 +35,8 @@
 #   DISPATCH_POLL_SECONDS          watch 폴링 간격 (기본 2)
 #   DISPATCH_WAVE_TIMEOUT_SECONDS  watch 최대 대기 (기본 7200 = 2 시간)
 #   FORGE_BIN DEFAULT_BRANCH  서브모드·대상 브랜치 판정(주입 가능, mock 검증).
-#   DISPATCH_DRIVER  fan-out 드라이버 override(strong-parallel|background|foreground-batch).
-#   DISPATCH_NO_STRONG_PARALLEL=1 / DISPATCH_NO_BACKGROUND=1  강등 신호(기본은 동적 선호; 동적·백그라운드
-#                    실행 불가 판정 시에만 주입). 없으면 기본 선호 strong-parallel.
+#   PYTHON3_BIN  flow 드라이버 전제 python3 판정용(주입 가능, 기본 python3). 3.9+ 미가용 시
+#               강등 없이 hard-abort. fan-out 드라이버는 단일 flow 로 고정.
 #
 # bash 3.2 호환 (assoc array 사용 안 함).
 
@@ -70,59 +69,17 @@ forge_backend_available() {
   command -v "${FORGE_BIN%% *}" >/dev/null 2>&1
 }
 
-# ----- fan-out 드라이버 (강한 병렬 / 백그라운드 / 포그라운드 배치) -----
-# dispatch fan-out 단계(준비된 SPEC당 워커 1개 진행)는 실행 환경 역량에 따라 세 드라이버 중
-# 하나로 구동된다. 세 드라이버는 동일한 결정적 코어(ready 스트리밍·mark skip 전파·merge/review
-# 게이트)를 공유하고 fan-out 진행 방식만 다르다.
-#   strong-parallel : dynamic Workflow 실행 — 임의 depends_on DAG를 promise 기반으로 표현해
-#                     노드별 의존성 충족 즉시 워커 실행(SPEC당 워커 1). 런타임이 병렬·스트리밍·
-#                     동시성·재개를 네이티브로 소유.
-#   background      : 워커를 비동기로 띄우고 개별 완료 신호에 반응해 의존자를 즉시 해제.
-#   foreground-batch: 한 턴에 ready 동시 시작 → 배리어 → 준비도 재평가. 안전 폴백(사슬 종착).
-# 안전 강등 사슬: strong-parallel → background → foreground-batch.
-#
-# 기본 선호는 strong-parallel(동적 Workflow): 신호가 없어도 기본으로 동적을 시도한다. 자동 감지는
-# 실행 환경(세션) 속성이라 대상 리포 파일로 결정적 probe 불가 — 실행 주체(모델)의 환경 판정에 둔다.
-# 동적 Workflow 를 실제로 실행할 수 없다고 판정될 때에만 모델이 강등 신호를 주입한다:
-# DISPATCH_NO_STRONG_PARALLEL=1(동적 불가) → background, 추가로 DISPATCH_NO_BACKGROUND=1(백그라운드도
-# 불가) → foreground-batch(강등 사슬 종착). 운영자 override 는 기존 시작 CLI 를 바꾸지 않도록
-# DISPATCH_DRIVER 환경 변수로 받는다(DISPATCH_* 주입 관례). 결정된 드라이버는 run-dir 마커(DRIVER)로
-# 영속해 --resume 에서 sticky 하다.
-DISPATCH_DRIVER="${DISPATCH_DRIVER:-}"   # 운영자 override(빈 값이면 자동 감지).
-FANOUT_DRIVER=""                         # cmd_start 가 결정 후 채운다.
+# ----- fan-out 드라이버 (단일 flow) -----
+# dispatch fan-out 단계(준비된 SPEC당 워커 1개 진행)는 단일 `flow` 드라이버로 구동된다 — flow
+# 스킬의 공개 계약(flow run <정의 파일> → 단일 JSON)을 통해 임의 depends_on DAG를 스트리밍
+# fan-out·동시성 상한·실패 이행 격리·저널 resume·결과 전달로 실행한다. 드라이버 선택·자동
+# 감지·운영자 override·안전 강등 사슬·DRIVER sticky 마커는 없다(완료 조건: 단일 flow). 관찰
+# 진입점(driver 커맨드·status 의 driver: 라인)은 항상 flow 를 일관 보고한다.
+FANOUT_DRIVER="flow"
 
-# valid_driver <name> — 알려진 드라이버 이름이면 0.
-valid_driver() {
-  case "$1" in
-    strong-parallel|background|foreground-batch) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
-# detect_driver — 드라이버를 결정해 echo. 우선순위:
-#   1. DISPATCH_DRIVER override 가 유효하면 그대로(무효면 abort).
-#   2. 기본 선호 = strong-parallel(동적 Workflow). 신호가 없으면 동적을 시도한다.
-#   3. 동적 실행 불가 판정 시에만 강등(모델 환경 신호):
-#        DISPATCH_NO_STRONG_PARALLEL=1 → background 로 강등.
-#        + DISPATCH_NO_BACKGROUND=1 도 있으면 → foreground-batch(강등 사슬 종착).
-#   강등 사슬은 strong-parallel → background → foreground-batch 순서를 지킨다(건너뛰기 없음):
-#   동적 가용이면(NO_STRONG_PARALLEL 미설정) NO_BACKGROUND 와 무관하게 strong-parallel.
-detect_driver() {
-  if [[ -n "$DISPATCH_DRIVER" ]]; then
-    if valid_driver "$DISPATCH_DRIVER"; then
-      echo "$DISPATCH_DRIVER"; return
-    fi
-    die "DISPATCH_DRIVER='$DISPATCH_DRIVER' 은 유효하지 않은 드라이버(strong-parallel|background|foreground-batch)"
-  fi
-  # 기본 선호: 동적 Workflow(strong-parallel). 실행 불가로 판정될 때에만 안전 강등.
-  if [[ "${DISPATCH_NO_STRONG_PARALLEL:-}" == "1" ]]; then
-    if [[ "${DISPATCH_NO_BACKGROUND:-}" == "1" ]]; then
-      echo "foreground-batch"; return
-    fi
-    echo "background"; return
-  fi
-  echo "strong-parallel"
-}
+# flow 엔진은 python3 3.9+ 표준 라이브러리로 동작한다. 주입 가능(mock 검증)하도록 PYTHON3_BIN
+# 으로 받는다(기본 python3). '사용 가능' 판정에만 쓴다.
+PYTHON3_BIN="${PYTHON3_BIN:-python3}"
 
 # ----- helpers -----
 
@@ -133,6 +90,16 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 require_yq() {
   command -v yq >/dev/null 2>&1 \
     || die "'yq' 가 필요합니다 — SPEC depends_on 파싱(DAG 구성)에 사용됩니다."
+}
+
+# require_python3 — flow 드라이버 전제. fan-out 은 단일 flow 드라이버(python3 3.9+ 표준 라이브러리)
+#   로 구동되므로, python3 3.9+ 가 사용 불가이면 다른 드라이버로 강등하지 않고 즉시 hard-abort
+#   한다(강등 사슬 자체를 제거하는 것이 이 통합의 핵심).
+require_python3() {
+  command -v "${PYTHON3_BIN%% *}" >/dev/null 2>&1 \
+    || die "'python3' 3.9+ 가 필요합니다 — dispatch fan-out 은 flow 드라이버(python3 표준 라이브러리)로 구동되며 폴백이 없습니다(hard-abort)."
+  ${PYTHON3_BIN} -c 'import sys; sys.exit(0 if sys.version_info[:2] >= (3, 9) else 1)' 2>/dev/null \
+    || die "'python3' 3.9+ 가 필요합니다(버전 부족) — dispatch fan-out 은 flow 드라이버로 구동되며 폴백이 없습니다(hard-abort)."
 }
 
 now_iso() { date -u +%Y-%m-%dT%H:%M:%SZ; }
@@ -497,6 +464,7 @@ cmd_mark() {
 cmd_start() {
   require_git_root
   require_yq
+  require_python3
   local resume=""
   local max_parallel=0
   local target_branch_opt=""
@@ -588,18 +556,10 @@ cmd_start() {
   # 마커가 있으면(=재개) 현재 플래그보다 우선(sticky).
   [[ -f "$rd/MAX_PARALLEL" ]] || printf '%s\n' "$max_parallel" > "$rd/MAX_PARALLEL"
 
-  # ----- fan-out 드라이버 판정 (DRIVER 마커, resume sticky) -----
-  # run-dir 마커($rd/DRIVER)로 영속해 --resume 에서 sticky(최초 시작 결정을 그대로 재개).
-  # 마커가 있으면(=재개) 현재 env(DISPATCH_DRIVER/신호)보다 우선. 자동 감지·override·안전 폴백은
-  # detect_driver 가 담당(강등 사슬: strong-parallel → background → foreground-batch).
-  if [[ -f "$rd/DRIVER" ]]; then
-    FANOUT_DRIVER="$(cat "$rd/DRIVER" 2>/dev/null || true)"
-  fi
-  if [[ -z "$FANOUT_DRIVER" ]] || ! valid_driver "$FANOUT_DRIVER"; then
-    FANOUT_DRIVER="$(detect_driver)"
-  fi
-  printf '%s\n' "$FANOUT_DRIVER" > "$rd/DRIVER"
-  log_event "$rd" "fan-out driver=$FANOUT_DRIVER (override=${DISPATCH_DRIVER:-auto})"
+  # ----- fan-out 드라이버 (단일 flow) -----
+  # 드라이버 선택·자동 감지·override·강등 사슬·DRIVER sticky 마커는 없다. fan-out 은 항상 flow
+  # 공개 계약으로 구동되며, 그 전제(python3 3.9+)는 cmd_start 진입부 require_python3 가 강제한다.
+  log_event "$rd" "fan-out driver=$FANOUT_DRIVER"
 
   # ----- 셋업 완료 — 모델 주도 오케스트레이션으로 인계 -----
   # dispatch.sh 는 결정적 셋업(run-dir·DAG·markers·pending 상태)만 수행한다. 준비된 SPEC당
@@ -659,8 +619,8 @@ cmd_status() {
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
   echo "run-id: $rid"
   echo "path:   $rd"
-  # fan-out 드라이버(관찰성: 자동 선택·override·안전 강등 결과). 마커 없으면 레거시 기본.
-  echo "driver: $(cat "$rd/DRIVER" 2>/dev/null || echo foreground-batch)"
+  # fan-out 드라이버(단일 flow). 관찰성: 항상 flow 를 일관 보고한다.
+  echo "driver: $FANOUT_DRIVER"
   echo ""
   # 모델 주도: dispatch 는 서브에이전트의 결과만 받으므로 오케스트레이션 상태(STATE)만 보고한다.
   # (loop 은 서브에이전트가 자기 컨텍스트에서 호출하므로 dispatch 가 직접 들여다보지 않는다.)
@@ -675,19 +635,14 @@ cmd_status() {
 }
 
 # ----- subcommand: driver -----
-# cmd_driver <run-id> — run 의 fan-out 드라이버(strong-parallel|background|foreground-batch)
-#   를 출력(관찰성: 자동 선택·override·안전 강등 결과). 마커 없는 레거시 run 은 foreground-batch.
+# cmd_driver <run-id> — run 의 fan-out 드라이버를 출력. 단일 드라이버이므로 항상 flow.
 cmd_driver() {
   local rid="${1:-}"
   [[ -z "$rid" ]] && die "사용: $0 driver <run-id>"
   require_git_root
   local rd; rd="$(run_dir "$rid")"
   [[ -d "$rd" ]] || die "run-id 없음: $rid"
-  if [[ -f "$rd/DRIVER" ]]; then
-    cat "$rd/DRIVER"
-  else
-    echo "foreground-batch"
-  fi
+  echo "$FANOUT_DRIVER"
 }
 
 # ----- subcommand: stop -----
@@ -779,6 +734,9 @@ cmd_sweep() {
 #     S5 대상 브랜치(기본/지정) + 서브모드(forge/direct) 마커 + --resume sticky.
 #     S6 depends_on cycle → abort(실행 셋업 안 함).
 #     S7 bash 드레인·레거시 경로 부재(integrating 상태·NO_INTEGRATE 마커 없음, no-op 플래그).
+#     S8 watch(읽기 전용 폴러)·stop(running→failed + 이행적 skip).
+#     S9 단일 flow 드라이버: 구 override·강등 신호가 동작을 가르지 않고 DRIVER 마커 부재.
+#     S10 관찰 진입점 일관 flow + python3 미가용 hard-abort(폴백 없음).
 # =====================================================================
 cmd_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
@@ -931,89 +889,42 @@ cmd_selftest() {
   if grep -rqx 'integrating' "$rd7"/state.* 2>/dev/null; then bad "S7 integrating 상태 부재(드레인 없음)"; else ok "S7 integrating 상태 부재(bash 드레인 없음)"; fi
   if grep -rqx 'done' "$rd7"/state.* 2>/dev/null; then bad "S7 셋업 직후 자동 done 부재"; else ok "S7 셋업 직후 자동 done 부재(start 미드라이브)"; fi
 
-  # ---- S9: fan-out 드라이버 — 기본=동적 선호·강등 신호·override·resume sticky ----
-  # 기본 선호는 strong-parallel(동적 Workflow). 자동 감지는 모델의 환경 판정에 둔다 → 동적/백그라운드
-  # 실행 불가일 때만 강등 신호(DISPATCH_NO_STRONG_PARALLEL/DISPATCH_NO_BACKGROUND)로 표현.
-  # override 는 DISPATCH_DRIVER(기존 시작 CLI 불변). 강등 사슬: strong-parallel → background → foreground-batch.
-  drv_marker() { cat "$1/DRIVER" 2>/dev/null; }
-  drv_cmd()    { ( cd "$REPO" && dsp bash "$DSP" driver "$1" 2>/dev/null ); }
+  # ---- S9: 단일 flow 드라이버 — 구 override·강등 신호가 동작을 가르지 않음 + DRIVER 마커 부재 ----
+  # 드라이버 선택·자동 감지·override·강등 사슬·DRIVER sticky 마커는 제거됐다. 어떤 env 조합에서도
+  # 관찰 진입점은 항상 flow 를 보고하고, DRIVER 마커 파일을 만들지 않는다.
+  drv_cmd() { ( cd "$REPO" && dsp bash "$DSP" driver "$1" 2>/dev/null ); }
 
-  # S9a: 신호 없음 → 기본 선호 strong-parallel(동적 선호로 역전; 과거 foreground-batch 폴백 아님).
+  # S9a: 신호 없음 → flow + DRIVER 마커 부재.
   rm -rf "$REPO/.dispatch"
-  local rid9a; rid9a="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_NO_STRONG_PARALLEL= DISPATCH_NO_BACKGROUND= bash "$DSP" start feature-a.md )"
+  local rid9a; rid9a="$( start_rid dsp bash "$DSP" start feature-a.md )"
   local rd9a; rd9a="$(latest_run)"
-  [[ "$(drv_marker "$rd9a")" == "strong-parallel" ]] \
-    && ok "S9a 신호 없음 → 기본 strong-parallel(동적 선호)" \
-    || bad "S9a 기본 선호 got=$(drv_marker "$rd9a")"
-  [[ "$(drv_cmd "$rid9a")" == "strong-parallel" ]] \
-    && ok "S9a driver 서브커맨드=strong-parallel" \
-    || bad "S9a driver 서브커맨드 got=$(drv_cmd "$rid9a")"
+  [[ "$(drv_cmd "$rid9a")" == "flow" ]] && ok "S9a driver=flow(단일 드라이버)" || bad "S9a driver got=$(drv_cmd "$rid9a")"
+  [[ ! -f "$rd9a/DRIVER" ]] && ok "S9a DRIVER 마커 부재(sticky 로직 제거)" || bad "S9a DRIVER 마커 부재"
 
-  # S9b: DISPATCH_NO_STRONG_PARALLEL=1(동적 불가) → background 로 강등.
+  # S9b: 구 override(DISPATCH_DRIVER) 무시 → 여전히 flow.
   rm -rf "$REPO/.dispatch"
-  local rid9b; rid9b="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_NO_STRONG_PARALLEL=1 DISPATCH_NO_BACKGROUND= bash "$DSP" start feature-a.md )"
-  local rd9b; rd9b="$(latest_run)"
-  [[ "$(drv_marker "$rd9b")" == "background" ]] \
-    && ok "S9b 동적 불가 → background 강등" \
-    || bad "S9b background got=$(drv_marker "$rd9b")"
+  local rid9b; rid9b="$( start_rid dsp env DISPATCH_DRIVER=background bash "$DSP" start feature-a.md )"
+  [[ "$(drv_cmd "$rid9b")" == "flow" ]] && ok "S9b 구 override(DISPATCH_DRIVER) 무시 → flow" || bad "S9b override got=$(drv_cmd "$rid9b")"
 
-  # S9c: DISPATCH_NO_STRONG_PARALLEL=1 + DISPATCH_NO_BACKGROUND=1(둘 다 불가) → foreground-batch 종착.
+  # S9c: 구 강등 신호(DISPATCH_NO_*) 무시 → 여전히 flow.
   rm -rf "$REPO/.dispatch"
-  local rid9c; rid9c="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_NO_STRONG_PARALLEL=1 DISPATCH_NO_BACKGROUND=1 bash "$DSP" start feature-a.md )"
-  local rd9c; rd9c="$(latest_run)"
-  [[ "$(drv_marker "$rd9c")" == "foreground-batch" ]] \
-    && ok "S9c 동적·백그라운드 불가 → foreground-batch 종착" \
-    || bad "S9c foreground-batch got=$(drv_marker "$rd9c")"
+  local rid9c; rid9c="$( start_rid dsp env DISPATCH_NO_STRONG_PARALLEL=1 DISPATCH_NO_BACKGROUND=1 bash "$DSP" start feature-a.md )"
+  [[ "$(drv_cmd "$rid9c")" == "flow" ]] && ok "S9c 구 강등 신호(DISPATCH_NO_*) 무시 → flow" || bad "S9c 강등 신호 got=$(drv_cmd "$rid9c")"
 
-  # S9c2: DISPATCH_NO_BACKGROUND=1 만(동적 가용) → 기본 strong-parallel 유지(동적 가용이면 강등 안 함).
+  # ---- S10: 관찰 진입점 일관 flow + python3 미가용 hard-abort(폴백 없음) ----
   rm -rf "$REPO/.dispatch"
-  local rid9c2; rid9c2="$( start_rid dsp env DISPATCH_DRIVER= DISPATCH_NO_STRONG_PARALLEL= DISPATCH_NO_BACKGROUND=1 bash "$DSP" start feature-a.md )"
-  local rd9c2; rd9c2="$(latest_run)"
-  [[ "$(drv_marker "$rd9c2")" == "strong-parallel" ]] \
-    && ok "S9c2 동적 가용이면 NO_BACKGROUND 무관하게 strong-parallel" \
-    || bad "S9c2 strong-parallel got=$(drv_marker "$rd9c2")"
-
-  # S9d: DISPATCH_DRIVER override → 강등 신호 무시하고 지정 드라이버 강제.
-  rm -rf "$REPO/.dispatch"
-  local rid9d; rid9d="$( start_rid dsp env DISPATCH_DRIVER=background DISPATCH_NO_STRONG_PARALLEL=1 DISPATCH_NO_BACKGROUND=1 bash "$DSP" start feature-a.md )"
-  local rd9d; rd9d="$(latest_run)"
-  [[ "$(drv_marker "$rd9d")" == "background" ]] \
-    && ok "S9d override=background(강등 신호 무시)" \
-    || bad "S9d override got=$(drv_marker "$rd9d")"
-
-  # S9e: resume sticky — 최초 결정이 마커로 영속돼 재개 시 다른 env override 보다 우선.
-  rm -rf "$REPO/.dispatch"
-  local rid9e; rid9e="$( start_rid dsp env DISPATCH_DRIVER=strong-parallel bash "$DSP" start feature-a.md )"
-  local rd9e; rd9e="$(latest_run)"
-  ( cd "$REPO" && dsp env DISPATCH_DRIVER=foreground-batch bash "$DSP" start --resume "$rid9e" ) >/dev/null 2>&1 || true
-  [[ "$(drv_marker "$rd9e")" == "strong-parallel" ]] \
-    && ok "S9e resume: driver sticky(override env 무시)" \
-    || bad "S9e resume sticky got=$(drv_marker "$rd9e")"
-
-  # S9f: 무효 override → 즉시 abort(비-0).
-  rm -rf "$REPO/.dispatch"
-  local rc9f=0; ( cd "$REPO" && dsp env DISPATCH_DRIVER=bogus bash "$DSP" start feature-a.md ) >/dev/null 2>&1 || rc9f=$?
-  [[ "$rc9f" -ne 0 ]] && ok "S9f 무효 override → abort(비-0)" || bad "S9f 무효 override abort got=$rc9f"
-
-  # ---- S10: 안전 강등 관찰 가능성 — 어느 드라이버로 갔는지 driver 커맨드/status 로 관찰 ----
-  rm -rf "$REPO/.dispatch"
-  local rid10; rid10="$( start_rid dsp env DISPATCH_DRIVER=strong-parallel bash "$DSP" start feature-a.md feature-b.md )"
-  [[ "$(drv_cmd "$rid10")" == "strong-parallel" ]] \
-    && ok "S10 driver 관찰(strong-parallel)" \
-    || bad "S10 driver 관찰 got=$(drv_cmd "$rid10")"
-  # 강등 종착(foreground-batch)도 관찰 가능.
-  rm -rf "$REPO/.dispatch"
-  local rid10b; rid10b="$( start_rid dsp env DISPATCH_DRIVER=foreground-batch bash "$DSP" start feature-a.md )"
-  [[ "$(drv_cmd "$rid10b")" == "foreground-batch" ]] \
-    && ok "S10 강등 종착 관찰(foreground-batch)" \
-    || bad "S10 강등 종착 관찰 got=$(drv_cmd "$rid10b")"
-  # status 출력에 driver 라인 포함(관찰성). 출력을 캡처 후 검사(grep -q 조기 종료에 의한
-  # SIGPIPE+pipefail 오탐 회피).
-  local s10status; s10status="$( cd "$REPO" && dsp bash "$DSP" status "$rid10b" 2>/dev/null )"
+  local rid10; rid10="$( start_rid dsp bash "$DSP" start feature-a.md feature-b.md )"
+  [[ "$(drv_cmd "$rid10")" == "flow" ]] && ok "S10 driver 관찰=flow" || bad "S10 driver 관찰 got=$(drv_cmd "$rid10")"
+  # status 출력에 driver 라인=flow(관찰성). 캡처 후 검사(grep -q 조기 종료 SIGPIPE 오탐 회피).
+  local s10status; s10status="$( cd "$REPO" && dsp bash "$DSP" status "$rid10" 2>/dev/null )"
   case "$s10status" in
-    *"driver: foreground-batch"*) ok "S10 status 에 driver 라인" ;;
-    *) bad "S10 status driver 라인 부재" ;;
+    *"driver: flow"*) ok "S10 status driver 라인=flow" ;;
+    *) bad "S10 status driver 라인=flow 부재" ;;
   esac
+  # python3 미가용(주입) → 강등 없이 hard-abort(비-0).
+  rm -rf "$REPO/.dispatch"
+  local rc10=0; ( cd "$REPO" && dsp env PYTHON3_BIN=__nopython__ bash "$DSP" start feature-a.md ) >/dev/null 2>&1 || rc10=$?
+  [[ "$rc10" -ne 0 ]] && ok "S10 python3 미가용 → hard-abort(비-0, 강등 없음)" || bad "S10 python3 hard-abort got=$rc10"
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
@@ -1048,8 +959,7 @@ Subcommands:
   status <run-id>
         run-id 단위 per-SPEC state(진단용 wave 표시 포함) + fan-out 드라이버.
   driver <run-id>
-        run 의 fan-out 드라이버(strong-parallel|background|foreground-batch) 출력
-        (관찰성: 자동 선택·override·안전 강등 결과).
+        run 의 fan-out 드라이버 출력 — 단일 드라이버이므로 항상 flow.
   stop <run-id>
         running SPEC 을 failed 로 표시하고 이행적 의존자를 skipped 전파(모델이 그 서브에이전트
         를 멈춘다). dispatch.sh 는 오케스트레이션 상태만 갱신한다.
@@ -1064,12 +974,9 @@ Subcommands:
 
 환경 변수:
   DISPATCH_POLL_SECONDS, DISPATCH_WAVE_TIMEOUT_SECONDS, FORGE_BIN, DEFAULT_BRANCH
-  DISPATCH_DRIVER       fan-out 드라이버 override(strong-parallel|background|foreground-batch).
-                        기존 시작 CLI 불변 — override 는 이 env 로만 받는다.
-  DISPATCH_NO_STRONG_PARALLEL=1  동적 불가 강등 신호(모델 자동 감지) → background.
-  DISPATCH_NO_BACKGROUND=1       추가 강등 신호(NO_STRONG_PARALLEL 과 함께) → foreground-batch.
-                        신호가 없으면 기본 선호 strong-parallel(동적 Workflow).
-                        강등 사슬: strong-parallel → background → foreground-batch.
+  PYTHON3_BIN           flow 드라이버 전제 python3 판정용(주입 가능, 기본 python3). 3.9+ 미가용
+                        시 강등 없이 hard-abort. fan-out 드라이버는 단일 flow 로 고정(선택·
+                        override·강등 사슬 없음).
 EOF
   exit 1
 }
