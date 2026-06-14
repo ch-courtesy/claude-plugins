@@ -1,6 +1,6 @@
 ---
 name: bootstrap
-description: 새 프로젝트를 시작할 때 공통 AGENTS.md와 선택한 벤더 골격을 설정합니다. 사용자가 새 프로젝트 준비를 요청하거나 공통 지침·벤더 골격이 누락된 프로젝트에서 활성화됩니다. 카테고리 지침 생성은 형제 `*-rule-creator`에 위임합니다.
+description: 새 프로젝트를 초기화(프로젝트 초기 설정·세팅·셋업·환경 구성)할 때 공통 AGENTS.md와 선택한 벤더 골격을 설정합니다. 사용자가 새 프로젝트 준비·초기화·세팅을 요청하거나 공통 지침·벤더 골격이 누락된 프로젝트에서 활성화됩니다. 카테고리 지침 생성은 형제 `*-rule-creator`에 위임합니다.
 allowed-tools:
   - AskUserQuestion
   - Read
