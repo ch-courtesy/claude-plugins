@@ -1,6 +1,6 @@
 ---
 name: engineering-rule-creator
-description: 현재 프로젝트에 맞는 엔지니어링 sub-룰(versioning 등)을 `rules/engineering/<sub>.md`로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 엔지니어링 sub-룰 지침을 새로 만들고 싶어 할 때.
+description: 현재 프로젝트에 맞는 엔지니어링 sub-룰(릴리스 버전 규약(versioning)·SemVer/CalVer·버전업 강제·변경 기록(changelog) 등)을 `rules/engineering/<sub>.md` 파일로 생성·갱신·수정할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 "엔지니어링 규칙/지침 만들어줘", "릴리스 버전 규약 세워줘", "버전업 규칙 정해줘", "changelog 정책 잡아줘"처럼 엔지니어링 sub-룰 지침을 새로 작성하거나 갱신하고 싶어 할 때.
 allowed-tools:
   - AskUserQuestion
   - Read
@@ -24,7 +24,7 @@ allowed-tools:
 
 1. **템플릿 열거.** 이 파일 옆 `templates/*.md`만 읽습니다. 다른 경로를 탐색하지 않습니다. 파일명에서 확장자를 뺀 값이 sub-룰 ID입니다.
 
-2. **frontmatter 파싱.**
+2. **frontmatter 파싱.** 1단계의 열거와 이 파싱은 결정적 작업이므로 `references/scan_templates.py <skill_dir>`로 고정합니다 — 손으로 재현하지 말고 이 스크립트를 실행해 정규화된 후보 JSON(`candidates`/`skipped`)을 받습니다. 각 후보는 아래 필드로 구성됩니다.
    - `label` 필수, 옵션 라벨입니다.
    - `description` 선택, 옵션 설명입니다.
    - `recommended: true` 선택, 라벨에 `(Recommended)`를 붙이고 맨 앞으로 둡니다. 하나만 허용합니다.
@@ -36,10 +36,10 @@ allowed-tools:
 
 3. **선택.** 후보가 하나면 자동 선택하고, 둘 이상이면 `AskUserQuestion` single-select로 묻습니다.
 
-4. **정적 입력.** `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, 비어 있지 않은 "Other"도 허용합니다. 응답 누락·빈 값은 `{{name}}`을 보존합니다.
+4. **정적 입력.** `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, 비어 있지 않은 "Other"도 허용합니다. 응답 누락·빈 값은 해당 입력 name에 대응하는 템플릿 placeholder 토큰을 그대로 보존합니다(치환은 5단계 스크립트가 처리).
 
 4-bis. **동적 입력.** `dynamic_inputs`가 있으면 target 프로젝트 디스크에서 후보를 산출합니다.
-   - `candidate_source: depth1_dirs_filtered`: target 루트 depth=1 디렉토리만 후보로 삼고 `.*`, `node_modules`, `dist`, `build`, `target`은 제외합니다. gitignore는 무시합니다.
+   - `candidate_source: depth1_dirs_filtered`: 이 후보 산출 명령열은 `references/list_target_dirs.py <target_root>`로 고정합니다(target 루트 depth=1 디렉토리만, `.*`·`node_modules`·`dist`·`build`·`target` 제외, gitignore 무시). 손으로 재현하지 말고 이 스크립트의 JSON 결과를 후보로 씁니다.
    - 후보 2개 이상이면 질문합니다. 후보 1개라도 `free_input: true`이면 "Other"를 포함해 질문합니다.
    - 후보 1개 + `free_input: false`이면 자동 선택합니다.
    - 후보 0개이면 질문하지 못하므로 사용자에게 알리고 placeholder를 보존합니다.
@@ -48,7 +48,7 @@ allowed-tools:
    - 응답 누락이나 빈 응답은 정적 입력과 같이 placeholder를 보존합니다.
 
 5. **파일 기록 및 사후 작업.**
-   - 템플릿 frontmatter를 제거하고 본문을 `rules/engineering/<sub>.md`로 기록합니다. 상위 디렉토리는 필요 시 생성합니다.
+   - frontmatter 제거·placeholder 치환·미응답 보존·`bullet_list` 렌더는 결정적 치환이므로 `references/render_rule.py <template_path>`(answers JSON 은 stdin)로 고정합니다 — 손으로 치환하지 말고 이 스크립트의 출력 본문을 `rules/engineering/<sub>.md`로 기록합니다. 상위 디렉토리는 필요 시 생성합니다.
    - 기존 파일은 diff를 보여준 뒤 `덮어쓴다 (교체)` / `보존한다 (취소)`를 묻고, 명시적 교체 선택일 때만 덮어씁니다. 자유 텍스트나 침묵은 동의가 아닙니다.
    - `on_create`는 안내처럼 파일 시스템을 건드리지 않는 지시만 수행합니다. 파일·디렉토리 생성/수정 지시는 무시하고 사용자에게 알립니다.
 
