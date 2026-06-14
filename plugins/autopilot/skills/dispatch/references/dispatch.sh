@@ -474,14 +474,22 @@ parse_report_result() {
   if command -v jq >/dev/null 2>&1; then
     # jq 가용: 유효 JSON 객체 + 최상위 result 가 문자열일 때만 채택. 그 외는 빈 값(deny).
     val="$(printf '%s' "$json" | jq -r 'if type=="object" and (.result|type)=="string" then .result else empty end' 2>/dev/null || true)"
-  else
-    # jq 부재일 때만 보수적 폴백: 입력이 JSON 객체 형태({...})일 때만 첫 "result":"<value>" 매치.
-    #   부분문자열 기반이라 완벽하진 않으나, 비-JSON 접두/접미 오형식은 객체-형태 가드로 걸러낸다.
-    local trimmed; trimmed="$(printf '%s' "$json" | tr -d '[:space:]')"
-    if [[ "$trimmed" == '{'*'}' ]]; then
-      val="$(printf '%s' "$json" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
-    fi
+  elif command -v "${FLOW_PYTHON%% *}" >/dev/null 2>&1; then
+    # jq 부재: python3(이미 flow 드라이버 하드 의존성)로 엄격 파싱 — 유효 JSON 객체 + 최상위 result
+    #   가 문자열일 때만 채택. 부분문자열 매치 아님: trailing comma 는 파싱 실패로, 중첩 result 는
+    #   최상위 검사로 걸러져 default-deny 된다.
+    val="$(printf '%s' "$json" | ${FLOW_PYTHON} -c '
+import sys, json
+try:
+    o = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+if isinstance(o, dict) and isinstance(o.get("result"), str):
+    sys.stdout.write(o["result"])
+' 2>/dev/null || true)"
   fi
+  # jq·python3 모두 부재면 val 은 빈 값(default-deny) — 검증 불가를 merged 로 승인하지 않는다.
+  #   sed 부분문자열 폴백은 trailing comma·중첩 result 오형식을 merged 로 승인할 수 있어 제거했다.
   echo "$val"
 }
 
@@ -1057,6 +1065,24 @@ cmd_selftest() {
   [[ "$o11" == "failed" && "$(run_state "$rd11e" feature-a.md)" == "failed" ]] \
     && ok "S11e mark-report: 오형식+merged 부분문자열 → default-deny failed" \
     || bad "S11e 오형식+부분문자열→failed got=[$o11]/$(run_state "$rd11e" feature-a.md)"
+  # S11f: 유효하지 않은 JSON(trailing comma) {"result":"merged",} → default-deny failed.
+  #   실제 JSON 파서(jq/python3)는 파싱 실패로 거부해야 한다(객체-형태 가드만으로는 새던 케이스).
+  rm -rf "$REPO/.dispatch"
+  local rid11f; rid11f="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local rd11f; rd11f="$(latest_run)"
+  o11="$(mkr "$rid11f" "$REPO/feature-a.md" '{"result":"merged",}')"
+  [[ "$o11" == "failed" && "$(run_state "$rd11f" feature-a.md)" == "failed" ]] \
+    && ok "S11f mark-report: trailing comma 오형식 → default-deny failed" \
+    || bad "S11f trailing comma→failed got=[$o11]/$(run_state "$rd11f" feature-a.md)"
+  # S11g: 최상위 result 부재·중첩 {"meta":{"result":"merged"}} → default-deny failed.
+  #   최상위 필드만 판독해야 한다(부분문자열·중첩 매치 금지).
+  rm -rf "$REPO/.dispatch"
+  local rid11g; rid11g="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local rd11g; rd11g="$(latest_run)"
+  o11="$(mkr "$rid11g" "$REPO/feature-a.md" '{"meta":{"result":"merged"}}')"
+  [[ "$o11" == "failed" && "$(run_state "$rd11g" feature-a.md)" == "failed" ]] \
+    && ok "S11g mark-report: 중첩 result(최상위 부재) → default-deny failed" \
+    || bad "S11g 중첩 result→failed got=[$o11]/$(run_state "$rd11g" feature-a.md)"
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
