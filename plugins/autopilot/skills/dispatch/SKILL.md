@@ -10,6 +10,7 @@ allowed-tools:
   - Bash(bash * dispatch.sh concurrency:*)
   - Bash(bash * dispatch.sh stop:*)
   - Bash(bash * dispatch.sh watch:*)
+  - Bash(bash * dispatch.sh sweep:*)
   - Bash(bash * dispatch.sh selftest:*)
 ---
 
