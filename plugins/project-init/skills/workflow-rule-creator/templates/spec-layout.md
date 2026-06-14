@@ -54,8 +54,6 @@ SPEC 첫 H1(`# `)에서 slug를 만듭니다.
 
 빈 slug면 fallback 디렉터리 없이 abort하고 제목 수정을 요청합니다.
 
-> 이 slug·경로 규칙은 자기완결이 되도록 위에 담았습니다. 타깃 프로젝트에 **engineering 카테고리의 branch·slug 단일 출처**(예: `rules/engineering/branch-and-slug.md`)가 있으면 그 출처가 우선이며, 이 지침은 그것과 정합해야 합니다 — 두 곳이 어긋나면 engineering 출처에 맞춰 이 값을 수정합니다.
-
 ## 베이스 경로 재정의 (선택)
 
 기본 베이스 `docs/specs/`가 프로젝트에 맞지 않으면, 사람이 읽고 grep 가능한 **약속된 키 한 줄** `spec-path:` 선언으로 per-spec 디렉터리 경로 템플릿을 재정의할 수 있습니다.
