@@ -65,8 +65,8 @@ allowed-tools:
 
 4-bis. **입력(inputs) 치환 — 정적 multi-select 집계 / single-select 단일 선택.** 산출 대상 템플릿 frontmatter에 `inputs`가 있으면 처리하고, 없으면 이 단계를 건너뜁니다. 한 입력은 `multi_select` 값에 따라 **다중 선택(집계)** 또는 **단일 선택** 두 모드 중 하나로 동작합니다. (현재 `git` 템플릿이 multi-select를, `review-approval` 템플릿의 `merge_method`가 single-select를 씁니다.)
    - **스키마.** 각 입력은 `name`, `header`, `question`, `multi_select`, `options[{label, description, value?, default?}]`를 가집니다. `multi_select: true`는 **한 질문에서 여러 정책을 다중 선택**함을 뜻하고, `multi_select: false`(또는 생략)는 **한 질문에서 정확히 하나를 고르는 단일 선택**을 뜻합니다.
-   - **질문.** 입력을 `AskUserQuestion`으로 **한 번** 묻되, 다중 선택 입력은 **multi-select**로, 단일 선택 입력은 **single-select**로 제시합니다. 옵션 표시 순서는 frontmatter 순서를 따릅니다. `default: true`인 옵션은 **기본 선택(체크)** 상태로 제시합니다(추천·기본 옵션을 첫 번째에 둡니다). 사용자에게는 정책·방식 선택지만 노출하고, 정책이 공통으로 분리된 내부 사정·분류 기준은 노출하지 않습니다.
-   - **옵션 1개뿐인 다중 선택 폴백.** 다중 선택 입력의 제시 가능한 옵션이 정확히 1개뿐이면, 옵션 1개짜리 `multiSelect`를 `AskUserQuestion`이 거부하므로(옵션 최소 2개 요구) 그 정책을 **허용/금지 single-select**로 제시합니다 — '금지(적용)'를 고르면 그 옵션 값을 본문에 넣고(집계와 동일), '허용(미적용)'을 고르면 빈 값으로 처리해 절을 제거합니다(예: `git.md`의 force push 금지 정책).
+   - **질문.** 입력을 현재 런타임의 구조화된 사용자 질문 기능으로 **한 번** 묻되, 다중 선택 입력은 **multi-select**로, 단일 선택 입력은 **single-select**로 제시합니다. 옵션 표시 순서는 frontmatter 순서를 따릅니다. `default: true`인 옵션은 **기본 선택(체크)** 상태로 제시합니다(추천·기본 옵션을 첫 번째에 둡니다). 사용자에게는 정책·방식 선택지만 노출하고, 정책이 공통으로 분리된 내부 사정·분류 기준은 노출하지 않습니다.
+   - **옵션 1개뿐인 다중 선택 폴백.** 다중 선택 입력의 제시 가능한 옵션이 정확히 1개뿐이면, 옵션 1개짜리 `multiSelect`를 구조화된 사용자 질문 기능이 거부하므로(옵션 최소 2개 요구) 그 정책을 **허용/금지 single-select**로 제시합니다 — '금지(적용)'를 고르면 그 옵션 값을 본문에 넣고(집계와 동일), '허용(미적용)'을 고르면 빈 값으로 처리해 절을 제거합니다(예: `git.md`의 force push 금지 정책).
    - **집계 치환 (다중 선택).** 본문의 **단일 집계 placeholder** `{{<name>}}`를, **선택된 옵션들의 값을 표시 순서대로 연결**한 텍스트로 치환합니다. 값은 `value`가 있으면 `value`, 없으면 `label`을 씁니다(value 우선). 비어 있지 않은 "Other" 자유 입력도 연결 대상에 포함합니다. 절과 절 사이는 빈 줄 하나로 구분해 마크다운 서식을 유지합니다. **정책별 개별 placeholder는 두지 않습니다.**
    - **단일 치환 (단일 선택).** 본문의 placeholder `{{<name>}}`를 **선택된 한 옵션의 값**으로 치환합니다(`value` 우선, 없으면 `label`). 연결은 일어나지 않습니다.
    - **빈 선택.** (다중 선택에서) 아무 옵션도 선택되지 않으면 집계 결과는 빈 문자열이고, placeholder가 놓인 줄을 절 단위로 정리·제거해 빈 줄·깨진 마크다운을 남기지 않습니다. 도입부(헤더 + git 계열 분류)는 그대로 남습니다.
@@ -82,6 +82,8 @@ allowed-tools:
 
 ## 규칙
 
+- 사용자에게 선택·승인·해명을 요청할 때는 현재 런타임의 구조화된 사용자 질문 기능을 우선 사용합니다. 구조화된 사용자 질문 기능을 사용할 수 없으면 동일 선택지를 간결한 직접 질문으로 제시합니다. 기능 부재 자체를 이유로 추천값을 임의로 적용하거나 무응답을 동의로 간주하지 않으며, 스킬이 별도로 정의한 명시적 누락 응답 계약은 그대로 따릅니다.
+
 - 본 스킬은 `rules/version-control/` 아래 sub-룰 파일만 생성·갱신합니다. 한 실행에서 적용 가능한 sub-룰을 고정 순서로 모두 기록하며, 백엔드가 git 계열이면 git 공통 지침(`git.md`)도 **동반 출력**으로 함께 기록합니다. 카테고리 밖 파일이나 다른 카테고리의 기존 지침(범용 리뷰 원칙 `rules/review.md`·릴리스 버전 지침 `rules/engineering/versioning.md` 포함)은 변경하지 않습니다.
 - sub-룰은 선택 질문 없이 적용 가능한 것을 고정 순서로 모두 기록합니다(백엔드 변형 sub-룰은 판별된 백엔드의 변형 본문을 씁니다). git 계열일 때는 git 공통 지침(`git.md`)도 동반 산출됩니다. 템플릿 본문을 서로 합치지는 않습니다.
 - 템플릿 본문은 그대로 복사합니다. SKILL.md에 본문별 로직을 추가하지 않습니다. 새 백엔드·새 sub-룰은 `templates/` 파일 추가만으로 확장하며 이 SKILL.md를 수정하지 않습니다.
@@ -90,4 +92,4 @@ allowed-tools:
 
 ## plugins 변경 시 버전 동반 (필수)
 
-`plugins/` 하위는 워치 디렉터리이므로, 본 스킬·템플릿을 추가·변경하는 머지에는 **같은 변경 안에서** 플러그인 버전 단일 출처(`plugins/project-init/.claude-plugin/plugin.json`)와 그 미러(`.claude-plugin/marketplace.json`의 project-init 항목)를 함께 올립니다. 두 곳의 버전 값은 일치해야 합니다(`rules/engineering/versioning.md` 참조).
+`plugins/` 하위는 워치 디렉터리이므로, 본 스킬·템플릿을 추가·변경하는 머지에는 **같은 변경 안에서** 플러그인 버전 표면(`plugins/project-init/.claude-plugin/plugin.json`, `plugins/project-init/.codex-plugin/plugin.json`, `.claude-plugin/marketplace.json`의 project-init 항목)을 함께 올립니다. 세 곳의 버전 값은 일치해야 합니다(`rules/engineering/versioning.md` 참조).
