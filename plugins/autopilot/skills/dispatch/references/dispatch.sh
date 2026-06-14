@@ -463,17 +463,24 @@ cmd_mark() {
 }
 
 # parse_report_result <json> — 워커 구조화 보고 JSON 에서 result 값만 추출(없으면 빈 문자열).
-#   jq 가용 시 jq, 아니면 sed 폴백(deps 강결합 회피). 오형식·누락은 빈 문자열을 반환해
-#   호출처(cmd_mark_report)가 default-deny 하게 한다.
+#   default-deny: 유효한 JSON 객체이고 최상위 result 가 문자열일 때만 그 값을 채택하고,
+#   파싱 실패·result 부재·비문자열은 빈 문자열을 반환해 호출처(cmd_mark_report)가 deny→failed 하게 한다.
+#   jq 가용 시 jq 가 단일 판정자다 — 파싱 실패해도 sed 부분문자열 폴백을 타지 않는다(거짓 성공 금지).
+#   sed 폴백은 jq 자체가 부재할 때만, 그것도 입력이 JSON 객체 형태일 때만 실행하는 보수적 폴백이다
+#   (오형식 부분문자열을 merged 로 승인하지 않는다).
 parse_report_result() {
   local json="$1" val=""
   [[ -n "$json" ]] || { echo ""; return; }
   if command -v jq >/dev/null 2>&1; then
-    val="$(printf '%s' "$json" | jq -r '.result // empty' 2>/dev/null || true)"
-  fi
-  if [[ -z "$val" ]]; then
-    # 폴백: 첫 "result": "<value>" 매치.
-    val="$(printf '%s' "$json" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    # jq 가용: 유효 JSON 객체 + 최상위 result 가 문자열일 때만 채택. 그 외는 빈 값(deny).
+    val="$(printf '%s' "$json" | jq -r 'if type=="object" and (.result|type)=="string" then .result else empty end' 2>/dev/null || true)"
+  else
+    # jq 부재일 때만 보수적 폴백: 입력이 JSON 객체 형태({...})일 때만 첫 "result":"<value>" 매치.
+    #   부분문자열 기반이라 완벽하진 않으나, 비-JSON 접두/접미 오형식은 객체-형태 가드로 걸러낸다.
+    local trimmed; trimmed="$(printf '%s' "$json" | tr -d '[:space:]')"
+    if [[ "$trimmed" == '{'*'}' ]]; then
+      val="$(printf '%s' "$json" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+    fi
   fi
   echo "$val"
 }
@@ -1041,6 +1048,15 @@ cmd_selftest() {
   [[ "$o11" == "failed" && "$(run_state "$rd11d" feature-a.md)" == "failed" ]] \
     && ok "S11d mark-report: result!=merged → failed" \
     || bad "S11d non-merged→failed got=[$o11]/$(run_state "$rd11d" feature-a.md)"
+  # S11e: 비-JSON 이지만 "result":"merged" 부분문자열 포함 → default-deny failed.
+  #   jq 가용 시 jq 파싱 실패는 sed 부분문자열 폴백을 타면 안 된다(거짓 성공 금지: 완료 조건 1·3).
+  rm -rf "$REPO/.dispatch"
+  local rid11e; rid11e="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local rd11e; rd11e="$(latest_run)"
+  o11="$(mkr "$rid11e" "$REPO/feature-a.md" 'not-json {"result":"merged"}')"
+  [[ "$o11" == "failed" && "$(run_state "$rd11e" feature-a.md)" == "failed" ]] \
+    && ok "S11e mark-report: 오형식+merged 부분문자열 → default-deny failed" \
+    || bad "S11e 오형식+부분문자열→failed got=[$o11]/$(run_state "$rd11e" feature-a.md)"
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
