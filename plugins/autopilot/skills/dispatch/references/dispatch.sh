@@ -462,6 +462,48 @@ cmd_mark() {
   fi
 }
 
+# parse_report_result <json> — 워커 구조화 보고 JSON 에서 result 값만 추출(없으면 빈 문자열).
+#   jq 가용 시 jq, 아니면 sed 폴백(deps 강결합 회피). 오형식·누락은 빈 문자열을 반환해
+#   호출처(cmd_mark_report)가 default-deny 하게 한다.
+parse_report_result() {
+  local json="$1" val=""
+  [[ -n "$json" ]] || { echo ""; return; }
+  if command -v jq >/dev/null 2>&1; then
+    val="$(printf '%s' "$json" | jq -r '.result // empty' 2>/dev/null || true)"
+  fi
+  if [[ -z "$val" ]]; then
+    # 폴백: 첫 "result": "<value>" 매치.
+    val="$(printf '%s' "$json" | sed -n 's/.*"result"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)"
+  fi
+  echo "$val"
+}
+
+# cmd_mark_report <run-id> <spec> [report-json] — 워커 구조화 보고 → 종료 전이(머지 정합 게이트).
+#   워커의 마지막 보고 JSON(형식: references/subagent-prompt.md 보고 절)을 받아 result 필드만으로
+#   결정적으로 전이한다: result=="merged" 일 때만 done(=의존자 해제), 그 외(escalated/누락/오형식)는
+#   default-deny 로 failed + 이행적 skip 전파. flow 의 ok:true(=flow 실행이 내부 오류 없이 끝남)는
+#   머지 성공이 아니므로 이 판정에 절대 쓰지 않는다 — 머지된 사실은 오직 워커의 구조화 머지 보고
+#   (result=merged)로만 표면화한다(거짓 성공 금지: 완료 조건 3·5). 결정된 상태를 stdout 으로 출력.
+#   보고 본문은 3번째 인자로 주거나 stdin 으로 흘려 넣는다.
+cmd_mark_report() {
+  require_git_root
+  local rid="${1:-}" spec="${2:-}" report="${3:-}"
+  [[ -n "$rid" && -n "$spec" ]] || die "사용: $0 mark-report <run-id> <spec> [report-json]  (보고는 인자 또는 stdin)"
+  if [[ -z "$report" ]] && [[ ! -t 0 ]]; then report="$(cat)"; fi
+  local result; result="$(parse_report_result "$report")"
+  local st
+  if [[ "$result" == "merged" ]]; then st="done"; else st="failed"; fi
+  local RD; local -a SP=() DEP_IDX=()
+  load_run "$rid"
+  local ap; ap="$(abspath "$spec")"
+  set_state "$RD" "$ap" "$st"
+  log_event "$RD" "mark-report $(spec_slug "$ap") result=${result:-<none>} → $st (done=머지됨; flow ok:true 무관)"
+  if [[ "$st" == "failed" ]]; then
+    propagate_skips "$RD" "${SP[@]}"
+  fi
+  echo "$st"
+}
+
 # ----- subcommand: start -----
 
 cmd_start() {
@@ -760,6 +802,8 @@ cmd_sweep() {
 #     S8 watch(읽기 전용 폴러)·stop(running→failed + 이행적 skip).
 #     S9 단일 flow 드라이버: 구 override·강등 신호가 동작을 가르지 않고 DRIVER 마커 부재.
 #     S10 관찰 진입점 일관 flow + python3 미가용 hard-abort(폴백 없음).
+#     S11 머지 정합 보고 게이트(mark-report): result=merged 만 done, 그 외(escalated/오형식/
+#         누락)는 default-deny failed+이행적 skip — flow ok:true 를 머지 성공으로 오인하지 않음.
 # =====================================================================
 cmd_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
@@ -790,6 +834,7 @@ cmd_selftest() {
   dsp() { env DISPATCH_POLL_SECONDS=0 DISPATCH_WAVE_TIMEOUT_SECONDS=120 "$@"; }
   rdy() { ( cd "$REPO" && dsp bash "$DSP" ready "$@" 2>/dev/null ); }
   mk() { ( cd "$REPO" && dsp bash "$DSP" mark "$@" ) >/dev/null 2>&1; }
+  mkr() { ( cd "$REPO" && dsp bash "$DSP" mark-report "$@" 2>/dev/null ); }
 
   # ---- S1: start = 셋업 전용 (스스로 done 으로 드라이브하지 않음) + 마커 ----
   rm -rf "$REPO/.dispatch"
@@ -956,6 +1001,47 @@ cmd_selftest() {
   local rc10=0; ( cd "$REPO" && dsp env FLOW_PYTHON=__nopython__ bash "$DSP" start feature-a.md ) >/dev/null 2>&1 || rc10=$?
   [[ "$rc10" -ne 0 ]] && ok "S10 python3 미가용 → hard-abort(비-0, 강등 없음)" || bad "S10 python3 hard-abort got=$rc10"
 
+  # ---- S11: 머지 정합 보고 게이트(mark-report) — 거짓 성공 금지 ----
+  # 워커 구조화 보고의 result 만으로 종료 전이를 결정한다(완료 조건 3·5). allowlist=merged 만
+  # done, 그 외(escalated/누락/오형식)는 default-deny → failed(+이행적 skip). flow 의 ok:true
+  # (=내부 오류 없이 실행 완료)를 머지 성공으로 해석하지 않는다(거짓 성공 금지).
+  local o11
+  # S11a: result=merged → done.
+  rm -rf "$REPO/.dispatch"
+  local rid11a; rid11a="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local rd11a; rd11a="$(latest_run)"
+  o11="$(mkr "$rid11a" "$REPO/feature-a.md" '{"key":"a","result":"merged","detail":"x"}')"
+  [[ "$o11" == "done" && "$(run_state "$rd11a" feature-a.md)" == "done" ]] \
+    && ok "S11a mark-report: result=merged → done" \
+    || bad "S11a merged→done got=[$o11]/$(run_state "$rd11a" feature-a.md)"
+  # S11b: result=escalated → failed + dep B 이행적 skipped.
+  rm -rf "$REPO/.dispatch"
+  local rid11b; rid11b="$( start_rid dsp bash "$DSP" start feature-a.md feature-b.md )"
+  local rd11b; rd11b="$(latest_run)"
+  o11="$(mkr "$rid11b" "$REPO/feature-a.md" '{"key":"a","result":"escalated","detail":"no merge"}')"
+  [[ "$o11" == "failed" && "$(run_state "$rd11b" feature-a.md)" == "failed" ]] \
+    && ok "S11b mark-report: result=escalated → failed(머지 없음=성공 아님)" \
+    || bad "S11b escalated→failed got=[$o11]/$(run_state "$rd11b" feature-a.md)"
+  [[ "$(run_state "$rd11b" feature-b.md)" == "skipped" ]] \
+    && ok "S11b escalated: dep B 이행적 skipped(독립 가지만 차단)" \
+    || bad "S11b B skipped got=$(run_state "$rd11b" feature-b.md)"
+  # S11c: 오형식/비-JSON 보고 → default-deny failed.
+  rm -rf "$REPO/.dispatch"
+  local rid11c; rid11c="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local rd11c; rd11c="$(latest_run)"
+  o11="$(mkr "$rid11c" "$REPO/feature-a.md" 'not-json-garbage')"
+  [[ "$o11" == "failed" && "$(run_state "$rd11c" feature-a.md)" == "failed" ]] \
+    && ok "S11c mark-report: 오형식 보고 → default-deny failed" \
+    || bad "S11c 오형식→failed got=[$o11]/$(run_state "$rd11c" feature-a.md)"
+  # S11d: result 가 merged 가 아닌 임의 값 → failed(allowlist=merged only).
+  rm -rf "$REPO/.dispatch"
+  local rid11d; rid11d="$( start_rid dsp bash "$DSP" start feature-a.md )"
+  local rd11d; rd11d="$(latest_run)"
+  o11="$(mkr "$rid11d" "$REPO/feature-a.md" '{"result":"running"}')"
+  [[ "$o11" == "failed" && "$(run_state "$rd11d" feature-a.md)" == "failed" ]] \
+    && ok "S11d mark-report: result!=merged → failed" \
+    || bad "S11d non-merged→failed got=[$o11]/$(run_state "$rd11d" feature-a.md)"
+
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
   return $fail
@@ -984,6 +1070,12 @@ Subcommands:
   mark <run-id> <running|done|failed> <spec>
         SPEC 상태 전이(결정적). running=spawn 직전, done=서브에이전트 머지 보고(=의존자 해제),
         failed=비완료 보고 → 이행적 의존자만 skipped 전파.
+  mark-report <run-id> <spec> [report-json]
+        워커 구조화 보고(references/subagent-prompt.md 보고 형식)를 받아 머지 정합으로 종료 전이를
+        결정한다(거짓 성공 금지). result=="merged" 일 때만 done(=의존자 해제), 그 외(escalated/
+        누락/오형식)는 default-deny → failed + 이행적 skip. flow 의 ok:true 를 머지 성공으로
+        해석하지 않는다 — 머지된 사실은 오직 워커의 result=merged 로만 표면화. 결정 상태를 출력.
+        보고는 인자 또는 stdin.
   list
         모든 run-id 와 진행 요약.
   status <run-id>
@@ -1022,6 +1114,7 @@ case "$SUB" in
   start)  cmd_start  "$@" ;;
   ready)  cmd_ready  "$@" ;;
   mark)   cmd_mark   "$@" ;;
+  mark-report) cmd_mark_report "$@" ;;
   list)   cmd_list  ;;
   status) cmd_status "$@" ;;
   driver) cmd_driver "$@" ;;
