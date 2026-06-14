@@ -36,7 +36,7 @@ allowed-tools:
 
 준비된(모든 dep 이 done) SPEC마다 서브에이전트를 **정확히 1개** 띄우고, 그 서브에이전트가 한 컨텍스트에서 그 SPEC 의 구현→리뷰→재구현→머지를 닫는다. **서브에이전트 절차의 단일 출처는 `references/subagent-prompt.md`**(loop/review 블랙박스 호출·forge/direct 서브모드·무한루프 가드·approve 후 머지 게이트·에스컬레이션) — dispatch 가 워커 spawn 프롬프트에 그 전문을 embed 한다. dispatch 는 그 내부를 들여다보지 않고 결과(머지됨/비완료)만 받는다.
 
-- **워커 spawn 은 flow 서브프로세스 에이전트 + 계약 프롬프트 embed**: 준비된 SPEC 의 워커는 **`flow` 의 에이전트 노드(`wf.agent` + `SubprocessAgentCaller`)로 띄우되, 워커 절차 계약 전문(`references/subagent-prompt.md`)을 spawn 프롬프트에 그대로 embed** 한다. flow 의 서브프로세스 caller(기본 `claude --print`, caller argv 주입으로 벤더 중립)가 워커를 **독립 서브프로세스**로 실행하므로, 워커는 자기 실행 환경에서 `autopilot:loop`·결정적 헬퍼를 호출해 구현→리뷰→머지를 완수한다. spawn 시 입력으로 `spec`·`target-branch`·`run-dir`·`key` 를 넘긴다. (인세션 Agent 도구의 부모 권한 상속 전제 대신 flow 서브프로세스 워커 모델이며 — 워커의 권한·스킬 가용성은 flow agent caller 설정·벤더 CLI 실행 환경에 의존한다. dispatch 는 그 결과·격리를 관찰해 보완한다.)
+- **워커 spawn 은 flow 서브프로세스 에이전트 + 계약 프롬프트 embed**: 준비된 SPEC 의 워커는 **`flow` 의 에이전트 노드(`wf.agent` + `SubprocessAgentCaller`)로 띄우되, 워커 절차 계약 전문(`references/subagent-prompt.md`)을 spawn 프롬프트에 그대로 embed** 한다. flow 의 서브프로세스 caller(기본 `claude --print`, caller argv 주입으로 벤더 중립)가 워커를 **독립 서브프로세스**로 실행하므로, 워커는 자기 실행 환경에서 loop 드라이버(`bash …/loop/references/loop.sh start <spec>`)·결정적 헬퍼를 구동해 구현→리뷰→머지를 완수한다. **헤드리스 동기 완주 강제**: 임베드한 계약은 구현 단계를 **포그라운드(`run_in_background` 금지) 직접 동기 구동**으로 규정한다 — 비대화형 일회성(`--print`) 워커에는 백그라운드 완료를 알릴 후속 턴이 없으므로, 워커가 loop 을 백그라운드로 띄우고 알림을 기다리며 턴을 끝내면 loop 이 고아로 kill 된다. 따라서 워커는 자기 **단일 호출 안에서** loop 을 종료 상태(DONE/BLOCKED)까지 동기로 완주한 **뒤** 통합·리뷰·머지로 진행한다. spawn 시 입력으로 `spec`·`target-branch`·`run-dir`·`key` 를 넘긴다. (인세션 Agent 도구의 부모 권한 상속 전제 대신 flow 서브프로세스 워커 모델이며 — 워커의 권한·스킬 가용성은 flow agent caller 설정·벤더 CLI 실행 환경에 의존한다. dispatch 는 그 결과·격리를 관찰해 보완한다.)
 
 - **서브프로세스 워커 진행 모니터 자동 설치**: 워커를 **flow 서브프로세스 에이전트로 띄울 때**, dispatch 는 그 워커의 진행을 **워커가 남기는 디스크 아티팩트**(구현 스킬 `autopilot:loop` 의 status/signals, 작업 브랜치 커밋, PR·리뷰 판정, dispatch SPEC state)에 기반해 관찰하는 **진행 모니터를 자동으로 설치**한다. 가용한 환경 수단(예: 주기 폴링 메커니즘)으로 설치하되 **특정 모니터링 하니스 도구에 하드 종속하지 않는다**.
   - **read-only 관찰(블랙박스 보존)**: 모니터는 디스크 아티팩트를 **읽기만** 하며 워커·loop 워크트리·신호·하니스를 변경하지 않는다. 관찰 상태가 **바뀔 때만** 진행을 표면화하고(변화 없는 동안 중복 방출하지 않음), 워커가 **산출 없이 죽거나 정지한 경우·조용한 실패**가 드러나게 한다.
@@ -46,7 +46,7 @@ allowed-tools:
 dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispatch.sh` 헬퍼로 분리되어 selftest 로 검증된다:
 
 - **준비도·격리**: depends_on 준비도 스케줄링·동시성 상한·서브에이전트 spawn/reap·실패 이행 격리(spawn 은 `flow` 의 서브프로세스 에이전트 caller 가 수행 — bash 무인 드레인 파이프라인 아님).
-- **머지=done 전이**: 서브에이전트가 머지를 보고한 SPEC 만 `done`(=대상 브랜치 머지됨)으로 전이해 의존자를 해제하므로, 의존자는 의존성이 머지된 뒤에야 갱신된 대상 브랜치 위에서 분기한다. 비완료 보고는 `failed` 로 두고 **그 이행적 의존자만** `skipped`(독립 가지는 계속).
+- **머지=done 전이(머지 정합 — 거짓 성공 금지)**: done 전이는 **오직 서브에이전트의 구조화 머지 보고**(`result=merged`)에만 의존한다(`dispatch.sh mark-report` 가 그 보고를 받아 `merged` 일 때만 done, 그 외는 default-deny failed). fan-out 을 구동하는 flow 의 `ok:true`(=flow 실행이 내부 오류 없이 끝남)는 **머지 성공이 아니므로 done 판정에 쓰지 않는다** — 머지 없이 끝난(고아·에스컬레이션·실패) 워커가 성공처럼 보이는 거짓 성공을 막는다. done 된 SPEC 만 의존자를 해제하므로, 의존자는 의존성이 머지된 뒤에야 갱신된 대상 브랜치 위에서 분기한다. 비완료 보고는 `failed` 로 두고 **그 이행적 의존자만** `skipped`(독립 가지는 계속).
 - **대상 브랜치**: `--target-branch <branch>`(미지정 시 기본 브랜치 또는 주입된 `DEFAULT_BRANCH`). run 전역으로 결정돼 모든 서브에이전트의 base 동기화·리뷰·ff 머지에 일관 적용되고, run-dir 마커(`TARGET_BRANCH`)로 영속해 `--resume` 에서 sticky 하다(마커가 현재 env·플래그보다 우선).
 - **주입 가능 인터페이스(mock 검증)**: 결정적 헬퍼의 외부 인터페이스(`LOOP_CMD`·`GIT_CMD`·`FORGE_CMD`(기본 gh)·`FORGE_BIN`(서브모드 판정)·`DEFAULT_BRANCH`·`REVIEW_ROUNDS_MAX`(3)·`WATCH_DIRS`(plugins/) 등)는 주입 가능해 실제 PR·머지 없이 mock 으로 독립 검증된다.
 
@@ -55,7 +55,7 @@ dispatch 자신의 책임은 **결정적 오케스트레이션**뿐이며 `dispa
 fan-out 단계(준비된 SPEC마다 워커 1개 진행)는 **단일 `flow` 드라이버**로 구동된다 — `flow` 스킬의 **공개 계약**(`bash plugins/autopilot/skills/flow/references/flow.sh run <정의 파일>` → 단일 JSON)을 통해 임의 `depends_on` DAG를 **스트리밍 fan-out·동시성 상한·실패 이행 격리·저널 resume·결과 전달**로 실행한다. flow 엔진 내부는 **블랙박스**로 두고 입력→JSON 출력 계약으로만 호출한다. 드라이버 선택·자동 감지·운영자 override·안전 강등 사슬은 없으며, 호출자에게 노출된 **시작 인터페이스는 변하지 않는다**(flow 통합은 dispatch 내부에서 일어난다). dispatch 의 결정적 코어(준비도·상태 전이·skip 전파·워커 계약·머지/리뷰 게이트)는 그대로 보존하고, fan-out 을 무엇으로 구동하느냐만 flow 로 통합한다.
 
 - **flow 호출 경로**: `dispatch.sh start` 로 run·DAG·markers·pending 상태를 셋업한 뒤, 오케스트레이터가 준비된 SPEC 들을 flow **워크플로 정의**(각 노드의 `depends_on` 이 모두 충족되는 즉시 워커 실행, SPEC당 워커 1개)로 표현하고 `flow run` 으로 실행한다. 한 SPEC 의 dep 이 모두 done 이면 **같은 그래프의 더 느린 무관한 SPEC 이 진행 중이어도** 기다리지 않고 그 워커가 시작된다(런타임 스트리밍). 동시성 상한은 flow 정의의 `CONCURRENCY` 로 주되 그 값은 `dispatch.sh concurrency <run-id>` 가 산출한다(`0`=무제한을 SPEC 수로 결정적 변환 — 단일 출처). **fan-out 항목이 하나(N=1)여도 같은 flow 경로로 구동**한다.
-- **워커 노드 = flow 서브프로세스 에이전트**: 각 SPEC 워커는 flow 의 에이전트 노드(`wf.agent` + `SubprocessAgentCaller`)로 spawn 하고, spawn 프롬프트에 **워커 계약 전문(`references/subagent-prompt.md`)을 embed** 하며 `spec`·`target-branch`·`run-dir`·`key` 를 입력으로 넘긴다. caller argv 는 주입 가능하며 기본은 Claude(`claude --print`) — 특정 벤더 CLI 에 하드 종속하지 않는다(멀티벤더). 워커가 머지를 보고하면 `dispatch.sh mark done`, 비완료면 `mark failed` 후 `ready` 재평가로 의존자를 해제한다.
+- **워커 노드 = flow 서브프로세스 에이전트**: 각 SPEC 워커는 flow 의 에이전트 노드(`wf.agent` + `SubprocessAgentCaller`)로 spawn 하고, spawn 프롬프트에 **워커 계약 전문(`references/subagent-prompt.md`)을 embed** 하며 `spec`·`target-branch`·`run-dir`·`key` 를 입력으로 넘긴다. caller argv 는 주입 가능하며 기본은 Claude(`claude --print`) — 특정 벤더 CLI 에 하드 종속하지 않는다(멀티벤더). 워커가 종료 보고를 내면 그 구조화 보고를 `dispatch.sh mark-report <run-id> <spec>` 로 받아 머지 정합으로 전이한다(`result=merged`→done, 그 외→failed; flow 의 `ok:true` 는 머지 성공으로 해석하지 않음) 후 `ready` 재평가로 의존자를 해제한다.
   - **워커 권한(서브프로세스는 부모 권한 비상속)**: 인세션 Agent 와 달리 flow 서브프로세스 워커는 **부모 세션의 런타임 권한 grant 를 상속하지 않는다**. 워커 계약(`references/subagent-prompt.md`)이 요구하는 명령 표면을 비대화형 `--print` 으로 무인 실행해야 하므로, caller 는 **격리 워크트리 전제로 `--dangerously-skip-permissions`** 를 기본으로 한다 — 더 좁은 정책이 필요하면 `--allowedTools`/프로젝트 settings allow 로 대체한다.
 - **`python3` hard-abort(폴백 없음)**: flow 는 `python3` 3.9+ 표준 라이브러리로 동작한다. **`python3` 3.9+ 가 사용 불가이면** dispatch 는 다른 드라이버로 강등하지 않고 **명확한 오류로 즉시 중단**한다(비-0 종료). 강등 사슬 자체를 두지 않는 것이 이 통합의 핵심이다(`dispatch.sh` 의 `require_python3` 가 `start` 진입부에서 강제).
 - **관찰**: 단일 드라이버이므로 `dispatch driver <run-id>` 와 `dispatch status` 의 `driver:` 라인은 항상 `flow` 를 일관되게 보고한다.
@@ -113,7 +113,7 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 
 | 파일 | 역할 |
 |---|---|
-| `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·`python3` 전제 강제(단일 flow 드라이버)·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
+| `dispatch.sh` | run-id 디렉토리·의존 인덱스·준비도 스케줄링·동시성·`python3` 전제 강제(단일 flow 드라이버)·머지 정합 보고 게이트(`mark-report`: `result=merged`만 done, 그 외 default-deny failed — flow `ok:true`≠머지)·구조화 종료 판정(결정적 오케스트레이션 헬퍼) |
 | `subagent-prompt.md` | **per-SPEC 워커 지침(계약)** — dispatch 가 flow 서브프로세스 에이전트 spawn 프롬프트에 embed(구현=autopilot:loop·통합/리뷰/머지=헬퍼 구동·approve 후 머지·구조화 보고) |
 | `lib-integration.sh` | per-SPEC 통합 상태 헬퍼(run-dir + 키: branch/pr/head/review-round/verdict/phase) — 서브에이전트 공유 |
 | `integration.sh` | base sync → push → PR 생성/재사용(forge) / PR 없이 작업 브랜치 식별(direct) + 실패-경로 조건부 워크트리 정리(`cleanup-on-fail`: 원격 보존 시 loop cleanup 위임·미보존 시 보존) — 서브에이전트 호출 헬퍼 |

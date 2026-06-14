@@ -12,20 +12,24 @@ dispatch 가 준비된(모든 `depends_on` 이 `done`) SPEC마다 띄우는 per-
 
 ## 절대 규칙 (위반 금지 — 어기느니 멈추고 에스컬레이션)
 
-1. **구현은 오직 격리 구현 스킬로**: 구현은 **반드시 `Skill(skill="autopilot:loop", args="start <spec>")`** 로 한다.
-   - **포그라운드(블로킹) 단일 실행**: 이 호출은 loop 의 이터레이션 루프가 끝날 때까지 블로킹한다(loop SKILL.md
-     가 정의). 너는 그 실행이 **반환될 때까지 자기 턴을 끝내지 않는다**. 같은 호출을 **백그라운드 프로세스로
-     띄우거나**(비동기 실행) 완료를 **기다리며 yield·턴 종료**하지 **마라**. 근거: 백그라운드로 띄우면 **워커
-     턴이 끝나는 순간 그 실행이 kill 되어 산출 없이 실패**한다(관측된 회귀). 포그라운드 실행이 **반환된 뒤에야**
-     종료를 판정한다.
+1. **구현은 오직 격리 구현 드라이버를 포그라운드 동기로 직접 구동**: 구현은 **반드시 loop 드라이버를
+   포그라운드(동기) 블로킹 Bash 호출로 직접 구동**한다 —
+   `bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/loop/references/loop.sh" start <spec>`.
+   - **포그라운드(블로킹) 단일 실행 — `run_in_background` 금지**: 이 호출은 loop 의 이터레이션 루프가 끝날
+     때까지 블로킹한다(loop SKILL.md 가 정의: `loop.sh start` 가 포그라운드 동기 진입점). 이 Bash 호출을
+     **`run_in_background:true` 로 띄우지 마라**. 너는 그 호출이 **반환될 때까지 자기 턴을 끝내지 않는다**.
+     실행을 **백그라운드로 띄운 뒤 "하니스가 완료를 알려줄 것"이라며 턴을 종료**하지 **마라**. 근거:
+     비대화형 일회성(`claude --print`) 워커에는 **완료를 알려 줄 후속 턴이 없어**, 백그라운드로 띄우면 **워커
+     턴이 끝나는 순간 그 실행이 kill 되어 산출(커밋·PR·머지) 없이 고아로 실패**한다(관측된 회귀). 포그라운드
+     실행이 **반환된 뒤에야** 종료를 판정한다.
    - **일반 원칙(임의 장시간 구동)**: 위는 loop 을 중심 사례로 하되, 네가 **직접 구동하는 임의의 장시간
      스킬·구동**에 똑같이 적용된다 — 직접 구동하는 것은 포그라운드 블로킹으로 돌리고 반환까지 턴을 유지한다.
      단 이는 **호출 세션이 너의 진행을 비차단으로 관찰**하는 정당한 행위(디스크 아티팩트 폴링·진행 모니터)를
      금지하지 않는다. 금지 대상은 **네가 네 실행을 백그라운드로 띄워 산출 전에 턴을 끝내는 것**이다.
-   - 대상 파일을 **직접 편집하지 않는다**. `git checkout -b`/`git commit` 등으로 **직접 구현하지 않는다**.
-   - `loop.sh`를 Bash로 **직접 구동하지 않는다** — 반드시 loop **스킬**을 호출한다. loop이 전용 격리
-     워크트리(`<spec_dir>/.worktree`)를 만들고 소유한다. 너의 cwd 워크트리를 점유하지 마라.
-   - loop 종료는 포그라운드 실행이 **반환된 뒤** 공개 구조화 상태(`autopilot:loop status --json`의
+   - 대상 파일을 **직접 편집하지 않는다**. `git checkout -b`/`git commit` 등으로 **직접 구현하지 않는다** —
+     구현은 위 loop 드라이버가 소유한다. loop 이 전용 격리 워크트리(`<spec_dir>/.worktree`)를 만들고
+     소유한다. 너의 cwd 워크트리를 점유하지 마라.
+   - loop 종료는 포그라운드 실행이 **반환된 뒤** loop 공개 구조화 상태(`loop.sh status --json`의
      `.state`·`.signals[]`)로만 판정한다 — **시작과 동시에 비동기 폴링으로 오인하지 마라**(반환이 먼저다).
 
 2. **통합·리뷰·머지는 오직 결정적 헬퍼로**: 다음 헬퍼를 구동한다(경로는 dispatch references/):
@@ -82,7 +86,7 @@ dispatch 가 준비된(모든 `depends_on` 이 `done`) SPEC마다 띄우는 per-
 5. **블랙박스 경계**: `autopilot:loop`·`autopilot:review`의 내부 신호 파일·워크트리·하니스를 들여다보거나 건드리지 않는다.
 
 ## 절차 요약
-1. `Skill(skill="autopilot:loop", args="start <spec>")` — **포그라운드 블로킹 실행**(반환까지 턴 유지), 반환된 뒤 DONE 판정(`autopilot:loop status --json`).
+1. `bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/loop/references/loop.sh" start <spec>` — **포그라운드 블로킹 직접 구동**(`run_in_background` 금지, 반환까지 턴 유지·알림 대기 금지), 반환된 뒤 DONE 판정(`loop.sh status --json`).
 2. 서브모드 판정 → `integration.sh integrate|integrate-direct`.
 3. `review-loop.sh run|run-direct` → 승인 게이트(forge=호스팅 리뷰 **비동기 대기**·pending=transient·**자기승인 금지**·PR APPROVED, direct=로컬 review approve). `request_changes`면 재구현 반복(가드).
 4. 승인 후 `merge.sh finish`(버전 범프·승인 게이트·**머지 확정 후 작업 브랜치 정리**). **타겟 전진 충돌·ff 실패는
@@ -95,4 +99,8 @@ dispatch 가 준비된(모든 `depends_on` 이 `done`) SPEC마다 띄우는 per-
 ## 보고 (너의 마지막 메시지 = 반환값, 사람 대상 산문 아님)
 정확히 아래 JSON 한 개:
 `{"key":"<key>","result":"merged"|"escalated","target_branch":"<branch>","work_branch":"<branch-or-null>","pr":"<url-or-null>","detail":"<한 줄>"}`
-`result="merged"`는 실제로 대상 브랜치에 머지된 경우만. 그 외는 `escalated`(사유를 detail에).
+`result="merged"`는 **실제로 대상 브랜치에 머지된 경우만**. 그 외는 모두 `escalated`(사유를 detail에) —
+loop 이 고아·미완(DONE 미도달)으로 끝났거나, 통합·리뷰·머지가 승인 없이 멈췄거나, 환경이 loop 을 동기
+완주시키지 못한 경우를 포함한다. dispatch 는 이 보고를 `dispatch.sh mark-report` 로 받아 **`result=merged`
+일 때만 done(=의존자 해제)** 으로 전이하고, 그 외는 failed 로 둔다(이행적 의존자만 차단). 머지하지 않았는데
+`merged` 로 보고하지 마라 — 거짓 성공은 금지다.
