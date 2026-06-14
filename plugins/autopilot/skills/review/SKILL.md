@@ -1,6 +1,6 @@
 ---
 name: review
-description: "한 작업의 변경(diff)을 여러 독립 관점으로 리뷰해 단일 머신리더블 판정(approve/request_changes/unavailable)·근거 있는 지적·재작업 브리프를 생산하고 싶을 때 사용 — 반복(iterate-until-approved)·승인·머지는 소유하지 않는 원샷 리뷰 생산자. 호출 'Skill(skill=\"review\", args=\"<subcommand> [<args>]\")' (run/status/list)."
+description: "한 작업의 변경(diff)을 여러 독립 관점으로 코드 리뷰해 단일 머신리더블 판정(approve/request_changes/unavailable)·근거 있는 지적·재작업 브리프를 생산하고 싶을 때 사용 — 반복(iterate-until-approved)·승인·머지는 소유하지 않는 원샷 리뷰 생산자. \"코드 리뷰 해줘\", \"PR 리뷰\", \"변경 검토\", \"diff 분석\", \"머지 전 검증\" 같은 표현을 포함한다. 호출 'Skill(skill=\"review\", args=\"<subcommand> [<args>]\")' (run/status/list)."
 allowed-tools:
   - Read
   - Agent
@@ -38,7 +38,7 @@ allowed-tools:
 3. **회귀·역사적 맥락** (`history`) — 변경이 기존 의도·이전 결정을 깨는지.
 4. **저장소 가이드라인 준수** (`guideline`) — `CLAUDE.md`·`rules/`·워크플로 문서와의 충돌.
 
-각 lens dispatch 양식은 `references/agent-prompts.md`. 규모 임계가 충족될 때만 가산 발동하는 적대 렌즈가 필요하면 그 정의는 `plugins/autopilot/skills/spec/references/personas.md`(단일 출처)를 **참조**한다 — 복제하지 않는다.
+각 lens dispatch 양식은 `references/agent-prompts.md` 에 있다. 규모 임계가 충족될 때만 가산 발동하는 적대 렌즈 정의가 필요하면 `plugins/autopilot/skills/spec/references/personas.md`(단일 출처)에 있다 — 여기서 복제하지 않는다.
 
 ## 중재 게이트 (결정적)
 
