@@ -1,6 +1,6 @@
 ---
 name: context-rule-creator
-description: 현재 프로젝트에 맞는 컨텍스트 관리 지침을 컨텍스트 카테고리 디렉터리 아래 두 sub-룰 파일(`rules/context/task-model.md`·`rules/context/task-ops.md`)로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 컨텍스트 지침을 새로 만들고 싶어 할 때.
+description: 현재 프로젝트에 맞는 컨텍스트 관리 지침(context rule)을 컨텍스트 카테고리 디렉터리 아래 두 sub-룰 파일(`rules/context/task-model.md`·`rules/context/task-ops.md`)로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 컨텍스트 지침·context rule을 새로 만들고 싶어 할 때 — "컨텍스트 지침 생성", "컨텍스트 관리 룰 만들어줘", "task-model·task-ops sub-룰 파일 작성", "태스크 상태/운영 규율 지침 세팅" 같은 표현을 포함합니다.
 allowed-tools:
   - AskUserQuestion
   - Read
@@ -46,8 +46,8 @@ allowed-tools:
 
 3. **백엔드 선택 (상호배타 단일).** 후보가 하나면 자동 선택하고, 둘 이상이면 `AskUserQuestion` single-select로 묻습니다. 한 번의 실행에서 **정확히 하나**의 백엔드만 기록합니다. 단순 재실행으로 백엔드를 바꾸지 않습니다.
 
-4. **정적 입력 수집.** 선택된 백엔드 `task-model.md`에 `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, "Other"도 허용합니다. 수집된 값만 `{{name}}`에 치환하고 누락·빈 값은 placeholder를 보존합니다.
-   - **github-project 백엔드의 `{{project_url}}`은 사용자에게 묻지 않고 에이전트가 `gh`로 직접 조회**해 채웁니다 — origin remote에서 소유자를 도출한 뒤 `gh project list --owner <소유자>` 등으로 이 레포에 연결된 Project의 URL/번호를 확인해 실제 값으로 치환합니다. `gh` 미인증·조회 실패·후보가 모호하면 TODO 마커(`<TODO: gh project list --owner <소유자> 결과로 확인 후 채움>`)로 폴백하고 그 사실을 사용자에게 알립니다.
+4. **정적 입력 수집.** 선택된 백엔드 `task-model.md`에 `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, "Other"도 허용합니다. (템플릿 본문은 이중 중괄호 표기의 placeholder 토큰을 쓰며, 이 SKILL.md 본문에서는 그 토큰을 중괄호 없이 이름으로 — 예: `name` placeholder — 지칭합니다.) 수집된 값만 해당 입력의 `name`에 대응하는 placeholder에 치환하고 누락·빈 값은 placeholder를 보존합니다.
+   - **github-project 백엔드의 `project_url` placeholder는 사용자에게 묻지 않고 에이전트가 `gh`로 직접 조회**해 채웁니다 — origin remote에서 소유자를 도출한 뒤 `gh project list --owner <소유자>` 등으로 이 레포에 연결된 Project의 URL/번호를 확인해 실제 값으로 치환합니다. `gh` 미인증·조회 실패·후보가 모호하면 TODO 마커(`<TODO: gh project list --owner <소유자> 결과로 확인 후 채움>`)로 폴백하고 그 사실을 사용자에게 알립니다.
 
 5. **이벤트별 목표 상태 수집.** 아래 **고정 이벤트 카탈로그**(작업 워크플로 라이프사이클 이벤트)의 각 이벤트에 대해 "어느 상태로 전이할지"만 묻습니다. 이벤트 자체는 사용자가 서술하지 않습니다 — 카탈로그는 진행 순서대로 나열되며, 맨 앞 "태스크 최초 등록"(아직 진행되지 않은 초기 상태)부터 묻습니다. 각 질문은 기본 상태 후보(`backlog`, `in_design`, `in_progress`, `blocked`, `review`, `done`, `cancelled`) 중에서 고르게 하고 "Other"도 허용하며, 응답 누락·빈 값이면 해당 placeholder를 보존합니다. **별도의 "상태 집합" 질문은 묻지 않습니다.**
 
@@ -55,21 +55,21 @@ allowed-tools:
 
    | 라이프사이클 이벤트 (고정) | placeholder | 추천 상태 |
    |---|---|---|
-   | 태스크 최초 등록 (아직 진행되지 않은 초기 상태) | `{{event_initial}}` | `in_design` |
-   | 계획/스펙 문서 생성 | `{{event_plan_doc}}` | `backlog` |
-   | 구현 시작 | `{{event_impl_start}}` | `in_progress` |
-   | 리뷰 요청 (검증/리뷰에 진입한 상태) | `{{event_review_start}}` | `review` |
-   | 머지/완료 | `{{event_merge_done}}` | `done` |
-   | 차단 발견 | `{{event_blocked}}` | `blocked` |
-   | 차단 해제 | `{{event_unblocked}}` | `in_progress` |
+   | 태스크 최초 등록 (아직 진행되지 않은 초기 상태) | `event_initial` | `in_design` |
+   | 계획/스펙 문서 생성 | `event_plan_doc` | `backlog` |
+   | 구현 시작 | `event_impl_start` | `in_progress` |
+   | 리뷰 요청 (검증/리뷰에 진입한 상태) | `event_review_start` | `review` |
+   | 머지/완료 | `event_merge_done` | `done` |
+   | 차단 발견 | `event_blocked` | `blocked` |
+   | 차단 해제 | `event_unblocked` | `in_progress` |
 
-   `{{state_set}}`은 사용자에게 따로 묻지 않고, 위에서 수집한 이벤트별 목표 상태들의 **합집합**(중복 제거, 표기 순서 유지)으로 도출해 task-model의 상태 집합·백엔드 매핑에 채웁니다. 이벤트별 목표 상태는 task-ops의 전이 이벤트·운영 규칙에 반영되고, 그중 on-path 이벤트들의 목표 상태는 기본 흐름(전이 순서) 자동 구성에도 쓰입니다.
+   `state_set` placeholder는 사용자에게 따로 묻지 않고, 위에서 수집한 이벤트별 목표 상태들의 **합집합**(중복 제거, 표기 순서 유지)으로 도출해 task-model의 상태 집합·백엔드 매핑에 채웁니다. 이벤트별 목표 상태는 task-ops의 전이 이벤트·운영 규칙에 반영되고, 그중 on-path 이벤트들의 목표 상태는 기본 흐름(전이 순서) 자동 구성에도 쓰입니다.
 
 6. **본문 조립.** 두 산출물 본문을 조립합니다.
    - task-model 본문: 선택된 백엔드 `task-model.md`의 frontmatter를 제거한 본문에 4·5단계 수집값을 치환합니다.
    - task-ops 본문: 공유 `templates/task-ops.md` 본문에 5단계 수집값을 치환합니다.
-   - "기본 흐름:" 줄의 `{{transition_order}}`는 사용자 입력이 아니라, 순서가 정해진 on-path 이벤트들의 목표 상태(`{{event_initial}}` → `{{event_plan_doc}}` → `{{event_impl_start}}` → `{{event_review_start}}` → `{{event_merge_done}}`)를 종합해 자동으로 채웁니다. 차단·해제 같은 off-path 이벤트는 기본 흐름에 포함하지 않습니다. on-path 이벤트의 목표 상태가 누락되면 그 자리는 placeholder를 보존합니다.
-   - 수집되지 않은 값의 `{{...}}` placeholder는 그대로 보존합니다.
+   - "기본 흐름:" 줄의 `transition_order` placeholder는 사용자 입력이 아니라, 순서가 정해진 on-path 이벤트들의 목표 상태(`event_initial` → `event_plan_doc` → `event_impl_start` → `event_review_start` → `event_merge_done`)를 종합해 자동으로 채웁니다. 차단·해제 같은 off-path 이벤트는 기본 흐름에 포함하지 않습니다. on-path 이벤트의 목표 상태가 누락되면 그 자리는 placeholder를 보존합니다.
+   - 수집되지 않은 값의 placeholder는 그대로 보존합니다.
 
 7. **파일 기록.** (신규 `task-model.md`·`task-ops.md`는 별도 승인 질문 없이 곧바로 기록합니다 — 기존 파일이 있을 때의 덮어쓰기 diff 확인만 아래에서 적용합니다.)
    - 대상 디렉터리 `rules/context/`가 없으면 기록 전에 생성합니다. (평면 파일 `rules/context.md`와 디렉터리 `rules/context/`는 경로가 달라 공존 가능하므로 디렉터리 생성 자체는 실패하지 않습니다.)
