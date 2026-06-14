@@ -83,12 +83,19 @@ mg_blocking_inline_gate() {
     echo "merge: 승인 차단 — repo owner/name 미확정으로 [blocking] 검증 불가(default-deny)" >&2
     return 1
   fi
+  # 모든 reviewThreads 페이지를 --paginate(pageInfo+after:$endCursor)로 따라간다 — 100개 초과
+  #   스레드의 [blocking]을 놓치지 않게. comments 는 단일 스레드 기준 충분한 first:100(한 라인
+  #   대화가 100개 초과는 비현실적). gh 출력은 페이지별 JSON 의 연결 스트림이고, 아래 jq 가 그
+  #   스트림 전체를 처리한다(mock 도 다중-페이지 JSON 을 연결해 돌려줘 결정적 검증).
   # shellcheck disable=SC2086
-  raw="$($FORGE_CMD api graphql -F owner="$owner" -F name="$name" -F pr="$pr" -f query='
-query($owner:String!,$name:String!,$pr:Int!){
+  raw="$($FORGE_CMD api graphql --paginate -F owner="$owner" -F name="$name" -F pr="$pr" -f query='
+query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){
     pullRequest(number:$pr){
-      reviewThreads(first:100){nodes{isResolved comments(first:50){nodes{author{login} commit{oid} body}}}}
+      reviewThreads(first:100, after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{isResolved comments(first:100){nodes{author{login} commit{oid} body}}}
+      }
     }}}' 2>/dev/null)"
   if [[ $? -ne 0 || -z "$raw" ]]; then
     echo "merge: 승인 차단 — 리뷰 스레드 조회 실패, [blocking] 검증 불가(default-deny)" >&2
@@ -709,6 +716,9 @@ BR
   # isResolved: resolve 된 스레드의 [blocking] → 차단 안 함(APPROVED) — resolve→재리뷰 데드락 방지.
   chk "resolved 스레드 [blocking] → 차단 안 함(APPROVED)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$(thr true "github-actions[bot]" "$H" "**[blocking/98] 해결됨**")" ag)" "APPROVED"
+  # 페이지네이션: 2페이지 연결 JSON 중 2페이지에 head [blocking] → 차단(--paginate 전 페이지 처리).
+  chk "pagination: 2페이지의 [blocking] → 차단(빈값)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$(thr false "github-actions[bot]" "$H" "**[non_blocking/80] 1p**")$(thr false "github-actions[bot]" "$H" "**[blocking/98] 2p**")" ag)" ""
   # AC3: 비신뢰 작성자 [blocking] + APPROVED → 차단 근거 아님(통과).
   chk "AC3 비신뢰봇 [blocking] → 차단 안 함(APPROVED)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$(thr false "random-human" "$H" "**[blocking/98] 위조**")" ag)" "APPROVED"

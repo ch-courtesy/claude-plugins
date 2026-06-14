@@ -88,11 +88,17 @@ rl_review_fetch_gh() {
   if [[ -z "$head" || -z "$owner" || -z "$name" ]]; then
     crc=1
   else
-    raw="$(gh api graphql -F owner="$owner" -F name="$name" -F pr="$pr" -f query='
-query($owner:String!,$name:String!,$pr:Int!){
+    # 모든 reviewThreads 페이지를 --paginate(pageInfo+after:$endCursor)로 따라간다(100개 초과
+    #   스레드 누락 방지). comments first:100(단일 스레드 100개 초과는 비현실적). gh 는 페이지별
+    #   JSON 을 연결 출력하고 아래 jq 가 스트림 전체를 처리한다.
+    raw="$(gh api graphql --paginate -F owner="$owner" -F name="$name" -F pr="$pr" -f query='
+query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
   repository(owner:$owner,name:$name){
     pullRequest(number:$pr){
-      reviewThreads(first:100){nodes{isResolved comments(first:50){nodes{author{login} commit{oid} body}}}}
+      reviewThreads(first:100, after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{isResolved comments(first:100){nodes{author{login} commit{oid} body}}}
+      }
     }}}' 2>/dev/null)"
     if [[ $? -ne 0 || -z "$raw" ]]; then
       crc=1
@@ -679,6 +685,8 @@ rl_selftest() {
     "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_THREADS="$GBLK" rvg)" "changes"
   chk "resolved 스레드 [blocking]+approve → approve(차단 안 함)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr true "github-actions[bot]" "$GH" "**[blocking/98] 해결됨**")" rvg)" "approve"
+  chk "pagination: 2페이지의 [blocking]+approve → changes" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "github-actions[bot]" "$GH" "**[non_blocking/80] 1p**")$(thr false "github-actions[bot]" "$GH" "**[blocking/98] 2p**")" rvg)" "changes"
   chk "AC3 outdated [blocking]+approve → approve(차단 안 함)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "github-actions[bot]" "oldSHA" "**[blocking/98] 이전**")" rvg)" "approve"
   chk "AC3 비신뢰봇 [blocking]+approve → approve(차단 안 함)" \
