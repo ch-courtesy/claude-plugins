@@ -45,7 +45,7 @@ allowed-tools:
 
 1. **템플릿 열거.** `templates/*.md`만 읽습니다. 각 파일을 `parse-name`으로 sub-룰 ID와 (있으면) 백엔드 변형으로 식별하고, 같은 sub-룰 ID의 변형 집합을 묶습니다.
 
-2. **백엔드 판별 (후보 확정 전 1회, 결과 재사용).** 백엔드 변형 sub-룰이나 git 계열 동반 산출(`git`)이 후보에 있으면, sub-룰 선택 **전에** 백엔드를 1회 판별합니다. 이 결과는 3단계의 git 계열 동반 산출 판정과 4단계의 변형 본문 선택에서 **재사용**하고 재판별하지 않습니다. 판별은 **공식 도메인 호스트명 정밀 매칭(네트워크 없음) + self-hosted read-only API probe**로 하며, 정밀 매칭·probe 어느 쪽으로도 확정하지 못하면(inconclusive 포함) 추측 없이 중단·안내합니다. origin 미설정도 중단입니다. 상세 절차·정밀 매칭 라벨 경계·probe 처리·git 계열 정적 매핑(`github`·`gitlab`)은 `references/backend-detection.md`가 단일 출처이고, git 계열 분류 판정은 `references/template_tools.py git-family <backend>`로 고정합니다.
+2. **백엔드 판별 (후보 확정 전 1회, 결과 재사용).** 백엔드 변형 sub-룰이나 git 계열 동반 산출(`git`)이 후보에 있으면, sub-룰 선택 **전에** 백엔드를 1회 판별합니다. 이 결과는 3단계의 git 계열 동반 산출 판정과 4단계의 변형 본문 선택에서 **재사용**하고 재판별하지 않습니다. 판별은 **공식 도메인 호스트명 정밀 매칭(네트워크 없음) + self-hosted read-only API probe**로 하며, 정밀 매칭·probe 어느 쪽으로도 확정하지 못하면(inconclusive 포함) 추측 없이 중단·안내합니다. origin 미설정도 중단입니다. 판별 절차의 상세(정밀 매칭 라벨 경계·probe 처리·중단 조건)는 `references/backend-detection.md`가 단일 출처이고, git 계열 분류(정적 매핑 멤버십 `github`·`gitlab`과 판정)는 `references/template_tools.py git-family <backend>`가 단일 출처입니다.
 
 3. **sub-룰 선택과 git 공통 동반 산출.**
    - **백엔드 변형 sub-룰과 그 밖의 sub-룰(`review-approval`·`branch-naming` 등).** 어느 것을 쓸지 묻는 선택 질문 **없이** 적용 가능한 모든 sub-룰을 고정 순서(`review-approval` → `branch-naming`)로 각각 기록합니다. 백엔드 변형 sub-룰은 2단계에서 판별된 백엔드의 변형 본문을 씁니다. 단순 재실행으로 이 집합을 바꾸지 않습니다.
