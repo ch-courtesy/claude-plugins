@@ -1,6 +1,6 @@
 ---
 name: review-rule-creator
-description: 현재 프로젝트에 맞는 리뷰 지침을 리뷰 카테고리 디렉터리 아래 두 sub-룰 파일(`rules/review/principles.md`·`rules/review/change-adoption.md`)로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 리뷰 지침을 새로 만들고 싶어 할 때.
+description: 현재 프로젝트에 맞는 리뷰 지침(review rule·코드 리뷰 규칙)을 리뷰 카테고리 디렉터리 아래 두 sub-룰 파일(`rules/review/principles.md`·`rules/review/change-adoption.md`)로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 리뷰 지침·코드 리뷰 원칙을 새로 만들고 싶어 할 때 — "리뷰 지침 생성", "코드 리뷰 규칙 만들어줘", "PR 리뷰 원칙 세팅", "change adoption·변경 반영 판단 지침 작성", "principles·change-adoption sub-룰 파일 작성" 같은 표현을 포함합니다.
 allowed-tools:
   - AskUserQuestion
   - Read
