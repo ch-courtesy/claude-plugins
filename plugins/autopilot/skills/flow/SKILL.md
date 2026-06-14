@@ -88,12 +88,14 @@ async def WORKFLOW(wf):
 
 ## references
 
-| 파일 | 역할 |
-|---|---|
-| `flow.sh` | CLI 라우터 — `run`/`selftest`/`deps`. 명시된 서브커맨드만 실행, 구조화 JSON 출력 |
-| `runner.py` | `run` 의 실행 로직 — 워크플로 정의를 import 해 엔진으로 실행하고 JSON 방출 |
-| `workflow_replica/` | 엔진 패키지 — 스케줄러·노드·저널·에이전트 어댑터·스키마(stdlib only) |
-| `tests/` | 엔진 자체 테스트(`selftest` 가 실행) |
+각 파일은 아래 "언제 읽나"의 상황이 올 때만 연다 — 평소엔 본문만으로 충분하다.
+
+| 파일 | 역할 | 언제 읽나 |
+|---|---|---|
+| `flow.sh` | CLI 라우터 — `run`/`selftest`/`deps`. 명시된 서브커맨드만 실행, 구조화 JSON 출력 | 서브커맨드 라우팅·인자 파싱·종료 코드 동작을 확인하거나, 직접 `bash flow.sh ...` 로 호출하기 전에 읽는다 |
+| `runner.py` | `run` 의 실행 로직 — 워크플로 정의를 import 해 엔진으로 실행하고 JSON 방출 | `run` 의 JSON 출력 스키마(필드·모드별 형태)를 프로그램적으로 소비하거나, import·실행 실패를 진단할 때 읽는다 |
+| `workflow_replica/` | 엔진 패키지 — 스케줄러·노드·저널·에이전트 어댑터·스키마(stdlib only) | 워크플로 정의 파일을 작성하며 `Node`/`run`/`workflow`/팩토리 등 engine API 시그니처·동작을 확인할 때 읽는다 |
+| `tests/` | 엔진 자체 테스트(`selftest` 가 실행) | engine API의 사용 예·기대 동작을 실동작 예시로 확인하거나, `selftest` 실패 원인을 좁힐 때 읽는다 |
 
 ## 의존성
 
