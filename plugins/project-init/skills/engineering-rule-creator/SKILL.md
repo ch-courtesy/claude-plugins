@@ -10,6 +10,7 @@ allowed-tools:
   - Bash(mkdir -p:*)
   - Bash(diff:*)
   - Bash(git diff:*)
+  - Bash(python3:*)
 ---
 
 # engineering-rule-creator
