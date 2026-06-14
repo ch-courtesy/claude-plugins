@@ -63,28 +63,45 @@ REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtes
 # 봇 컨벤션 결합을 끊기 위해 주입 가능 변수로 둔다(awk index() 리터럴 매치 → awk별 escape 비의존).
 BLOCKING_TAG="${BLOCKING_TAG:-[blocking}"
 
-# mg_blocking_inline_gate <pr> <head> — 현재 head 에 신뢰봇이 남긴 미해결 [blocking] 인라인이
-#   하나라도 있으면 1(차단), 없으면 0(통과). "현재 head 대응" = 코멘트 commit_id==head(결정적;
-#   재푸시로 head 가 바뀌면 outdated 지적은 자동 해소). head 미확정·조회 실패는 보수적 차단
-#   (default-deny)하고 사유를 stderr 로 표면화(거짓 승인 금지).
+# mg_blocking_inline_gate <pr> <head> — 현재 head 에 신뢰봇이 남긴 **미해결** [blocking] 인라인이
+#   하나라도 있으면 1(차단), 없으면 0(통과).
+#   - 미해결 판정: 리뷰 스레드 isResolved(GraphQL). resolve 된 스레드는 제외 → resolve→재리뷰
+#     워크플로 데드락 방지(commit_id 일치만으로 영구 차단하지 않음).
+#   - 현재 head 대응: 코멘트 commit.oid==head(재푸시로 head 가 바뀌면 outdated 는 자동 해소).
+#   - owner/name·head 미확정·조회/파싱 실패는 보수적 차단(default-deny)하고 사유를 stderr 로 표면화.
+#   - GraphQL raw JSON 을 받아 실제 jq 로 필터 → isResolved 필터를 mock(raw 반환)으로 결정적 검증.
 mg_blocking_inline_gate() {
-  local pr="$1" head="$2" out rc
+  local pr="$1" head="$2" on owner name raw out
   if [[ -z "$head" ]]; then
     echo "merge: 승인 차단 — 현재 head 미확정으로 [blocking] 인라인 검증 불가(default-deny)" >&2
     return 1
   fi
-  # 인라인 리뷰 코멘트: login\tcommit_id\tbody(코멘트당 1줄, 본문 개행·탭은 공백화).
   # shellcheck disable=SC2086
-  out="$($FORGE_CMD api "repos/{owner}/{repo}/pulls/$pr/comments" --paginate \
-        --jq '.[] | (.user.login // "")+"\t"+(.commit_id // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)"
-  rc=$?
-  if [[ $rc -ne 0 ]]; then
-    echo "merge: 승인 차단 — 인라인 리뷰 조회 실패(rc=$rc), [blocking] 검증 불가(default-deny)" >&2
+  on="$($FORGE_CMD repo view --json owner,name --jq '.owner.login+" "+.name' 2>/dev/null)" || on=""
+  owner="${on%% *}"; name="${on##* }"
+  if [[ -z "$owner" || -z "$name" ]]; then
+    echo "merge: 승인 차단 — repo owner/name 미확정으로 [blocking] 검증 불가(default-deny)" >&2
     return 1
   fi
-  # 현재 head 대응(field2 정확일치) + [blocking] 태그(field3 리터럴 index) 줄의 login(field1)을
-  #   추려, 신뢰봇 정규식으로 grep(앵커가 login 단독에 올바로 걸림; awk 정규식 escape 비의존).
-  #   하나라도 있으면 차단.
+  # shellcheck disable=SC2086
+  raw="$($FORGE_CMD api graphql -F owner="$owner" -F name="$name" -F pr="$pr" -f query='
+query($owner:String!,$name:String!,$pr:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$pr){
+      reviewThreads(first:100){nodes{isResolved comments(first:50){nodes{author{login} commit{oid} body}}}}
+    }}}' 2>/dev/null)"
+  if [[ $? -ne 0 || -z "$raw" ]]; then
+    echo "merge: 승인 차단 — 리뷰 스레드 조회 실패, [blocking] 검증 불가(default-deny)" >&2
+    return 1
+  fi
+  # 미해결(isResolved=false) 스레드의 코멘트만: login\tcommit_oid\tbody.
+  out="$(printf '%s' "$raw" | jq -r '
+        .data.repository.pullRequest.reviewThreads.nodes[]
+        | select(.isResolved==false)
+        | .comments.nodes[]
+        | (.author.login // "")+"\t"+(.commit.oid // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)" \
+    || { echo "merge: 승인 차단 — 리뷰 스레드 파싱 실패(default-deny)" >&2; return 1; }
+  # 미해결 + 현재 head 대응(field2==head) + [blocking] 태그(field3 리터럴) 줄의 login 을 신뢰봇 grep.
   if printf '%s\n' "$out" \
        | awk -F'\t' -v h="$head" -v tag="$BLOCKING_TAG" '$2==h && index($3,tag)>0 {print $1}' \
        | grep -qE "$REVIEW_BOT_LOGINS_RE"; then
@@ -655,8 +672,8 @@ BR
   #   mg_approval_gh 를 직접 호출(merge_finish 경로는 MERGE_APPROVAL_CMD 가 mock 이라
   #   gh-경로를 안 탐). FORGE_CMD 를 시나리오 변수로 구동하는 mock 으로 치환.
   # =====================================================================
-  # mock gh: pr view --json {reviewDecision|headRefOid|reviews}, api .../comments 를
-  #   이미 --jq 적용된 형태로 시뮬(SC_* 변수). api 실패는 SC_API_FAIL=1.
+  # mock gh: pr view --json {reviewDecision|headRefOid|reviews}, repo view(--jq → "owner name"),
+  #   api graphql(리뷰 스레드 raw JSON). graphql 조회 실패는 SC_API_FAIL=1.
   mock_forge_gh() {
     case "$1" in
       pr)
@@ -665,45 +682,51 @@ BR
           *"--json headRefOid"*)     printf '%s\n' "${SC_HEAD:-}" ;;
           *"--json reviews"*)        printf '%b' "${SC_REVIEWS:-}" ;;  # login\tbody 줄들
         esac ;;
+      repo) printf '%s %s\n' "${SC_OWNER:-o}" "${SC_NAME:-n}" ;;
       api)
         [[ "${SC_API_FAIL:-}" == "1" ]] && return 1
-        printf '%b' "${SC_COMMENTS:-}" ;;  # login\tcommit_id\tbody 줄들
+        printf '%s' "${SC_THREADS:-}" ;;  # 리뷰 스레드 raw GraphQL JSON(게이트 내부 jq 가 필터)
     esac
     return 0
   }
+  # thr <isResolved> <login> <oid> <body> — 단일 리뷰 스레드 raw GraphQL JSON 빌더.
+  thr() { printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":%s,"comments":{"nodes":[{"author":{"login":"%s"},"commit":{"oid":"%s"},"body":"%s"}]}}]}}}}}' "$1" "$2" "$3" "$4"; }
   # ag — mg_approval_gh 출력(APPROVED/빈값). 시나리오 SC_* 는 호출부 env-prefix 로 주입하되
   #   반드시 substitution 안에서 prefix 해야 ag 환경에 도달한다(밖에 두면 chk 에만 걸림).
   ag() { FORGE_CMD=mock_forge_gh mg_approval_gh "${1:-700}" 2>/dev/null | tr -d '[:space:]'; }
   local H="headSHA1"
   # 마커 경로 grep 은 login\tbody 줄에 앵커 정규식을 적용 → 비앵커 매치되는 courtesy-bot 사용.
   local MARK="courtesy-bot\t<!-- claude-formal-review head_sha=$H verdict=approve -->\n"
-  local BLK="github-actions[bot]\t$H\t**[blocking/98] 차단 지적** 본문\n"
-  local OK_C="github-actions[bot]\t$H\t**[non_blocking/85] 정보성** 본문\n"
+  local BLK; BLK="$(thr false "github-actions[bot]" "$H" "**[blocking/98] 차단 지적**")"
+  local OK_C; OK_C="$(thr false "github-actions[bot]" "$H" "**[non_blocking/85] 정보성**")"
 
-  # AC2: APPROVED 인데 현재 head 신뢰봇 [blocking] 인라인 → 승인 아님(차단).
+  # AC2: APPROVED 인데 현재 head 신뢰봇 미해결 [blocking] → 승인 아님(차단).
   chk "AC2 approved+head [blocking] → 차단(빈값)" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_COMMENTS="$BLK" ag)" ""
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$BLK" ag)" ""
   # AC1: blocking 없음 + APPROVED → APPROVED 통과.
   chk "AC1 approved+blocking없음 → APPROVED" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_COMMENTS="$OK_C" ag)" "APPROVED"
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$OK_C" ag)" "APPROVED"
+  # isResolved: resolve 된 스레드의 [blocking] → 차단 안 함(APPROVED) — resolve→재리뷰 데드락 방지.
+  chk "resolved 스레드 [blocking] → 차단 안 함(APPROVED)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$(thr true "github-actions[bot]" "$H" "**[blocking/98] 해결됨**")" ag)" "APPROVED"
   # AC3: 비신뢰 작성자 [blocking] + APPROVED → 차단 근거 아님(통과).
   chk "AC3 비신뢰봇 [blocking] → 차단 안 함(APPROVED)" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_COMMENTS="random-human\t$H\t**[blocking/98] 위조**\n" ag)" "APPROVED"
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$(thr false "random-human" "$H" "**[blocking/98] 위조**")" ag)" "APPROVED"
   # AC3: outdated(이전 head) [blocking] + APPROVED → 차단 근거 아님(통과).
   chk "AC3 outdated [blocking] → 차단 안 함(APPROVED)" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_COMMENTS="github-actions[bot]\toldSHA\t**[blocking/98] 이전**\n" ag)" "APPROVED"
-  # AC2: 강등 승인 마커(verdict=approve) + head [blocking] → 차단.
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$(thr false "github-actions[bot]" "oldSHA" "**[blocking/98] 이전**")" ag)" "APPROVED"
+  # AC2: 강등 승인 마커(verdict=approve) + head 미해결 [blocking] → 차단.
   chk "AC2 마커승인+head [blocking] → 차단(빈값)" \
-    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_COMMENTS="$BLK" ag)" ""
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_THREADS="$BLK" ag)" ""
   # 강등 승인 마커 + blocking 없음 → APPROVED.
   chk "마커승인+blocking없음 → APPROVED" \
-    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_COMMENTS="$OK_C" ag)" "APPROVED"
-  # AC5: 인라인 조회 실패 + APPROVED → default-deny(차단).
-  chk "AC5 인라인 조회 실패 → default-deny(차단)" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_THREADS="$OK_C" ag)" "APPROVED"
+  # AC5: 스레드 조회 실패 + APPROVED → default-deny(차단).
+  chk "AC5 스레드 조회 실패 → default-deny(차단)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_API_FAIL=1 ag)" ""
   # AC5: head 미확정 + APPROVED → default-deny(차단).
   chk "AC5 head 미확정 → default-deny(차단)" \
-    "$(SC_DECISION=APPROVED SC_HEAD="" SC_COMMENTS="$OK_C" ag)" ""
+    "$(SC_DECISION=APPROVED SC_HEAD="" SC_THREADS="$OK_C" ag)" ""
   # AC5: 조회 실패 시 stderr 표면화(거짓 승인 금지).
   ( SC_DECISION=APPROVED SC_HEAD=$H SC_API_FAIL=1 FORGE_CMD=mock_forge_gh mg_approval_gh 708 ) \
     2>"$TMP/ag_err" >/dev/null

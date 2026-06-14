@@ -78,21 +78,41 @@ rl_review_fetch_gh() {
   if [[ -z "$approve" && -n "$head" ]] && gh pr view "$pr" --json reviews \
         --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
        | grep -E "$REVIEW_BOT_LOGIN_RE" | grep -qE "head_sha=${head}[^>]*verdict=approve"; then approve=1; fi
-  # 현재 head 인라인 코멘트 1회 조회: login\tcommit_id\tbody(본문 개행·탭 공백화).
-  local comments crc blocking=""
-  comments="$(gh api "repos/{owner}/{repo}/pulls/$pr/comments" --paginate \
-        --jq '.[] | (.user.login // "")+"\t"+(.commit_id // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)"
-  crc=$?
-  # 신뢰봇이 현재 head 에 남긴 [blocking] 인라인 — approve 를 가리는 가산 차단(PR #385).
-  #   조회 실패·head 미확정은 보수적 차단(default-deny). login 은 field1 단독에 정규식 적용.
-  if [[ $crc -ne 0 || -z "$head" ]]; then
+  # 현재 head 미해결(isResolved=false) 스레드의 인라인 코멘트만 조회(GraphQL): login\tcommit_oid\tbody.
+  #   resolve 된 스레드는 제외해 resolve→재리뷰 데드락을 막는다. raw JSON 을 jq 로 필터
+  #   (mock=raw 반환으로 isResolved 필터를 결정적 검증). 조회/owner 확정 실패·head 미확정은
+  #   보수적 차단(default-deny).
+  local on owner name raw comments crc=0 blocking=""
+  on="$(gh repo view --json owner,name --jq '.owner.login+" "+.name' 2>/dev/null)" || on=""
+  owner="${on%% *}"; name="${on##* }"
+  if [[ -z "$head" || -z "$owner" || -z "$name" ]]; then
+    crc=1
+  else
+    raw="$(gh api graphql -F owner="$owner" -F name="$name" -F pr="$pr" -f query='
+query($owner:String!,$name:String!,$pr:Int!){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$pr){
+      reviewThreads(first:100){nodes{isResolved comments(first:50){nodes{author{login} commit{oid} body}}}}
+    }}}' 2>/dev/null)"
+    if [[ $? -ne 0 || -z "$raw" ]]; then
+      crc=1
+    else
+      comments="$(printf '%s' "$raw" | jq -r '
+            .data.repository.pullRequest.reviewThreads.nodes[]
+            | select(.isResolved==false)
+            | .comments.nodes[]
+            | (.author.login // "")+"\t"+(.commit.oid // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)" || crc=1
+    fi
+  fi
+  # 신뢰봇이 현재 head 에 남긴 미해결 [blocking] 인라인 — approve 를 가리는 가산 차단(PR #385).
+  if [[ $crc -ne 0 ]]; then
     blocking="FETCH_FAILED"
   elif printf '%s\n' "$comments" \
        | awk -F'\t' -v h="$head" -v tag="$BLOCKING_TAG" '$2==h && index($3,tag)>0 {print $1}' \
        | grep -qE "$REVIEW_BOT_LOGIN_RE"; then
     blocking=1
   fi
-  # 현재 head 의 전체 인라인 지적(타당성 판단은 워커가 change-adoption 으로 — 여기선 원천만 평탄화).
+  # 현재 head 미해결 스레드의 전체 인라인 지적(타당성 판단은 워커가 change-adoption 으로 — 원천만 평탄화).
   findings="$(printf '%s\n' "$comments" | awk -F'\t' -v h="$head" '$2==h{print $3}' \
        | sed -E 's/<!--[^>]*-->//g' | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
   if [[ -n "$approve" && -z "$blocking" ]]; then
@@ -639,25 +659,30 @@ rl_selftest() {
               *)        printf '%b' "${SC_SUMMARY:-state: NONE\nauthor: \n}" ;; # state/author 요약
             esac ;;
         esac ;;
-      "api "*|api) [[ "${SC_API_FAIL:-}" == "1" ]] && return 1; printf '%b' "${SC_COMMENTS:-}" ;;
+      "repo view") printf '%s %s\n' "${SC_OWNER:-o}" "${SC_NAME:-n}" ;;
+      "api graphql"|"api "*|api) [[ "${SC_API_FAIL:-}" == "1" ]] && return 1; printf '%s' "${SC_THREADS:-}" ;;
     esac
     return 0
   }
+  # thr <isResolved> <login> <oid> <body> — 단일 리뷰 스레드 raw GraphQL JSON 빌더.
+  thr() { printf '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"isResolved":%s,"comments":{"nodes":[{"author":{"login":"%s"},"commit":{"oid":"%s"},"body":"%s"}]}}]}}}}}' "$1" "$2" "$3" "$4"; }
   rvg() { rl_review_fetch_gh "${1:-200}" 2>/dev/null | grep -i '^verdict:' | sed -E 's/^[^:]*:[[:space:]]*//'; }
   local GH="sha-GH"
-  local GBLK="github-actions[bot]\t$GH\t**[blocking/98] 차단 지적** 상세\n"
-  local GOKC="github-actions[bot]\t$GH\t**[non_blocking/85] 정보성** 상세\n"
+  local GBLK; GBLK="$(thr false "github-actions[bot]" "$GH" "**[blocking/98] 차단 지적**")"
+  local GOKC; GOKC="$(thr false "github-actions[bot]" "$GH" "**[non_blocking/85] 정보성**")"
 
   chk "AC4 approve+head [blocking] → changes" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_COMMENTS="$GBLK" rvg)" "changes"
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GBLK" rvg)" "changes"
   chk "AC4 approve+blocking없음(정보성) → approve" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_COMMENTS="$GOKC" rvg)" "approve"
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GOKC" rvg)" "approve"
   chk "AC4 비승인+head [blocking] → changes" \
-    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_COMMENTS="$GBLK" rvg)" "changes"
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_THREADS="$GBLK" rvg)" "changes"
+  chk "resolved 스레드 [blocking]+approve → approve(차단 안 함)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr true "github-actions[bot]" "$GH" "**[blocking/98] 해결됨**")" rvg)" "approve"
   chk "AC3 outdated [blocking]+approve → approve(차단 안 함)" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_COMMENTS="github-actions[bot]\toldSHA\t**[blocking/98] 이전**\n" rvg)" "approve"
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "github-actions[bot]" "oldSHA" "**[blocking/98] 이전**")" rvg)" "approve"
   chk "AC3 비신뢰봇 [blocking]+approve → approve(차단 안 함)" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_COMMENTS="random-human\t$GH\t**[blocking/98] 위조**\n" rvg)" "approve"
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "random-human" "$GH" "**[blocking/98] 위조**")" rvg)" "approve"
   chk "AC5 인라인 조회 실패 → changes(default-deny)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rvg)" "changes"
   out="$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rl_review_fetch_gh 205 2>/dev/null)"
