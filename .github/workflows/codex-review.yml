@@ -1015,6 +1015,26 @@ jobs:
             // (workflow-computed, not model-supplied) — the fallback tier resolves
             // any self thread whose fingerprint is absent from this set.
             const findingFingerprints = new Set(findings.map((f) => computeFingerprint(f)));
+            // Supersede tier — fingerprints we ACTUALLY posted as inline comments
+            // this round. Only populated when a submission really happened
+            // (submitOk): if the submit was skipped as a duplicate or failed, no
+            // new thread was created, so nothing should be superseded. When the
+            // model re-emits a finding with the same fingerprint on a new head,
+            // the fresh thread we just posted plus the prior run's open thread
+            // both carry that fingerprint; the supersede module keeps only the
+            // newest open thread per posted fingerprint and resolves the older
+            // duplicate(s) so stale [blocking] threads don't pile up. This is
+            // resolve-only (the finding is always posted) and additive to the
+            // resolved_threads/fallback tiers above — never weakening them.
+            const postedThisRound = submitOk
+              ? new Set(inlineFindings.map((f) => computeFingerprint(f)))
+              : new Set();
+            let selectSupersededThreads = () => [];
+            try {
+              ({ selectSupersededThreads } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/pr-review-supersede.js`));
+            } catch (e) {
+              core.warning(`Supersede module unavailable (${e.message}); skipping supersede tier (resolved_threads/fallback still apply).`);
+            }
             try {
               const threadResp = await github.graphql(`
                 query($owner:String!, $repo:String!, $pr:Int!) {
@@ -1025,7 +1045,7 @@ jobs:
                           id
                           isResolved
                           comments(first: 1) {
-                            nodes { author { login } body }
+                            nodes { databaseId author { login } body }
                           }
                         }
                       }
@@ -1038,6 +1058,32 @@ jobs:
               // accept both forms.
               const botLoginGql = botLogin.replace(/\[bot\]$/, '');
               const fpRe = /<!-- codex-review-inline fingerprint=([^\s]+) -->/;
+              // Identify a thread's fingerprint iff it is an open self-owned codex
+              // inline thread carrying our marker; null otherwise.
+              const selfThreadFp = (t) => {
+                if (!t || t.isResolved) return null;
+                const author = t.comments?.nodes?.[0]?.author?.login;
+                if (author !== botLogin && author !== botLoginGql) return null;
+                const cbody = t.comments?.nodes?.[0]?.body || '';
+                if (!cbody.includes(inlineMarkerBase)) return null;
+                const m = cbody.match(fpRe);
+                return (m && m[1]) || null;
+              };
+              // Supersede pre-pass: among open self threads whose fingerprint was
+              // posted this round, keep only the newest (largest first-comment
+              // databaseId) and resolve older duplicates. Computed over the full
+              // thread set so the freshly posted thread is correctly identified as
+              // newest. ids → resolved via the bySupersede reason in the loop.
+              const openThreads = threads
+                .map((t) => ({ t, fp: selfThreadFp(t) }))
+                .filter((x) => x.fp)
+                .map((x) => ({
+                  id: x.t.id,
+                  fingerprint: x.fp,
+                  order: x.t.comments?.nodes?.[0]?.databaseId,
+                }));
+              const supersededIds = new Set(
+                selectSupersededThreads({ postedFingerprints: postedThisRound, openThreads }));
               for (const t of threads) {
                 if (t.isResolved) continue;
                 const author = t.comments?.nodes?.[0]?.author?.login;
@@ -1049,7 +1095,12 @@ jobs:
                 if (!fp) continue; // legacy/markerless thread — leave untouched
                 const byModel = resolvedFingerprints.has(fp);
                 const byFallback = !byModel && !findingFingerprints.has(fp);
-                if (!byModel && !byFallback) continue; // still reported — leave
+                // Supersede: this is an OLDER duplicate of a fingerprint we just
+                // re-posted (a newer open thread for it survives). Resolve it so
+                // stale [blocking] threads don't accumulate. The finding itself
+                // stays posted in the newest thread (no suppression).
+                const bySupersede = supersededIds.has(t.id);
+                if (!byModel && !byFallback && !bySupersede) continue; // still reported — leave
                 try {
                   await github.graphql(`
                     mutation($id:ID!) {
@@ -1057,7 +1108,8 @@ jobs:
                         thread { id isResolved }
                       }
                     }`, { id: t.id });
-                  core.info(`Resolved self inline thread ${t.id} (fingerprint=${fp}, via=${byModel ? 'resolved_threads' : 'fallback'}).`);
+                  const via = byModel ? 'resolved_threads' : (byFallback ? 'fallback' : 'supersede');
+                  core.info(`Resolved self inline thread ${t.id} (fingerprint=${fp}, via=${via}).`);
                 } catch (e) {
                   core.warning(`Failed to resolve thread ${t.id}: ${e.message}`);
                 }
