@@ -38,7 +38,12 @@ allowed-tools:
 
 3. **선택.** 후보가 하나면 자동 선택하고, 둘 이상이면 `AskUserQuestion` single-select로 묻습니다.
 
-4. **정적 입력.** `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, 비어 있지 않은 "Other"(임의 경로 직접 입력 포함)도 허용합니다. 응답 누락·빈 값은 `{{name}}`을 보존합니다 — 단, `temp-files`의 `temp_path`는 응답 누락·빈 값이면 placeholder 대신 기본값 `.tmp/`로 치환하고, 입력값("Other" 자유 입력 포함)은 치환 전에 항상 **후행 `/`로 끝나도록 정규화**합니다(예: `.scratch` → `.scratch/`). 이래야 본문의 `{{temp_path}}<주제>/`·`{{temp_path}}.gitkeep`이 선택한 디렉터리의 하위 경로로 바르게 결합됩니다.
+4. **정적 입력.** `inputs`가 있으면 정의된 순서대로 입력 메뉴를 **먼저 제시**합니다. 메뉴 제시와 기본값 적용은 별개 단계이며, 질문을 건너뛰고 곧바로 기본값·placeholder로 진행하지 않습니다.
+   - **메뉴 제시(항상).** 각 입력은 `AskUserQuestion`으로 묻습니다. 템플릿의 `options`(추천 옵션은 `(Recommended)`를 붙여 맨 앞)와 함께 임의 경로를 직접 적을 수 있는 자유 입력 "Other"를 포함합니다. 예로 `temp-files`의 `temp_path`는 추천 `.tmp/`를 첫 선택지로, `.scratch/`, 자유 입력 "Other"를 반드시 제시합니다.
+   - **값 사용.** 응답은 `value` 또는 `label`을 사용하고, 비어 있지 않은 "Other"(임의 경로 직접 입력 포함)도 허용합니다.
+   - **기본값·placeholder 적용(무응답·거절에 한해).** 사용자가 제시된 질문에 응답을 비우거나 거절한 **경우에만** 치환합니다 — 질문을 제시하지 않고 기본값을 적용하지 않습니다. 일반 입력은 응답 누락·빈 값이면 `{{name}}`을 보존하고, `temp-files`의 `temp_path`는 응답 누락·빈 값이면 placeholder 대신 기본값 `.tmp/`로 치환합니다.
+   - **비대화 맥락.** 질문을 제시할 수 없는 비대화(자율 오케스트레이션) 맥락이면, 그 사실을 알리고 무응답과 동일하게 기본값 `.tmp/`(일반 입력은 `{{name}}` 보존)로 진행합니다.
+   - **경로 정규화.** `temp_path` 입력값("Other" 자유 입력 포함)은 치환 전에 항상 **후행 `/`로 끝나도록 정규화**합니다(예: `.scratch` → `.scratch/`). 이래야 본문의 `{{temp_path}}<주제>/`·`{{temp_path}}.gitkeep`이 선택한 디렉터리의 하위 경로로 바르게 결합됩니다.
 
 4-bis. **동적 입력.** `dynamic_inputs`가 있으면 target 프로젝트 디스크에서 후보를 산출합니다.
    - `candidate_source: depth1_dirs_filtered`: target 루트 depth=1 디렉토리만 후보로 삼고 `.*`, `node_modules`, `dist`, `build`, `target`은 제외합니다. gitignore는 무시합니다.

@@ -1,6 +1,6 @@
 ---
 name: loop
-description: 단일 SPEC 파일을 격리 작업 공간에서 자율적으로 구현(랄프 루프)하고 싶을 때 사용. 호출 'Skill(skill="loop", args="<subcommand> [<args>]")' (start/status/stop/list/cleanup/logs).
+description: 단일 SPEC 파일을 격리된 전용 워크트리(워크트리 격리) 작업 공간에서 자율적으로 구현(랄프 루프, ralph loop)하고 싶을 때 사용 — SPEC 실행·자율 구현을 사람 개입 없이 백그라운드 에이전트로 위임. 호출 'Skill(skill="loop", args="<subcommand> [<args>]")' (start/status/stop/list/cleanup/logs).
 allowed-tools:
   - Read
   - Bash(bash * loop.sh start:*)
