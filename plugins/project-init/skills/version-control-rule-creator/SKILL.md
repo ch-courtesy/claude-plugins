@@ -13,7 +13,9 @@ allowed-tools:
   - Bash(git diff:*)
   - Bash(git remote get-url:*)
   - Bash(git config:*)
-  - Bash(python3:*)
+  - Bash(python3 references/template_tools.py parse-name:*)
+  - Bash(python3 references/template_tools.py git-family:*)
+  - Bash(python3 references/template_tools.py aggregate:*)
 ---
 
 # version-control-rule-creator

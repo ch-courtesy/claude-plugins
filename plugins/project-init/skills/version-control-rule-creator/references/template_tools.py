@@ -41,10 +41,16 @@ def main(argv):
         return 2
     cmd = argv[1]
     if cmd == "parse-name":
+        if len(argv) < 3:
+            print("usage: template_tools.py parse-name <filename>", file=sys.stderr)
+            return 2
         sub, backend = parse_name(argv[2])
         print(f"{sub}\t{backend}")
         return 0
     if cmd == "git-family":
+        if len(argv) < 3:
+            print("usage: template_tools.py git-family <backend>", file=sys.stderr)
+            return 2
         return 0 if is_git_family(argv[2]) else 1
     if cmd == "aggregate":
         print(aggregate(argv[2:]))
