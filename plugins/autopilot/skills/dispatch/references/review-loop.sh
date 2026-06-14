@@ -51,6 +51,9 @@ set -uo pipefail
 
 REVIEW_ROUNDS_MAX="${REVIEW_ROUNDS_MAX:-3}"
 REVIEW_BOT_LOGIN_RE="${REVIEW_BOT_LOGIN_RE:-(\[bot\]$|claude|github-actions)}"
+# 차단성 인라인 태그(리터럴 부분문자열) — 리뷰 워크플로 본문 `**[<severity>/<conf>] title**` 형식
+# (.github/workflows/{codex,claude}-review.yml). `[blocking` 는 `[non_blocking` 미매치. 주입 가능.
+BLOCKING_TAG="${BLOCKING_TAG:-[blocking}"
 
 REVIEW_FETCH_CMD="${REVIEW_FETCH_CMD:-rl_review_fetch_gh}"
 REVIEW_PRODUCE_CMD="${REVIEW_PRODUCE_CMD:-rl_produce_review_skill}"
@@ -75,12 +78,29 @@ rl_review_fetch_gh() {
   if [[ -z "$approve" && -n "$head" ]] && gh pr view "$pr" --json reviews \
         --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
        | grep -E "$REVIEW_BOT_LOGIN_RE" | grep -qE "head_sha=${head}[^>]*verdict=approve"; then approve=1; fi
-  # 현재 head 의 인라인 지적(타당성 판단은 워커가 change-adoption 으로 — 여기선 원천만 평탄화).
-  findings="$(gh api "repos/{owner}/{repo}/pulls/$pr/comments" \
-        --jq ".[] | select(.commit_id==\"$head\") | .body" 2>/dev/null \
+  # 현재 head 인라인 코멘트 1회 조회: login\tcommit_id\tbody(본문 개행·탭 공백화).
+  local comments crc blocking=""
+  comments="$(gh api "repos/{owner}/{repo}/pulls/$pr/comments" --paginate \
+        --jq '.[] | (.user.login // "")+"\t"+(.commit_id // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)"
+  crc=$?
+  # 신뢰봇이 현재 head 에 남긴 [blocking] 인라인 — approve 를 가리는 가산 차단(PR #385).
+  #   조회 실패·head 미확정은 보수적 차단(default-deny). login 은 field1 단독에 정규식 적용.
+  if [[ $crc -ne 0 || -z "$head" ]]; then
+    blocking="FETCH_FAILED"
+  elif printf '%s\n' "$comments" \
+       | awk -F'\t' -v h="$head" -v tag="$BLOCKING_TAG" '$2==h && index($3,tag)>0 {print $1}' \
+       | grep -qE "$REVIEW_BOT_LOGIN_RE"; then
+    blocking=1
+  fi
+  # 현재 head 의 전체 인라인 지적(타당성 판단은 워커가 change-adoption 으로 — 여기선 원천만 평탄화).
+  findings="$(printf '%s\n' "$comments" | awk -F'\t' -v h="$head" '$2==h{print $3}' \
        | sed -E 's/<!--[^>]*-->//g' | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
-  if [[ -n "$approve" ]]; then
+  if [[ -n "$approve" && -z "$blocking" ]]; then
     echo "verdict: approve"
+  elif [[ "$blocking" == "FETCH_FAILED" ]]; then
+    # 인라인 조회 실패 → 거짓 승인 금지. changes 로 표면화(무진전 가드가 에스컬레이션 유도).
+    echo "verdict: changes"
+    echo "finding: [blocking] 인라인 조회 실패 — default-deny(보수적 차단), 확인 필요"
   elif [[ -n "$findings" ]]; then
     echo "verdict: changes"
     echo "finding: $findings"
@@ -601,6 +621,48 @@ rl_selftest() {
   prod_simple sha-DU unavailable > "$RV/$kDU.produce"
   MOCK_HEAD=sha-DU rl_round_direct "$rd" "$kDU" "$base" "feat/run1-du" >/dev/null; rc=$?
   chk "AC7 direct unavailable 에스컬레이션(rc=10)" "$rc" "10"
+
+  # =====================================================================
+  # AC4/AC5/AC6: rl_review_fetch_gh — 현재 head 신뢰봇 미해결 [blocking] 인라인이
+  #   approve 를 가린다(verdict=approve → changes). gh 를 시나리오 변수 mock 으로 치환.
+  #   SC_* 는 substitution 안에서 env-prefix 해야 함수 환경에 도달한다.
+  # =====================================================================
+  gh() {
+    case "$1 $2" in
+      "pr view")
+        case "$*" in
+          *"--json headRefOid"*)     printf '%s\n' "${SC_HEAD:-}" ;;
+          *"--json reviewDecision"*) printf '%s\n' "${SC_DECISION:-}" ;;
+          *"--json reviews"*)
+            case "$*" in
+              *'"\t"'*) printf '%b' "${SC_REVIEWS:-}" ;;                       # 마커 jq(login\tbody)
+              *)        printf '%b' "${SC_SUMMARY:-state: NONE\nauthor: \n}" ;; # state/author 요약
+            esac ;;
+        esac ;;
+      "api "*|api) [[ "${SC_API_FAIL:-}" == "1" ]] && return 1; printf '%b' "${SC_COMMENTS:-}" ;;
+    esac
+    return 0
+  }
+  rvg() { rl_review_fetch_gh "${1:-200}" 2>/dev/null | grep -i '^verdict:' | sed -E 's/^[^:]*:[[:space:]]*//'; }
+  local GH="sha-GH"
+  local GBLK="github-actions[bot]\t$GH\t**[blocking/98] 차단 지적** 상세\n"
+  local GOKC="github-actions[bot]\t$GH\t**[non_blocking/85] 정보성** 상세\n"
+
+  chk "AC4 approve+head [blocking] → changes" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_COMMENTS="$GBLK" rvg)" "changes"
+  chk "AC4 approve+blocking없음(정보성) → approve" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_COMMENTS="$GOKC" rvg)" "approve"
+  chk "AC4 비승인+head [blocking] → changes" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_COMMENTS="$GBLK" rvg)" "changes"
+  chk "AC3 outdated [blocking]+approve → approve(차단 안 함)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_COMMENTS="github-actions[bot]\toldSHA\t**[blocking/98] 이전**\n" rvg)" "approve"
+  chk "AC3 비신뢰봇 [blocking]+approve → approve(차단 안 함)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_COMMENTS="random-human\t$GH\t**[blocking/98] 위조**\n" rvg)" "approve"
+  chk "AC5 인라인 조회 실패 → changes(default-deny)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rvg)" "changes"
+  out="$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rl_review_fetch_gh 205 2>/dev/null)"
+  case "$out" in *조회\ 실패*|*default-deny*) ok "AC5 조회 실패 finding 표면화";; *) bad "AC5 조회 실패 finding 표면화";; esac
+  unset -f gh
 
   # ---- force 미사용 (mock_git force 보면 exit99; 여기 도달했으면 미사용) ----
   [[ -s "$PUSHLOG" ]] && ok "재작업 라운드 실제 push 수행" || bad "재작업 라운드 실제 push 수행"

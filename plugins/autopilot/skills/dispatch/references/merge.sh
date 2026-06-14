@@ -58,28 +58,72 @@ mg_die() { echo "merge: $*" >&2; return 1; }
 #       남긴 본문 마커 `<!-- <prefix> head_sha=<sha> verdict=approve -->`(prefix=*-formal-review).
 # 신뢰 봇 로그인(App bot / github-actions[bot])만 마커를 신뢰한다(위조 마커 거부).
 REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtesy-bot)}"
+# 차단성 인라인 태그(리터럴 부분문자열) — 리뷰 워크플로 본문 `**[<severity>/<conf>] title**` 형식
+# (.github/workflows/{codex,claude}-review.yml). `[blocking` 는 `[non_blocking` 을 매치하지 않음.
+# 봇 컨벤션 결합을 끊기 위해 주입 가능 변수로 둔다(awk index() 리터럴 매치 → awk별 escape 비의존).
+BLOCKING_TAG="${BLOCKING_TAG:-[blocking}"
+
+# mg_blocking_inline_gate <pr> <head> — 현재 head 에 신뢰봇이 남긴 미해결 [blocking] 인라인이
+#   하나라도 있으면 1(차단), 없으면 0(통과). "현재 head 대응" = 코멘트 commit_id==head(결정적;
+#   재푸시로 head 가 바뀌면 outdated 지적은 자동 해소). head 미확정·조회 실패는 보수적 차단
+#   (default-deny)하고 사유를 stderr 로 표면화(거짓 승인 금지).
+mg_blocking_inline_gate() {
+  local pr="$1" head="$2" out rc
+  if [[ -z "$head" ]]; then
+    echo "merge: 승인 차단 — 현재 head 미확정으로 [blocking] 인라인 검증 불가(default-deny)" >&2
+    return 1
+  fi
+  # 인라인 리뷰 코멘트: login\tcommit_id\tbody(코멘트당 1줄, 본문 개행·탭은 공백화).
+  # shellcheck disable=SC2086
+  out="$($FORGE_CMD api "repos/{owner}/{repo}/pulls/$pr/comments" --paginate \
+        --jq '.[] | (.user.login // "")+"\t"+(.commit_id // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)"
+  rc=$?
+  if [[ $rc -ne 0 ]]; then
+    echo "merge: 승인 차단 — 인라인 리뷰 조회 실패(rc=$rc), [blocking] 검증 불가(default-deny)" >&2
+    return 1
+  fi
+  # 현재 head 대응(field2 정확일치) + [blocking] 태그(field3 리터럴 index) 줄의 login(field1)을
+  #   추려, 신뢰봇 정규식으로 grep(앵커가 login 단독에 올바로 걸림; awk 정규식 escape 비의존).
+  #   하나라도 있으면 차단.
+  if printf '%s\n' "$out" \
+       | awk -F'\t' -v h="$head" -v tag="$BLOCKING_TAG" '$2==h && index($3,tag)>0 {print $1}' \
+       | grep -qE "$REVIEW_BOT_LOGINS_RE"; then
+    echo "merge: 승인 차단 — 신뢰봇이 현재 head($head)에 남긴 미해결 [blocking] 인라인 존재" >&2
+    return 1
+  fi
+  return 0
+}
+
 # mg_approval_gh <pr> — 승인이면 "APPROVED" 출력(없으면 빈 값). 주입 가능(MERGE_APPROVAL_CMD).
+#   승인 신호(reviewDecision==APPROVED 또는 현재 head verdict=approve 마커)가 있어도, 현재 head 의
+#   신뢰봇 미해결 [blocking] 인라인이 있으면 승인을 가린다(가산 차단, PR #385 회귀 가드).
 mg_approval_gh() {
-  local pr="$1" decision head
+  local pr="$1" decision head approved=""
   # shellcheck disable=SC2086
   decision="$($FORGE_CMD pr view "$pr" --json reviewDecision --jq '.reviewDecision' 2>/dev/null)"
-  if [[ "$decision" == "APPROVED" ]]; then echo "APPROVED"; return 0; fi
-  # 강등 승인: 신뢰 봇이 현재 head 에 남긴 verdict=approve 마커.
   # shellcheck disable=SC2086
   head="$($FORGE_CMD pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)"
-  [[ -n "$head" ]] || return 0
+  if [[ "$decision" == "APPROVED" ]]; then
+    approved=1
+  # 강등 승인: 신뢰 봇이 현재 head 에 남긴 verdict=approve 마커.
   # shellcheck disable=SC2086
-  if $FORGE_CMD pr view "$pr" --json reviews \
+  elif [[ -n "$head" ]] && $FORGE_CMD pr view "$pr" --json reviews \
         --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
        | grep -E "$REVIEW_BOT_LOGINS_RE" \
        | grep -qE "head_sha=${head}[^>]*verdict=approve"; then
-    echo "APPROVED"
+    approved=1
   fi
+  [[ -n "$approved" ]] || return 0
+  # 승인 신호가 있어도 현재 head 의 신뢰봇 [blocking] 인라인이 가린다(차단되면 APPROVED 미출력).
+  mg_blocking_inline_gate "$pr" "$head" || return 0
+  echo "APPROVED"
 }
 # mg_approval_gate <pr> — forge PR 의 호스팅 리뷰가 APPROVED 면 0, 아니면 1(차단).
+#   stderr 는 의도적으로 통과시킨다 — default-deny([blocking] 검출·인라인 조회 실패) 사유가
+#   거짓 승인 없이 관찰 가능하도록(AC5). stdout 만 캡처하므로 판정에는 영향 없다.
 mg_approval_gate() {
   local decision
-  decision="$($MERGE_APPROVAL_CMD "$1" 2>/dev/null | tr -d '[:space:]')"
+  decision="$($MERGE_APPROVAL_CMD "$1" | tr -d '[:space:]')"
   [[ "$decision" == "APPROVED" ]]
 }
 
@@ -605,6 +649,72 @@ BR
   case "$swerr" in *WARN*) ok "sweep 부분 실패 WARN 표면화";; *) bad "sweep 부분 실패 WARN 표면화(조용한 실패 금지)";; esac
   # force 미사용(sweep 경로).
   if grep -qiE 'force|(^| )-f( |$)' "$trace"; then bad "sweep force 미사용"; else ok "sweep force 미사용"; fi
+
+  # =====================================================================
+  # 승인 게이트 ── 현재 head 의 신뢰봇 미해결 [blocking] 인라인이 approve 를 가린다(PR #385).
+  #   mg_approval_gh 를 직접 호출(merge_finish 경로는 MERGE_APPROVAL_CMD 가 mock 이라
+  #   gh-경로를 안 탐). FORGE_CMD 를 시나리오 변수로 구동하는 mock 으로 치환.
+  # =====================================================================
+  # mock gh: pr view --json {reviewDecision|headRefOid|reviews}, api .../comments 를
+  #   이미 --jq 적용된 형태로 시뮬(SC_* 변수). api 실패는 SC_API_FAIL=1.
+  mock_forge_gh() {
+    case "$1" in
+      pr)
+        case "$*" in
+          *"--json reviewDecision"*) printf '%s\n' "${SC_DECISION:-}" ;;
+          *"--json headRefOid"*)     printf '%s\n' "${SC_HEAD:-}" ;;
+          *"--json reviews"*)        printf '%b' "${SC_REVIEWS:-}" ;;  # login\tbody 줄들
+        esac ;;
+      api)
+        [[ "${SC_API_FAIL:-}" == "1" ]] && return 1
+        printf '%b' "${SC_COMMENTS:-}" ;;  # login\tcommit_id\tbody 줄들
+    esac
+    return 0
+  }
+  # ag — mg_approval_gh 출력(APPROVED/빈값). 시나리오 SC_* 는 호출부 env-prefix 로 주입하되
+  #   반드시 substitution 안에서 prefix 해야 ag 환경에 도달한다(밖에 두면 chk 에만 걸림).
+  ag() { FORGE_CMD=mock_forge_gh mg_approval_gh "${1:-700}" 2>/dev/null | tr -d '[:space:]'; }
+  local H="headSHA1"
+  # 마커 경로 grep 은 login\tbody 줄에 앵커 정규식을 적용 → 비앵커 매치되는 courtesy-bot 사용.
+  local MARK="courtesy-bot\t<!-- claude-formal-review head_sha=$H verdict=approve -->\n"
+  local BLK="github-actions[bot]\t$H\t**[blocking/98] 차단 지적** 본문\n"
+  local OK_C="github-actions[bot]\t$H\t**[non_blocking/85] 정보성** 본문\n"
+
+  # AC2: APPROVED 인데 현재 head 신뢰봇 [blocking] 인라인 → 승인 아님(차단).
+  chk "AC2 approved+head [blocking] → 차단(빈값)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_COMMENTS="$BLK" ag)" ""
+  # AC1: blocking 없음 + APPROVED → APPROVED 통과.
+  chk "AC1 approved+blocking없음 → APPROVED" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_COMMENTS="$OK_C" ag)" "APPROVED"
+  # AC3: 비신뢰 작성자 [blocking] + APPROVED → 차단 근거 아님(통과).
+  chk "AC3 비신뢰봇 [blocking] → 차단 안 함(APPROVED)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_COMMENTS="random-human\t$H\t**[blocking/98] 위조**\n" ag)" "APPROVED"
+  # AC3: outdated(이전 head) [blocking] + APPROVED → 차단 근거 아님(통과).
+  chk "AC3 outdated [blocking] → 차단 안 함(APPROVED)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_COMMENTS="github-actions[bot]\toldSHA\t**[blocking/98] 이전**\n" ag)" "APPROVED"
+  # AC2: 강등 승인 마커(verdict=approve) + head [blocking] → 차단.
+  chk "AC2 마커승인+head [blocking] → 차단(빈값)" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_COMMENTS="$BLK" ag)" ""
+  # 강등 승인 마커 + blocking 없음 → APPROVED.
+  chk "마커승인+blocking없음 → APPROVED" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_COMMENTS="$OK_C" ag)" "APPROVED"
+  # AC5: 인라인 조회 실패 + APPROVED → default-deny(차단).
+  chk "AC5 인라인 조회 실패 → default-deny(차단)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_API_FAIL=1 ag)" ""
+  # AC5: head 미확정 + APPROVED → default-deny(차단).
+  chk "AC5 head 미확정 → default-deny(차단)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="" SC_COMMENTS="$OK_C" ag)" ""
+  # AC5: 조회 실패 시 stderr 표면화(거짓 승인 금지).
+  ( SC_DECISION=APPROVED SC_HEAD=$H SC_API_FAIL=1 FORGE_CMD=mock_forge_gh mg_approval_gh 708 ) \
+    2>"$TMP/ag_err" >/dev/null
+  case "$(cat "$TMP/ag_err" 2>/dev/null)" in *차단*|*default-deny*) ok "AC5 조회 실패 stderr 표면화";; *) bad "AC5 조회 실패 stderr 표면화";; esac
+  # AC5 Wired: 전체 게이트(mg_approval_gate→mg_approval_gh)에서 default-deny 사유가 stderr 로 살아남고
+  #   판정은 차단(rc=1)임. mg_approval_gate 의 stderr 미차단이 관찰성을 보존하는지 검증.
+  ( SC_DECISION=APPROVED SC_HEAD=$H SC_API_FAIL=1 \
+    FORGE_CMD=mock_forge_gh MERGE_APPROVAL_CMD=mg_approval_gh mg_approval_gate 709 ) \
+    2>"$TMP/gate_err"; rc=$?
+  chk "AC5 게이트 default-deny 차단(rc=1)" "$rc" "1"
+  case "$(cat "$TMP/gate_err" 2>/dev/null)" in *차단*|*default-deny*) ok "AC5 게이트 stderr 사유 보존(Wired)";; *) bad "AC5 게이트 stderr 사유 보존(Wired)";; esac
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
