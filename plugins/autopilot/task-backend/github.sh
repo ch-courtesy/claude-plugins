@@ -7,21 +7,32 @@
 #   status     = 라벨 `status:<state>` (단일 status 라벨 불변식)
 #   depends_on = 본문 HTML 마커 `<!-- autopilot:depends_on: 12,13 -->`
 #   title/body = Issue 제목/본문(본문 = SPEC, 섹션 구조는 contract.md)
-#   lease      = 로컬 미러 .autopilot/leases/<id> (epoch) — API 빈발 호출 회피
-#   list_ready = gh issue list(open) 클라이언트측 필터 (depends_on 모두 done + stale-lease in_progress)
+#   lease      = **공유** 본문 마커 `<!-- autopilot:lease at=<epoch> owner=<o> -->` — 모든 체크아웃/
+#                머신이 같은 lease 를 본다(로컬 미러 아님). 공유 백엔드에서 크래시 워커를 어느 호스트든
+#                회수 가능하고, 실행 중 태스크를 다른 호스트가 즉시 오회수하지 않는다.
+#   list_ready = gh issue list(open) 클라이언트측 필터 (depends_on 모두 done + 공유 lease stale 회수)
 # github_project_url 이 config 에 있으면 create 시 project item 추가(선택).
-# gh 미설치 시 hard-abort.
+# gh 미설치 시 hard-abort. heartbeat 가 본문을 갱신하므로 github 은 heartbeat_interval 을 넉넉히 둘 것.
 
 be_require() { command -v gh >/dev/null 2>&1 || tb_die "github-project 백엔드는 gh CLI 가 필요합니다 (미설치)"; }
 
-gh_lease_dir()  { printf '%s/.autopilot/leases' "$TB_ROOT"; }
-gh_lease_file() { printf '%s/.autopilot/leases/%s' "$TB_ROOT" "$1"; }
 gh_repo_args()  {  # config 에 owner/repo 있으면 -R owner/repo
   local o r; o="$(tb_cfg .github_owner)"; r="$(tb_cfg .github_repo)"
   [[ -n "$o" && -n "$r" ]] && printf -- '-R\n%s/%s' "$o" "$r"
 }
+gh_body()         { gh issue view "$1" $(gh_repo_args) --json body -q .body 2>/dev/null; }
 gh_status_label() { gh issue view "$1" $(gh_repo_args) --json labels -q '.labels[].name' 2>/dev/null | sed -n 's/^status://p' | head -1; }
-gh_deps()        { gh issue view "$1" $(gh_repo_args) --json body -q .body 2>/dev/null | sed -n 's/.*<!-- autopilot:depends_on: \(.*\) -->.*/\1/p' | tr ',' '\n' | sed '/^$/d'; }
+gh_deps()         { gh_body "$1" | sed -n 's/^<!-- autopilot:depends_on: \(.*\) -->$/\1/p' | head -1 | tr ',' '\n' | sed '/^$/d'; }
+
+# ----- 공유 lease (이슈 본문 마커) -----
+gh_get_lease() { gh_body "$1" | sed -n 's/^<!-- autopilot:lease at=\([0-9]*\) .*-->$/\1/p' | tail -1; }
+# gh_set_lease <id> <epoch> <owner> — 본문의 lease 마커만 정밀 교체(다른 내용 보존).
+gh_set_lease() {
+  local id="$1" at="$2" owner="$3" body
+  body="$(gh_body "$id" | sed '/^<!-- autopilot:lease at=[0-9]* .*-->$/d')"
+  body+=$'\n'"<!-- autopilot:lease at=$at owner=$owner -->"
+  gh issue edit "$id" $(gh_repo_args) --body "$body" >/dev/null 2>&1 || tb_die "lease 마커 갱신 실패"
+}
 
 be_create_task() {
   local title body deps; title="$(_argval --title "$@")"; body="$(_argval --body "$@")"; deps="$(_argval --depends-on "$@")"
@@ -56,22 +67,22 @@ be_set_status() {
   local old; old="$(gh_status_label "$id")"
   [[ -n "$old" ]] && gh issue edit "$id" $(gh_repo_args) --remove-label "status:$old" >/dev/null 2>&1 || true
   gh issue edit "$id" $(gh_repo_args) --add-label "status:$s" >/dev/null 2>&1 || tb_die "라벨 status:$s 설정 실패(라벨 존재 필요)"
-  if [[ "$s" == "in_progress" ]]; then mkdir -p "$(gh_lease_dir)"; tb_now_epoch > "$(gh_lease_file "$id")"; fi
+  if [[ "$s" == "in_progress" ]]; then gh_set_lease "$id" "$(tb_now_epoch)" "$(_argval --owner "$@")"; fi
   [[ "$s" == "done" ]] && gh issue close "$id" $(gh_repo_args) >/dev/null 2>&1 || true
   jq -nc --arg id "$id" --arg s "$s" '{task_id:$id, status:$s}'
 }
 
-# be_claim — 실행권 획득. 주의: 공유 store(GitHub) 전반의 진정한 원자성은 원격 CAS 가 필요하며
-# v1 은 단일 호스트 범위다. 같은 호스트의 신선한 로컬 lease 가 있으면 양보(claimed:false).
+# be_claim — 실행권 획득(공유 lease 기준). in_progress 의 공유 lease 가 신선하면 양보(claimed:false),
+# stale 면 탈취. lease 가 이슈 본문(공유)에 있어 다른 호스트의 실행 중 태스크를 오회수하지 않는다.
+# 주의: 본문 read-modify-write 라 동시 claim 경쟁의 완전한 원자성은 원격 CAS 가 필요(드문 경합).
 be_claim() {
   local id owner; id="$(_argval --task-id "$@")"; owner="$(_argval --owner "$@")"
-  local s lf now ttl; s="$(gh_status_label "$id")"; lf="$(gh_lease_file "$id")"
-  now="$(tb_now_epoch)"; ttl="${TB_LEASE_TTL:-300}"
-  if [[ "$s" == "in_progress" && -f "$lf" ]]; then
-    local lr; lr="$(cat "$lf")"; (( now - lr <= ttl )) && { jq -nc --arg id "$id" '{task_id:$id, claimed:false}'; return 0; }
+  local s now ttl; s="$(gh_status_label "$id")"; now="$(tb_now_epoch)"; ttl="${TB_LEASE_TTL:-300}"
+  if [[ "$s" == "in_progress" ]]; then
+    local lr; lr="$(gh_get_lease "$id")"; [[ -n "$lr" ]] || lr=0
+    (( now - lr <= ttl )) && { jq -nc --arg id "$id" '{task_id:$id, claimed:false}'; return 0; }
   fi
   be_set_status --task-id "$id" --status in_progress --owner "$owner" >/dev/null
-  mkdir -p "$(gh_lease_dir)"; printf '%s\n' "$now" > "$lf"
   jq -nc --arg id "$id" '{task_id:$id, claimed:true}'
 }
 
@@ -79,9 +90,10 @@ be_link_dependency() {
   local id dep; id="$(_argval --task-id "$@")"; dep="$(_argval --depends-on-id "$@")"
   local cur; cur="$(gh_deps "$id" | tr '\n' ',' | sed 's/,$//')"
   [[ ",$cur," == *",$dep,"* ]] || cur="${cur:+$cur,}$dep"
-  local body; body="$(gh issue view "$id" $(gh_repo_args) --json body -q .body)"
-  body="$(printf '%s' "$body" | sed '/<!-- autopilot:depends_on:/d')"
-  body+=$'\n\n'"<!-- autopilot:depends_on: $cur -->"
+  local body; body="$(gh_body "$id")"
+  # 우리가 생성한 마커 라인만 정밀 삭제(전체-라인 매칭) — 본문 중 유사 텍스트 오삭제 방지.
+  body="$(printf '%s' "$body" | sed '/^<!-- autopilot:depends_on:.*-->$/d')"
+  body+=$'\n'"<!-- autopilot:depends_on: $cur -->"
   gh issue edit "$id" $(gh_repo_args) --body "$body" >/dev/null 2>&1 || tb_die "depends_on 갱신 실패"
   jq -nc --arg id "$id" --argjson d "$(printf '%s' "$cur" | tr ',' '\n' | jq -R . | jq -sc .)" '{task_id:$id, depends_on:$d}'
 }
@@ -99,10 +111,11 @@ be_list_ready() {
           [[ "$(gh_status_label "$d")" == "done" ]] || ready=0
         done < <(gh_deps "$id") ;;
       in_progress)
-        # 로컬 lease 파일이 있을 때만 stale 회수. 파일이 없으면(다른 체크아웃/머신이 점유 중일 수
-        # 있음) 회수하지 않는다 — lr=0 폴백으로 실행 중 태스크를 즉시 중복 회수하던 버그 방지.
-        local lf; lf="$(gh_lease_file "$id")"
-        if [[ -f "$lf" ]]; then local lr; lr="$(cat "$lf")"; (( now - lr > ttl )) && ready=1; fi
+        # 공유 lease(이슈 본문)로 회수 판정. 실행 중 워커는 heartbeat 로 공유 lease 를 갱신하므로
+        # 어느 호스트에서 보든 신선하면 회수하지 않는다. 크래시로 lease 가 stale 해지면(또는 없으면)
+        # 어느 호스트든 회수 가능.
+        local lr; lr="$(gh_get_lease "$id")"; [[ -n "$lr" ]] || lr=0
+        (( now - lr > ttl )) && ready=1
         ;;
     esac
     (( ready )) && out="$(printf '%s' "$out" | jq -c --arg id "$id" --arg t "$title" '. + [{task_id:$id, title:$t}]')"
@@ -120,12 +133,13 @@ be_materialize() {
   local id; id="$(_argval --task-id "$@")"
   local dir="$TB_ROOT/.task-work/$id"; mkdir -p "$dir"; local sp="$dir/SPEC.md"
   { printf '# %s\n\n' "$(gh issue view "$id" $(gh_repo_args) --json title -q .title)"
-    gh issue view "$id" $(gh_repo_args) --json body -q .body; } > "$sp"
+    # 내부 마커(lease/depends_on)는 spec 본문에서 제외
+    gh_body "$id" | sed -e '/^<!-- autopilot:lease at=[0-9]* .*-->$/d' -e '/^<!-- autopilot:depends_on:.*-->$/d'; } > "$sp"
   jq -nc --arg id "$id" --arg p "$sp" '{task_id:$id, spec_path:$p}'
 }
 
 be_renew_lease() {
-  local id; id="$(_argval --task-id "$@")"; mkdir -p "$(gh_lease_dir)"
-  local now; now="$(tb_now_epoch)"; printf '%s\n' "$now" > "$(gh_lease_file "$id")"
+  local id owner now; id="$(_argval --task-id "$@")"; owner="$(_argval --owner "$@")"; now="$(tb_now_epoch)"
+  gh_set_lease "$id" "$now" "$owner"   # 공유 lease(이슈 본문) 갱신
   jq -nc --arg id "$id" --arg t "$now" '{task_id:$id, lease_renewed_at:$t}'
 }
