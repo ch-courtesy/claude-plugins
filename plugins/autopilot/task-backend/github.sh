@@ -7,9 +7,9 @@
 #   status     = 라벨 `status:<state>` (단일 status 라벨 불변식)
 #   depends_on = 본문 HTML 마커 `<!-- autopilot:depends_on: 12,13 -->`
 #   title/body = Issue 제목/본문(본문 = SPEC, 섹션 구조는 contract.md)
-#   lease      = **공유** 본문 마커 `<!-- autopilot:lease at=<epoch> owner=<o> -->` — 모든 체크아웃/
-#                머신이 같은 lease 를 본다(로컬 미러 아님). 공유 백엔드에서 크래시 워커를 어느 호스트든
-#                회수 가능하고, 실행 중 태스크를 다른 호스트가 즉시 오회수하지 않는다.
+#   lease      = **공유 전용 코멘트** `<!-- autopilot:lease at=<epoch> owner=<o> -->` (이슈당 1개,
+#                in-place PATCH). 본문(SPEC·depends_on)과 독립이라 heartbeat 가 본문을 read-modify-write
+#                하지 않는다 → 동시 본문 수정 clobber/데이터 유실 없음. 모든 체크아웃/머신이 같은 lease 를 본다.
 #   list_ready = gh issue list(open) 클라이언트측 필터 (depends_on 모두 done + 공유 lease stale 회수)
 # github_project_url 이 config 에 있으면 create 시 project item 추가(선택).
 # gh 미설치 시 hard-abort. heartbeat 가 본문을 갱신하므로 github 은 heartbeat_interval 을 넉넉히 둘 것.
@@ -23,15 +23,30 @@ gh_repo_args()  {  # config 에 owner/repo 있으면 -R owner/repo
 gh_body()         { gh issue view "$1" $(gh_repo_args) --json body -q .body 2>/dev/null; }
 gh_status_label() { gh issue view "$1" $(gh_repo_args) --json labels -q '.labels[].name' 2>/dev/null | sed -n 's/^status://p' | head -1; }
 gh_deps()         { gh_body "$1" | sed -n 's/^<!-- autopilot:depends_on: \(.*\) -->$/\1/p' | head -1 | tr ',' '\n' | sed '/^$/d'; }
+gh_owner_repo()   {  # "owner/repo" (config 우선, 없으면 gh 추론)
+  local o r; o="$(tb_cfg .github_owner)"; r="$(tb_cfg .github_repo)"
+  if [[ -n "$o" && -n "$r" ]]; then printf '%s/%s' "$o" "$r"; else gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null; fi
+}
 
-# ----- 공유 lease (이슈 본문 마커) -----
-gh_get_lease() { gh_body "$1" | sed -n 's/^<!-- autopilot:lease at=\([0-9]*\) .*-->$/\1/p' | tail -1; }
-# gh_set_lease <id> <epoch> <owner> — 본문의 lease 마커만 정밀 교체(다른 내용 보존).
+# ----- 공유 lease (이슈당 전용 코멘트, in-place PATCH — 본문과 독립) -----
+# gh_lease_comment <id> → "<comment_id>\t<body>" (lease 코멘트, 없으면 빈 출력)
+gh_lease_comment() {
+  local nr; nr="$(gh_owner_repo)"
+  gh api "repos/$nr/issues/$1/comments" --paginate \
+    -q '.[] | select(.body|startswith("<!-- autopilot:lease ")) | "\(.id)\t\(.body)"' 2>/dev/null | tail -1
+}
+gh_get_lease() { gh_lease_comment "$1" | sed -n 's/.*at=\([0-9]*\) .*/\1/p' | tail -1; }
+# gh_set_lease <id> <epoch> <owner> — lease 전용 코멘트를 in-place PATCH(없으면 생성). 본문 미변경.
 gh_set_lease() {
-  local id="$1" at="$2" owner="$3" body
-  body="$(gh_body "$id" | sed '/^<!-- autopilot:lease at=[0-9]* .*-->$/d')"
-  body+=$'\n'"<!-- autopilot:lease at=$at owner=$owner -->"
-  gh issue edit "$id" $(gh_repo_args) --body "$body" >/dev/null 2>&1 || tb_die "lease 마커 갱신 실패"
+  local id="$1" at="$2" owner="$3" nr cid
+  nr="$(gh_owner_repo)"
+  local b="<!-- autopilot:lease at=$at owner=$owner -->"
+  cid="$(gh_lease_comment "$id" | cut -f1)"
+  if [[ -n "$cid" ]]; then
+    gh api --method PATCH "repos/$nr/issues/comments/$cid" -f body="$b" >/dev/null 2>&1 || tb_die "lease 코멘트 갱신 실패"
+  else
+    gh issue comment "$id" $(gh_repo_args) --body "$b" >/dev/null 2>&1 || tb_die "lease 코멘트 생성 실패"
+  fi
 }
 
 be_create_task() {
@@ -133,8 +148,8 @@ be_materialize() {
   local id; id="$(_argval --task-id "$@")"
   local dir="$TB_ROOT/.task-work/$id"; mkdir -p "$dir"; local sp="$dir/SPEC.md"
   { printf '# %s\n\n' "$(gh issue view "$id" $(gh_repo_args) --json title -q .title)"
-    # 내부 마커(lease/depends_on)는 spec 본문에서 제외
-    gh_body "$id" | sed -e '/^<!-- autopilot:lease at=[0-9]* .*-->$/d' -e '/^<!-- autopilot:depends_on:.*-->$/d'; } > "$sp"
+    # 내부 depends_on 마커는 spec 본문에서 제외(lease 는 본문이 아닌 전용 코멘트라 본문에 없음)
+    gh_body "$id" | sed '/^<!-- autopilot:depends_on:.*-->$/d'; } > "$sp"
   jq -nc --arg id "$id" --arg p "$sp" '{task_id:$id, spec_path:$p}'
 }
 

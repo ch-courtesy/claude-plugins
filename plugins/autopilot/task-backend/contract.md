@@ -125,9 +125,10 @@ DoD 확인 방법(테스트·관찰 지표·수동 단계).
 - **filesystem**: `.tasks/T-NNN.md` — YAML frontmatter(`id,title,status,depends_on,parent,owner,created,
   lease_renewed_at,lease_owner`) + 본문 섹션. git 커밋 대상. 의존성 없는 참조 구현.
 - **github-project**: Issue=태스크(번호=id), 라벨 `status:<state>`=status, body=본문(SPEC), comments=진행 로그,
-  본문 마커 `<!-- autopilot:depends_on: ... -->`=depends_on. **lease는 공유 본문 마커**
-  `<!-- autopilot:lease at=<epoch> owner=<o> -->`(모든 체크아웃/호스트 공유 — 로컬 미러 아님)로, heartbeat가
-  본문을 갱신한다(github은 `heartbeat_interval_seconds`를 넉넉히 둘 것).
+  본문 마커 `<!-- autopilot:depends_on: ... -->`=depends_on. **lease는 이슈당 전용 코멘트**
+  `<!-- autopilot:lease at=<epoch> owner=<o> -->`를 in-place PATCH(모든 체크아웃/호스트 공유). 본문과 독립이라
+  heartbeat가 본문(SPEC·depends_on)을 read-modify-write하지 않는다 → 동시 본문 수정 clobber 없음. github은
+  `heartbeat_interval_seconds`를 넉넉히 둘 것.
 - **beads**: `.beads/*.jsonl`(`bd` CLI). `bd dep`=depends_on, `bd ready`=list_ready 베이스, notes=로그.
 
 미설치 CLI(gh/bd)에 의존하는 백엔드는 미설치 시 hard-abort(조용한 폴백 없음).
