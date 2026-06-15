@@ -10,6 +10,7 @@ allowed-tools:
   - Bash(bash * dispatch.sh concurrency:*)
   - Bash(bash * dispatch.sh stop:*)
   - Bash(bash * dispatch.sh watch:*)
+  - Bash(bash * dispatch.sh sweep:*)
   - Bash(bash * dispatch.sh selftest:*)
 ---
 
@@ -103,7 +104,7 @@ per-SPEC 상태를 주기적으로 refresh 하며, 모든 child 가 terminal(`do
 
 **dispatch 자신이 만든 작업 브랜치** 중 **대상 브랜치에 이미 머지된** 것을 소급해 **일괄 삭제**하는 정비 진입점이다. 머지 시점 단건 정리(머지가 삭제하는 한 브랜치)는 정책 이전·외부(수동) 머지로 원격에 누적된 dispatch 작업 브랜치를 청소하지 못하므로, **명시 요청으로만** 도는 일괄 정리를 둔다(자동 무인 파괴 아님).
 
-- **대상 식별 = dispatch 자기 출처(provenance)**: dispatch 전용 네이밍 시그니처(`feat/<run-id>-<slug>`, `<run-id>`=`<YYYYMMDDTHHMMSS>-<sha7>`)에 맞는 브랜치만 대상으로 한다. 단순히 `feat/*` 가 비슷하다는 이유로 삭제하지 않으며, **dispatch 가 만들지 않은 브랜치(사람·타 도구 생성)는 이름이 유사해도 제외**한다.
+- **대상 식별 = dispatch 자기 출처(provenance)**: dispatch 전용 네이밍 시그니처(`feat/<run-id>-<slug>`, `<run-id>`=`YYYYMMDDTHHMMSS-<sha7>`)에 맞는 브랜치만 대상으로 한다. 단순히 `feat/*` 가 비슷하다는 이유로 삭제하지 않으며, **dispatch 가 만들지 않은 브랜치(사람·타 도구 생성)는 이름이 유사해도 제외**한다.
 - **머지 확인된 것만 삭제**: 대상 브랜치의 조상(=머지됨)인 것만 force 없이 일반 삭제(원격, 있으면 로컬)하고, **미머지 브랜치는 절대 삭제하지 않는다**(보존).
 - **결정적 헬퍼가 삭제 소유**: 식별·삭제는 `merge.sh sweep`(결정적 공용 삭제 경로)이 수행하고, 워커·dispatch 는 raw 원격 명령으로 직접 삭제하지 않는다.
 - **부분 실패 격리·관찰 가능**: 한 브랜치 삭제 실패는 경고로 표면화하되 다른 브랜치 처리를 막지 않으며, 어떤 브랜치를 지웠고 어떤 것을 건너뛰었는지(미머지·실패)를 보고한다.
