@@ -217,6 +217,8 @@ jobs:
             cat .review-context/issue-comments.json
             printf '\n\nExisting review comments JSON:\n'
             cat .review-context/review-comments.json
+            printf '\n\nReview thread resolution state JSON (isResolved 등 — 각 thread body 의 fingerprint 로 self finding 매칭; isResolved:true 는 이미 해소된 thread):\n'
+            cat .review-context/review-threads.json
             if [ -f .review-context/thread.json ]; then
               printf '\n\nTarget review thread JSON:\n'
               cat .review-context/thread.json

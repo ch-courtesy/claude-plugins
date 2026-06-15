@@ -64,6 +64,28 @@ gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
 gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" \
   > "$REVIEW_OUTPUT_DIR/review-comments.json"
 
+# Review THREAD resolution state (GraphQL) — the REST /pulls/comments endpoint above
+# carries NO resolution flag. Without it an incremental reviewer cannot tell that a
+# prior finding was already resolved (by a maintainer, or by a fix in an EARLIER
+# increment that the current diff does not touch), so it keeps re-counting that
+# finding as active blocking and never reaches approve. Each thread's first comment
+# body carries the reviewer's hidden `fingerprint=` marker, so the model can map its
+# own findings to GitHub's resolution state by fingerprint. Non-fatal on failure.
+gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" -f query='
+  query($owner:String!,$name:String!,$pr:Int!){
+    repository(owner:$owner,name:$name){
+      pullRequest(number:$pr){
+        reviewThreads(first:100){ nodes{
+          isResolved isOutdated
+          comments(first:1){ nodes{ databaseId author{login} body } } } } } } }' \
+  --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | {
+          isResolved, isOutdated,
+          comment_id: (.comments.nodes[0].databaseId),
+          author: (.comments.nodes[0].author.login // null),
+          body: (.comments.nodes[0].body // "") }]' \
+  > "$REVIEW_OUTPUT_DIR/review-threads.json" 2>/dev/null \
+  || echo '[]' > "$REVIEW_OUTPUT_DIR/review-threads.json"
+
 case "$mode" in
   incremental)
     git diff --patch "$incremental_base" "$PR_HEAD_SHA" > "$REVIEW_OUTPUT_DIR/diff.patch" || {
