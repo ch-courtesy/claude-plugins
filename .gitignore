@@ -15,6 +15,12 @@ milestones/**/loops/**/.lock
 # dispatch run artifacts
 .dispatch/
 
+# task-centric family 런타임 산출물 (materialize 임시 spec, lease 미러, run 상태)
+# .autopilot/task-backend.json(백엔드 선택 SoT)은 추적; 런타임만 무시
+.task-work/
+.autopilot/leases/
+.autopilot/runs/
+
 # 임시·스크래치 파일 (rules/workspace/temp-files.md)
 .tmp/
 
