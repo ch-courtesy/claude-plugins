@@ -4,6 +4,7 @@ scope:
   exclude:
     - rules/**
     - milestones/**
+    - AGENTS.md
     - CLAUDE.md
 {{depends_on}}
 # depends_on: optional list of sibling SPEC slugs this unit depends on.
@@ -22,7 +23,7 @@ scope:
 {{purpose}}
 
 ## 완료 조건
-<!-- 완료 조건은 5문장 패턴(항상 / …할 때 / …인 동안 / …이면(오류) / …기능이 켜지면)을 따르고, 각 조건은 관찰 가능하고 독립 검증 가능해야 함. -->
+<!-- 5문장 패턴(항상 / …할 때 / …인 동안 / …이면(오류) / …기능이 켜지면)과 언어 규칙은 references/ears-patterns.md. 각 조건은 관찰 가능하고 독립 검증 가능해야 함. -->
 {{acceptance_criteria}}
 
 ## 범위

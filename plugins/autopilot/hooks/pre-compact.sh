@@ -7,8 +7,8 @@
 #
 # stdin(JSON): {session_id, transcript_path, cwd, hook_event_name, trigger, ...}
 
-ROOT="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}"
-# CLAUDE_PLUGIN_ROOT 는 플러그인 루트(…/autopilot)를 가리킨다. common 은 hooks/ 아래.
+ROOT="${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}}"
+# 런타임 plugin root는 플러그인 루트(…/autopilot)를 가리킨다. common은 hooks/ 아래.
 if [ -f "$ROOT/handoff-common.sh" ]; then
   . "$ROOT/handoff-common.sh"
 elif [ -f "$ROOT/hooks/handoff-common.sh" ]; then
@@ -91,7 +91,7 @@ build_raw() {
   emit_field_header constraints
   cons=$(printf '%s\n' "$recent" | grep -iE '제약|constraint|반드시|금지|must|should not|scope' | head -8 || true)
   if [ -n "$cons" ]; then printf '%s\n' "$cons" >> "$TMP"
-  else printf '(이 세션에서 명시적으로 캡처된 제약 없음 — 프로젝트 CLAUDE.md·SPEC 우선)\n' >> "$TMP"; fi
+  else printf '(이 세션에서 명시적으로 캡처된 제약 없음 — 프로젝트 AGENTS.md·CLAUDE.md·SPEC 우선)\n' >> "$TMP"; fi
 
   emit_field_header files_touched
   if [ -n "$files" ]; then

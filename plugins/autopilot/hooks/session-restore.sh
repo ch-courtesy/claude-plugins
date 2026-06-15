@@ -8,7 +8,7 @@
 #
 # stdin(JSON): {session_id, source, cwd, hook_event_name, ...}
 
-ROOT="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}"
+ROOT="${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)}}"
 if [ -f "$ROOT/handoff-common.sh" ]; then
   . "$ROOT/handoff-common.sh"
 elif [ -f "$ROOT/hooks/handoff-common.sh" ]; then

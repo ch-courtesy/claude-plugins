@@ -55,7 +55,7 @@ Prompt:
 [무엇을 왜]
 
 ## 기준
-SPEC와 CLAUDE.md Self-Review.
+SPEC와 AGENTS.md·CLAUDE.md Self-Review.
 
 ## Git 범위
 Base: <sha 또는 HEAD~1>

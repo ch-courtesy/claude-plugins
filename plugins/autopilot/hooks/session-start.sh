@@ -4,8 +4,8 @@
 # 본 스크립트는 래퍼 태그만 덧붙이고 내용을 복제하지 않는다.
 set -eu
 
-# CLAUDE_PLUGIN_ROOT가 있으면 사용하고, 없으면(직접 실행·테스트) 스크립트 위치 기준으로 자기 위치를 찾는다.
-ROOT="${CLAUDE_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}"
+# 런타임 plugin root가 있으면 사용하고, 없으면 스크립트 위치 기준으로 자기 위치를 찾는다.
+ROOT="${CLAUDE_PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT:-$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)}}"
 SKILL_FILE="$ROOT/skills/using-autopilot/SKILL.md"
 
 # 스킬 본문이 없으면 조용히 통과(세션 시작을 막지 않는다).

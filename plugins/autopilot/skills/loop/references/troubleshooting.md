@@ -12,7 +12,7 @@
 
 ## driver halt 처리
 
-driver 가 객관 게이트 위반·claude streak 등으로 halt 하면 BLOCKED 신호는 만들지 않는다 — stderr 메시지 + 미커밋 변경 자동 stash + exit 1. 진단:
+driver 가 객관 게이트 위반·worker 비정상 exit streak 등으로 halt 하면 BLOCKED 신호는 만들지 않는다 — stderr 메시지 + 미커밋 변경 자동 stash + exit 1. 진단:
 - 최근 이터 로그(`.loop/iterations/<n>.log`)에서 원인 파악.
 - 작업 공간에서 `git stash list`, 필요 시 `git stash pop`.
 - 스펙(scope·verify) 조정 또는 노트(`.loop/notes.md`)에 메모 후 재시작.
