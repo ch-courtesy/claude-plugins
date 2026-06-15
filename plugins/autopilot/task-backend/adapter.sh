@@ -78,7 +78,7 @@ main() {
     init)     tb_init "$@";;
     selftest) tb_selftest;;
     backend)  tb_load_backend; jq -nc --arg b "$TB_BACKEND" '{backend:$b}';;
-    create_task|get_task|get_body|set_status|link_dependency|list_ready|append_log|materialize|renew_lease)
+    create_task|get_task|get_body|set_status|link_dependency|list_ready|append_log|materialize|renew_lease|claim)
       tb_load_backend; "be_$verb" "$@";;
     ""|-h|--help|help)
       cat >&2 <<'EOF'

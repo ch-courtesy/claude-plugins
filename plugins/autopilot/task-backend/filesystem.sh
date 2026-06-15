@@ -56,7 +56,9 @@ be_create_task() {
   local max=0 f n
   for f in "$(fs_tasks_dir)"/T-*.md; do
     [[ -e "$f" ]] || continue
-    n="$(basename "$f" .md)"; n="${n#T-}"; n="$((10#$n))"
+    n="$(basename "$f" .md)"
+    [[ "$n" =~ ^T-[0-9]+$ ]] || continue   # 비정상 파일명 방어(산술 확장 오류 방지)
+    n="${n#T-}"; n="$((10#$n))"
     (( n > max )) && max=$n
   done
   local id; id="$(printf 'T-%03d' "$((max+1))")"
@@ -93,6 +95,9 @@ be_get_body() {
     '{task_id:$id, title:$t, body:$b}'
 }
 
+fs_claim_dir() { printf '%s/.task-work/.claims' "$TB_ROOT"; }
+fs_release_claim() { rm -rf "$(fs_claim_dir)/$1" 2>/dev/null || true; }
+
 be_set_status() {
   local id s; id="$(_argval --task-id "$@")"; s="$(_argval --status "$@")"
   fs_exists "$id" || tb_die "set_status: 없음 $id"
@@ -102,7 +107,30 @@ be_set_status() {
     fs_fm_set "$f" lease_renewed_at "$(tb_now_epoch)"
     fs_fm_set "$f" lease_owner "$(_argval --owner "$@")"
   fi
+  # 종단 상태로 가면 claim 락 해제(다음 선점 허용)
+  case "$s" in done|blocked|cancelled) fs_release_claim "$id";; esac
   jq -nc --arg id "$id" --arg s "$s" '{task_id:$id, status:$s}'
+}
+
+# be_claim — 원자적 실행권 획득(중복 실행 방지). mkdir 은 원자적 CAS.
+#   현재 락이 있고 lease 가 신선하면 claimed:false(다른 실행자 점유). lease stale 면 탈취.
+be_claim() {
+  local id owner; id="$(_argval --task-id "$@")"; owner="$(_argval --owner "$@")"
+  fs_exists "$id" || tb_die "claim: 없음 $id"
+  local f lock now ttl; f="$(fs_file "$id")"; now="$(tb_now_epoch)"; ttl="${TB_LEASE_TTL:-300}"
+  mkdir -p "$(fs_claim_dir)"; lock="$(fs_claim_dir)/$id"
+  if ! mkdir "$lock" 2>/dev/null; then
+    local lr; lr="$(fs_fm_get "$f" lease_renewed_at)"
+    if [[ -n "$lr" ]] && (( now - lr <= ttl )); then
+      jq -nc --arg id "$id" '{task_id:$id, claimed:false}'; return 0   # 신선한 점유 — 양보
+    fi
+    # stale → 탈취(락 디렉토리는 이미 존재)
+  fi
+  printf '%s %s\n' "$owner" "$now" > "$lock/owner"
+  fs_fm_set "$f" status in_progress
+  fs_fm_set "$f" lease_renewed_at "$now"
+  fs_fm_set "$f" lease_owner "$owner"
+  jq -nc --arg id "$id" '{task_id:$id, claimed:true}'
 }
 
 be_link_dependency() {
@@ -121,7 +149,8 @@ be_list_ready() {
   local out="[]" f id st ready
   for f in "$(fs_tasks_dir)"/T-*.md; do
     [[ -e "$f" ]] || continue
-    id="$(basename "$f" .md)"; st="$(fs_fm_get "$f" status)"; ready=0
+    id="$(basename "$f" .md)"; [[ "$id" =~ ^T-[0-9]+$ ]] || continue
+    st="$(fs_fm_get "$f" status)"; ready=0
     case "$st" in
       backlog|in_design)
         ready=1

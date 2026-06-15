@@ -61,6 +61,20 @@ be_set_status() {
   jq -nc --arg id "$id" --arg s "$s" '{task_id:$id, status:$s}'
 }
 
+# be_claim — 실행권 획득. 주의: 공유 store(GitHub) 전반의 진정한 원자성은 원격 CAS 가 필요하며
+# v1 은 단일 호스트 범위다. 같은 호스트의 신선한 로컬 lease 가 있으면 양보(claimed:false).
+be_claim() {
+  local id owner; id="$(_argval --task-id "$@")"; owner="$(_argval --owner "$@")"
+  local s lf now ttl; s="$(gh_status_label "$id")"; lf="$(gh_lease_file "$id")"
+  now="$(tb_now_epoch)"; ttl="${TB_LEASE_TTL:-300}"
+  if [[ "$s" == "in_progress" && -f "$lf" ]]; then
+    local lr; lr="$(cat "$lf")"; (( now - lr <= ttl )) && { jq -nc --arg id "$id" '{task_id:$id, claimed:false}'; return 0; }
+  fi
+  be_set_status --task-id "$id" --status in_progress --owner "$owner" >/dev/null
+  mkdir -p "$(gh_lease_dir)"; printf '%s\n' "$now" > "$lf"
+  jq -nc --arg id "$id" '{task_id:$id, claimed:true}'
+}
+
 be_link_dependency() {
   local id dep; id="$(_argval --task-id "$@")"; dep="$(_argval --depends-on-id "$@")"
   local cur; cur="$(gh_deps "$id" | tr '\n' ',' | sed 's/,$//')"
@@ -85,8 +99,11 @@ be_list_ready() {
           [[ "$(gh_status_label "$d")" == "done" ]] || ready=0
         done < <(gh_deps "$id") ;;
       in_progress)
-        local lf lr; lf="$(gh_lease_file "$id")"; lr="$( [[ -f "$lf" ]] && cat "$lf" || echo 0 )"
-        (( now - lr > ttl )) && ready=1 ;;
+        # 로컬 lease 파일이 있을 때만 stale 회수. 파일이 없으면(다른 체크아웃/머신이 점유 중일 수
+        # 있음) 회수하지 않는다 — lr=0 폴백으로 실행 중 태스크를 즉시 중복 회수하던 버그 방지.
+        local lf; lf="$(gh_lease_file "$id")"
+        if [[ -f "$lf" ]]; then local lr; lr="$(cat "$lf")"; (( now - lr > ttl )) && ready=1; fi
+        ;;
     esac
     (( ready )) && out="$(printf '%s' "$out" | jq -c --arg id "$id" --arg t "$title" '. + [{task_id:$id, title:$t}]')"
   done < <(gh issue list $(gh_repo_args) --state open --json number,title -q '.[] | "\(.number)\t\(.title)"')

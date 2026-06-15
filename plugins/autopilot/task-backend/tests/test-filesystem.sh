@@ -43,4 +43,12 @@ c="$(bash "$A" create_task --title "C" --body "## 목표"$'\n'"씨" | jq -r .tas
 bash "$A" link_dependency --task-id "$b" --depends-on-id "$c" >/dev/null
 chk "link_dependency 추가" "$(bash "$A" get_task --task-id "$b" | jq -r '.depends_on | length')" "2"
 
+# 원자적 claim: 첫 획득 true, 신선 점유 중 재획득 false
+d="$(bash "$A" create_task --title D --body '## 목표'$'\n'디 | jq -r .task_id)"
+chk "claim 1회 true" "$(bash "$A" claim --task-id "$d" --owner w1 | jq -r .claimed)" "true"
+chk "claim 신선 점유 false" "$(bash "$A" claim --task-id "$d" --owner w2 | jq -r .claimed)" "false"
+chk "claim 후 in_progress" "$(bash "$A" get_task --task-id "$d" | jq -r .status)" "in_progress"
+bash "$A" set_status --task-id "$d" --status done >/dev/null
+[[ -d "$TMP/.task-work/.claims/$d" ]] && bad "done 시 claim 해제" || ok "done 시 claim 해제"
+
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail

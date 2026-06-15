@@ -41,14 +41,24 @@ et_start() {
   [[ -n "$sp" && "$sp" != null ]] || die "materialize 실패: $id"
 
   local owner; owner="$(hostname 2>/dev/null || echo host)-$$"
+
+  # 원자적 실행권 획득(중복 실행 방지). 이미 다른 실행자가 점유 중이면 조용히 skip(에러 아님).
+  local claimed; claimed="$($ADAPTER_CMD claim --task-id "$id" --owner "$owner" | jq -r '.claimed // false')"
+  if [[ "$claimed" != "true" ]]; then echo "execute-task: 이미 다른 실행자가 점유 — skip ($id)"; return 0; fi
+
   # reclaim: 죽은 워커 잔재 정리(있으면) — loop 가 notes/worktree 로 이어받음
   $LOOP_CMD cleanup "$sp" --force >/dev/null 2>&1 || true
 
-  $ADAPTER_CMD set_status --task-id "$id" --status in_progress --owner "$owner" >/dev/null
-
-  # 백그라운드 heartbeat (lease 갱신)
-  ( while true; do $ADAPTER_CMD renew_lease --task-id "$id" --owner "$owner" >/dev/null 2>&1 || true
-      sleep "$HEARTBEAT_INTERVAL"; done ) &
+  # 백그라운드 heartbeat (lease 갱신). 연속 실패 시 lease 를 잃어 이중 실행 위험 → fail-fast 로 메인 중단.
+  ( fail=0
+    while true; do
+      if $ADAPTER_CMD renew_lease --task-id "$id" --owner "$owner" >/dev/null 2>&1; then fail=0
+      else fail=$((fail+1)); if (( fail >= 3 )); then
+        echo "execute-task: heartbeat lease 갱신 연속 실패 — 작업 중단($id)" >&2
+        kill -TERM $$ 2>/dev/null || true; exit 1
+      fi; fi
+      sleep "$HEARTBEAT_INTERVAL"
+    done ) &
   HB_PID=$!
 
   # 구현 (포그라운드 블로킹)
@@ -56,7 +66,8 @@ et_start() {
 
   # 분류
   local sj signals; sj="$($LOOP_CMD status --json "$sp" 2>/dev/null || echo '{}')"
-  signals="$(printf '%s' "$sj" | yq -r '.signals[]?' 2>/dev/null || true)"
+  # loop status --json 은 JSON 계약 → 필수 의존성 jq 로 읽는다(미선언 yq 회피).
+  signals="$(printf '%s' "$sj" | jq -r '.signals[]?' 2>/dev/null || true)"
   if printf '%s\n' "$signals" | grep -Fxq BLOCKED; then
     $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "loop BLOCKED" >/dev/null
     $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "loop BLOCKED" >/dev/null

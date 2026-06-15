@@ -56,11 +56,42 @@ be_link_dependency() {
   jq -nc --arg id "$id" --argjson d "$djson" '{task_id:$id, depends_on:$d}'
 }
 
+# bd_last_lease <id> — notes 의 마지막 "[lease] <epoch>" 값(없으면 0). (가정한 notes 스키마: .notes[].text)
+bd_last_lease() {
+  bd show "$1" --json 2>/dev/null \
+    | jq -r '[.notes[]? | (.text // .) | select(type=="string" and startswith("[lease] ")) | (ltrimstr("[lease] ")|tonumber?)] | max // 0' 2>/dev/null \
+    || echo 0
+}
+
 be_list_ready() {
-  # bd ready 가 의존 충족분을 반환. stale-lease in_progress 회수는 note 의 마지막 [lease] epoch 로 판정.
   local now ttl; now="$(tb_now_epoch)"; ttl="${TB_LEASE_TTL:-300}"
-  bd ready --json 2>/dev/null | jq -c '[.[] | {task_id:.id, title:.title}]' || echo '[]'
-  # NOTE: stale-lease in_progress 회수는 bd note 파싱이 필요 — bd 실환경에서 보강.
+  # 1) 의존 충족분(bd ready)
+  local base; base="$(bd ready --json 2>/dev/null | jq -c '[.[] | {task_id:.id, title:.title}]' 2>/dev/null || echo '[]')"
+  # 2) stale-lease in_progress 회수 (계약: 모든 백엔드가 회수)
+  local stale="[]" id last title
+  while IFS= read -r id; do
+    [[ -z "$id" ]] && continue
+    last="$(bd_last_lease "$id")"; [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    if (( now - last > ttl )); then
+      title="$(bd show "$id" --json 2>/dev/null | jq -r '.title // ""')"
+      stale="$(printf '%s' "$stale" | jq -c --arg id "$id" --arg t "$title" '. + [{task_id:$id, title:$t}]')"
+    fi
+  done < <(bd list --status in_progress --json 2>/dev/null | jq -r '.[].id' 2>/dev/null)
+  jq -cn --argjson a "$base" --argjson b "$stale" '($a + $b) | unique_by(.task_id)'
+}
+
+# be_claim — 실행권 획득(best-effort). 신선한 lease 의 in_progress 면 양보. 진정한 원자성은 bd 측 CAS 필요.
+be_claim() {
+  local id owner; id="$(_argval --task-id "$@")"; owner="$(_argval --owner "$@")"
+  local now ttl s; now="$(tb_now_epoch)"; ttl="${TB_LEASE_TTL:-300}"
+  s="$(bd show "$id" --json 2>/dev/null | jq -r '.status // ""')"
+  if [[ "$s" == "in_progress" ]]; then
+    local last; last="$(bd_last_lease "$id")"; [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    (( now - last <= ttl )) && { jq -nc --arg id "$id" '{task_id:$id, claimed:false}'; return 0; }
+  fi
+  bd update "$id" --status in_progress >/dev/null 2>&1 || tb_die "bd update 실패"
+  bd note add "$id" "[lease] $now" >/dev/null 2>&1 || true
+  jq -nc --arg id "$id" '{task_id:$id, claimed:true}'
 }
 
 be_append_log() {

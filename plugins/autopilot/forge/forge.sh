@@ -15,10 +15,13 @@ fg_die() { echo "forge: $*" >&2; exit 1; }
 # 감지: cwd 의 git origin 으로 호스트 분류
 fg_host() {
   local url; url="$(git remote get-url origin 2>/dev/null || true)"
-  if   [[ -z "$url" ]];            then echo direct
-  elif [[ "$url" == *github.com* ]]; then echo github
-  elif [[ "$url" == *gitlab* ]];     then echo gitlab
-  else echo direct; fi
+  case "$url" in
+    "")                              echo direct;;
+    *github.com*)                    echo github;;
+    # gitlab.com 또는 gitlab.* 호스트만 — `my-gitlab-backup.example.com` 같은 오탐 회피
+    *gitlab.com*|*://gitlab.*|*@gitlab.*) echo gitlab;;
+    *)                               echo direct;;
+  esac
 }
 
 fg_load() {
@@ -26,8 +29,9 @@ fg_load() {
   local impl="$FG_DIR/$host.sh"
   [[ -f "$impl" ]] || fg_die "forge 구현 없음: $impl"
   FG_HOST="$host"
-  # 재사용할 dispatch 워커 헬퍼 경로 (런타임 재사용)
-  FG_REF="$(git rev-parse --show-toplevel)/plugins/autopilot/skills/dispatch/references"
+  # 재사용할 dispatch 워커 헬퍼 경로 — **스크립트 위치 기준**으로 계산(설치형 플러그인 호환).
+  # 소비 프로젝트 git 루트 아래를 가정하지 않는다(forge/ 의 형제 skills/dispatch/references).
+  FG_REF="$(cd "$FG_DIR/../skills/dispatch/references" && pwd)"
   # shellcheck disable=SC1090
   source "$impl"
 }

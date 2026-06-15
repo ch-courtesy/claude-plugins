@@ -103,8 +103,22 @@ DoD 확인 방법(테스트·관찰 지표·수동 단계).
 | `append_log` | `--task-id <id> --marker decision|handoff|blocked --text <s>` | `{"task_id","logged":true}` |
 | `materialize` | `--task-id <id>` | `{"task_id","spec_path"}` (`.task-work/<id>/SPEC.md`) |
 | `renew_lease` | `--task-id <id> [--owner <s>]` | `{"task_id","lease_renewed_at"}` |
+| `claim` | `--task-id <id> --owner <s>` | `{"task_id","claimed":true|false}` |
 
 관리 동사: `init`(config 생성/갱신), `selftest`(계약 자체 검증), `backend`(현재 백엔드 출력).
+
+### claim (원자적 실행권 획득 — 중복 실행 방지)
+
+`list_ready` 조회와 in_progress 전이 사이의 경쟁으로 같은 태스크가 이중 실행되는 것을 막기 위해, 실행자는
+구현 시작 **전에 `claim` 으로 원자적으로 실행권을 획득**한다(단순 `set_status in_progress` 금지). 성공 시
+`claimed:true`(+ status를 in_progress로 전이, lease 초기화), 이미 신선한 lease로 점유 중이면 `claimed:false`
+(실행자는 조용히 skip). lease가 **stale**이면 탈취한다(크래시 워커 회수).
+
+- **filesystem**: `.task-work/.claims/<id>` 디렉토리 `mkdir`(원자적 CAS)로 게이트. 종단 상태(done/blocked/
+  cancelled) 전이 시 자동 해제.
+- **github-project/beads**: 공유 store 전반의 진정한 원자성은 원격 CAS가 필요하며 v1은 **단일 호스트 범위**의
+  best-effort(현재 상태+lease 확인 후 전이). github의 stale 회수는 **로컬 lease 미러가 존재하고 stale일 때만**
+  수행한다(미러 부재 시 회수하지 않음 — 타 체크아웃의 실행 중 태스크 오회수 방지).
 
 ## 백엔드별 저장 레이아웃 (플러그인 소유)
 
