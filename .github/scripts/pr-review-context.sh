@@ -71,19 +71,36 @@ gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" \
 # finding as active blocking and never reaches approve. Each thread's first comment
 # body carries the reviewer's hidden `fingerprint=` marker, so the model can map its
 # own findings to GitHub's resolution state by fingerprint. Non-fatal on failure.
-gh api graphql -F owner="${GITHUB_REPOSITORY%/*}" -F name="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER" -f query='
-  query($owner:String!,$name:String!,$pr:Int!){
-    repository(owner:$owner,name:$name){
-      pullRequest(number:$pr){
-        reviewThreads(first:100){ nodes{
-          isResolved isOutdated
-          comments(first:1){ nodes{ databaseId author{login} body } } } } } } }' \
-  --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | {
-          isResolved, isOutdated,
-          comment_id: (.comments.nodes[0].databaseId),
-          author: (.comments.nodes[0].author.login // null),
-          body: (.comments.nodes[0].body // "") }]' \
-  > "$REVIEW_OUTPUT_DIR/review-threads.json" 2>/dev/null \
+# Paginate ALL review threads — GraphQL caps reviewThreads at 100/page. A PR with
+# >100 threads would otherwise drop resolution state for the remainder, leaving those
+# resolved findings invisible (REST review-comments has them, but no isResolved) and
+# reintroducing the same approve-block this change fixes. Walk pageInfo.endCursor.
+collect_review_threads() {
+  local cursor="" acc="[]" resp page has args
+  while :; do
+    args=(-f owner="${GITHUB_REPOSITORY%/*}" -f name="${GITHUB_REPOSITORY#*/}" -F pr="$PR_NUMBER")
+    if [ -n "$cursor" ]; then args+=(-f cursor="$cursor"); fi
+    resp="$(gh api graphql "${args[@]}" -f query='
+      query($owner:String!,$name:String!,$pr:Int!,$cursor:String){
+        repository(owner:$owner,name:$name){
+          pullRequest(number:$pr){
+            reviewThreads(first:100, after:$cursor){
+              pageInfo{ hasNextPage endCursor }
+              nodes{ isResolved isOutdated
+                comments(first:1){ nodes{ databaseId author{login} body } } } } } } }')" || return 1
+    page="$(printf '%s' "$resp" | jq -c '[.data.repository.pullRequest.reviewThreads.nodes[] | {
+              isResolved, isOutdated,
+              comment_id: (.comments.nodes[0].databaseId),
+              author: (.comments.nodes[0].author.login // null),
+              body: (.comments.nodes[0].body // "") }]')" || return 1
+    acc="$(jq -cn --argjson a "$acc" --argjson b "$page" '$a + $b')" || return 1
+    has="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
+    cursor="$(printf '%s' "$resp" | jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')"
+    [ "$has" = "true" ] || break
+  done
+  printf '%s\n' "$acc"
+}
+collect_review_threads > "$REVIEW_OUTPUT_DIR/review-threads.json" 2>/dev/null \
   || echo '[]' > "$REVIEW_OUTPUT_DIR/review-threads.json"
 
 case "$mode" in
