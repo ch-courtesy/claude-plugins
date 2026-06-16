@@ -101,6 +101,22 @@ run_poll "$id" NO_PR=1 APPROVAL_CHECK_CMD="bash $TMP/bin/approve" APPROVE_COUNTE
 chk "(e) direct 경로 → done(폴링 미적용)" "$(status_of "$id")" "done"
 chk "(e) direct 경로 승인 폴링 미호출" "$(cat "$cnt" 2>/dev/null || echo 0)" "0"
 
+# (g) 비숫자 APPROVAL_WAIT_MAX override → 기본값(360)으로 보정돼 폴링이 즉시 오종료하지 않음.
+#   보정 전: (( waited >= abc )) 가 0>=0 으로 평가돼 1회 확인 후 즉시 break(blocked) → 오종료.
+#   보정 후: 360 으로 보정, interval=200 → 0,200,400 누적으로 3회 확인 후 blocked.
+id="$(newtask G)"; cnt="$TMP/cntG"; : > "$cnt"
+run_poll "$id" APPROVAL_CHECK_CMD="bash $TMP/bin/approve" APPROVE_COUNTER="$cnt" \
+  APPROVAL_WAIT_MAX=abc APPROVAL_POLL_INTERVAL=200 SLEEP_CMD=: >/dev/null 2>&1 || true
+chk "(g) 비숫자 상한 → 기본값 보정 후 blocked" "$(status_of "$id")" "blocked"
+chk "(g) 비숫자 상한 보정(360/200→3회)" "$(cat "$cnt")" "3"
+
+# (h) 빈 APPROVAL_WAIT_MAX override 도 무한 멈춤 없이 정상 종료(기본값 동작) — timeout 가드.
+id="$(newtask H)"; cnt="$TMP/cntH"; : > "$cnt"
+timeout 20 env ADAPTER_CMD="bash $ADAPTER" LOOP_CMD="bash $TMP/bin/loop" FORGE_CMD="bash $TMP/bin/forge" \
+  HEARTBEAT_INTERVAL=1 MOCK_RESULT=DONE APPROVAL_CHECK_CMD="bash $TMP/bin/approve" APPROVE_COUNTER="$cnt" \
+  APPROVAL_WAIT_MAX= APPROVAL_POLL_INTERVAL=200 SLEEP_CMD=: bash "$ET" start "$id" >/dev/null 2>&1 || true
+chk "(h) 빈 상한 → 무한 멈춤 없이 blocked" "$(status_of "$id")" "blocked"
+
 # (f) merge.sh mg_approval_gate 는 단발 검사(sleep/loop 없음) 유지
 gate="$(awk '/^mg_approval_gate\(\)/{f=1} f{print} f&&/^}/{if(NR>1)exit}' "$MERGE")"
 if printf '%s' "$gate" | grep -qE 'sleep|while|[^a-z]for[^a-z]'; then bad "(f) merge gate 단발 유지(폴링 없음)"; else ok "(f) merge gate 단발 유지(폴링 없음)"; fi

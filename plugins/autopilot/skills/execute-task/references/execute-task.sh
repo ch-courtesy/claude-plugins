@@ -123,6 +123,10 @@ et_start() {
     #   쓰지 않는다 — 단순 0 반환을 승인으로 오해하지 않음), 승인 여부는 실제 PR 승인 상태
     #   ($APPROVAL_CHECK_CMD)로 직접 확인한다. 상한까지 미게시일 때만 blocked 로 종착한다.
     case "$APPROVAL_POLL_INTERVAL" in ''|*[!0-9]*|0) APPROVAL_POLL_INTERVAL=1;; esac
+    # 비숫자/빈값 상한은 산술 비교((( waited >= MAX )))를 0>=0 으로 망가뜨려 즉시 오종료(또는
+    # 빈값 시 무한 멈춤)시키므로 기본값(360)으로 보정한다. 0 은 "대기 없이 1회 확인"으로 안전히
+    # 허용한다(간격과 달리 0 이어도 영구 멈춤이 없다 — 첫 확인 후 0>=0 으로 정상 종료).
+    case "$APPROVAL_WAIT_MAX" in ''|*[!0-9]*) APPROVAL_WAIT_MAX=360;; esac
     local waited=0 rounds=0
     while true; do
       rounds=$((rounds+1))
