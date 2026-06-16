@@ -51,6 +51,8 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
 한다. `.autopilot/` 는 워치 디렉토리(=`plugins/`)가 아니므로 이 config PR 엔 plugin.json 범프를 넣지 않는다.
 머지 진행 상황은 사용자에게 보고하되, 자율 오케스트레이터 맥락에선 별도 사용자 프롬프트 없이 진행한다.
 
+헬퍼는 한 줄 JSON `{status}`를 반환한다 — `persisted`(메인 머지/auto-merge 예약 확인) 또는 `skip`(이미 추적, 멱등)이면 성공이다. `pending`(gh 미가용 — 브랜치만 push) · `pr_created`(PR 은 생성됐으나 auto-merge 예약 실패)는 **메인 영속화 미완**(exit 3)이므로, 그 사실과 수동 완료가 필요함을 사용자에게 보고한다(메인 영속화가 확인되지 않았는데 완료로 보고하지 않는다).
+
 ## 워크플로
 
 호출 시 단계를 TodoWrite로 등록한다. 모든 결정·승인은 `AskUserQuestion`으로 받는다(자유 텍스트 질문 종결구 금지).
