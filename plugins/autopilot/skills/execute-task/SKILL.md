@@ -7,6 +7,9 @@ allowed-tools:
   - Bash(bash * forge.sh:*)
   - Bash(bash * loop.sh:*)
   - Bash(git rev-parse:*)
+  - Bash(git add:*)
+  - Bash(git status:*)
+  - Bash(tail:*)
   - Read
 ---
 

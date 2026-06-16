@@ -7,6 +7,12 @@ allowed-tools:
   - Write
   - Bash(bash * adapter.sh:*)
   - Bash(git rev-parse:*)
+  - Bash(git log:*)
+  - Bash(ls:*)
+  - Bash(git remote:*)
+  - Bash(gh:*)
+  - Bash(python3:*)
+  - Bash(cat:*)
 ---
 
 # create-task
