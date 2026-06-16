@@ -95,4 +95,21 @@ rc6=0; out6="$(cd "$R6/r" && PBC_GH="$R6/gh" bash "$H" 2>/dev/null)" || rc6=$?
 chk "6: 머지 성공 status persisted" "$(printf '%s' "$out6" | jq -r .status)" "persisted"
 chk "6: 머지 성공 exit 0" "$rc6" "0"
 
+# --- 시나리오 7: gh 있음 + PR 생성·조회 모두 실패(빈 PR_URL) → pending(pr_created 아님), exit 3 ---
+R7="$(mktemp -d)"; mkrepo_origin "$R7/r" "$R7/origin.git"
+mkdir -p "$R7/r/.autopilot"; printf '%s\n' "$CFG" > "$R7/r/.autopilot/task-backend.json"
+cat > "$R7/gh" <<'EOF'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "pr create") exit 1;;   # 생성 실패
+  "pr view")   exit 1;;   # 조회도 실패 → PR_URL 빈 값
+  "pr merge")  exit 0;;
+esac
+exit 0
+EOF
+chmod +x "$R7/gh"
+rc7=0; out7="$(cd "$R7/r" && PBC_GH="$R7/gh" bash "$H" 2>/dev/null)" || rc7=$?
+chk "7: PR 생성 실패 status pending" "$(printf '%s' "$out7" | jq -r .status)" "pending"
+chk "7: PR 생성 실패 exit 3" "$rc7" "3"
+
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || { echo "FAILURES present"; exit 1; }

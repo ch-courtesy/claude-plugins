@@ -96,6 +96,14 @@ if [[ -n "$ORIGIN_URL" ]]; then
             --body "백엔드 선택 SoT(\`$PBC_REL\`)를 메인에 영속화. config 파일 단독 변경." \
             2>/dev/null || "$PBC_GH" pr view "$PBC_BRANCH" --json url -q .url 2>/dev/null || true)"
 
+  # PR 생성·조회가 모두 실패(빈 PR_URL)면 PR 자체가 없는 것 — pr_created 가 아니라 pending.
+  if [[ -z "$PR_URL" ]]; then
+    jq -nc --arg br "$PBC_BRANCH" --arg base "$DEFAULT_BRANCH" \
+      '{status:"pending", path:"'"$PBC_REL"'", branch:$br, base:$base,
+        note:"PR 생성 실패(gh pr create·view 실패) — 브랜치만 push됨. PR 생성·메인 머지를 수동 완료 필요."}'
+    exit 3
+  fi
+
   # auto-merge 예약(또는 즉시 머지) 성공 여부를 추적 — 실패를 || true 로 삼키지 않는다.
   MERGE_OK=0
   if "$PBC_GH" pr merge "$PBC_BRANCH" --auto --merge 2>/dev/null; then MERGE_OK=1
