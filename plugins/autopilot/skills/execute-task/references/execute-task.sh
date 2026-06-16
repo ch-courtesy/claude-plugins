@@ -21,8 +21,34 @@ FORGE_CMD="${FORGE_CMD:-bash $PLUGIN/forge/forge.sh}"
 LOOP_CMD="${LOOP_CMD:-bash $PLUGIN/skills/loop/references/loop.sh}"
 HEARTBEAT_INTERVAL="${HEARTBEAT_INTERVAL:-60}"
 REVIEW_MAX="${REVIEW_MAX:-5}"
+# 비동기 호스팅 리뷰 봇 승인 폴링(PR 경로). 봇 승인 게시 지연(관측 ~2.5분)을 상한 내에서 대기.
+APPROVAL_WAIT_MAX="${APPROVAL_WAIT_MAX:-360}"          # 총 대기 상한(초, 논리 누적)
+APPROVAL_POLL_INTERVAL="${APPROVAL_POLL_INTERVAL:-20}" # 폴링 간격(초)
+APPROVAL_CHECK_CMD="${APPROVAL_CHECK_CMD:-et_approval_gh}"  # <pr> → 승인이면 rc0 (mock 치환 가능)
+SLEEP_CMD="${SLEEP_CMD:-sleep}"                        # 폴링 sleep (테스트 no-op 치환 가능)
+# 신뢰 봇 로그인(.github/workflows/{codex,claude}-review.yml 컨벤션) — merge.sh mg_approval_gh 와 동일.
+REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtesy-bot)}"
 
 die() { echo "execute-task: $*" >&2; exit 1; }
+
+# et_approval_gh <pr> — PR 호스팅 리뷰가 승인 상태면 0, 아니면 1.
+#   승인 신호 두 가지(merge.sh mg_approval_gh / review-loop rl_review_fetch_gh 와 동일 컨벤션):
+#     (a) 공식 APPROVE 리뷰 → reviewDecision==APPROVED.
+#     (b) App 토큰 self-approve 불가로 APPROVE→COMMENT 강등된 신뢰 봇의 현재 head verdict=approve 마커.
+#   머지 직전 merge.sh 의 단발 승인 게이트(미해결 [blocking] 인라인 가산 차단 포함)가 재검증한다.
+et_approval_gh() {
+  local pr="$1" decision head
+  [[ -n "$pr" ]] || return 1
+  command -v gh >/dev/null 2>&1 || return 1
+  decision="$(gh pr view "$pr" --json reviewDecision --jq '.reviewDecision' 2>/dev/null)"
+  [[ "$decision" == "APPROVED" ]] && return 0
+  head="$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)"
+  [[ -n "$head" ]] || return 1
+  gh pr view "$pr" --json reviews \
+       --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
+     | grep -E "$REVIEW_BOT_LOGINS_RE" \
+     | grep -qE "head_sha=${head}[^>]*verdict=approve"
+}
 
 HB_PID=""
 cleanup_hb() { [[ -n "${HB_PID:-}" ]] && kill "$HB_PID" 2>/dev/null || true; }
@@ -90,16 +116,40 @@ et_start() {
   branch="$(printf '%s' "$iout" | sed -n 's/^branch:[[:space:]]*//p' | head -1)"
   pr="$(printf '%s' "$iout" | sed -n 's/^pr:[[:space:]]*//p' | head -1)"
 
-  local n=0 approved=0
-  while (( n < REVIEW_MAX )); do
-    n=$((n+1))
-    if $FORGE_CMD review "$run_dir" "$key" "$sp" "$pr" "$branch"; then approved=1; break; fi
-    # 비-0: 재작업/대기/에스컬레이션 — review-loop 내부 가드가 재구현/판정. 한 라운드 더 시도.
-  done
-  if (( ! approved )); then
-    $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 미승인(에스컬레이션/가드)" >/dev/null
-    $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 미승인 ($n 라운드)" >/dev/null
-    return 1
+  local approved=0
+  if [[ -n "$pr" ]]; then
+    # PR(forge) 경로: 비동기 호스팅 리뷰 봇 승인을 상한 내에서 sleep+폴링으로 기다린다.
+    #   review 라운드는 재작업/대기/에스컬레이션을 내부 가드로 처리하되(반환코드는 승인 판정에
+    #   쓰지 않는다 — 단순 0 반환을 승인으로 오해하지 않음), 승인 여부는 실제 PR 승인 상태
+    #   ($APPROVAL_CHECK_CMD)로 직접 확인한다. 상한까지 미게시일 때만 blocked 로 종착한다.
+    case "$APPROVAL_POLL_INTERVAL" in ''|*[!0-9]*|0) APPROVAL_POLL_INTERVAL=1;; esac
+    local waited=0 rounds=0
+    while true; do
+      rounds=$((rounds+1))
+      $FORGE_CMD review "$run_dir" "$key" "$sp" "$pr" "$branch" || true
+      if $APPROVAL_CHECK_CMD "$pr"; then approved=1; break; fi
+      (( waited >= APPROVAL_WAIT_MAX )) && break
+      $SLEEP_CMD "$APPROVAL_POLL_INTERVAL"
+      waited=$((waited + APPROVAL_POLL_INTERVAL))
+    done
+    if (( ! approved )); then
+      $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 미승인(승인 폴링 상한 ${APPROVAL_WAIT_MAX}s 초과)" >/dev/null
+      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 승인 미게시 — 폴링 상한 초과($rounds 회 확인)" >/dev/null
+      return 1
+    fi
+  else
+    # direct(PR 없음) 경로: 로컬 동기 리뷰 — 비동기 승인 대기 불필요(기존 동작 보존).
+    local n=0
+    while (( n < REVIEW_MAX )); do
+      n=$((n+1))
+      if $FORGE_CMD review "$run_dir" "$key" "$sp" "$pr" "$branch"; then approved=1; break; fi
+      # 비-0: 재작업/대기/에스컬레이션 — review-loop 내부 가드가 재구현/판정. 한 라운드 더 시도.
+    done
+    if (( ! approved )); then
+      $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 미승인(에스컬레이션/가드)" >/dev/null
+      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 미승인 ($n 라운드)" >/dev/null
+      return 1
+    fi
   fi
 
   if $FORGE_CMD merge "$sp" "$run_dir" "$key" "$pr"; then
