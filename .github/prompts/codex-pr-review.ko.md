@@ -82,6 +82,7 @@
 - 기존 Codex finding과 같은 문제를 반복하지 않습니다.
 - 기존 Codex(자신) self inline thread의 hidden marker에는 그 finding의 fingerprint가 들어 있습니다. 현재 변경에서 그 thread의 문제가 해결되었다고 판단되면, 해당 marker의 fingerprint를 근거로 resolved_threads에 그 fingerprint와 reason을 기록합니다.
 - 아직 해결되지 않은 기존 Codex self thread는 unresolved_threads에 남은 문제를 구체적으로 기록합니다.
+- **이미 GitHub에서 resolved된 self thread는 해소된 것으로 간주합니다.** `review-threads.json`에서 `isResolved: true`인 thread의 `body`에 담긴 self 마커 fingerprint는, **현재 증분 diff가 그 파일을 건드리지 않았더라도** active blocking으로 세지 않고 unresolved_threads에 넣지 않습니다(이전 증분 또는 관리자가 이미 해소). 그 fingerprint는 resolved_threads에 reason="GitHub에서 이미 resolved됨"으로 기록합니다. 즉 resolve 판단은 현재 증분뿐 아니라 GitHub thread 상태도 근거로 합니다.
 - 다른 리뷰어가 만든 thread/comment는 resolve하거나 수정하지 않습니다.
 - Codex가 만든 thread/comment만 관리합니다.
 
