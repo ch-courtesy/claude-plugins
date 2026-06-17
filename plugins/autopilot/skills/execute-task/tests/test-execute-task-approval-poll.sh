@@ -61,8 +61,10 @@ chmod +x bin/sleeprec
 status_of(){ bash "$ADAPTER" get_task --task-id "$1" | jq -r .status; }
 newtask(){ bash "$ADAPTER" create_task --title "$1" --body '## 목표'$'\n'x | jq -r .task_id; }
 run_poll() { local id="$1"; shift
+  # BLOCKING_CHECK_CMD=:(clear) 로 미해결-[blocking] 가산 게이트를 중립화 — 이 파일은 승인 폴링만
+  # 검증한다. blocking 가산 차단은 test-execute-task-blocking-gate.sh 가 별도로 다룬다.
   env ADAPTER_CMD="bash $ADAPTER" LOOP_CMD="bash $TMP/bin/loop" FORGE_CMD="bash $TMP/bin/forge" \
-      HEARTBEAT_INTERVAL=1 MOCK_RESULT=DONE "$@" bash "$ET" start "$id"
+      HEARTBEAT_INTERVAL=1 MOCK_RESULT=DONE BLOCKING_CHECK_CMD=: "$@" bash "$ET" start "$id"
 }
 
 # (a) 미승인 후 폴링하다 3번째 확인에서 APPROVED → 대기 후 머지·done
@@ -113,7 +115,7 @@ chk "(g) 비숫자 상한 보정(360/200→3회)" "$(cat "$cnt")" "3"
 # (h) 빈 APPROVAL_WAIT_MAX override 도 무한 멈춤 없이 정상 종료(기본값 동작) — timeout 가드.
 id="$(newtask H)"; cnt="$TMP/cntH"; : > "$cnt"
 timeout 20 env ADAPTER_CMD="bash $ADAPTER" LOOP_CMD="bash $TMP/bin/loop" FORGE_CMD="bash $TMP/bin/forge" \
-  HEARTBEAT_INTERVAL=1 MOCK_RESULT=DONE APPROVAL_CHECK_CMD="bash $TMP/bin/approve" APPROVE_COUNTER="$cnt" \
+  HEARTBEAT_INTERVAL=1 MOCK_RESULT=DONE BLOCKING_CHECK_CMD=: APPROVAL_CHECK_CMD="bash $TMP/bin/approve" APPROVE_COUNTER="$cnt" \
   APPROVAL_WAIT_MAX= APPROVAL_POLL_INTERVAL=200 SLEEP_CMD=: bash "$ET" start "$id" >/dev/null 2>&1 || true
 chk "(h) 빈 상한 → 무한 멈춤 없이 blocked" "$(status_of "$id")" "blocked"
 
