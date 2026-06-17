@@ -1,6 +1,6 @@
 {
   "name": "autopilot",
-  "version": "0.48.4",
+  "version": "0.48.5",
   "description": "자율 수행 루프(랄프 루프) 운영 인터페이스. spec/repair/loop/dispatch/review/flow 6-skill family — spec으로 기능 의도에서 SPEC 작성, repair로 버그·증상·실패 테스트를 정적 분석 진단해 수정용 SPEC 작성(spec 자산 재사용·진단 섹션 추가), loop으로 스펙 파일 기반 로컬 자율 실행, dispatch로 준비된 SPEC당 서브에이전트가 한 컨텍스트에서 구현(loop)·리뷰(review)·머지를 소유하는 모델 주도 오케스트레이션(dispatch는 의존성·웨이브·동시성·실패 격리만 총괄, 머지=done이면 의존자 해제; forge 백엔드 가용이면 PR 적대 리뷰→가용 토큰 ff-only 머지(분리 승인 신원 불필요), 미가용이면 로컬 적대 리뷰→ff-only 직접 머지; 대상 브랜치 --target-branch), review로 변경을 다관점 리뷰해 머신리더블 판정·재작업 브리프 생산, flow로 내장 dynamic Workflow 미가용 시 Python 표준 라이브러리만으로 임의 depends_on DAG를 스트리밍 fan-out·동시성 상한·실패 이행 격리·저널 resume으로 구동. 추가로 태스크 중심 3-skill family(create-task/execute-task/workflow-task) — create-task로 의도를 태스크 백엔드(filesystem/github-project/beads)에 등록(본문=SPEC), execute-task로 단일 태스크 전체 생애(구현→리뷰→머지→done, origin 호스트별 PR/MR/로컬), workflow-task로 준비된 태스크를 무인 자동 실행하는 DAG 없는 1회 드레인. 플러그인 자기완결(프로젝트 rules 비의존), 검증된 엔진(loop/forge 워커 헬퍼/flow)은 런타임 재사용.",
   "author": {
     "name": "예의상",

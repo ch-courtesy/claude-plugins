@@ -166,30 +166,41 @@ et_start() {
 
   local approved=0
   if [[ -n "$pr" ]]; then
-    # PR(forge) 경로: 비동기 호스팅 리뷰 봇 승인을 상한 내에서 sleep+폴링으로 기다린다.
-    #   review 라운드는 재작업/대기/에스컬레이션을 내부 가드로 처리하되(반환코드는 승인 판정에
-    #   쓰지 않는다 — 단순 0 반환을 승인으로 오해하지 않음), 승인 여부는 실제 PR 승인 상태
-    #   ($APPROVAL_CHECK_CMD)로 직접 확인한다. 상한까지 미게시일 때만 blocked 로 종착한다.
+    # PR(forge) 경로: review 라운드(=rl_round, $FORGE_CMD review)의 반환코드로 분기한다(#426).
+    #   리워크로 진전 가능 → 진행 / 진전 불가 → 빠른 실패 / 깨끗+비동기 승인 대기만 → 폴링 유지.
+    #   반환코드 계약(dispatch review-loop.sh rl_round, 소비만 — 변경 없음):
+    #     30 = approve         → 머지 진행(merge.sh 가 미해결 [blocking] 가산 게이트를 머지 직전 재검증).
+    #     0  = 재작업 재푸시(진전) → 새 head 가 올라갔으니 재리뷰 위해 루프 계속(무의미 대기 아님).
+    #     10 = 에스컬레이션/라운드상한/핑퐁(진전 불가) → 폴링 상한 더 안 기다리고 즉시 blocked.
+    #     20 = 할 일 없음(깨끗한 코드가 비동기 봇 승인만 대기) → 기존 APPROVAL_WAIT_MAX 폴링 유지(#419).
+    #          이때만 폴링이 의미: 승인 = 호스팅 승인 신호 AND 현재 head 미해결 [blocking] 인라인 없음.
+    #     기타 비-0 = 미정의 신호 → 보수적 즉시 blocked(default-deny). rl_round 미경유 호출은 없다.
     case "$APPROVAL_POLL_INTERVAL" in ''|*[!0-9]*|0) APPROVAL_POLL_INTERVAL=1;; esac
     # 비숫자/빈값 상한은 산술 비교((( waited >= MAX )))를 0>=0 으로 망가뜨려 즉시 오종료(또는
     # 빈값 시 무한 멈춤)시키므로 기본값(360)으로 보정한다. 0 은 "대기 없이 1회 확인"으로 안전히
     # 허용한다(간격과 달리 0 이어도 영구 멈춤이 없다 — 첫 확인 후 0>=0 으로 정상 종료).
     case "$APPROVAL_WAIT_MAX" in ''|*[!0-9]*) APPROVAL_WAIT_MAX=360;; esac
-    local waited=0 rounds=0
+    local waited=0 rounds=0 rrc
     while true; do
       rounds=$((rounds+1))
-      $FORGE_CMD review "$run_dir" "$key" "$sp" "$pr" "$branch" || true
-      # 승인 = 호스팅 승인 신호 AND 현재 head 미해결 [blocking] 인라인 없음(가산 차단).
-      #   APPROVED 여도 신뢰봇 미해결 [blocking] 가 있으면 머지하지 않고 resolved(또는 head 변경
-      #   해소)될 때까지 상한 내에서 폴링 대기한다. 게이트는 스레드를 스스로 resolve 하지 않는다.
-      if $APPROVAL_CHECK_CMD "$pr" && $BLOCKING_CHECK_CMD "$pr"; then approved=1; break; fi
-      (( waited >= APPROVAL_WAIT_MAX )) && break
-      $SLEEP_CMD "$APPROVAL_POLL_INTERVAL"
-      waited=$((waited + APPROVAL_POLL_INTERVAL))
+      rrc=0; $FORGE_CMD review "$run_dir" "$key" "$sp" "$pr" "$branch" || rrc=$?
+      case "$rrc" in
+        30) approved=1; break ;;   # approve → 머지(아래 merge 가 #423 가산 게이트 재검증)
+        0)  continue ;;            # 재작업 재푸시(진전) → 재리뷰 위해 루프 계속
+        20)                        # 깨끗+비동기 봇 승인 대기 → 승인 폴링 유지(정당한 대기)
+          if $APPROVAL_CHECK_CMD "$pr" && $BLOCKING_CHECK_CMD "$pr"; then approved=1; break; fi
+          (( waited >= APPROVAL_WAIT_MAX )) && break
+          $SLEEP_CMD "$APPROVAL_POLL_INTERVAL"
+          waited=$((waited + APPROVAL_POLL_INTERVAL)) ;;
+        *)                         # 10(에스컬레이션/라운드상한/핑퐁) 등 진전 불가 → 빠른 실패
+          $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 진전 불가(리워크로 해소 불가, rl_round rc=$rrc) — 폴링 상한 대기 생략" >/dev/null
+          $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 진전 불가(rc=$rrc) — 즉시 종료($rounds 라운드)" >/dev/null
+          return 1 ;;
+      esac
     done
     if (( ! approved )); then
       $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 미승인(승인 폴링 상한 ${APPROVAL_WAIT_MAX}s 초과)" >/dev/null
-      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 승인 미게시 — 폴링 상한 초과($rounds 회 확인)" >/dev/null
+      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 승인 미게시 — 폴링 상한 초과($rounds 라운드)" >/dev/null
       return 1
     fi
   else

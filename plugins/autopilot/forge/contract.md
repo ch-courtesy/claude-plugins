@@ -21,10 +21,15 @@ origin url 없음            → direct  (로컬 review + ff-only 직접 머지)
 | 동사 | 인자 | 내부 위임(github / direct) |
 |---|---|---|
 | `integrate` | `<spec> <run_dir> <key>` | `integration.sh integrate` / `integrate-direct` |
-| `review` | `<run_dir> <key> <spec> [pr] [branch]` | `review-loop.sh run` / `run-direct` |
+| `review` | `<run_dir> <key> <spec> [pr] [branch]` | `review-loop.sh round` / `run-direct` |
 | `merge` | `<spec> <run_dir> <key> [pr]` | `merge.sh finish <...> [pr]` / `finish <...> "" 1` |
 
 관리 동사: `host`(감지된 호스트 출력), `selftest`(라우팅 검증).
+
+`review`(github)는 `round`(=`rl_round`)를 호출해 반환코드(`0`=재작업 재푸시·`10`=에스컬레이션/라운드상한/핑퐁·
+`20`=대기·`30`=approve)를 **그대로 표면화**한다. 단일 동기 드라이버(execute-task)가 이 코드로 리워크 진행/빠른
+실패/승인 폴링을 분기하기 위함이다(`run` 은 코드를 `0` 으로 collapse 해 분기 불가). direct 는 PR 메타가 없어
+기존 `run-direct`(동기 단발 리뷰)를 유지한다.
 
 ## 런타임 재사용
 

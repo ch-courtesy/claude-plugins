@@ -30,12 +30,13 @@ case "$1" in
 esac
 EOF
 chmod +x bin/loop
-# mock forge: integrate→branch+pr(7); review→rc0; merge→기록(+rc0)
+# mock forge: integrate→branch+pr(7); review→rc20(할 일 없음=깨끗+비동기 승인대기, rl_round #426
+#   계약 → 승인 폴링 유지 시나리오에서 미해결 [blocking] 가산 게이트 검증); merge→기록(+rc0)
 cat > bin/forge <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
   integrate) echo "branch: feat/x"; echo "pr: 7"; exit 0;;
-  review) exit 0;;
+  review) exit 20;;
   merge) [[ -n "${MERGE_LOG:-}" ]] && echo merged >> "$MERGE_LOG"; exit 0;;
   *) exit 0;;
 esac
