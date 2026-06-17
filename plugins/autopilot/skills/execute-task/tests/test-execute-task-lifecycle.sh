@@ -22,12 +22,13 @@ case "$1" in
 esac
 EOF
 chmod +x bin/loop
-# mock forge: integrate→branch 출력, review/merge→rc0
+# mock forge: integrate→branch 출력, review→rc20(할 일 없음=깨끗+비동기 승인대기), merge→rc0.
+#   review 반환코드는 rl_round 계약(#426): 20 = 승인 폴링 유지 시나리오. 해피패스는 즉시 승인.
 cat > bin/forge <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
   integrate) echo "branch: feat/x"; echo "pr: 7"; exit 0;;
-  review) exit 0;;
+  review) exit 20;;
   merge) exit 0;;
   *) exit 0;;
 esac

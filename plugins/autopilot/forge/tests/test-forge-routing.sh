@@ -11,4 +11,17 @@ if bash "$F" selftest; then ok "forge selftest"; else bad "forge selftest"; fi
 # gitlab 구현은 호출 시 비-0 (조용한 실패 금지 — 확장점)
 ( source "$HERE/../gitlab.sh"; fg_integrate x y z ) >/dev/null 2>&1 && bad "gitlab integrate abort" || ok "gitlab integrate abort(비-0)"
 
+# fg_review 위임 검증(#426): github 은 review-loop.sh `round`(rl_round 코드 0/10/20/30 표면화),
+#   direct 는 `run-direct`(기존 동기 리뷰, collapse). 스텁 review-loop.sh 로 서브커맨드 캡처.
+TMPD="$(mktemp -d)"; trap 'rm -rf "$TMPD"' EXIT
+mkdir -p "$TMPD/ref"
+cat > "$TMPD/ref/review-loop.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "$1" > "$RL_SUB"
+EOF
+( source "$HERE/../github.sh"; FG_REF="$TMPD/ref" RL_SUB="$TMPD/sub.gh" fg_review rd key spec 7 br )
+[[ "$(cat "$TMPD/sub.gh")" == "round" ]] && ok "github fg_review → review-loop.sh round" || bad "github fg_review → round (got '$(cat "$TMPD/sub.gh")')"
+( source "$HERE/../direct.sh"; FG_REF="$TMPD/ref" RL_SUB="$TMPD/sub.dir" fg_review rd key spec "" br )
+[[ "$(cat "$TMPD/sub.dir")" == "run-direct" ]] && ok "direct fg_review → review-loop.sh run-direct(불변)" || bad "direct fg_review → run-direct (got '$(cat "$TMPD/sub.dir")')"
+
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail
