@@ -21,8 +21,82 @@ FORGE_CMD="${FORGE_CMD:-bash $PLUGIN/forge/forge.sh}"
 LOOP_CMD="${LOOP_CMD:-bash $PLUGIN/skills/loop/references/loop.sh}"
 HEARTBEAT_INTERVAL="${HEARTBEAT_INTERVAL:-60}"
 REVIEW_MAX="${REVIEW_MAX:-5}"
+# 비동기 호스팅 리뷰 봇 승인 폴링(PR 경로). 봇 승인 게시 지연(관측 ~2.5분)을 상한 내에서 대기.
+APPROVAL_WAIT_MAX="${APPROVAL_WAIT_MAX:-360}"          # 총 대기 상한(초, 논리 누적)
+APPROVAL_POLL_INTERVAL="${APPROVAL_POLL_INTERVAL:-20}" # 폴링 간격(초)
+APPROVAL_CHECK_CMD="${APPROVAL_CHECK_CMD:-et_approval_gh}"  # <pr> → 승인이면 rc0 (mock 치환 가능)
+# 미해결 [blocking] 인라인 가산 게이트. <pr> → 차단 없음(clear)이면 rc0, blocking 존재/조회실패면 rc1.
+#   approval 신호와 AND 결합돼 승인 판정을 가린다(mock 치환 가능). merge.sh mg_blocking_inline_gate 미러.
+BLOCKING_CHECK_CMD="${BLOCKING_CHECK_CMD:-et_blocking_inline_gh}"
+SLEEP_CMD="${SLEEP_CMD:-sleep}"                        # 폴링 sleep (테스트 no-op 치환 가능)
+# 신뢰 봇 로그인(.github/workflows/{codex,claude}-review.yml 컨벤션) — merge.sh mg_approval_gh 와 동일.
+REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtesy-bot)}"
+# 차단성 인라인 태그(리터럴 부분문자열) — merge.sh BLOCKING_TAG 와 동일 컨벤션. `[blocking` 는
+# `[non_blocking` 을 매치하지 않는다(awk index() 리터럴 매치).
+BLOCKING_TAG="${BLOCKING_TAG:-[blocking}"
 
 die() { echo "execute-task: $*" >&2; exit 1; }
+
+# et_approval_gh <pr> — PR 호스팅 리뷰가 승인 상태면 0, 아니면 1.
+#   승인 신호 두 가지(merge.sh mg_approval_gh / review-loop rl_review_fetch_gh 와 동일 컨벤션):
+#     (a) 공식 APPROVE 리뷰 → reviewDecision==APPROVED.
+#     (b) App 토큰 self-approve 불가로 APPROVE→COMMENT 강등된 신뢰 봇의 현재 head verdict=approve 마커.
+#   머지 직전 merge.sh 의 단발 승인 게이트(미해결 [blocking] 인라인 가산 차단 포함)가 재검증한다.
+et_approval_gh() {
+  local pr="$1" decision head
+  [[ -n "$pr" ]] || return 1
+  command -v gh >/dev/null 2>&1 || return 1
+  decision="$(gh pr view "$pr" --json reviewDecision --jq '.reviewDecision' 2>/dev/null)"
+  [[ "$decision" == "APPROVED" ]] && return 0
+  head="$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)"
+  [[ -n "$head" ]] || return 1
+  gh pr view "$pr" --json reviews \
+       --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
+     | grep -E "$REVIEW_BOT_LOGINS_RE" \
+     | grep -qE "head_sha=${head}[^>]*verdict=approve"
+}
+
+# et_blocking_inline_gh <pr> — 현재 head 에 신뢰봇이 남긴 **미해결**(isResolved=false) [blocking]
+#   인라인 스레드가 없으면 0(clear=머지 가능), 하나라도 있으면 1(차단=대기).
+#   merge.sh mg_blocking_inline_gate / review-loop.sh 와 동일 컨벤션(BLOCKING_TAG, commit.oid==head,
+#   신뢰봇 로그인). 게이트는 스레드를 **스스로 resolve 하지 않는다** — resolved 전이는 봇/리뷰어
+#   책임이고 여기선 폴링으로 관찰만 한다. head/owner·name 미확정·조회/파싱 실패는 보수적 차단
+#   (default-deny=1)하되, 호출자(폴링 루프)의 상한과 결합돼 영구 멈춤은 없다.
+et_blocking_inline_gh() {
+  local pr="$1" head on owner name raw out
+  [[ -n "$pr" ]] || return 1
+  command -v gh >/dev/null 2>&1 || return 1
+  head="$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)"
+  [[ -n "$head" ]] || return 1   # head 미확정 → 보수적 차단
+  on="$(gh repo view --json owner,name --jq '.owner.login+" "+.name' 2>/dev/null)" || on=""
+  owner="${on%% *}"; name="${on##* }"
+  [[ -n "$owner" && -n "$name" ]] || return 1   # repo 미확정 → 보수적 차단
+  # 모든 reviewThreads 페이지를 --paginate(pageInfo+after:$endCursor)로 따라간다(100개 초과 누락 방지).
+  raw="$(gh api graphql --paginate -F owner="$owner" -F name="$name" -F pr="$pr" -f query='
+query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$pr){
+      reviewThreads(first:100, after:$endCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{isResolved comments(first:100){nodes{author{login} commit{oid} body}}}
+      }
+    }}}' 2>/dev/null)"
+  [[ -n "$raw" ]] || return 1   # 조회 실패 → 보수적 차단
+  # 미해결(isResolved=false) 스레드의 코멘트만: login\tcommit_oid\tbody.
+  out="$(printf '%s' "$raw" | jq -r '
+        .data.repository.pullRequest.reviewThreads.nodes[]
+        | select(.isResolved==false)
+        | .comments.nodes[]
+        | (.author.login // "")+"\t"+(.commit.oid // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)" \
+    || return 1   # 파싱 실패 → 보수적 차단
+  # 미해결 + 현재 head 대응(field2==head) + [blocking] 태그(field3 리터럴) 줄의 login 을 신뢰봇 grep.
+  if printf '%s\n' "$out" \
+       | awk -F'\t' -v h="$head" -v tag="$BLOCKING_TAG" '$2==h && index($3,tag)>0 {print $1}' \
+       | grep -qE "$REVIEW_BOT_LOGINS_RE"; then
+    return 1   # 신뢰봇 미해결 [blocking] 존재 → 차단
+  fi
+  return 0
+}
 
 HB_PID=""
 cleanup_hb() { [[ -n "${HB_PID:-}" ]] && kill "$HB_PID" 2>/dev/null || true; }
@@ -90,16 +164,58 @@ et_start() {
   branch="$(printf '%s' "$iout" | sed -n 's/^branch:[[:space:]]*//p' | head -1)"
   pr="$(printf '%s' "$iout" | sed -n 's/^pr:[[:space:]]*//p' | head -1)"
 
-  local n=0 approved=0
-  while (( n < REVIEW_MAX )); do
-    n=$((n+1))
-    if $FORGE_CMD review "$run_dir" "$key" "$sp" "$pr" "$branch"; then approved=1; break; fi
-    # 비-0: 재작업/대기/에스컬레이션 — review-loop 내부 가드가 재구현/판정. 한 라운드 더 시도.
-  done
-  if (( ! approved )); then
-    $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 미승인(에스컬레이션/가드)" >/dev/null
-    $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 미승인 ($n 라운드)" >/dev/null
-    return 1
+  local approved=0
+  if [[ -n "$pr" ]]; then
+    # PR(forge) 경로: review 라운드(=rl_round, $FORGE_CMD review)의 반환코드로 분기한다(#426).
+    #   리워크로 진전 가능 → 진행 / 진전 불가 → 빠른 실패 / 깨끗+비동기 승인 대기만 → 폴링 유지.
+    #   반환코드 계약(dispatch review-loop.sh rl_round, 소비만 — 변경 없음):
+    #     30 = approve         → 머지 진행(merge.sh 가 미해결 [blocking] 가산 게이트를 머지 직전 재검증).
+    #     0  = 재작업 재푸시(진전) → 새 head 가 올라갔으니 재리뷰 위해 루프 계속(무의미 대기 아님).
+    #     10 = 에스컬레이션/라운드상한/핑퐁(진전 불가) → 폴링 상한 더 안 기다리고 즉시 blocked.
+    #     20 = 할 일 없음(깨끗한 코드가 비동기 봇 승인만 대기) → 기존 APPROVAL_WAIT_MAX 폴링 유지(#419).
+    #          이때만 폴링이 의미: 승인 = 호스팅 승인 신호 AND 현재 head 미해결 [blocking] 인라인 없음.
+    #     기타 비-0 = 미정의 신호 → 보수적 즉시 blocked(default-deny). rl_round 미경유 호출은 없다.
+    case "$APPROVAL_POLL_INTERVAL" in ''|*[!0-9]*|0) APPROVAL_POLL_INTERVAL=1;; esac
+    # 비숫자/빈값 상한은 산술 비교((( waited >= MAX )))를 0>=0 으로 망가뜨려 즉시 오종료(또는
+    # 빈값 시 무한 멈춤)시키므로 기본값(360)으로 보정한다. 0 은 "대기 없이 1회 확인"으로 안전히
+    # 허용한다(간격과 달리 0 이어도 영구 멈춤이 없다 — 첫 확인 후 0>=0 으로 정상 종료).
+    case "$APPROVAL_WAIT_MAX" in ''|*[!0-9]*) APPROVAL_WAIT_MAX=360;; esac
+    local waited=0 rounds=0 rrc
+    while true; do
+      rounds=$((rounds+1))
+      rrc=0; $FORGE_CMD review "$run_dir" "$key" "$sp" "$pr" "$branch" || rrc=$?
+      case "$rrc" in
+        30) approved=1; break ;;   # approve → 머지(아래 merge 가 #423 가산 게이트 재검증)
+        0)  continue ;;            # 재작업 재푸시(진전) → 재리뷰 위해 루프 계속
+        20)                        # 깨끗+비동기 봇 승인 대기 → 승인 폴링 유지(정당한 대기)
+          if $APPROVAL_CHECK_CMD "$pr" && $BLOCKING_CHECK_CMD "$pr"; then approved=1; break; fi
+          (( waited >= APPROVAL_WAIT_MAX )) && break
+          $SLEEP_CMD "$APPROVAL_POLL_INTERVAL"
+          waited=$((waited + APPROVAL_POLL_INTERVAL)) ;;
+        *)                         # 10(에스컬레이션/라운드상한/핑퐁) 등 진전 불가 → 빠른 실패
+          $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 진전 불가(리워크로 해소 불가, rl_round rc=$rrc) — 폴링 상한 대기 생략" >/dev/null
+          $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 진전 불가(rc=$rrc) — 즉시 종료($rounds 라운드)" >/dev/null
+          return 1 ;;
+      esac
+    done
+    if (( ! approved )); then
+      $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 미승인(승인 폴링 상한 ${APPROVAL_WAIT_MAX}s 초과)" >/dev/null
+      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 승인 미게시 — 폴링 상한 초과($rounds 라운드)" >/dev/null
+      return 1
+    fi
+  else
+    # direct(PR 없음) 경로: 로컬 동기 리뷰 — 비동기 승인 대기 불필요(기존 동작 보존).
+    local n=0
+    while (( n < REVIEW_MAX )); do
+      n=$((n+1))
+      if $FORGE_CMD review "$run_dir" "$key" "$sp" "$pr" "$branch"; then approved=1; break; fi
+      # 비-0: 재작업/대기/에스컬레이션 — review-loop 내부 가드가 재구현/판정. 한 라운드 더 시도.
+    done
+    if (( ! approved )); then
+      $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 미승인(에스컬레이션/가드)" >/dev/null
+      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 미승인 ($n 라운드)" >/dev/null
+      return 1
+    fi
   fi
 
   if $FORGE_CMD merge "$sp" "$run_dir" "$key" "$pr"; then
@@ -127,4 +243,5 @@ main() {
     *) die "알 수 없는 동사: $verb";;
   esac
 }
-main "$@"
+# 직접 실행 시에만 main 구동. source 시(단위 테스트)엔 함수만 노출하고 실행하지 않는다.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then main "$@"; fi

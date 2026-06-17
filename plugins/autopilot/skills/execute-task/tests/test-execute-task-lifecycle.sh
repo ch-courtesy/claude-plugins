@@ -22,20 +22,23 @@ case "$1" in
 esac
 EOF
 chmod +x bin/loop
-# mock forge: integrate→branch 출력, review/merge→rc0
+# mock forge: integrate→branch 출력, review→rc20(할 일 없음=깨끗+비동기 승인대기), merge→rc0.
+#   review 반환코드는 rl_round 계약(#426): 20 = 승인 폴링 유지 시나리오. 해피패스는 즉시 승인.
 cat > bin/forge <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
   integrate) echo "branch: feat/x"; echo "pr: 7"; exit 0;;
-  review) exit 0;;
+  review) exit 20;;
   merge) exit 0;;
   *) exit 0;;
 esac
 EOF
 chmod +x bin/forge
 
+# 승인 게이트는 실제 PR 승인 상태로 판정한다(review rc 아님). 해피패스 = 즉시 승인(true) +
+# 미해결 [blocking] 인라인 없음(BLOCKING_CHECK_CMD=true=clear). blocking 가산 차단은 별도 테스트.
 run() { ADAPTER_CMD="bash $ADAPTER" LOOP_CMD="bash $TMP/bin/loop" FORGE_CMD="bash $TMP/bin/forge" \
-        HEARTBEAT_INTERVAL=1 bash "$ET" "$@"; }
+        HEARTBEAT_INTERVAL=1 APPROVAL_CHECK_CMD=true BLOCKING_CHECK_CMD=true SLEEP_CMD=: bash "$ET" "$@"; }
 status_of(){ bash "$ADAPTER" get_task --task-id "$1" | jq -r .status; }
 
 # 1) --stop-at review: DONE → review 에서 정지

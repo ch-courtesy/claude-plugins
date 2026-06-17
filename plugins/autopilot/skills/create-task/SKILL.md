@@ -6,7 +6,14 @@ allowed-tools:
   - Read
   - Write
   - Bash(bash * adapter.sh:*)
+  - Bash(bash * persist-backend-config.sh:*)
   - Bash(git rev-parse:*)
+  - Bash(git log:*)
+  - Bash(ls:*)
+  - Bash(git remote:*)
+  - Bash(gh:*)
+  - Bash(python3:*)
+  - Bash(cat:*)
 ---
 
 # create-task
@@ -28,11 +35,31 @@ bash "$ADAPTER" <verb> [args]
 동사·상태 집합·태스크 본문 구조의 단일 출처는 `task-backend/contract.md`다. 백엔드 미설정 시
 `bash "$ADAPTER" init --backend <filesystem|github-project|beads>`를 안내한다(선택은 `AskUserQuestion`).
 
+### 백엔드 선택 SoT 영속화
+
+`adapter init` 이 만드는 `.autopilot/task-backend.json` 은 백엔드 선택의 단일 출처(SoT)다(`.gitignore`가
+추적 대상으로 명시). init 직후 이 SoT를 **메인 브랜치까지 영속화**해 새 체크아웃·CI·다른 세션에서도 동일
+백엔드가 설정되게 한다. 전용 헬퍼가 멱등적으로 처리한다(이미 메인에 동일 내용이 추적되면 중복 PR/커밋 없이
+건너뜀):
+
+```
+bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/persist-backend-config.sh"
+```
+
+헬퍼는 config 파일 **단독** 변경만 커밋한다(태스크 본문·다른 변경 미동반). origin 이 있으면 config-only
+브랜치 push → PR 생성 → 저장소 auto-merge 경로로 메인 머지까지 진행하고, origin 이 없으면 로컬 메인에 merge
+한다. `.autopilot/` 는 워치 디렉토리(=`plugins/`)가 아니므로 이 config PR 엔 plugin.json 범프를 넣지 않는다.
+머지 진행 상황은 사용자에게 보고하되, 자율 오케스트레이터 맥락에선 별도 사용자 프롬프트 없이 진행한다.
+
+헬퍼는 한 줄 JSON `{status}`를 반환한다 — `persisted`(메인 머지/auto-merge 예약 확인) 또는 `skip`(이미 추적, 멱등)이면 성공이다. `pending`(gh 미가용 — 브랜치만 push) · `pr_created`(PR 은 생성됐으나 auto-merge 예약 실패)는 **메인 영속화 미완**(exit 3)이므로, 그 사실과 수동 완료가 필요함을 사용자에게 보고한다(메인 영속화가 확인되지 않았는데 완료로 보고하지 않는다).
+
 ## 워크플로
 
 호출 시 단계를 TodoWrite로 등록한다. 모든 결정·승인은 `AskUserQuestion`으로 받는다(자유 텍스트 질문 종결구 금지).
 
-1. **컨텍스트 탐색** — `git log --oneline -5`, `ls -A`, 얕은 구조 파악으로 컨벤션만 요약.
+1. **컨텍스트 탐색 · 백엔드 준비** — `git log --oneline -5`, `ls -A`, 얕은 구조 파악으로 컨벤션만 요약한다.
+   백엔드 미설정이면 `adapter init`(선택은 `AskUserQuestion`) 후 위 「백엔드 선택 SoT 영속화」 헬퍼를 실행해
+   config를 메인까지 영속화한다(멱등).
 2. **범위 분해 게이트** — `references/decomposition-gate.md`로 다중 독립 서브시스템 여부 판정. 다중이면 N개
    태스크를 발행하고, 아니면 1개.
 3. **명확화 인터뷰** — `references/clarification.md`의 깔때기형 단일 흐름으로 의도·제약·완료 조건을 짚는다.

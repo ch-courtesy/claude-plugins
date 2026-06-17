@@ -16,16 +16,17 @@
 # 환경 변수:
 #   MAX_ITERATIONS         이터 상한 (기본: 30)
 #   WALL_CLOCK_MINUTES     시계 캡 (기본: 120)
-#   CLAUDE_FAIL_STREAK_LIMIT  claude 비정상 exit 연속 허용 (기본: 3)
+#   AUTOPILOT_WORKER_VENDOR  worker CLI 선택 (기본: claude; claude|codex)
+#   AUTOPILOT_WORKER_FAIL_STREAK_LIMIT  worker 비정상 exit 연속 허용 (기본: 3)
 
 set -euo pipefail
 
 # ----- 스크립트 자신의 디렉토리 (references/) -----
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ----- 워커 claude 세션 도구 권한 -----
-# 무인 이터 워커는 `--dangerously-skip-permissions`로 실행되므로 별도 allow-list를
-# 코어에서 강제하지 않는다.
+# ----- worker runtime adapter -----
+# Claude는 기존 무인 권한 플래그를 유지하고, Codex는 격리 worktree에서
+# workspace-write sandbox를 명시한다.
 
 # ----- 헬퍼 -----
 die() {
@@ -35,6 +36,31 @@ die() {
 
 require_tool() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' 명령이 필요합니다."
+}
+
+worker_vendor() {
+  printf '%s' "${AUTOPILOT_WORKER_VENDOR:-claude}"
+}
+
+worker_executable() {
+  case "$(worker_vendor)" in
+    claude) printf 'claude' ;;
+    codex) printf 'codex' ;;
+    *) die "지원하지 않는 worker vendor: $(worker_vendor) (지원: claude, codex)" ;;
+  esac
+}
+
+run_worker() {
+  case "$(worker_vendor)" in
+    claude)
+      exec claude --print --no-session-persistence --dangerously-skip-permissions \
+        --system-prompt-file CLAUDE.md --add-dir . --output-format json
+      ;;
+    codex)
+      exec codex exec --ephemeral --sandbox workspace-write -
+      ;;
+    *) worker_executable >/dev/null ;;
+  esac
 }
 
 now_iso() {
@@ -444,15 +470,7 @@ iterate() {
   local exit_code=0
   (
     cd "$WT"
-    exec claude \
-      --print \
-      --no-session-persistence \
-      --dangerously-skip-permissions \
-      --system-prompt-file CLAUDE.md \
-      --add-dir . \
-      --output-format json \
-      < "$SPEC_PATH" \
-      > ".loop/iterations/$n.log" 2>&1
+    run_worker < "$SPEC_PATH" > ".loop/iterations/$n.log" 2>&1
   ) &
   CLAUDE_PID=$!
   # 워커 PID 영속 — driver 가 죽고 워커만 남는 orphan 을 다음 start/stop 이 감지.
@@ -466,9 +484,9 @@ iterate() {
 
   if [[ $exit_code -ne 0 ]]; then
     CLAUDE_FAIL_STREAK=$((CLAUDE_FAIL_STREAK + 1))
-    echo "WARN: claude 비정상 exit (연속 $CLAUDE_FAIL_STREAK회). .loop/iterations/$n.log 확인."
-    if [[ $CLAUDE_FAIL_STREAK -ge ${CLAUDE_FAIL_STREAK_LIMIT:-3} ]]; then
-      halt "claude 비정상 exit ${CLAUDE_FAIL_STREAK}회 연속 (rate limit·네트워크·인증 의심)."
+    echo "WARN: worker $(worker_vendor) 비정상 exit (연속 $CLAUDE_FAIL_STREAK회). .loop/iterations/$n.log 확인."
+    if [[ $CLAUDE_FAIL_STREAK -ge ${AUTOPILOT_WORKER_FAIL_STREAK_LIMIT:-${CLAUDE_FAIL_STREAK_LIMIT:-3}} ]]; then
+      halt "worker $(worker_vendor) 비정상 exit ${CLAUDE_FAIL_STREAK}회 연속 (rate limit·네트워크·인증 의심)."
     fi
   else
     CLAUDE_FAIL_STREAK=0
@@ -533,12 +551,17 @@ prepare_workspace() {
   # 어느 cwd 에서 호출되든 같은 작업 공간을 본다.
   printf '%s\n' "$WT" > "$SPEC_DIR/.loop-wt"
 
-  # 헌법을 워크트리 CLAUDE.md로 복사. 워커 계약(노트·signals/ 컨벤션 등)의 SoT 는
+  # 헌법을 워크트리의 Claude/Codex 지침 파일로 복사. 워커 계약(노트·signals/ 컨벤션 등)의 SoT 는
   # constitution.md 이므로 별도 append 없이 cp 만으로 충분하다.
   cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
     || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
+  cp "$SCRIPT_DIR/constitution.md" "$WT/AGENTS.md" \
+    || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
   if git -C "$WT" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
     git -C "$WT" update-index --skip-worktree CLAUDE.md || true
+  fi
+  if git -C "$WT" ls-files --error-unmatch AGENTS.md >/dev/null 2>&1; then
+    git -C "$WT" update-index --skip-worktree AGENTS.md || true
   fi
   local gcd; gcd="$(git -C "$WT" rev-parse --git-common-dir)"
   [[ "$gcd" != /* ]] && gcd="$WT/$gcd"
@@ -547,7 +570,7 @@ prepare_workspace() {
   # 자동 제외. enclosing worktree(보조 포함)에서 중첩 .worktree/ 가 untracked 로
   # 노출되지 않게 공통 git 디렉토리의 info/exclude 에 등록한다(모든 worktree 공유).
   # .loop-lock 은 SPEC_DIR 레벨이라 별도 패턴 필요. .loop/ 는 안전망 중복.
-  for pat in "CLAUDE.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt" ".loop-worker"; do
+  for pat in "CLAUDE.md" "AGENTS.md" ".worktree/" ".loop/" ".loop-lock" ".loop-wt" ".loop-worker"; do
     grep -qxF "$pat" "$gcd/info/exclude" 2>/dev/null || echo "$pat" >> "$gcd/info/exclude"
   done
 }
@@ -557,9 +580,9 @@ cmd_start() {
   local input="$1"; shift || true
   [[ -z "$input" ]] && die "사용: $0 start <spec-path> [--max-iterations N] [--wall-clock-minutes N]"
   [[ -f "$input" ]] || die "스펙 파일을 찾을 수 없음: $input"
-  # 게이트(yq)·이터(claude)는 start에서만 필요 — 여기서 검사.
+  # 게이트(yq)·worker CLI는 start에서만 필요 — 여기서 검사.
   require_tool yq
-  require_tool claude
+  require_tool "$(worker_executable)"
 
   local max_iterations_override="" wall_clock_minutes_override=""
   while [[ $# -gt 0 ]]; do
@@ -900,7 +923,8 @@ start 동작을 조정하는 환경 변수:
 
   MAX_ITERATIONS             기본 30      이터 상한 (--max-iterations 로 override)
   WALL_CLOCK_MINUTES         기본 120     시간 상한 (--wall-clock-minutes 로 override)
-  CLAUDE_FAIL_STREAK_LIMIT   기본 3       claude 비정상 exit 연속 허용 횟수
+  AUTOPILOT_WORKER_VENDOR              기본 claude  worker CLI (claude|codex)
+  AUTOPILOT_WORKER_FAIL_STREAK_LIMIT  기본 3       worker 비정상 exit 연속 허용 횟수
 EOF
 }
 
@@ -911,7 +935,7 @@ cmd_gates() {
 
   - 이터 상한 도달               (MAX_ITERATIONS)
   - 시간 상한 도달               (WALL_CLOCK_MINUTES)
-  - claude 비정상 exit 연속      (CLAUDE_FAIL_STREAK_LIMIT)
+  - worker 비정상 exit 연속      (AUTOPILOT_WORKER_FAIL_STREAK_LIMIT)
   - 테스트 약화                  (기존 테스트 파일 변경 감지)
   - 의존성 manifest 변경
   - SPEC scope 위반              (scope.include 밖 변경)
@@ -932,7 +956,7 @@ cmd_deps() {
   echo "  ✓ bash $BASH_VERSION"
   echo "  $(command -v git    >/dev/null 2>&1 && echo "✓" || echo "✗") git"
   echo "  $(command -v yq     >/dev/null 2>&1 && echo "✓" || echo "✗") yq (mikefarah)"
-  echo "  $(command -v claude >/dev/null 2>&1 && echo "✓" || echo "✗") claude"
+  echo "  $(command -v "$(worker_executable)" >/dev/null 2>&1 && echo "✓" || echo "✗") $(worker_executable) (selected worker)"
   if [[ -n "$HASH_BIN" ]]; then
     echo "  ✓ $HASH_BIN (해시 유틸)"
   else
@@ -989,7 +1013,7 @@ Subcommands:
 
 Exit codes (driver 자체):
   0     정상 종료 (signals/ 가 비어있지 않음 — 워커 terminal 의도)
-  1     halt (객관 게이트 위반, claude 비정상 streak, 환경/락 에러 등)
+  1     halt (객관 게이트 위반, worker 비정상 streak, 환경/락 에러 등)
   2     사용법 에러 (잘못된 인자)
   130   SIGTERM/SIGINT
 
