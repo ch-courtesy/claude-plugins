@@ -1,0 +1,20 @@
+{
+  "name": "courtesy-codex-plugins",
+  "interface": {
+    "displayName": "Courtesy Codex Plugins"
+  },
+  "plugins": [
+    {
+      "name": "project-init",
+      "source": {
+        "source": "local",
+        "path": "./plugins/project-init"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
