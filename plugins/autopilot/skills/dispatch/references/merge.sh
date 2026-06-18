@@ -4,17 +4,19 @@
 # 책임 (파이프라인 종착: "리뷰가 approve 로 수렴하면 머지되고 SPEC 은 done(=머지됨)이 된다"):
 #   - 버전 범프 게이트: 머지될 변경이 워치 디렉토리(plugins/)를 건드리면 같은 변경 안에서
 #     plugin.json 버전이 올랐는지 단언한다. 안 올랐으면 머지 차단(비완료 종착).
-#   - 머지: default 브랜치에 fast-forward 전용(--ff-only)으로 머지(+base push). 머지 커밋·
-#     force 금지. main 체크아웃+머지 구간은 run-dir 락으로 **직렬화**한다(동시 머지 레이스 차단).
+#   - 머지: 백엔드 가용 여부로 라우팅. **백엔드(forge host) 가용 시 로컬 머지 금지** — 호스트의
+#     PR 기반 서버사이드 머지로만 통합한다(로컬 `git checkout <base>` 안 함). 백엔드/origin 미가용
+#     (direct)일 때만 default 브랜치에 fast-forward 전용(--ff-only) 로컬 머지(+base push)한다. 머지
+#     커밋·force 금지. 머지 구간은 run-dir 락으로 **직렬화**한다(동시 머지 레이스 차단, 두 경로 공통).
 #   - 완료: 머지 확인되면 int-phase=merged(스케줄러가 SPEC 을 done 으로 전이) + 작업 공간
 #     정리를 loop 의 공개 cleanup 인터페이스로 위임.
 #
 # 분리 approver 신원 요구 없음:
 #   머지는 **가용한 forge 토큰**(예: gh 인증)으로 수행한다. 별도의 분리 승인 신원(APPROVER)의
 #   정식 APPROVED 리뷰를 머지 전제로 두지 않는다 — 리뷰 수렴(approve) 판정은 상위 리뷰 루프가
-#   책임지고, 이 모듈은 버전 게이트 통과 시 가용 토큰으로 ff-only 머지한다. forge 서브모드는
-#   통합이 PR 을 통하며(작업 브랜치 push→PR), direct 서브모드(forge 백엔드 미가용)는 PR 없이
-#   로컬 작업 브랜치를 머지한다.
+#   책임지고, 이 모듈은 게이트 통과 시 가용 토큰으로 머지한다. forge 서브모드는 통합이 PR 을 통하며
+#   (작업 브랜치 push→PR→**서버사이드 PR 머지**, 로컬 base 체크아웃 안 함), direct 서브모드(forge
+#   백엔드 미가용)는 PR 없이 로컬 작업 브랜치를 ff-only 로 머지한다.
 #
 # 불변식:
 #   - force(강제) 머지·push 금지. 머지는 git merge --ff-only 만.
@@ -255,6 +257,30 @@ mg_merge_ff_only() {
   [[ "$rc" -eq 0 ]] || { mg_die "fast-forward 머지/푸시 실패($tries 회 재시도 후, 머지 커밋·force 금지): $branch → $DEFAULT_BRANCH — 워커 base 재동기화 후 재시도 필요"; return 1; }
 }
 
+# ===== 3b) 서버사이드 PR 머지 — forge 백엔드(github 등) 가용 경로. 로컬 checkout 금지 =====
+# mg_merge_pr_serverside <run_dir> <pr> <branch>
+#   백엔드가 가용(PR 존재)하면 로컬 `git checkout <base>`+ff+push 로 통합하지 않고, 호스트의
+#   PR 기반 서버사이드 머지로만 통합한다(본 SPEC 핵심 — 로컬 머지 금지). persist-config 헬퍼와
+#   동일 패턴: `pr merge --auto --merge`(예약: 보호 브랜치·필수 체크 통과 후 머지) → 실패 시
+#   `--merge`(즉시) 폴백. 머지(예약) 성공/실패를 정확히 판정해 반환한다(조용한 성공 금지).
+#   직렬화 락은 서버사이드에서도 유지(동시 dispatch 머지 직렬화). force 미사용(gh 가 머지 커밋/스쿼시
+#   아닌 `--merge` 사용). 로컬 base 를 체크아웃하지 않으므로 멀티-워크트리 `already checked out` 무관.
+mg_merge_pr_serverside() {
+  local rd="$1" pr="$2" branch="$3" rc=1
+  [[ -n "$pr" ]] || { mg_die "서버사이드 PR 머지: PR 미지정(forge 경로엔 PR 필요): $branch"; return 1; }
+  mg_acquire_lock "$rd" || { mg_die "머지 락 획득 실패(직렬화 대기 초과): $rd"; return 1; }
+  # 임계구간: 호스트 PR 머지(예약/즉시). 로컬 base checkout 없음 — `already checked out` 불가능.
+  # shellcheck disable=SC2086
+  if $FORGE_CMD pr merge "$pr" --auto --merge >/dev/null 2>&1; then
+    rc=0
+  # shellcheck disable=SC2086
+  elif $FORGE_CMD pr merge "$pr" --merge >/dev/null 2>&1; then
+    rc=0
+  fi
+  mg_release_lock "$rd"
+  [[ "$rc" -eq 0 ]] || { mg_die "서버사이드 PR 머지 실패(권한·브랜치 보호·체크 등): pr=$pr branch=$branch — 조용한 성공 금지, 차단 종착"; return 1; }
+}
+
 # ===== 4) 정리 — loop 공개 cleanup 위임 =====
 mg_cleanup_workspace() {
   # shellcheck disable=SC2086
@@ -360,11 +386,13 @@ mg_sweep_merged_branches() {
 
 # ===== 5) 메인 진입 — 버전 게이트 통과 시 머지하고 phase=merged =====
 # mg_merge_finish <spec> <run_dir> <key> [pr] [direct]
-#   direct=1 이면 direct 서브모드(forge 백엔드 미가용 — PR 없이 로컬 머지) 계약으로, PR 보강·
-#   PR 출력을 건너뛴다. version 범프 게이트·ff-only·작업공간 정리는 두 서브모드 공통.
+#   direct=1 이면 direct 서브모드(forge 백엔드 미가용 — PR 없이 **로컬 ff-only** 머지) 계약으로,
+#   PR 보강·승인 게이트·PR 출력을 건너뛴다. direct≠1(forge 백엔드 가용)은 PR 기반 **서버사이드
+#   머지**로만 통합하고 로컬 base 체크아웃을 하지 않는다(백엔드 가용 시 로컬 머지 금지).
+#   version 범프 게이트·직렬화 락·작업공간 정리는 두 서브모드 공통.
 #   머지는 분리 approver 승인을 전제하지 않고 가용 토큰으로 수행한다(리뷰 수렴은 상위 책임).
-#   반환: 0=머지 완료(phase=merged) / 1=차단(phase=blocked, 비완료 종착 — forge PR 없음 또는
-#         버전게이트).
+#   반환: 0=머지 완료(phase=merged) / 1=차단(phase=blocked, 비완료 종착 — forge PR 없음·미승인·
+#         버전게이트·서버사이드 머지 실패).
 mg_merge_finish() {
   local spec="$1" rd="$2" key="$3" pr="${4:-}" direct="${5:-}"
   [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { mg_die "사용: merge.sh finish <spec> <run_dir> <key> [pr] [direct]"; return 1; }
@@ -407,21 +435,37 @@ mg_merge_finish() {
     return 1
   fi
 
-  # 3) ff-only 머지(직렬화 락 보호, 가용 토큰).
+  # 3) 머지 실행 — 백엔드 가용 여부로 라우팅. **백엔드(forge) 가용 시 로컬 머지 금지**.
+  #    direct=1(forge 백엔드/origin 미가용) → 로컬 ff-only(checkout+ff+push). review 스킬이
+  #      phase 로 승인 보증하는 로컬 direct 머지(PR/서버 없음).
+  #    direct≠1(forge 백엔드 가용, PR 존재) → 호스트의 PR 기반 서버사이드 머지만. 로컬
+  #      `git checkout <base>` 를 타지 않으므로 멀티-워크트리 `already checked out` 결함이 제거된다.
   int_set_phase "$rd" "$key" merging
-  int_log "$rd" "$key" "게이트 통과 → ff-only 머지(직렬화, 가용 토큰): $branch → $DEFAULT_BRANCH"
-  mg_merge_ff_only "$rd" "$branch" || { int_set_phase "$rd" "$key" blocked; return 1; }
+  if [[ "$direct" == "1" ]]; then
+    int_log "$rd" "$key" "게이트 통과 → direct 로컬 ff-only 머지(직렬화, 가용 토큰): $branch → $DEFAULT_BRANCH"
+    mg_merge_ff_only "$rd" "$branch" || { int_set_phase "$rd" "$key" blocked; return 1; }
+  else
+    int_log "$rd" "$key" "게이트 통과 → forge 서버사이드 PR 머지(직렬화, 로컬 checkout 금지): pr=$pr"
+    mg_merge_pr_serverside "$rd" "$pr" "$branch" || { int_set_phase "$rd" "$key" blocked; return 1; }
+  fi
 
   # 4) 완료. 머지 확정 후 사후 단계로 정리한다(순서: 워크트리 정리 → 작업 브랜치 삭제).
   #    워크트리를 먼저 위임 정리해야 그 워크트리에 체크아웃된 작업 브랜치를 로컬에서 삭제할 수 있다.
   #    정리 실패는 경고로 표면화하되 머지·완료 판정을 뒤집지 않는다(아래 헬퍼들이 rc 0 유지).
+  #    작업 브랜치 삭제는 **direct(로컬) 머지에서만** 워커가 수행한다. 서버사이드 경로는 머지가
+  #    예약(--auto)일 수 있어 원격 브랜치를 지금 지우면 예약 머지를 취소할 수 있으므로, 원격
+  #    작업 브랜치 정리는 호스트(repo head-branch 자동삭제)·dispatch sweep 에 맡긴다.
   int_set_phase "$rd" "$key" merged
   mg_cleanup_workspace "$spec"
-  mg_delete_merged_branch "$branch"
-  int_log "$rd" "$key" "완료: 머지 확인, phase=merged, 작업 공간 정리 위임 + 작업 브랜치 삭제."
+  [[ "$direct" == "1" ]] && mg_delete_merged_branch "$branch"
+  int_log "$rd" "$key" "완료: 머지 확인, phase=merged, 작업 공간 정리 위임(direct 는 작업 브랜치도 삭제)."
   echo "key:     $key"
   echo "phase:   merged"
-  echo "branch:  $branch → $DEFAULT_BRANCH (ff-only)"
+  if [[ "$direct" == "1" ]]; then
+    echo "branch:  $branch → $DEFAULT_BRANCH (ff-only)"
+  else
+    echo "branch:  $branch → $DEFAULT_BRANCH (PR #$pr 서버사이드 머지)"
+  fi
   # direct 서브모드는 PR 없이 동작 — PR 필드 생략(stale PR 출력 방지).
   [[ "$direct" == "1" ]] || echo "pr:      $pr"
   return 0
@@ -492,18 +536,31 @@ mg_selftest() {
   setup() { local k="$1"; int_set_branch "$rd" "$k" "feat/run1-$k"; int_set_pr "$rd" "$k" 77; }
   reset() { : > "$trace"; }
 
-  # ---- forge: 워치 변경 없음 → ff-only 머지 + phase=merged + cleanup (approver 불필요) ----
+  # ---- forge: 워치 변경 없음 → 서버사이드 PR 머지 + phase=merged + cleanup (approver 불필요) ----
+  #   백엔드 가용 경로는 로컬 checkout/ff/push 를 타지 않고 호스트 PR 머지로만 통합한다.
   reset; setup k1
   MOCK_FILES="README.md" MOCK_BUMP="" \
     mg_merge_finish "$spec" "$rd" k1 >/dev/null 2>&1; local rc=$?
   chk "forge 머지 rc=0(approver 불필요)" "$rc" "0"
-  has 'git merge --ff-only' && ok "ff-only 머지 호출" || bad "ff-only 머지 호출"
-  has 'git push origin main' && ok "base push(가용 토큰)" || bad "base push(가용 토큰)"
+  has 'forge pr merge' && ok "서버사이드 PR 머지 호출" || bad "서버사이드 PR 머지 호출"
+  if has 'git checkout main'; then bad "forge 가용인데 로컬 checkout main(로컬머지 금지 위반)"; else ok "로컬 checkout main 미호출"; fi
+  if has 'git merge --ff-only'; then bad "forge 가용인데 로컬 ff 머지(로컬머지 금지 위반)"; else ok "로컬 ff 머지 미호출"; fi
+  if has 'git push origin main'; then bad "forge 가용인데 로컬 base push(로컬머지 금지 위반)"; else ok "로컬 base push 미호출"; fi
   chk "phase=merged" "$(int_get_phase "$rd" k1)" "merged"
   has 'loop cleanup' && ok "cleanup 위임" || bad "cleanup 위임"
-  # 머지 성공 → 작업 브랜치 정리(원격+로컬, force 없는 일반 삭제). ff-머지 확정 이후.
-  has 'push origin --delete feat/run1-k1' && ok "머지후 원격 작업브랜치 삭제" || bad "머지후 원격 작업브랜치 삭제"
-  has 'branch -d feat/run1-k1' && ok "머지후 로컬 작업브랜치 삭제(force 없음)" || bad "머지후 로컬 작업브랜치 삭제(force 없음)"
+  # 서버사이드(예약 가능) 경로 — 워커가 원격/로컬 작업 브랜치를 직접 지우지 않는다(예약 머지 취소 방지,
+  #   호스트 자동삭제·sweep 에 위임). direct 경로 단위 검증은 아래 kdelfail/kdnoremote 가 담당.
+  if has 'push origin --delete feat/run1-k1'; then bad "서버사이드인데 원격 작업브랜치 직접 삭제(예약 머지 취소 위험)"; else ok "서버사이드 → 원격 작업브랜치 직접 삭제 안 함"; fi
+  if has 'branch -d feat/run1-k1'; then bad "서버사이드인데 로컬 작업브랜치 직접 삭제"; else ok "서버사이드 → 로컬 작업브랜치 직접 삭제 안 함"; fi
+
+  # ---- forge: 서버사이드 머지 실패(권한·브랜치 보호 등) → 차단(rc=1), 조용한 성공 금지 ----
+  reset; setup kssfail
+  mock_forge_mergefail() { echo "forge $*" >> "$trace"; case "$1 $2" in "pr merge") return 1;; esac; return 0; }
+  FORGE_CMD=mock_forge_mergefail MOCK_FILES="README.md" MOCK_BUMP="" \
+    mg_merge_finish "$spec" "$rd" kssfail >/dev/null 2>&1; rc=$?
+  chk "서버사이드 머지 실패 rc=1(차단)" "$rc" "1"
+  chk "서버사이드 머지 실패 phase=blocked" "$(int_get_phase "$rd" kssfail)" "blocked"
+  if has 'loop cleanup'; then bad "머지 실패인데 cleanup 위임(조용한 성공)"; else ok "머지 실패 → cleanup 미위임(차단 종착)"; fi
 
   # ---- forge: PR 미승인(reviewDecision!=APPROVED) → 차단(승인 전 머지 차단, PR #353 회귀 가드) ----
   reset; setup knapp
@@ -524,12 +581,13 @@ mg_selftest() {
   if has 'git merge --ff-only'; then bad "범프없음 머지 안 함"; else ok "범프없음 머지 안 함"; fi
   chk "차단 phase=blocked" "$(int_get_phase "$rd" k4)" "blocked"
 
-  # ---- forge: plugins/ 변경 + 범프 있음 → 머지 ----
+  # ---- forge: plugins/ 변경 + 범프 있음 → 서버사이드 머지 ----
   reset; setup k5
   MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="1" \
     mg_merge_finish "$spec" "$rd" k5 >/dev/null 2>&1; rc=$?
   chk "워치+범프있음 rc=0" "$rc" "0"
-  has 'git merge --ff-only' && ok "범프시 머지" || bad "범프시 머지"
+  has 'forge pr merge' && ok "범프시 서버사이드 머지" || bad "범프시 서버사이드 머지"
+  if has 'git checkout main'; then bad "범프 forge인데 로컬 checkout(로컬머지 금지 위반)"; else ok "범프 forge → 로컬 checkout 미호출"; fi
 
   # ---- 같은 version 값 재기입(라인은 추가되나 값 동일) → 차단 (Codex blocking 회귀 가드) ----
   reset; setup k6
@@ -568,6 +626,7 @@ mg_selftest() {
   if has 'git merge --ff-only'; then bad "direct 범프없음 머지 안 함"; else ok "direct 범프없음 머지 안 함"; fi
 
   # ---- 브랜치 삭제 실패 → 경고로 표면화, 머지 판정(merged)은 유지(정리는 사후 단계) ----
+  #   작업 브랜치 삭제는 direct(로컬) 머지 경로의 사후 단계 — direct=1 로 검증한다.
   reset; setup kdelfail
   # 삭제 명령만 실패시키는 mock — 머지/push 는 성공, delete 만 rc=1.
   mock_git_delfail() {
@@ -583,7 +642,7 @@ mg_selftest() {
     esac
     return 0
   }
-  err="$(GIT_CMD=mock_git_delfail MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdelfail 2>&1 >/dev/null)"; rc=$?
+  err="$(GIT_CMD=mock_git_delfail MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdelfail "" 1 2>&1 >/dev/null)"; rc=$?
   chk "삭제 실패해도 머지 rc=0" "$rc" "0"
   chk "삭제 실패해도 phase=merged" "$(int_get_phase "$rd" kdelfail)" "merged"
   case "$err" in *WARN*) ok "브랜치 삭제 실패 경고 표면화";; *) bad "브랜치 삭제 실패 경고 표면화(조용한 실패 금지)";; esac

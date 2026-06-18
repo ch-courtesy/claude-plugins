@@ -26,6 +26,16 @@ origin url 없음            → direct  (로컬 review + ff-only 직접 머지)
 
 관리 동사: `host`(감지된 호스트 출력), `selftest`(라우팅 검증).
 
+`merge` 통합 방식은 **백엔드 가용 여부로 갈린다**(`merge.sh finish` 내부 라우팅):
+- **github/gitlab(백엔드 가용, PR/MR 존재)** → 호스트의 **PR 기반 서버사이드 머지**로만 통합한다.
+  로컬 `git checkout <base>`+ff+push 를 **타지 않는다**(백엔드 가용 시 로컬 머지 금지). 따라서 기본
+  브랜치가 다른 워크트리에 점유돼도 `already checked out` 으로 실패하지 않는다.
+- **direct(origin/백엔드 미가용)** → PR 없이 로컬 `ff-only`(checkout+ff+push) 직접 머지.
+
+두 경로 공통: PR 존재(forge)·승인(`reviewDecision==APPROVED` + 현재 head 미해결 `[blocking]` 0)·버전
+범프 게이트를 머지 **전에** 적용하고, 직렬화 락·force 미사용을 유지한다. 서버사이드 머지 실패는 조용한
+성공으로 보고하지 않고 `blocked` 로 종착한다.
+
 `review`(github)는 `round`(=`rl_round`)를 호출해 반환코드(`0`=재작업 재푸시·`10`=에스컬레이션/라운드상한/핑퐁·
 `20`=대기·`30`=approve)를 **그대로 표면화**한다. 단일 동기 드라이버(execute-task)가 이 코드로 리워크 진행/빠른
 실패/승인 폴링을 분기하기 위함이다(`run` 은 코드를 `0` 으로 collapse 해 분기 불가). direct 는 PR 메타가 없어
