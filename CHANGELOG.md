@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.48.9
+
+### 새 기능
+- **using-autopilot에 자가개선 트리거 추가 — task 스킬 비정상 동작을 create-task 수정 스펙으로 라우팅** — `using-autopilot` 스킬이 기존 "새 코드 변경 신호 → create-task" 라우팅에 더해, **autopilot 자기 도구의 비정상 동작**을 새 신호 유형으로 같은 진입점(`create-task`)에 라우팅한다. task 스킬(`create-task`/`execute-task`/`workflow-task` 및 그 엔진 loop·forge·merge·review) 사용 중 잘못된/근거 약한 `blocked`, 오지 않을 상태 무의미 대기, 모순된 상태 전이, 예기치 못한 실패·오보고 등을 관찰하면, 단순 우회·수동 처리로 끝내지 말고 **자가개선 판단을 시작**한다: (1) 적대적 진단으로 실제 결함인지 판정(가능하면 결정적 재현·검증), (2) 실제 결함이면 그 수정을 `create-task`로 자기완결 스펙으로 떠 등록(본문=SPEC), (3) 등록 스펙은 평소 실행 경로(`execute-task`/`workflow-task`)로 처리. 정당한 우회(일회성 환경 이슈·사용자 명시 지시)는 예외이고, 무한 재귀(자기 수정의 자기 수정) 방지를 위해 관찰된 구체적 비정상 1건에 한정한다. 사람이 매번 "버그인지 보고 고쳐라"라고 지시하지 않아도 autopilot이 자기 도구의 결함을 탐지→판단→수정 스펙 등록으로 잇는 자가개선이 지침으로 강제된다. `SKILL.md`(frontmatter description·트리거 절·Red flag 행)와 사람용 `README.md`를 동일 계약으로 동기화했고, 기존 라우팅·예외와 모순 없이 가산되며 플러그인 자기완결·`REQUIRED RUNTIME CONTRACT` 라인은 보존된다.
+
 ## autopilot 0.48.8
 
 ### 버그 수정
