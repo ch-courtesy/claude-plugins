@@ -50,6 +50,11 @@ LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 WATCH_DIRS="${WATCH_DIRS:-plugins/}"
 MERGE_APPROVAL_CMD="${MERGE_APPROVAL_CMD:-mg_approval_gh}"
+# 서버사이드 PR 머지 완료 확인 폴링 — `--auto`(예약) 성공을 곧 머지 완료로 보지 않고 실제
+# PR state==MERGED 를 폴링 확인한다(예약만 되고 미머지인 상태로 완료 처리되는 것 방지).
+MERGE_CONFIRM_WAIT_MAX="${MERGE_CONFIRM_WAIT_MAX:-360}"          # 총 확인 폴링 상한(초)
+MERGE_CONFIRM_POLL_INTERVAL="${MERGE_CONFIRM_POLL_INTERVAL:-20}" # 폴링 간격(초)
+MG_SLEEP_CMD="${MG_SLEEP_CMD:-sleep}"                            # 폴링 sleep(테스트 no-op 치환 가능)
 
 mg_die() { echo "merge: $*" >&2; return 1; }
 
@@ -262,23 +267,41 @@ mg_merge_ff_only() {
 #   백엔드가 가용(PR 존재)하면 로컬 `git checkout <base>`+ff+push 로 통합하지 않고, 호스트의
 #   PR 기반 서버사이드 머지로만 통합한다(본 SPEC 핵심 — 로컬 머지 금지). persist-config 헬퍼와
 #   동일 패턴: `pr merge --auto --merge`(예약: 보호 브랜치·필수 체크 통과 후 머지) → 실패 시
-#   `--merge`(즉시) 폴백. 머지(예약) 성공/실패를 정확히 판정해 반환한다(조용한 성공 금지).
-#   직렬화 락은 서버사이드에서도 유지(동시 dispatch 머지 직렬화). force 미사용(gh 가 머지 커밋/스쿼시
-#   아닌 `--merge` 사용). 로컬 base 를 체크아웃하지 않으므로 멀티-워크트리 `already checked out` 무관.
+#   `--merge`(즉시) 폴백.
+#   **머지 발행 ≠ 머지 완료**: `--auto` 는 예약만 돼도 0 을 반환할 수 있다(필수 체크가 나중에
+#   실패하면 실제 머지는 안 일어남). 발행 성공을 곧 merged 로 처리하면 미머지 PR 이 done 처리되어
+#   사라질 수 있으므로, 발행 후 **실제 PR state==MERGED 를 폴링 확인**해야만 성공(0)으로 반환한다.
+#   상한(MERGE_CONFIRM_WAIT_MAX) 내 MERGED 미도달이면 차단(비완료 종착). 직렬화 락은 머지 *발행*
+#   구간에만 보유하고(분 단위 폴링 동안 점유 안 함; auto-merge 수렴은 호스트가 직렬화), 폴링은
+#   락 밖에서 한다. force 미사용. 로컬 base 미체크아웃 → 멀티-워크트리 `already checked out` 무관.
 mg_merge_pr_serverside() {
-  local rd="$1" pr="$2" branch="$3" rc=1
+  local rd="$1" pr="$2" branch="$3" issued=0
   [[ -n "$pr" ]] || { mg_die "서버사이드 PR 머지: PR 미지정(forge 경로엔 PR 필요): $branch"; return 1; }
+  local wmax="$MERGE_CONFIRM_WAIT_MAX" ival="$MERGE_CONFIRM_POLL_INTERVAL"
+  case "$wmax" in ''|*[!0-9]*) wmax=360;; esac
+  case "$ival" in ''|*[!0-9]*|0) ival=20;; esac
+
+  # 발행 임계구간(락 보유): 호스트 PR 머지(예약/즉시) 발행. 로컬 checkout 없음.
   mg_acquire_lock "$rd" || { mg_die "머지 락 획득 실패(직렬화 대기 초과): $rd"; return 1; }
-  # 임계구간: 호스트 PR 머지(예약/즉시). 로컬 base checkout 없음 — `already checked out` 불가능.
   # shellcheck disable=SC2086
-  if $FORGE_CMD pr merge "$pr" --auto --merge >/dev/null 2>&1; then
-    rc=0
+  if $FORGE_CMD pr merge "$pr" --auto --merge >/dev/null 2>&1; then issued=1
   # shellcheck disable=SC2086
-  elif $FORGE_CMD pr merge "$pr" --merge >/dev/null 2>&1; then
-    rc=0
+  elif $FORGE_CMD pr merge "$pr" --merge >/dev/null 2>&1; then issued=1
   fi
   mg_release_lock "$rd"
-  [[ "$rc" -eq 0 ]] || { mg_die "서버사이드 PR 머지 실패(권한·브랜치 보호·체크 등): pr=$pr branch=$branch — 조용한 성공 금지, 차단 종착"; return 1; }
+  [[ "$issued" -eq 1 ]] || { mg_die "서버사이드 PR 머지 발행 실패(권한·브랜치 보호·체크 등): pr=$pr branch=$branch — 조용한 성공 금지, 차단 종착"; return 1; }
+
+  # 발행 성공 ≠ 완료. 실제 PR state==MERGED 를 폴링 확인(락 밖)해야만 머지 완료로 본다.
+  local waited=0 state
+  while true; do
+    # shellcheck disable=SC2086
+    state="$($FORGE_CMD pr view "$pr" --json state --jq '.state' 2>/dev/null || true)"
+    [[ "$state" == "MERGED" ]] && return 0
+    (( waited >= wmax )) && break
+    $MG_SLEEP_CMD "$ival"; waited=$((waited + ival))
+  done
+  mg_die "서버사이드 PR 머지 미확정(머지 발행됐으나 ${wmax}s 내 PR state==MERGED 미도달, 마지막 state='${state:-unknown}'): pr=$pr branch=$branch — 예약만 되고 미머지일 수 있어 완료로 보지 않음(차단 종착)"
+  return 1
 }
 
 # ===== 4) 정리 — loop 공개 cleanup 위임 =====
