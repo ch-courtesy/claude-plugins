@@ -1,6 +1,6 @@
 ---
 name: using-autopilot
-description: Use at the start of any session in an autopilot-installed project — routes every new code-change signal to a single mandatory entry point, create-task, before any other response: feature intent (기능 추가·지침 작성·새로 만들기) and bug·symptom·failing-test signals (버그·증상·실패 테스트 고치기) alike are registered as a task via create-task, overriding generic brainstorming-first guidance for such work.
+description: Use at the start of any session in an autopilot-installed project — routes every new code-change signal to a single mandatory entry point, create-task, before any other response: feature intent (기능 추가·지침 작성·새로 만들기) and bug·symptom·failing-test signals (버그·증상·실패 테스트 고치기) alike are registered as a task via create-task, overriding generic brainstorming-first guidance for such work. Also routes self-improvement signals — anomalous behavior of autopilot's own task skills (create-task/execute-task/workflow-task) observed during use (wrong blocked, pointless waiting, contradictory state, unexpected failure) — to the same entry point: diagnose, and if a real defect, register the fix as a self-contained spec via create-task rather than just working around it.
 ---
 
 # using-autopilot
@@ -38,6 +38,20 @@ autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다
 
 `autopilot:create-task`는 "어떤 작업이든 시작하기 전 가장 먼저 사용"하도록 일반화된 단일 진입점이다. 위 신호들이 그 트리거다. `create-task`의 명확화 인터뷰(집요함·결정 트리·추천 답·코드 우선)가 **기능 의도와 버그·증상을 모두** 태스크 본문(=SPEC)으로 흡수하므로, 별도의 사전 설계 단계 없이 그것이 곧 첫 단계다. 기능과 버그가 섞여 있어도 가를 필요 없이 그대로 `create-task`에 넘기면 인터뷰가 본문으로 정리하며, 신호 여부가 모호하면 사용자에게 한 번 확인한다.
 
+## 자가개선 트리거 — task 스킬 비정상 동작 → create-task 수정 스펙
+
+위 트리거가 **사용자가 요청한 새 코드 변경**을 라우팅한다면, 이 절은 **autopilot 자기 도구의 비정상 동작**이라는 새 신호 유형을 같은 진입점(`create-task`)으로 라우팅한다. 사람이 매번 "버그인지 보고 고쳐라"라고 지시하지 않아도, 비정상을 그 자리에서 자가개선 신호로 인식해 탐지→판단→수정 스펙 등록으로 잇는다. 이것은 기존 "새 코드 변경 신호 → create-task" 라우팅을 **대체·약화하지 않고 그 위에 가산**된다.
+
+- **트리거** — `create-task`/`execute-task`/`workflow-task`(및 그 엔진 loop·forge·merge·review) 사용 중 비정상 동작을 관찰했을 때: 잘못된/근거 약한 `blocked`, 오지 않을 상태를 무의미하게 대기, 모순된 상태 전이, 예기치 못한 실패·오보고 등. (실제로 다수 관찰·수정된 결함 유형: 승인 폴링 무의미 대기, 머지 경로 오작동, 봇 승인 마커 미매치 등.)
+- **행동** — 그 비정상을 단순 우회·수동 처리로 끝내지 말고 **자가개선 판단을 시작**한다. 순서:
+  1. **적대적 진단** — 그 비정상이 실제 결함인지 적대적으로 진단한다. 가능하면 결정적으로 재현·검증한다(일회성/환경 요인 배제).
+  2. **수정 스펙 등록** — 실제 결함으로 판정되면 그 수정을 `create-task`로 자기완결 스펙으로 떠 등록한다(본문=SPEC). 관찰된 증상·재현 경로·결함 범위를 스펙에 담는다.
+  3. **평소 실행 경로로 처리** — 등록된 스펙은 `create-task`가 안내하는 평소 실행 단계(`execute-task` 단일 실행 / `workflow-task` 무인 드레인)로 처리한다.
+- **경계**
+  - 단순 우회가 **정당한 경우는 제외**한다: 일회성 환경 이슈, 또는 사용자가 우회를 **명시적으로** 지시한 경우(사용자 지침 최우선).
+  - 결함인지 **불확실하면** 보정된 신뢰도로 보고하되, 비정상이 **blocking 성격**(작업을 멈추는)이면 스펙 등록을 우선한다.
+  - 무한 재귀(자기 수정의 자기 수정…) 방지를 위해 **관찰된 구체적 비정상 1건**에 한정한다 — 한 번에 하나의 결함만 스펙으로 뜨고, 그 스펙 처리 중 새로 관찰된 비정상은 별개의 1건으로 따로 다룬다.
+
 ## 합리화 구멍 차단 (이 세 합리화로 라우팅을 건너뛰지 않는다)
 
 라우팅 누락은 거의 항상 다음 셋 중 하나의 합리화에서 나온다. 세 경우 모두 코드-변경 신호이며 **`create-task`가 먼저다** — 합리화가 옳아 보여도 라우팅한다.
@@ -71,6 +85,7 @@ milestone 규모(다중 독립 서브시스템)는 `create-task`의 **범위 분
 | "기존 SPEC/태스크를 구현/확인하는 것뿐이니까" | SPEC/태스크 읽기·검증은 예외지만 구현은 코드-변경 신호다. `SPEC.md 구현`은 create-task 먼저. |
 | "문서·지침 편집은 코드 변경이 아니야" | 지침·문서의 편집·압축·축약·수정·삭제는 동작·지침을 바꾸는 코드-변경 신호다. create-task 먼저. |
 | "사용자가 그냥 만들라고 했으니" | "만들어줘"는 WHAT이지 HOW가 아니다 — create-task가 HOW 이전에 WHAT을 확정한다. |
+| "task 스킬이 이상하지만 일단 수동으로 우회하자" | autopilot 자기 도구의 비정상은 자가개선 신호다. 우회로 끝내지 말고 진단→실제 결함이면 create-task로 수정 스펙 등록(「자가개선 트리거」). 정당한 우회(일회성 환경·사용자 명시 지시)만 예외. |
 
 ## 예외 (create-task 라우팅 불필요)
 
