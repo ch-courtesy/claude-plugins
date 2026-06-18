@@ -137,11 +137,14 @@ mg_approval_gh() {
   if [[ "$decision" == "APPROVED" ]]; then
     approved=1
   # 강등 승인: 신뢰 봇이 현재 head 에 남긴 verdict=approve 마커.
+  #   봇 로그인 정규식은 **login 필드 단독**에 적용해야 앵커(\[bot\]$/^github-actions$)가 성립한다.
+  #   login\tbody 결합 라인에 grep 하면 본문 때문에 앵커가 영영 깨진다(#432). awk 로 현재 head 의
+  #   verdict=approve 마커를 가진 리뷰의 login 만 추출 → 그 login 을 신뢰봇 grep(blocking 게이트 미러).
   # shellcheck disable=SC2086
   elif [[ -n "$head" ]] && $FORGE_CMD pr view "$pr" --json reviews \
-        --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
-       | grep -E "$REVIEW_BOT_LOGINS_RE" \
-       | grep -qE "head_sha=${head}[^>]*verdict=approve"; then
+        --jq '.reviews[] | (.author.login // "") + "\t" + ((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null \
+       | awk -F'\t' -v h="$head" '$2 ~ ("head_sha=" h "[^>]*verdict=approve") {print $1}' \
+       | grep -qE "$REVIEW_BOT_LOGINS_RE"; then
     approved=1
   fi
   [[ -n "$approved" ]] || return 0
@@ -813,6 +816,20 @@ BR
   # 강등 승인 마커 + blocking 없음 → APPROVED.
   chk "마커승인+blocking없음 → APPROVED" \
     "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_THREADS="$OK_C" ag)" "APPROVED"
+  # #432: 봇 로그인 정규식을 login 필드 단독에 적용해야 앵커(\[bot\]$/^github-actions$)가 성립.
+  #   결합 라인(login\tbody) grep 회귀 가드 — [bot]/github-actions 계열 마커 승인 감지.
+  local MARK_GA="github-actions[bot]\t<!-- claude-formal-review head_sha=$H verdict=approve -->\n"
+  local MARK_CX="codex[bot]\t<!-- codex-formal-review head_sha=$H verdict=approve -->\n"
+  local MARK_EVIL="evil-user\t<!-- forged head_sha=$H verdict=approve -->\n"
+  local MARK_OLD="github-actions[bot]\t<!-- claude-formal-review head_sha=otherSHA verdict=approve -->\n"
+  chk "#432 github-actions[bot] 마커승인 → APPROVED" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_GA" SC_THREADS="$OK_C" ag)" "APPROVED"
+  chk "#432 codex[bot] 마커승인 → APPROVED" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_CX" SC_THREADS="$OK_C" ag)" "APPROVED"
+  chk "#432 비신뢰(evil-user) 마커 → 미승인(빈값)" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_EVIL" SC_THREADS="$OK_C" ag)" ""
+  chk "#432 head 불일치 마커 → 미승인(빈값)" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_OLD" SC_THREADS="$OK_C" ag)" ""
   # AC5: 스레드 조회 실패 + APPROVED → default-deny(차단).
   chk "AC5 스레드 조회 실패 → default-deny(차단)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_API_FAIL=1 ag)" ""
