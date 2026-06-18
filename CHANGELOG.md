@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.48.8
+
+### 버그 수정
+- **create-task 백엔드 config 영속화의 direct(로컬) 경로가 사용자 staged 변경을 무단 삭제하지 않음** — `persist-backend-config.sh`의 origin 없는 direct 경로는 config-only 머지로 `<base>`를 전진시킨 뒤, 현재 체크아웃이 `<base>`이면 인덱스를 새 HEAD에 동기화하려고 `git read-tree "$MERGE"`(단일 트리 인자)를 호출했는데, 이 명령은 **인덱스를 통째로 그 트리로 교체**하므로 호출 시점에 사용자가 `git add`로 stage 해둔 변경이 **조용히·비가역적으로 사라지던** 결함을 고친다(스크립트 헤더의 "워킹트리·스테이징 비파괴" 계약 위반). 시나리오는 드물지만(origin 없는 로컬 repo + `<base>` 체크아웃 + staged 변경 보유 + 그 시점 헬퍼 실행) silent data loss이므로 수정한다. 머지는 config-only 이므로 이제 인덱스의 **config 항목만** `git update-index --add --cacheinfo`로 새 HEAD에 동기화하고, 다른 staged 변경과 워킹트리 파일은 그대로 보존한다. config 커밋 자체는 기존대로 plumbing(commit-tree)로 만들어 워킹트리·스테이징을 건드리지 않으며, origin 있는(PR) 경로·멱등성·config-only 보장 등 기존 동작은 불변이다.
+
 ## autopilot 0.48.7
 
 ### 버그 수정

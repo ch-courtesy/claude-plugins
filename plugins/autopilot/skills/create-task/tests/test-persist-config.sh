@@ -112,4 +112,19 @@ rc7=0; out7="$(cd "$R7/r" && PBC_GH="$R7/gh" bash "$H" 2>/dev/null)" || rc7=$?
 chk "7: PR 생성 실패 status pending" "$(printf '%s' "$out7" | jq -r .status)" "pending"
 chk "7: PR 생성 실패 exit 3" "$rc7" "3"
 
+# --- 시나리오 8: direct + base 체크아웃 + 사용자 staged 변경 → staged 보존(무단 삭제 금지) ---
+# 워킹트리 비파괴 계약은 파일뿐 아니라 staging(인덱스)까지 보존해야 한다.
+R8="$(mktemp -d)/r"; mkrepo "$R8"
+mkdir -p "$R8/.autopilot"; printf '%s\n' "$CFG" > "$R8/.autopilot/task-backend.json"
+echo "user staged edit" >> "$R8/README.md"        # 사용자가 추적 파일 수정
+( cd "$R8" && git add README.md )                  # 그리고 stage
+staged_before="$(cd "$R8" && git rev-parse :README.md)"
+( cd "$R8" && bash "$H" >/dev/null 2>&1 ) || bad "8: persist exit"
+staged_after="$(cd "$R8" && git rev-parse :README.md)"
+chk "8: staged 변경 보존(인덱스)" "$staged_after" "$staged_before"
+# 워킹트리 파일도 그대로
+chk "8: 워킹트리 파일 보존" "$(cd "$R8" && tail -1 README.md)" "user staged edit"
+# config 자체는 새 HEAD에 동기화되어 clean(미커밋 잔여 없음)
+chk "8: config 인덱스 동기화(clean)" "$(cd "$R8" && git status --porcelain -- .autopilot/task-backend.json)" ""
+
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || { echo "FAILURES present"; exit 1; }

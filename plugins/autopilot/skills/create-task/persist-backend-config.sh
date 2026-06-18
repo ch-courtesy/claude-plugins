@@ -127,9 +127,12 @@ else
   MERGE="$(git -C "$ROOT" commit-tree "$TREE" -p "$BASE_SHA" -p "$COMMIT" \
             -m "Merge: 태스크 백엔드 선택 SoT 영속화")"
   git -C "$ROOT" update-ref "refs/heads/$DEFAULT_BRANCH" "$MERGE"
-  # 메인이 현재 체크아웃이면 인덱스만 새 HEAD로 동기화(워킹트리 파일은 유지).
+  # 메인이 현재 체크아웃이면 인덱스의 **config 항목만** 새 HEAD에 동기화한다.
+  # read-tree <tree>(단일 인자)는 인덱스를 통째로 교체해 사용자의 staged 변경을
+  # 무단 삭제하므로 쓰지 않는다. 머지는 config-only 이므로 그 한 항목만 갱신하면
+  # 충분하고, 다른 staged 변경과 워킹트리 파일은 그대로 보존된다.
   if [[ "$(git -C "$ROOT" symbolic-ref --quiet --short HEAD 2>/dev/null || true)" == "$DEFAULT_BRANCH" ]]; then
-    git -C "$ROOT" read-tree "$MERGE"
+    git -C "$ROOT" update-index --add --cacheinfo "100644,$BLOB,$PBC_REL"
   fi
   jq -nc --arg base "$DEFAULT_BRANCH" \
     '{status:"persisted", path:"'"$PBC_REL"'", base:$base, mode:"direct"}'
