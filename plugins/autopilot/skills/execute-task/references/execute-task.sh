@@ -50,10 +50,14 @@ et_approval_gh() {
   [[ "$decision" == "APPROVED" ]] && return 0
   head="$(gh pr view "$pr" --json headRefOid --jq '.headRefOid' 2>/dev/null)"
   [[ -n "$head" ]] || return 1
+  # 봇 로그인 정규식(REVIEW_BOT_LOGINS_RE)은 **login 필드 단독**에 적용해야 앵커(\[bot\]$/
+  #   ^github-actions$)가 성립한다. login\tbody 결합 라인에 grep 하면 본문이 탭 뒤에 이어져
+  #   앵커가 영영 깨진다(#432). et_blocking_inline_gh 와 동일 컨벤션으로 awk 가 현재 head 의
+  #   verdict=approve 마커를 가진 리뷰의 login 만 추출 → 그 login 을 신뢰봇 grep.
   gh pr view "$pr" --json reviews \
-       --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
-     | grep -E "$REVIEW_BOT_LOGINS_RE" \
-     | grep -qE "head_sha=${head}[^>]*verdict=approve"
+       --jq '.reviews[] | (.author.login // "") + "\t" + ((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null \
+     | awk -F'\t' -v h="$head" '$2 ~ ("head_sha=" h "[^>]*verdict=approve") {print $1}' \
+     | grep -qE "$REVIEW_BOT_LOGINS_RE"
 }
 
 # et_blocking_inline_gh <pr> — 현재 head 에 신뢰봇이 남긴 **미해결**(isResolved=false) [blocking]
