@@ -404,15 +404,27 @@ in_spec_issue() {
   ' "$1"
 }
 
-# in_pr_body <spec_path> <run-id> — 구조화 PR 본문(결정적) stdout.
-#   자동 리뷰 식별 줄(dispatch 자동 생성·자동 적대 리뷰) + 추적성(SPEC 경로) + 실행 컨텍스트
-#   (dispatch run-id) + 조건부 이슈 cross-reference(Refs #n, rules/context.md 형식) + 요약
-#   (SPEC 의도 섹션, 없으면 생략).
+# in_pr_body <spec_path> <run-id> — 구조화 PR 본문(결정적) stdout. dispatch·execute-task 공용.
+#   자동 리뷰 식별 줄(주체별 자동 생성 표기 + "자동 적대 리뷰") + 추적성 + 실행 컨텍스트(run-id)
+#   + 조건부 이슈 cross-reference(Refs #n, rules/context.md 형식) + 요약(SPEC 의도 섹션, 없으면 생략).
+#   originator 판정은 spec 경로의 임시 materialize 마커(execute-task 의 .task-work/<id>/SPEC.md
+#   컨벤션)로 한다:
+#     - execute-task: 임시 SPEC 경로는 리뷰어에게 무의미·로컬 레이아웃 누출이라 박지 않고(생략),
+#       주체를 정확히 표기(execute-task)하며 추적성은 task-run·이슈 참조(Refs #n)로 표현한다.
+#     - dispatch: 실제 repo SPEC 경로(추적 가치 있음)·dispatch-run 으로 기존 표현을 회귀 없이 유지.
 in_pr_body() {
   local spec="$1" rid="$2"
-  printf '🤖 이 PR 은 dispatch 가 자동 생성했으며 자동 적대 리뷰를 거칩니다.\n\n'
-  printf 'SPEC: %s\n' "$spec"
-  printf 'dispatch-run: %s\n' "$rid"
+  case "$spec" in
+    *"/.task-work/"*|".task-work/"*)
+      printf '🤖 이 PR 은 execute-task 가 자동 생성했으며 자동 적대 리뷰를 거칩니다.\n\n'
+      printf 'task-run: %s\n' "$rid"
+      ;;
+    *)
+      printf '🤖 이 PR 은 dispatch 가 자동 생성했으며 자동 적대 리뷰를 거칩니다.\n\n'
+      printf 'SPEC: %s\n' "$spec"
+      printf 'dispatch-run: %s\n' "$rid"
+      ;;
+  esac
   local issue; issue="$(in_spec_issue "$spec")"
   [[ -n "$issue" ]] && printf 'Refs #%s\n' "$issue"
   local summary; summary="$(in_pr_summary "$spec")"
@@ -846,6 +858,28 @@ SPECEOF
   printf -- '---\nissue: "#43"\n---\n\n# 이슈 기능 W\n' > "$specI"
   body="$(in_pr_body "$specI" "rid8888")"
   case "$body" in *'Refs #43'*) ok "이슈 '#43' 표기 정규화";; *) bad "이슈 '#43' 표기 정규화";; esac
+
+  # ---- originator=execute-task: 임시 materialize SPEC(.task-work/<id>/SPEC.md) 본문 ----
+  #   (a) .task-work/·절대 경로 누출 부재, (b) dispatch 오표기 부재·주체 라벨 정확,
+  #   (c) 태스크 참조(Refs #n)·리뷰 식별 줄 보존, (d) 태스크 run 추적성. ----
+  local specET="$TMP/.task-work/777/SPEC.md"
+  mkdir -p "$TMP/.task-work/777"
+  printf -- '---\nslug: et-body\nissue: 777\n---\n\n# ET 기능\n\n## 무엇을 만들 것인가\nET 요약 줄.\n' > "$specET"
+  body="$(in_pr_body "$specET" "777")"
+  case "$body" in *'.task-work/'*) bad "ET: .task-work 임시 경로 누출 부재";; *) ok "ET: .task-work 임시 경로 누출 부재";; esac
+  case "$body" in *"$specET"*) bad "ET: 절대 SPEC 경로 부재";; *) ok "ET: 절대 SPEC 경로 부재";; esac
+  case "$body" in *dispatch*) bad "ET: dispatch 오표기 부재";; *) ok "ET: dispatch 오표기 부재";; esac
+  case "$body" in *'execute-task 가 자동 생성'*) ok "ET: 주체 라벨 정확(execute-task)";; *) bad "ET: 주체 라벨 정확(execute-task)";; esac
+  case "$body" in *'자동 적대 리뷰'*) ok "ET: 리뷰 식별 줄 보존";; *) bad "ET: 리뷰 식별 줄 보존";; esac
+  case "$body" in *'Refs #777'*) ok "ET: 태스크 이슈 참조(Refs #777) 보존";; *) bad "ET: 태스크 이슈 참조(Refs #777) 보존";; esac
+  case "$body" in *'task-run: 777'*) ok "ET: 태스크 run 추적성";; *) bad "ET: 태스크 run 추적성";; esac
+  case "$body" in *'ET 요약 줄.'*) ok "ET: 요약 섹션 보존";; *) bad "ET: 요약 섹션 보존";; esac
+
+  # ---- originator=dispatch 회귀 가드: 기존 본문 표현(라벨·SPEC 경로·dispatch-run) 유지 ----
+  body="$(in_pr_body "$specB" "ridDG")"
+  case "$body" in *'dispatch 가 자동 생성'*) ok "회귀: dispatch 라벨 유지";; *) bad "회귀: dispatch 라벨 유지";; esac
+  case "$body" in *'dispatch-run: ridDG'*) ok "회귀: dispatch-run 유지";; *) bad "회귀: dispatch-run 유지";; esac
+  case "$body" in *"SPEC: $specB"*) ok "회귀: dispatch SPEC 경로 유지";; *) bad "회귀: dispatch SPEC 경로 유지";; esac
 
   # ---- PR 생성이 --body-file 로 멀티라인 본문을 forge 에 전달(줄바꿈 보존) ----
   local kB="x-bbb0000"; : > "$PRLOG"; : > "$PRBODY"; : > "$PUSHLOG"

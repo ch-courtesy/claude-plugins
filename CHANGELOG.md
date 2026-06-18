@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.48.10
+
+### 버그 수정
+- **자동 생성 PR 본문의 로컬 임시 SPEC 경로 누출·dispatch 오표기 제거** — `integration.sh` 의 공용 `in_pr_body`(dispatch·execute-task 공유)가 execute-task 실행에서 (1) `SPEC:` 줄에 `.task-work/<id>/SPEC.md` 같은 **로컬 절대·임시 materialize 경로**를 박아 리뷰어 환경에 없는 경로로 워커 파일시스템 레이아웃을 누출하던 것과, (2) 실제 실행 주체가 execute-task인데도 본문을 "**dispatch** 가 자동 생성"·"**dispatch-run**"으로 **오표기**하던 결함을 고쳤다. 이제 originator를 spec 경로의 임시 materialize 마커(`.task-work/`)로 판정해 execute-task 경로에서는 임시 SPEC 경로를 박지 않고(생략) 주체를 정확히 표기(`execute-task 가 자동 생성`)하며 추적성은 `task-run`·이슈 참조(`Refs #n`)로 표현한다. 리뷰 트리거 마커(제목 `🤖 [자동 리뷰]`, 본문 "자동 적대 리뷰" 식별 줄, `Refs #n`)는 보존되고, dispatch 경로의 기존 본문 표현(`SPEC:`·`dispatch-run:`)은 회귀 없이 그대로다.
+
 ## autopilot 0.48.9
 
 ### 새 기능
