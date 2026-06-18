@@ -75,9 +75,13 @@ rl_review_fetch_gh() {
   echo "head: ${head:-}"
   # 승인: 공식 APPROVED 또는 신뢰 봇이 현재 head 에 남긴 승인 마커(verdict=approve, *-formal-review).
   if [[ "$decision" == "APPROVED" ]]; then approve=1; fi
+  # 봇 로그인 정규식은 **login 필드 단독**에 적용해야 앵커(\[bot\]$)가 성립한다 — login\tbody
+  #   결합 라인에 grep 하면 본문 때문에 앵커가 깨진다(#432). awk 로 현재 head 의 verdict=approve
+  #   마커를 가진 리뷰의 login 만 추출 → 그 login 을 신뢰봇 grep(아래 [blocking] 인라인 게이트와 동일).
   if [[ -z "$approve" && -n "$head" ]] && gh pr view "$pr" --json reviews \
-        --jq '.reviews[] | (.author.login // "") + "\t" + (.body // "")' 2>/dev/null \
-       | grep -E "$REVIEW_BOT_LOGIN_RE" | grep -qE "head_sha=${head}[^>]*verdict=approve"; then approve=1; fi
+        --jq '.reviews[] | (.author.login // "") + "\t" + ((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null \
+       | awk -F'\t' -v h="$head" '$2 ~ ("head_sha=" h "[^>]*verdict=approve") {print $1}' \
+       | grep -qE "$REVIEW_BOT_LOGIN_RE"; then approve=1; fi
   # 현재 head 미해결(isResolved=false) 스레드의 인라인 코멘트만 조회(GraphQL): login\tcommit_oid\tbody.
   #   resolve 된 스레드는 제외해 resolve→재리뷰 데드락을 막는다. raw JSON 을 jq 로 필터
   #   (mock=raw 반환으로 isResolved 필터를 결정적 검증). 조회/owner 확정 실패·head 미확정은
@@ -691,6 +695,21 @@ rl_selftest() {
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "github-actions[bot]" "oldSHA" "**[blocking/98] 이전**")" rvg)" "approve"
   chk "AC3 비신뢰봇 [blocking]+approve → approve(차단 안 함)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "random-human" "$GH" "**[blocking/98] 위조**")" rvg)" "approve"
+  # #432: 봇 로그인 정규식을 login 필드 단독에 적용해야 앵커가 성립 — 결합 라인 grep 회귀 가드.
+  #   GEMPTY: 미해결 스레드 없음(blocking·findings 공히 비어 마커 경로만 격리).
+  local GEMPTY='{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
+  local MARK_GA2="github-actions[bot]\t<!-- claude-formal-review head_sha=$GH verdict=approve -->\n"
+  local MARK_CX2="codex[bot]\t<!-- codex-formal-review head_sha=$GH verdict=approve -->\n"
+  local MARK_EVIL2="evil-user\t<!-- forged head_sha=$GH verdict=approve -->\n"
+  local MARK_OLD2="github-actions[bot]\t<!-- claude-formal-review head_sha=oldSHA verdict=approve -->\n"
+  chk "#432 github-actions[bot] 마커승인 → approve" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_GA2" SC_THREADS="$GEMPTY" rvg)" "approve"
+  chk "#432 codex[bot] 마커승인 → approve" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_CX2" SC_THREADS="$GEMPTY" rvg)" "approve"
+  chk "#432 비신뢰(evil-user) 마커 → 미승인(pending)" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_EVIL2" SC_THREADS="$GEMPTY" rvg)" "pending"
+  chk "#432 head 불일치 마커 → 미승인(pending)" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_OLD2" SC_THREADS="$GEMPTY" rvg)" "pending"
   chk "AC5 인라인 조회 실패 → changes(default-deny)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rvg)" "changes"
   out="$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rl_review_fetch_gh 205 2>/dev/null)"

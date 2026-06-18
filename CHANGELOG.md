@@ -10,6 +10,31 @@
 ### 변경(호환)
 - **런타임 중립 질문 계약** — 공통 스킬 절차 본문에서 직접 런타임 도구명 의존을 제거하고, 구조화 질문 기능이 없는 표면에서는 동일 선택지를 간결한 직접 질문으로 제시하되 스킬별 명시적 누락 응답 계약은 보존하도록 명시했다.
 
+## autopilot 0.48.10
+
+### 버그 수정
+- **자동 생성 PR 본문의 로컬 임시 SPEC 경로 누출·dispatch 오표기 제거** — `integration.sh` 의 공용 `in_pr_body`(dispatch·execute-task 공유)가 execute-task 실행에서 (1) `SPEC:` 줄에 `.task-work/<id>/SPEC.md` 같은 **로컬 절대·임시 materialize 경로**를 박아 리뷰어 환경에 없는 경로로 워커 파일시스템 레이아웃을 누출하던 것과, (2) 실제 실행 주체가 execute-task인데도 본문을 "**dispatch** 가 자동 생성"·"**dispatch-run**"으로 **오표기**하던 결함을 고쳤다. 이제 originator를 spec 경로의 임시 materialize 마커(`.task-work/`)로 판정해 execute-task 경로에서는 임시 SPEC 경로를 박지 않고(생략) 주체를 정확히 표기(`execute-task 가 자동 생성`)하며 추적성은 `task-run`·이슈 참조(`Refs #n`)로 표현한다. 리뷰 트리거 마커(제목 `🤖 [자동 리뷰]`, 본문 "자동 적대 리뷰" 식별 줄, `Refs #n`)는 보존되고, dispatch 경로의 기존 본문 표현(`SPEC:`·`dispatch-run:`)은 회귀 없이 그대로다.
+
+## autopilot 0.48.9
+
+### 새 기능
+- **using-autopilot에 자가개선 트리거 추가 — task 스킬 비정상 동작을 create-task 수정 스펙으로 라우팅** — `using-autopilot` 스킬이 기존 "새 코드 변경 신호 → create-task" 라우팅에 더해, **autopilot 자기 도구의 비정상 동작**을 새 신호 유형으로 같은 진입점(`create-task`)에 라우팅한다. task 스킬(`create-task`/`execute-task`/`workflow-task` 및 그 엔진 loop·forge·merge·review) 사용 중 잘못된/근거 약한 `blocked`, 오지 않을 상태 무의미 대기, 모순된 상태 전이, 예기치 못한 실패·오보고 등을 관찰하면, 단순 우회·수동 처리로 끝내지 말고 **자가개선 판단을 시작**한다: (1) 적대적 진단으로 실제 결함인지 판정(가능하면 결정적 재현·검증), (2) 실제 결함이면 그 수정을 `create-task`로 자기완결 스펙으로 떠 등록(본문=SPEC), (3) 등록 스펙은 평소 실행 경로(`execute-task`/`workflow-task`)로 처리. 정당한 우회(일회성 환경 이슈·사용자 명시 지시)는 예외이고, 무한 재귀(자기 수정의 자기 수정) 방지를 위해 관찰된 구체적 비정상 1건에 한정한다. 사람이 매번 "버그인지 보고 고쳐라"라고 지시하지 않아도 autopilot이 자기 도구의 결함을 탐지→판단→수정 스펙 등록으로 잇는 자가개선이 지침으로 강제된다. `SKILL.md`(frontmatter description·트리거 절·Red flag 행)와 사람용 `README.md`를 동일 계약으로 동기화했고, 기존 라우팅·예외와 모순 없이 가산되며 플러그인 자기완결·`REQUIRED RUNTIME CONTRACT` 라인은 보존된다.
+
+## autopilot 0.48.8
+
+### 버그 수정
+- **create-task 백엔드 config 영속화의 direct(로컬) 경로가 사용자 staged 변경을 무단 삭제하지 않음** — `persist-backend-config.sh`의 origin 없는 direct 경로는 config-only 머지로 `<base>`를 전진시킨 뒤, 현재 체크아웃이 `<base>`이면 인덱스를 새 HEAD에 동기화하려고 `git read-tree "$MERGE"`(단일 트리 인자)를 호출했는데, 이 명령은 **인덱스를 통째로 그 트리로 교체**하므로 호출 시점에 사용자가 `git add`로 stage 해둔 변경이 **조용히·비가역적으로 사라지던** 결함을 고친다(스크립트 헤더의 "워킹트리·스테이징 비파괴" 계약 위반). 시나리오는 드물지만(origin 없는 로컬 repo + `<base>` 체크아웃 + staged 변경 보유 + 그 시점 헬퍼 실행) silent data loss이므로 수정한다. 머지는 config-only 이므로 이제 인덱스의 **config 항목만** `git update-index --add --cacheinfo`로 새 HEAD에 동기화하고, 다른 staged 변경과 워킹트리 파일은 그대로 보존한다. config 커밋 자체는 기존대로 plumbing(commit-tree)로 만들어 워킹트리·스테이징을 건드리지 않으며, origin 있는(PR) 경로·멱등성·config-only 보장 등 기존 동작은 불변이다.
+
+## autopilot 0.48.7
+
+### 버그 수정
+- **신뢰봇 승인 마커 정규식을 `login` 필드 단독에 적용 — `[bot]`·`github-actions` 계열 봇 영영 미매치 결함 수정** — PR 승인 경로 b(강등 승인 마커) 매칭이 신뢰봇 로그인 정규식 `REVIEW_BOT_LOGINS_RE`(기본 `(\[bot\]$|^github-actions$|courtesy-bot)`)을 `login\t본문` **결합 한 줄**에 grep 해, 앵커 패턴 `\[bot\]$`(줄 끝 `[bot]` 요구)와 `^github-actions$`(줄 전체 일치 요구)가 탭 뒤 본문 때문에 **절대 매치되지 않던** 결함(`courtesy-bot` 같은 비앵커 부분문자열만 우연히 동작)을 고친다. 그 결과 봇 로그인이 `*[bot]`·`github-actions`이고 App 토큰 self-approve 불가로 `verdict=approve` 마커를 COMMENT 형태로 남기는(문서화된 App-token 경로) 환경에서, 공식 `reviewDecision==APPROVED`(경로 a)가 없으면 승인 신호(경로 b)를 영영 감지하지 못해 폴링 상한까지 헛대기 후 잘못 `blocked`로 종착하던 이식성 결함이 사라진다. 이제 `execute-task.sh`(`et_approval_gh`)·`merge.sh`(`mg_approval_gh`)·`review-loop.sh`(`rl_review_fetch_gh`) 세 경로 모두 미해결 `[blocking]` 인라인 게이트(`et_blocking_inline_gh`)와 동일 컨벤션으로, awk 가 현재 head 의 `verdict=approve` 마커를 가진 리뷰의 **login 만** 추출해 그 login 에만 봇 정규식을 적용한다 — 앵커가 실제로 성립한다. 위조 마커 거부(신뢰봇 로그인만 인정)·`head_sha==현재 head`·`verdict=approve` 검사 의미와 승인 경로 a(`reviewDecision==APPROVED`) 동작은 불변이다.
+
+## autopilot 0.48.6
+
+### 버그 수정
+- **forge 백엔드(GitHub 등) 가용 시 로컬 머지 금지 — PR 서버사이드 머지로만 통합** — dispatch·execute-task 공용 머지 경로(`merge.sh` `mg_merge_finish`)가 백엔드 가용 여부와 무관하게 항상 로컬 머지(`git checkout <base>`+`merge --ff-only`+`push`)로 통합해, 기본 브랜치가 다른 워크트리(공유 최상위 체크아웃 등)에 점유돼 있으면 `fatal: '<base>' is already checked out at ...` 로 머지가 실패하고 수동 `gh pr merge`(서버사이드)로 우회해야 하던 결함(관측: #423/PR428·#426/PR429)을 고친다. 또한 forge 경로가 PR을 만들어 리뷰까지 받고도 정작 머지는 PR을 통하지 않고 로컬로 main에 직접 push하던 모순을 제거한다. 이제 `mg_merge_finish`가 백엔드 가용 여부로 통합을 라우팅한다: **forge 백엔드 가용(PR 존재)** 이면 호스트의 PR 기반 서버사이드 머지(`pr merge --auto --merge` 예약 → 실패 시 `--merge` 즉시 폴백)로만 통합하고 로컬 `git checkout <base>`/ff push 경로를 **절대 타지 않는다**(따라서 멀티-워크트리 `already checked out` 결함 소멸). **백엔드/origin 미가용(direct)** 은 기존 로컬 ff-only(checkout+ff+push)를 그대로 유지한다. PR 존재·승인(`reviewDecision==APPROVED` + 현재 head 미해결 `[blocking]` 0)·버전 범프 게이트와 직렬화 락·force 미사용은 서버사이드 경로에서도 머지 **전에** 그대로 적용되며, 서버사이드 머지 실패는 조용한 성공이 아니라 `blocked`로 종착한다. 또한 `pr merge --auto`는 머지가 *예약*만 돼도 0을 반환하므로(필수 체크가 나중에 실패하면 실제 머지 안 됨), 발행 성공을 곧 완료로 보지 않고 **실제 PR `state==MERGED`를 폴링 확인**(`MERGE_CONFIRM_WAIT_MAX`/`MERGE_CONFIRM_POLL_INTERVAL`)한 경우에만 `phase=merged`로 전이한다 — 상한 내 미머지면 예약만 된 것으로 보아 `blocked`로 종착(미머지 PR이 done 처리돼 사라지는 것 방지). 폴링은 직렬화 락 밖에서 수행한다. 서버사이드(예약 가능) 경로에선 워커가 원격 작업 브랜치를 직접 삭제하지 않고(예약 머지 취소 방지) 호스트 자동삭제·dispatch sweep에 맡긴다. `forge/contract.md` 머지 계약에 반영.
+
 ## autopilot 0.48.5
 
 ### 변경(호환)
