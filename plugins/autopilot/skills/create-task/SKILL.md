@@ -76,8 +76,14 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
    ```
    bash "$ADAPTER" link_dependency --task-id "<후행>" --depends-on-id "<선행>"
    ```
-   등록 후 `bash "$ADAPTER" set_status --task-id <id> --status in_design` 로 전이하고, 결과(task_id·url)와
-   다음 단계(`execute-task start <id>` 또는 `workflow-task start`)를 안내한다.
+   등록 후 본문의 `[NEEDS CLARIFICATION` 마커 유무로 최종 상태를 분기한다(`create_task`의 초기 상태는
+   `backlog`다):
+   - 마커가 **없으면**(완성 SPEC) 초기 상태 `backlog`를 유지한다 — 전이를 생략하거나 명시적으로
+     `bash "$ADAPTER" set_status --task-id <id> --status backlog` 를 호출한다.
+   - 마커가 **남아 있으면**(미해결 잔존) `bash "$ADAPTER" set_status --task-id <id> --status in_design` 로 전이한다.
+
+   최종 상태(`backlog`/`in_design`)와 함께 결과(task_id·url)와 다음 단계(`execute-task start <id>` 또는
+   `workflow-task start`)를 안내한다.
 
 ## 규칙
 
