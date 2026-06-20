@@ -55,8 +55,8 @@ cat > "$PROJECT/.gitignore" <<'EOF'
 .loop-lock
 .loop-wt
 EOF
-# main-tracked CLAUDE.md — start 가 constitution 으로 덮어쓰고 skip-worktree 설정하는
-# 분별 능력(false-positive halt 차단)을 검증하기 위한 baseline.
+# main-tracked CLAUDE.md — start 가 원본 프로젝트 지침을 보존하고 constitution 을 병합한 뒤
+# skip-worktree 설정하는 분별 능력(false-positive halt 차단)을 검증하기 위한 baseline.
 echo "# placeholder root CLAUDE.md" > "$PROJECT/CLAUDE.md"
 git add -A
 git commit -q -m "chore: baseline (.gitignore + CLAUDE.md)"
@@ -138,8 +138,12 @@ WT2="$PROJECT/specs/basic/.worktree"
 MAX_ITERATIONS=10 WALL_CLOCK_MINUTES=10 loop start "$SPEC2"
 [[ -d "$WT2" ]] || { echo "FAIL: 워크트리 미생성"; exit 1; }
 [[ -f "$WT2/CLAUDE.md" ]] || { echo "FAIL: CLAUDE.md 미복사"; exit 1; }
-diff "$CONSTITUTION_SRC" "$WT2/CLAUDE.md" >/dev/null \
-  || { echo "FAIL: CLAUDE.md가 constitution.md와 다름"; exit 1; }
+# #450: 워커 지침 = 원본 프로젝트 지침 보존 + constitution 병합(덮어쓰기 아님).
+grep -qF "placeholder root CLAUDE.md" "$WT2/CLAUDE.md" \
+  || { echo "FAIL: CLAUDE.md 에 원본 프로젝트 지침이 보존되지 않음"; exit 1; }
+const_first="$(grep -m1 -v '^[[:space:]]*$' "$CONSTITUTION_SRC")"
+grep -qF "$const_first" "$WT2/CLAUDE.md" \
+  || { echo "FAIL: CLAUDE.md 에 constitution 병합 내용이 없음"; exit 1; }
 # 메타는 .loop/ 아래 (구 contract 의 .iterations/·PLAN.md 시드 아님)
 [[ -f "$WT2/.loop/BASE_SHA" ]] || { echo "FAIL: .loop/BASE_SHA 미생성"; exit 1; }
 [[ -f "$WT2/.loop/iterations/1.log" ]] || { echo "FAIL: .loop/iterations/1.log 미생성"; exit 1; }
@@ -274,6 +278,7 @@ echo "=== TEST 11: acquire_lock 이 stale lock(죽은 PID) 자동 정리 (source
   set +e
   source "$LOOP_SH_SRC"
   LOCK_FILE="$WORK_DIR/al-stale.lock"
+  WORKER_FILE="$WORK_DIR/al-stale.worker"   # acquire_lock 의 orphan 판정용(미존재=워커 없음)
   SPEC_PATH="x"
   echo "999999" > "$LOCK_FILE"
   ( acquire_lock; [[ "$(cat "$LOCK_FILE")" == "$$" ]] ) || exit 1
@@ -287,6 +292,7 @@ echo "=== TEST 12: acquire_lock 이 빈/비숫자 PID 도 stale 로 인식 (sour
   set +e
   source "$LOOP_SH_SRC"
   LOCK_FILE="$WORK_DIR/al-empty.lock"
+  WORKER_FILE="$WORK_DIR/al-empty.worker"   # orphan 판정용(미존재=워커 없음)
   SPEC_PATH="x"
   : > "$LOCK_FILE"          # 빈 PID
   ( acquire_lock ) || exit 1
