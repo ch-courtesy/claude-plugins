@@ -1,8 +1,5 @@
 {
   "backend": "github-project",
   "lease_ttl_seconds": 300,
-  "heartbeat_interval_seconds": 60,
-  "github_project_url": "https://github.com/users/ch-courtesy/projects/1",
-  "github_owner": "ch-courtesy",
-  "github_repo": "claude-plugins"
+  "heartbeat_interval_seconds": 60
 }
