@@ -551,12 +551,27 @@ prepare_workspace() {
   # 어느 cwd 에서 호출되든 같은 작업 공간을 본다.
   printf '%s\n' "$WT" > "$SPEC_DIR/.loop-wt"
 
-  # 헌법을 워크트리의 Claude/Codex 지침 파일로 복사. 워커 계약(노트·signals/ 컨벤션 등)의 SoT 는
-  # constitution.md 이므로 별도 append 없이 cp 만으로 충분하다.
-  cp "$SCRIPT_DIR/constitution.md" "$WT/CLAUDE.md" \
+  # 워커 지침 파일(CLAUDE.md/AGENTS.md)을 구성한다. 워크트리에 이미 있는 소비 프로젝트의 벤더 지침
+  # (AGENTS.md 본문 = rules 인덱스 등 프로젝트 지침)을 보존하고, 그 뒤에 워커 계약 SoT 인
+  # constitution.md 를 병합한다. 이렇게 해야 워커가 프로젝트 지침(예: versioning — plugins/ 변경 시
+  # plugin.json 범프)과 loop 헌법을 모두 받는다. 플러그인은 특정 프로젝트 규칙을 하드코딩하지 않는다.
+  # CLAUDE.md 의 @import 해석에 의존하지 않도록 AGENTS.md 본문을 인라인 기반으로 쓴다(없으면 CLAUDE.md).
+  [[ -f "$SCRIPT_DIR/constitution.md" ]] \
     || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
-  cp "$SCRIPT_DIR/constitution.md" "$WT/AGENTS.md" \
-    || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
+  local _loop_const _loop_base _loop_merged
+  _loop_const="$(cat "$SCRIPT_DIR/constitution.md")"
+  _loop_base=""
+  if [[ -s "$WT/AGENTS.md" ]]; then _loop_base="$(cat "$WT/AGENTS.md")"
+  elif [[ -s "$WT/CLAUDE.md" ]]; then _loop_base="$(cat "$WT/CLAUDE.md")"; fi
+  if [[ -n "$_loop_base" ]]; then
+    _loop_merged="$(printf '%s\n\n---\n\n%s' "$_loop_base" "$_loop_const")"
+  else
+    _loop_merged="$_loop_const"
+  fi
+  printf '%s\n' "$_loop_merged" > "$WT/CLAUDE.md" \
+    || die "워커 지침 CLAUDE.md 작성 실패: $WT/CLAUDE.md"
+  printf '%s\n' "$_loop_merged" > "$WT/AGENTS.md" \
+    || die "워커 지침 AGENTS.md 작성 실패: $WT/AGENTS.md"
   if git -C "$WT" ls-files --error-unmatch CLAUDE.md >/dev/null 2>&1; then
     git -C "$WT" update-index --skip-worktree CLAUDE.md || true
   fi
