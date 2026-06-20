@@ -1,4 +1,4 @@
-# 태스크 본문(=SPEC) 구조 (create-task 자체 소유)
+# 태스크 본문(=SPEC) 구조 (feature 자체 소유)
 
 태스크 본문이 설계의 단일 출처다. 별도 SPEC 파일을 만들지 않는다. 본문 섹션 순서(고정) — 백엔드 공통이며
 정규 정의는 플러그인 `task-backend/contract.md`와 일치한다.

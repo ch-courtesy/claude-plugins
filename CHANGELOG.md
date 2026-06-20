@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.50.0
+
+### 새 기능
+- **작성/등록 분리 — 인터뷰 작성자 `feature` 스킬 신설, `create-task`를 등록 프리미티브로 정립** — 기존 `create-task`가 명확화 인터뷰 작성 + 등록을 함께 수행해 작성 로직이 스킬마다 흩어지던 문제를 풀었다. 인터뷰 작성부를 새 **`feature`** 스킬로 분리(경량 참조 4종 `clarification`/`decomposition-gate`/`self-review`/`task-body-template`을 `feature`로 이동)해, `feature`가 인터뷰로 태스크 본문(=SPEC)을 떠서 `create-task`로 등록을 위임한다. **`create-task`는 등록 프리미티브**로 정립 — 외부 작성자(`feature`·향후 `fix`)가 만든 본문을 받아 등록하고 등록-후 상태 전이(완성→backlog / 미해결 잔존→in_design)를 소유하며, 본문 갱신은 `set_body`(0.49.0 신설)에 위임한다(인터뷰·작성 로직 미보유). `using-autopilot`은 **기능 의도를 `feature`로 라우팅**하고, 버그·증상·실패는 전용 작성자(`fix`)가 생기기 전까지 **현행대로 `create-task`로** 보낸다(미존재 스킬로 라우팅하지 않음). 파일 산출 없음(백엔드 본문=SoT). spec 스킬은 불변.
+
 ## autopilot 0.49.0
 
 ### 새 기능

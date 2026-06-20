@@ -1,10 +1,9 @@
 ---
 name: create-task
-description: 새 작업(기능·변경·지침)을 태스크 백엔드에 등록하려 할 때 사용 — 명확화 인터뷰로 의도를 탐색해 태스크 본문(목표·배경·제안·검증 계획·완료 기준)을 작성하고, 선택된 백엔드(filesystem/github-project/beads)에 태스크로 등록한다. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 호출 'Skill(skill="create-task", args="<자연어 task 설명>")'.
+description: 외부 작성자(feature·fix)가 만든 자기완결적 태스크 본문(=SPEC)을 받아 선택된 백엔드(filesystem/github-project/beads)에 태스크로 등록하려 할 때 사용하는 등록 프리미티브 — 등록과 등록-후 상태 전이(완성→backlog / 미해결 잔존→in_design)를 소유하고, 본문 갱신은 백엔드 set_body 동사에 위임한다. 인터뷰·정적분석 같은 작성 로직은 갖지 않는다(작성은 feature·fix가 소유). 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 호출 'Skill(skill="create-task", args="<제목>\n\n<태스크 본문>")'.
 allowed-tools:
   - AskUserQuestion
   - Read
-  - Write
   - Bash(bash * adapter.sh:*)
   - Bash(bash * persist-backend-config.sh:*)
   - Bash(git rev-parse:*)
@@ -18,12 +17,17 @@ allowed-tools:
 
 # create-task
 
-자연어 의도를 **명확화 인터뷰**로 탐색해 자기완결적 **태스크 본문**으로 떠서 태스크 백엔드에 **등록**하는
-진입점이다. 태스크 본문이 곧 설계(SPEC)의 단일 출처이며 별도 SPEC 파일을 만들지 않는다. 등록된 태스크는
-이후 `execute-task`(단일 실행)나 `workflow-task`(무인 드레인)가 실행한다.
+외부 작성자(`feature` 인터뷰 작성자, `fix` 정적분석 작성자)가 떠 준 자기완결적 **태스크 본문**을 받아 태스크
+백엔드에 **등록**하는 **등록 프리미티브**다. 등록과 **등록-후 상태 전이**를 소유하며, 본문 갱신은 백엔드
+`set_body` 동사에 위임한다. 태스크 본문이 곧 설계(SPEC)의 단일 출처이며 별도 SPEC 파일을 만들지 않는다.
+등록된 태스크는 이후 `execute-task`(단일 실행)나 `workflow-task`(무인 드레인)가 실행한다.
+
+이 스킬은 **등록만** 한다 — 인터뷰·범위 분해·정적분석 같은 **작성 로직을 갖지 않는다**. 그 작성
+방법론은 작성자 스킬(`feature`/`fix`)이 소유한다. 본 스킬에 넘어오는 본문은 이미 작성·자체검토가 끝난
+완성본으로 간주한다.
 
 이 스킬은 플러그인 자기완결이다 — 컨슈밍 프로젝트의 `rules/` 지침이나 다른 스킬을 참조하지 않는다. 필요한
-방법론·계약은 이 스킬의 `references/`와 플러그인 `task-backend/contract.md`가 소유한다.
+계약은 플러그인 `task-backend/contract.md`가 소유한다.
 
 ## 백엔드 어댑터
 
@@ -55,48 +59,44 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
 
 ## 워크플로
 
-호출 시 단계를 TodoWrite로 등록한다. 모든 결정·승인은 `AskUserQuestion`으로 받는다(자유 텍스트 질문 종결구 금지).
+호출 시 단계를 TodoWrite로 등록한다. 결정·승인은 `AskUserQuestion`으로 받는다(자유 텍스트 질문 종결구 금지).
 
-1. **컨텍스트 탐색 · 백엔드 준비** — `git log --oneline -5`, `ls -A`, 얕은 구조 파악으로 컨벤션만 요약한다.
-   백엔드 미설정이면 `adapter init`(선택은 `AskUserQuestion`) 후 위 「백엔드 선택 SoT 영속화」 헬퍼를 실행해
-   config를 메인까지 영속화한다(멱등).
-2. **범위 분해 게이트** — `references/decomposition-gate.md`로 다중 독립 서브시스템 여부 판정. 다중이면 N개
-   태스크를 발행하고, 아니면 1개.
-3. **명확화 인터뷰** — `references/clarification.md`의 깔때기형 단일 흐름으로 의도·제약·완료 조건을 짚는다.
-   내부 커버리지 체크리스트(목적·성공기준·제약·위험)로 충분성만 점검한다.
-4. **접근법 비교** — 비자명한 결정이 있으면 2-3안·trade-off·추천을 제시(자명하면 생략).
-5. **태스크 본문 작성** — `references/task-body-template.md` 구조(목표/배경/제안/검증 계획/완료 기준)로 본문을
-   작성한다. 본문이 SPEC이다. 미해결 항목은 `[NEEDS CLARIFICATION: <질문>]` 마커로 남긴다.
-6. **자체 검토** — `references/self-review.md` 5축(placeholder·모순·범위·모호성·검증 가능성)을 점검·수정.
-7. **등록** — 완성 본문 전체를 한 번 제시해 `AskUserQuestion`으로 단일 승인을 받고 등록한다:
+1. **본문 수신** — 작성자(`feature`/`fix`)가 넘긴 **완성 태스크 본문**(제목 + 목표/배경/제안/검증 계획/완료
+   기준)을 입력으로 받는다. 본문 작성·인터뷰·분해는 하지 않는다(작성자의 몫). 받은 본문에서 제목과 본문을
+   분리한다.
+2. **백엔드 준비** — 백엔드 미설정이면 `adapter init`(선택은 `AskUserQuestion`) 후 위 「백엔드 선택 SoT
+   영속화」 헬퍼를 실행해 config를 메인까지 영속화한다(멱등).
+3. **등록** — 받은 본문을 그대로 등록한다(`create_task`의 초기 상태는 `backlog`다). 작성자가 의존 관계를
+   넘겼으면 `--depends-on`으로 함께 전달한다:
    ```
-   bash "$ADAPTER" create_task --title "<제목>" --body "<본문>"     # → task_id
+   bash "$ADAPTER" create_task --title "<제목>" --body "<본문>" [--depends-on "<선행id,...>"]   # → task_id
    ```
-   분해 발행(N개)이면 의존 순서대로 등록하며 `slug→task_id` 룩업으로 의존을 연결한다:
+   여러 본문을 의존 순서대로 받으면 `slug→task_id` 룩업으로 의존을 연결한다:
    ```
    bash "$ADAPTER" link_dependency --task-id "<후행>" --depends-on-id "<선행>"
    ```
-   등록 후 본문의 `[NEEDS CLARIFICATION` 마커 유무로 최종 상태를 분기한다(`create_task`의 초기 상태는
-   `backlog`다):
+4. **등록-후 상태 전이 (소유)** — 등록 직후 본문의 `[NEEDS CLARIFICATION` 마커 유무로 최종 상태를 분기한다.
+   이 전이는 이 등록 프리미티브가 소유한다:
    - 마커가 **없으면**(완성 SPEC) 초기 상태 `backlog`를 유지한다 — 전이를 생략하거나 명시적으로
      `bash "$ADAPTER" set_status --task-id <id> --status backlog` 를 호출한다.
-   - 마커가 **남아 있으면**(미해결 잔존) `bash "$ADAPTER" set_status --task-id <id> --status in_design` 로 전이한다.
-
-   최종 상태(`backlog`/`in_design`)와 함께 결과(task_id·url)와 다음 단계(`execute-task start <id>` 또는
-   `workflow-task start`)를 안내한다.
+   - 마커가 **남아 있으면**(미해결 잔존) `bash "$ADAPTER" set_status --task-id <id> --status in_design` 로
+     상태를 전이한다.
+5. **본문 갱신은 set_body에 위임** — 등록된 태스크의 본문을 나중에 갱신해야 하면(예: `in_design` 태스크의
+   SPEC 보강) 직접 구현하지 않고 백엔드 `set_body` 동사에 위임한다(본문만 교체, status·`depends_on`·메타
+   보존):
+   ```
+   bash "$ADAPTER" set_body --task-id <id> --body "<갱신 본문>"
+   ```
+   `set_body`의 정의·구현은 백엔드 소관이다(`task-backend/contract.md`). 이 스킬은 그 동사를 **노출·호출**할
+   뿐 정의하지 않는다.
+6. **안내** — 최종 상태(`backlog`/`in_design`)와 함께 결과(task_id·url)와 다음 단계(`execute-task start <id>`
+   또는 `workflow-task start`)를 안내한다.
 
 ## 규칙
 
-- 대화형 진입점이다(무인 폴러는 호출하지 않는다). 의존성은 `depends_on`으로만 표현한다.
+- **등록만** 한다 — 작성(인터뷰·분해·정적분석·자체검토)은 작성자(`feature`/`fix`)가 소유한다. 본 스킬은
+  완성 본문을 받아 등록·전이만 한다.
+- 의존성은 `depends_on`으로만 표현한다. 본문 갱신은 `set_body`에 위임(직접 구현 금지).
 - 다른 스킬·`rules/`를 doc-link하지 않는다(플러그인 자기완결). 후속 스킬을 자동 호출하지 않는다 — 등록 후
   안내만 남긴다.
 - `[NEEDS CLARIFICATION` 마커가 남아 있으면 무인 실행이 차단됨을 안내한다.
-
-## references
-
-| 파일 | 역할 |
-|---|---|
-| `clarification.md` | 명확화 인터뷰 방법론(깔때기형 흐름·내부 커버리지·추천 답) |
-| `task-body-template.md` | 태스크 본문(=SPEC) 구조 |
-| `decomposition-gate.md` | 다중 서브시스템 감지·발행 규칙 |
-| `self-review.md` | 자체 검토 5축 |
