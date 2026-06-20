@@ -556,13 +556,16 @@ prepare_workspace() {
   # constitution.md 를 병합한다. 이렇게 해야 워커가 프로젝트 지침(예: versioning — plugins/ 변경 시
   # plugin.json 범프)과 loop 헌법을 모두 받는다. 플러그인은 특정 프로젝트 규칙을 하드코딩하지 않는다.
   # CLAUDE.md 의 @import 해석에 의존하지 않도록 AGENTS.md 본문을 인라인 기반으로 쓴다(없으면 CLAUDE.md).
+  # 원본 프로젝트 지침은 git HEAD(pristine)에서 읽는다 — prepare_workspace 는 재시작 시 워크트리를
+  # 재사용하므로, 이미 병합·skip-worktree 된 작업 사본을 base 로 다시 읽으면 constitution 이 매
+  # 재시작마다 중복 누적된다. HEAD 는 워커가 변경하지 않아(skip-worktree+헌법 금지) 병합이 멱등하다.
   [[ -f "$SCRIPT_DIR/constitution.md" ]] \
     || die "constitution.md를 찾을 수 없음: $SCRIPT_DIR/constitution.md"
   local _loop_const _loop_base _loop_merged
-  _loop_const="$(cat "$SCRIPT_DIR/constitution.md")"
-  _loop_base=""
-  if [[ -s "$WT/AGENTS.md" ]]; then _loop_base="$(cat "$WT/AGENTS.md")"
-  elif [[ -s "$WT/CLAUDE.md" ]]; then _loop_base="$(cat "$WT/CLAUDE.md")"; fi
+  _loop_const="$(cat "$SCRIPT_DIR/constitution.md")" \
+    || die "constitution.md 읽기 실패: $SCRIPT_DIR/constitution.md"
+  _loop_base="$(git -C "$WT" show HEAD:AGENTS.md 2>/dev/null || true)"
+  [[ -z "$_loop_base" ]] && _loop_base="$(git -C "$WT" show HEAD:CLAUDE.md 2>/dev/null || true)"
   if [[ -n "$_loop_base" ]]; then
     _loop_merged="$(printf '%s\n\n---\n\n%s' "$_loop_base" "$_loop_const")"
   else
