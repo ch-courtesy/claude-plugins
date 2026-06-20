@@ -77,6 +77,17 @@ be_get_body() {
     --arg b "$(gh issue view "$id" $(gh_repo_args) --json body -q .body)" '{task_id:$id, title:$t, body:$b}'
 }
 
+# be_set_body — 이슈 본문(=SPEC)만 교체. status(라벨)·lease(전용 코멘트)는 본문과 독립이라 보존되고,
+#   depends_on 은 본문 마커라 명시 보존한다(기존 마커를 새 본문 끝에 재부착; 새 본문에 섞여온 마커는 제거).
+be_set_body() {
+  local id body; id="$(_argval --task-id "$@")"; body="$(_argval --body "$@")"
+  local marker; marker="$(gh_body "$id" | sed -n '/^<!-- autopilot:depends_on:.*-->$/p' | head -1)"
+  local new; new="$(printf '%s' "$body" | sed '/^<!-- autopilot:depends_on:.*-->$/d')"
+  [[ -n "$marker" ]] && new+=$'\n'"$marker"
+  gh issue edit "$id" $(gh_repo_args) --body "$new" >/dev/null 2>&1 || tb_die "set_body: 본문 갱신 실패"
+  jq -nc --arg id "$id" '{task_id:$id}'
+}
+
 be_set_status() {
   local id s; id="$(_argval --task-id "$@")"; s="$(_argval --status "$@")"
   local old; old="$(gh_status_label "$id")"
