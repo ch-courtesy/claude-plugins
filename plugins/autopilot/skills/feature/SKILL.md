@@ -8,6 +8,7 @@ allowed-tools:
   - Bash(git log:*)
   - Bash(ls:*)
   - Bash(cat:*)
+  - Bash(bash * adapter.sh:link_dependency)
 ---
 
 # feature
@@ -41,8 +42,13 @@ allowed-tools:
    ```
    Skill(skill="create-task", args="<제목>\n\n<본문>")
    ```
-   분해 발행(N개)이면 의존 순서대로 `create-task`에 넘기고, 선후 의존은 `create-task`가 받는 `depends_on`으로
-   전달한다(작성자는 의존 관계만 명시하고, 실제 등록·연결·상태 전이는 `create-task`가 수행한다).
+   분해 발행(N개)이면 의존 순서대로 각 본문을 `create-task`로 등록하고(각 호출의 보고에서 `task_id`를 받는다),
+   `slug→task_id` 룩업으로 **이 스킬이 직접 `link_dependency`를 호출해 선후 의존을 연결**한다 — 등록 전용
+   `create-task`의 `args="<제목>\n\n<본문>"`엔 의존을 전달할 수단이 없기 때문이다:
+   ```bash
+   ADAPTER="$(git rev-parse --show-toplevel)/plugins/autopilot/task-backend/adapter.sh"
+   bash "$ADAPTER" link_dependency --task-id "<후행 task_id>" --depends-on-id "<선행 task_id>"
+   ```
 
    등록 결과(task_id·url·최종 상태)와 다음 단계(`execute-task start <id>` 또는 `workflow-task start`) 안내는
    `create-task`가 책임진다. 이 스킬은 본문을 넘기는 데서 끝난다.
