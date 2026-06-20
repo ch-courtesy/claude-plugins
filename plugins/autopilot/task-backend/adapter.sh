@@ -78,7 +78,7 @@ main() {
     init)     tb_init "$@";;
     selftest) tb_selftest;;
     backend)  tb_load_backend; jq -nc --arg b "$TB_BACKEND" '{backend:$b}';;
-    create_task|get_task|get_body|set_status|link_dependency|list_ready|append_log|materialize|renew_lease|claim)
+    create_task|get_task|get_body|set_body|set_status|link_dependency|list_ready|append_log|materialize|renew_lease|claim)
       tb_load_backend; "be_$verb" "$@";;
     ""|-h|--help|help)
       cat >&2 <<'EOF'
@@ -86,6 +86,7 @@ usage: adapter.sh <verb> [args]
   init --backend <filesystem|github-project|beads> [--github-project-url U --github-owner O --github-repo R]
   create_task --title T --body B [--depends-on a,b]
   get_task|get_body|materialize|renew_lease --task-id ID
+  set_body --task-id ID --body B
   set_status --task-id ID --status S [--reason R]
   link_dependency --task-id ID --depends-on-id ID
   append_log --task-id ID --marker decision|handoff|blocked --text T
@@ -117,6 +118,10 @@ tb_selftest() {
   ( cd "$TMP" && bash "$A" set_status --task-id "$id1" --status done >/dev/null )
   ready="$(cd "$TMP" && bash "$A" list_ready | jq -r '.[].task_id' | tr '\n' ' ')"
   chk "dep 해제 후 후행 ready" "$ready" "$id2 "
+  # set_body: 본문만 교체, status·depends_on 보존
+  ( cd "$TMP" && bash "$A" set_body --task-id "$id2" --body $'## 목표\n교체본문' >/dev/null )
+  chk "set_body 새 본문" "$(cd "$TMP" && bash "$A" get_body --task-id "$id2" | jq -r .body | grep -c '교체본문')" "1"
+  chk "set_body depends_on 보존" "$(cd "$TMP" && bash "$A" get_task --task-id "$id2" | jq -r '.depends_on[0]')" "$id1"
   # materialize
   local mr; mr="$(cd "$TMP" && bash "$A" materialize --task-id "$id2")"
   local sp; sp="$(printf '%s' "$mr" | jq -r .spec_path)"

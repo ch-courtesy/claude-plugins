@@ -43,6 +43,16 @@ c="$(bash "$A" create_task --title "C" --body "## 목표"$'\n'"씨" | jq -r .tas
 bash "$A" link_dependency --task-id "$b" --depends-on-id "$c" >/dev/null
 chk "link_dependency 추가" "$(bash "$A" get_task --task-id "$b" | jq -r '.depends_on | length')" "2"
 
+# set_body: 본문만 교체, status·frontmatter(depends_on)·title 보존
+e="$(bash "$A" create_task --title "E" --body $'## 목표\n원본본문' --depends-on "$a" | jq -r .task_id)"
+bash "$A" set_status --task-id "$e" --status in_design >/dev/null
+bash "$A" set_body --task-id "$e" --body $'## 목표\n교체된본문' >/dev/null
+chk "set_body 새 본문 반환" "$(bash "$A" get_body --task-id "$e" | jq -r .body | grep -c '교체된본문')" "1"
+chk "set_body 원본 제거" "$(bash "$A" get_body --task-id "$e" | jq -r .body | grep -c '원본본문')" "0"
+chk "set_body status 보존" "$(bash "$A" get_task --task-id "$e" | jq -r .status)" "in_design"
+chk "set_body depends_on 보존" "$(bash "$A" get_task --task-id "$e" | jq -r '.depends_on[0]')" "$a"
+chk "set_body title 보존" "$(bash "$A" get_body --task-id "$e" | jq -r .title)" "E"
+
 # 원자적 claim: 첫 획득 true, 신선 점유 중 재획득 false
 d="$(bash "$A" create_task --title D --body '## 목표'$'\n'디 | jq -r .task_id)"
 chk "claim 1회 true" "$(bash "$A" claim --task-id "$d" --owner w1 | jq -r .claimed)" "true"

@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.49.0
+
+### 새 기능
+- **task-backend에 `set_body` 동사 신설 — 기존 태스크 본문(=SPEC) 갱신 수단** — 어댑터에 본문 쓰기 프리미티브가 없어(`get_body` 읽기 전용) 이미 등록된 in_design 태스크의 SPEC을 갱신할 수 없던 공백을 메웠다. `set_body --task-id <id> --body <s>` → `{"task_id"}` 를 contract.md 동사표에 `get_body`의 쓰기 짝으로 추가하고 3개 백엔드(filesystem/github-project/beads)에 구현했다. 본문만 교체하고 status·frontmatter·`depends_on` 등 메타는 보존한다(filesystem: frontmatter 뒤 본문 영역만 교체; github: 이슈 본문 교체하되 라벨=status·전용 코멘트 lease는 본문과 독립이라 보존하고 `depends_on` 마커는 재부착; beads: `bd update --description`로 status·`bd dep`와 무관하게 본문만). 작성/등록 분리(#445)·인터뷰 재개(#443)의 본문 갱신 의존성을 푼다.
+
 ## autopilot 0.48.12
 
 ### 버그 수정
