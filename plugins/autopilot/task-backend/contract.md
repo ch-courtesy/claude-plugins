@@ -73,7 +73,9 @@ DoD 확인 방법(테스트·관찰 지표·수동 단계).
 - [ ] ...
 ```
 
-`get_body`는 위 본문을 반환하고, `materialize`는 `# <title>` H1을 앞에 붙여 임시 spec 파일로 쓴다.
+`get_body`는 위 본문을 반환하고, `set_body`는 그 쓰기 짝으로 **본문만 교체**한다(상태·frontmatter·depends_on 보존
+— 이미 등록된 in_design 태스크의 설계 본문 갱신·인터뷰 재개에 쓴다). `materialize`는 `# <title>` H1을 앞에 붙여 임시
+spec 파일로 쓴다.
 
 ## 의존성 (depends_on 단일 축)
 
@@ -88,7 +90,7 @@ DoD 확인 방법(테스트·관찰 지표·수동 단계).
 - `list_ready`는 lease가 **stale**(now − lease_renewed_at > `lease_ttl_seconds`)인 in_progress 태스크를 ready로
   반환한다(크래시·행 워커 회수). lease가 신선하면 제외(이중 실행 방지).
 
-## 동사 (9개)
+## 동사 (10개)
 
 모든 동사는 성공 시 한 줄 JSON을 stdout에 쓴다.
 
@@ -97,6 +99,7 @@ DoD 확인 방법(테스트·관찰 지표·수동 단계).
 | `create_task` | `--title <s> --body <s> [--depends-on <id,...>]` | `{"task_id","status":"backlog","url":<s|null>}` |
 | `get_task` | `--task-id <id>` | `{"task_id","title","status","depends_on":[...],"url"}` |
 | `get_body` | `--task-id <id>` | `{"task_id","title","body"}` |
+| `set_body` | `--task-id <id> --body <s>` | `{"task_id"}` |
 | `set_status` | `--task-id <id> --status <state> [--reason <s>]` | `{"task_id","status"}` |
 | `link_dependency` | `--task-id <id> --depends-on-id <id>` | `{"task_id","depends_on":[...]}` |
 | `list_ready` | (없음) | `[{"task_id","title"},...]` (depends_on 충족 + stale-lease in_progress) |

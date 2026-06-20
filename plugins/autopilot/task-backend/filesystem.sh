@@ -95,6 +95,18 @@ be_get_body() {
     '{task_id:$id, title:$t, body:$b}'
 }
 
+# be_set_body — get_body 의 쓰기 짝. frontmatter(닫는 --- 포함)만 보존하고 본문 영역을 새 본문으로 교체.
+#   status·depends_on 등 frontmatter 는 불변. 본문 영역(get_body 가 읽는 곳)만 바뀐다.
+be_set_body() {
+  local id body; id="$(_argval --task-id "$@")"; body="$(_argval --body "$@")"
+  fs_exists "$id" || tb_die "set_body: 없음 $id"
+  local f; f="$(fs_file "$id")"
+  awk 'BEGIN{n=0} {print} /^---[[:space:]]*$/{n++; if(n==2) exit}' "$f" > "$f.tmp"
+  printf '%s\n' "$body" >> "$f.tmp"
+  mv "$f.tmp" "$f"
+  jq -nc --arg id "$id" '{task_id:$id}'
+}
+
 fs_claim_dir() { printf '%s/.task-work/.claims' "$TB_ROOT"; }
 fs_release_claim() { rm -rf "$(fs_claim_dir)/$1" 2>/dev/null || true; }
 

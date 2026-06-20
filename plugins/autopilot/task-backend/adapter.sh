@@ -78,7 +78,7 @@ main() {
     init)     tb_init "$@";;
     selftest) tb_selftest;;
     backend)  tb_load_backend; jq -nc --arg b "$TB_BACKEND" '{backend:$b}';;
-    create_task|get_task|get_body|set_status|link_dependency|list_ready|append_log|materialize|renew_lease|claim)
+    create_task|get_task|get_body|set_body|set_status|link_dependency|list_ready|append_log|materialize|renew_lease|claim)
       tb_load_backend; "be_$verb" "$@";;
     ""|-h|--help|help)
       cat >&2 <<'EOF'
@@ -86,6 +86,7 @@ usage: adapter.sh <verb> [args]
   init --backend <filesystem|github-project|beads> [--github-project-url U --github-owner O --github-repo R]
   create_task --title T --body B [--depends-on a,b]
   get_task|get_body|materialize|renew_lease --task-id ID
+  set_body --task-id ID --body B
   set_status --task-id ID --status S [--reason R]
   link_dependency --task-id ID --depends-on-id ID
   append_log --task-id ID --marker decision|handoff|blocked --text T

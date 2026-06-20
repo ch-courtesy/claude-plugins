@@ -51,4 +51,13 @@ chk "claim 후 in_progress" "$(bash "$A" get_task --task-id "$d" | jq -r .status
 bash "$A" set_status --task-id "$d" --status done >/dev/null
 [[ -d "$TMP/.task-work/.claims/$d" ]] && bad "done 시 claim 해제" || ok "done 시 claim 해제"
 
+# set_body: 본문만 교체, frontmatter(status·depends_on) 보존
+e="$(bash "$A" create_task --title "E" --body $'## 목표\n원본' --depends-on "$a" | jq -r .task_id)"
+bash "$A" set_status --task-id "$e" --status in_design >/dev/null
+chk "set_body 반환 task_id" "$(bash "$A" set_body --task-id "$e" --body $'## 목표\n교체본문\n## 검증\nok' | jq -r .task_id)" "$e"
+chk "set_body 후 get_body 새 본문" "$(bash "$A" get_body --task-id "$e" | jq -r .body | sed -n 2p)" "교체본문"
+chk "set_body 후 status 불변" "$(bash "$A" get_task --task-id "$e" | jq -r .status)" "in_design"
+chk "set_body 후 depends_on 불변" "$(bash "$A" get_task --task-id "$e" | jq -r '.depends_on[0]')" "$a"
+chk "set_body 후 title 불변" "$(bash "$A" get_body --task-id "$e" | jq -r .title)" "E"
+
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail

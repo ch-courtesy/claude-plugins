@@ -42,6 +42,13 @@ be_get_body() {
   bd show "$id" --json 2>/dev/null | jq -c '{task_id:.id, title:.title, body:(.description//"")}' || tb_die "bd show 실패: $id"
 }
 
+# be_set_body — get_body 의 쓰기 짝. description(=본문/SPEC)만 교체. status·depends_on 은 bd 네이티브라 불변.
+be_set_body() {
+  local id body; id="$(_argval --task-id "$@")"; body="$(_argval --body "$@")"
+  bd update "$id" --description "$body" >/dev/null 2>&1 || tb_die "bd update --description 실패"
+  jq -nc --arg id "$id" '{task_id:$id}'
+}
+
 be_set_status() {
   local id s; id="$(_argval --task-id "$@")"; s="$(_argval --status "$@")"
   bd update "$id" --status "$s" >/dev/null 2>&1 || tb_die "bd update --status 실패"
