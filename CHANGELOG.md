@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.48.12
+
+### 버그 수정
+- **loop 워커가 프로젝트 지침을 잃던 문제 수정** — `loop`이 워크트리의 `CLAUDE.md`/`AGENTS.md`를 플러그인 `constitution.md`로 덮어써, 워커가 소비 프로젝트의 벤더 지침(`rules/` 인덱스 → versioning 등)을 보지 못했다. 이제 워크트리의 원본 프로젝트 지침을 보존하고 그 뒤에 `constitution`을 병합해, 워커가 프로젝트 지침(예: `plugins/` 변경 시 `plugin.json` 버전 범프)과 loop 헌법을 모두 받는다. 플러그인은 특정 프로젝트 규칙을 하드코딩하지 않는다.
+
 ## project-init 0.21.0
 
 ### 새 기능
