@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-PLUGIN_DIR="$REPO_ROOT/plugins/roundtable"
+PLUGIN_DIR="$REPO_ROOT/plugins/thinktank"
 SKILL_DIR="$PLUGIN_DIR/skills/brainstorm"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REFS="$SKILL_DIR/references"
@@ -123,10 +123,10 @@ ok "검증 경계와 산출물 계약"
 
 echo ""
 echo "=== TEST 8: 플러그인 버전 ==="
-grep -q '"version": "0.2.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" \
-  || fail "roundtable 플러그인 버전이 0.2.0이 아님"
-awk '/"name": "roundtable"/{found=1} found && /"version": "0.2.0"/{ok=1; exit} END{exit !ok}' "$MARKETPLACE" \
-  || fail "마켓플레이스 roundtable 버전이 0.2.0이 아님"
+grep -q '"version": "0.3.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" \
+  || fail "thinktank 플러그인 버전이 0.3.0이 아님"
+awk '/"name": "thinktank"/{found=1} found && /"version": "0.3.0"/{ok=1; exit} END{exit !ok}' "$MARKETPLACE" \
+  || fail "마켓플레이스 thinktank 버전이 0.3.0이 아님"
 ok "플러그인과 마켓플레이스 버전"
 
 echo ""

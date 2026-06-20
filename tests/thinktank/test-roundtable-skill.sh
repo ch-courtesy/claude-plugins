@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-PLUGIN_DIR="$REPO_ROOT/plugins/roundtable"
+PLUGIN_DIR="$REPO_ROOT/plugins/thinktank"
 SKILL_DIR="$PLUGIN_DIR/skills/roundtable"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REFS="$SKILL_DIR/references"
@@ -123,8 +123,8 @@ ok "문서 산출물과 실행 경계"
 
 echo ""
 echo "=== TEST 8: 마켓플레이스 등록 ==="
-grep -q '"name": "roundtable"' "$MARKETPLACE" \
-  || fail "마켓플레이스에 roundtable 미등록"
+grep -q '"name": "thinktank"' "$MARKETPLACE" \
+  || fail "마켓플레이스에 thinktank 미등록"
 ok "마켓플레이스 등록"
 
 echo ""
