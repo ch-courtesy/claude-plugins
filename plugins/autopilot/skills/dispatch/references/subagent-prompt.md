@@ -80,6 +80,11 @@ dispatch 가 준비된(모든 `depends_on` 이 `done`) SPEC마다 띄우는 per-
    - **최종 머지 레이스**: `merge.sh finish` 가 타겟 전진으로 ff 실패를 보고하면(헬퍼 내부 바운드 재시도 후에도),
      `integration.sh integrate`(자율 재동기화)를 다시 돌린 뒤 `merge.sh finish` 를 재시도한다. **유한 횟수**
      (기본 한도) 초과 시 에스컬레이션한다.
+   - **버전게이트 동률 블록**: `merge.sh finish` 가 `blocked: version-bump` 을 보고하면(병렬 태스크가 **같은
+     버전으로** 범프해 먼저 머지된 쪽이 base 를 올려 동률이 된 경우 — 충돌이 없어 결정적 버전 해소가 발동하지
+     않는다), 곧장 에스컬레이션하지 말고 `integration.sh integrate` 를 다시 돌린다 — 통합 경로가 새 베이스보다
+     한 단계 앞서게 **자동 재범프(append commit, ff-safe·non-force)**한 뒤 작업 브랜치 head 가 전진하므로,
+     리뷰 게이트(재승인)를 거쳐 `merge.sh finish` 를 재시도한다. **유한 횟수** 초과 시 에스컬레이션한다.
    - 자동 해결·재동기화·재시도는 **어떤 경로에서도 non-force**다(force push/merge/rebase 금지). 검증으로 닫히지
      않거나 한도를 넘는 충돌만 보수적으로 에스컬레이션한다.
 
