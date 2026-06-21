@@ -87,6 +87,35 @@ spec_key() {
   fi
 }
 
+# ----- rules 인덱스 생성 (자기완결) -----
+# 워커는 `claude --print`(일회성)로 실행되어 SessionStart 훅이 돌지 않는다. 따라서
+# 소비 프로젝트의 rules 인덱스(project-init 훅 산출물 <project-rules-index>)가 워커에
+# 닿지 않아, 카테고리 지침(예: versioning — plugins/ 변경 시 plugin.json 범프)을
+# 비일관적으로 적용한다(#463). autopilot 이 직접 워크트리 rules/ 를 훑어 동일 블록을
+# 생성한다 — project-init 무의존(자기완결). rules/ 가 없거나 .md 가 없으면 빈 출력(no-op).
+build_rules_index() {
+  local root="$1"
+  local rules_dir="$root/rules"
+  [[ -d "$rules_dir" ]] || return 0
+  local body
+  body="$(
+    find "$rules_dir" -type f -name '*.md' 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
+      rel="${f#"$root"/}"
+      title="$(sed -n 's/^#[[:space:]]\{1,\}//p' "$f" 2>/dev/null | head -n 1)"
+      if [[ -n "$title" ]]; then
+        printf '%s — %s\n' "- $rel" "$title"
+      else
+        printf '%s\n' "- $rel"
+      fi
+    done
+  )"
+  [[ -n "$body" ]] || return 0
+  printf '%s\n' "<project-rules-index>"
+  printf '%s\n' "이 프로젝트의 \`rules/\` 카테고리별 지침 목록이다(경로 + 한 줄 목적). 세션 시작 시엔 이 인덱스로 파일 이름·목적만 파악하고, 각 파일의 전체 내용은 관련 작업을 시작하기 직전에 읽고 그 내용을 예외 없이 따른다(전체 내용 선읽기 금지)."
+  printf '%s\n' "$body"
+  printf '%s\n' "</project-rules-index>"
+}
+
 # ----- 의존성 검사 -----
 # git은 모든 subcommand가 쓴다(compute_paths). yq·claude는 start의 게이트·이터에서만
 # 필요하므로 cmd_start에서 늦게 검사한다 — status/list/stop/cleanup/logs와 테스트의
@@ -570,6 +599,14 @@ prepare_workspace() {
     _loop_merged="$(printf '%s\n\n---\n\n%s' "$_loop_base" "$_loop_const")"
   else
     _loop_merged="$_loop_const"
+  fi
+  # rules 인덱스를 병합본에 인라인한다. 워커가 --print 라 SessionStart 훅(rules-index)이
+  # 돌지 않으므로 autopilot 이 직접 워크트리 rules/ 를 훑어 <project-rules-index> 를 만든다.
+  # rules/ 없으면 빈 문자열(no-op) — 자기완결 유지.
+  local _loop_rules_index
+  _loop_rules_index="$(build_rules_index "$WT")"
+  if [[ -n "$_loop_rules_index" ]]; then
+    _loop_merged="$(printf '%s\n\n---\n\n%s' "$_loop_merged" "$_loop_rules_index")"
   fi
   printf '%s\n' "$_loop_merged" > "$WT/CLAUDE.md" \
     || die "워커 지침 CLAUDE.md 작성 실패: $WT/CLAUDE.md"
