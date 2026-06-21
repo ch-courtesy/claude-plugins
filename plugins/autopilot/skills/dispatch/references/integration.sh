@@ -47,6 +47,9 @@ LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 GIT_CMD="${GIT_CMD:-git}"
 FORGE_CMD="${FORGE_CMD:-gh}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
+# 신뢰 봇(App bot) 로그인 정규식 — 재실행 stale 잔여의 'autopilot 소유 PR' 판정용
+#   (merge.sh REVIEW_BOT_LOGINS_RE 컨벤션 동일: App bot / github-actions / courtesy-bot).
+INT_REVIEW_BOT_LOGINS_RE="${INT_REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtesy-bot)}"
 
 in_die() { echo "integration: $*" >&2; return 1; }
 
@@ -358,6 +361,73 @@ in_push_branch() {
 }
 
 # =====================================================================
+# 3c) 재실행 stale 잔여 정리 — 직전 실패/blocked 시도가 남긴 원격 작업 브랜치/열린 PR 이
+#   현재 로컬 작업 커밋과 non-ff 비호환이고 **현재 실행 소유 stale 잔여**로 식별되면,
+#   push 전에 안전하게 정리(PR close + 원격 브랜치 삭제)해 non-ff push 거부를 막는다.
+#   force 금지(브랜치 삭제는 history 재작성이 아님). 소유 신호 두 가지를 **모두** 만족할
+#   때만 정리하고, 그렇지 않으면(외부 생성 동명 브랜치 가능) **건드리지 않는다**(오삭제 방지):
+#     1. 원격에 결정적 작업 브랜치명(feat/<rid>-<slug>)이 존재(= 이 함수에 넘어온 branch).
+#     2. 그 위 열린 PR 이 신뢰 봇(App bot) 작성이고 *-formal-review 마커를 가짐.
+# =====================================================================
+
+# in_remote_tip <branch> — origin 의 작업 브랜치 tip SHA(ls-remote). 미존재면 빈 출력.
+in_remote_tip() {
+  # shellcheck disable=SC2086
+  $GIT_CMD ls-remote --heads origin "$1" 2>/dev/null | awk 'NR==1 { print $1 }'
+}
+
+# in_remote_ff_incompatible <branch> <local_commit> — 원격 브랜치가 존재하고 그 tip 이
+#   local_commit 의 조상이 **아니면**(force 없는 push 가 non-fast-forward 로 거부) 0,
+#   원격 미존재 또는 ff 호환이면 1. ancestry 비교용 객체를 위해 원격 ref 를 fetch 한다.
+in_remote_ff_incompatible() {
+  local branch="$1" local_commit="$2" tip
+  tip="$(in_remote_tip "$branch")"
+  [[ -n "$tip" ]] || return 1          # 원격 미존재 → 호환(신규 push).
+  # shellcheck disable=SC2086
+  $GIT_CMD fetch origin "$branch" >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086
+  $GIT_CMD merge-base --is-ancestor "$tip" "$local_commit" 2>/dev/null && return 1
+  return 0
+}
+
+# in_pr_autopilot_owned <pr> — 열린 PR 이 autopilot 소유 신호를 모두 가지면 0, 아니면 1.
+#   (a) 작성자 login 이 신뢰 봇(App bot), (b) 그 PR 에 신뢰 봇이 남긴 *-formal-review 마커 존재.
+#   #432: 봇 정규식은 login 필드 단독에 적용한다(login\tbody 결합 라인 grep 은 앵커가 깨짐).
+in_pr_autopilot_owned() {
+  local pr="$1" author
+  [[ -n "$pr" ]] || return 1
+  # shellcheck disable=SC2086
+  author="$($FORGE_CMD pr view "$pr" --json author --jq '.author.login' 2>/dev/null)"
+  printf '%s\n' "$author" | grep -qE "$INT_REVIEW_BOT_LOGINS_RE" || return 1
+  # shellcheck disable=SC2086
+  $FORGE_CMD pr view "$pr" --json reviews \
+      --jq '.reviews[] | (.author.login // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null \
+    | awk -F'\t' '$2 ~ /-formal-review/ { print $1 }' \
+    | grep -qE "$INT_REVIEW_BOT_LOGINS_RE"
+}
+
+# in_clear_stale_residue <branch> — 재실행 진입 시 non-ff 인 autopilot-소유 stale 잔여 정리.
+#   두 소유 신호를 모두 만족할 때만 PR close + 원격 브랜치 삭제(force 아님). 그 외는 보존.
+#   정리는 통합의 사전 단계 — 실패해도 rc 를 바꾸지 않고(후속 push 가 비호환을 표면화) 0 반환.
+in_clear_stale_residue() {
+  local branch="$1" local_commit pr
+  [[ -n "$branch" ]] || return 0
+  # shellcheck disable=SC2086
+  local_commit="$($GIT_CMD rev-parse "refs/heads/$branch" 2>/dev/null)"
+  [[ -n "$local_commit" ]] || return 0
+  in_remote_ff_incompatible "$branch" "$local_commit" || return 0   # 원격부재/ff호환 → 보존.
+  pr="$(in_existing_open_pr "$branch")"
+  [[ -n "$pr" ]] || return 0                                        # 열린 PR 없음 → 소유 확증 불가 → 보존.
+  in_pr_autopilot_owned "$pr" || return 0                           # 외부 소유 가능 → 미훼손(보존).
+  echo "integration: 재실행 stale 잔여 정리(non-ff) — PR #$pr close + 원격 브랜치 삭제(force 금지): $branch" >&2
+  # shellcheck disable=SC2086
+  $FORGE_CMD pr close "$pr" >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086
+  $GIT_CMD push origin --delete "$branch" >/dev/null 2>&1 || true
+  return 0
+}
+
+# =====================================================================
 # 3b) 실패/터미널 경로 조건부 워크트리 정리 — "보존되면 정리, 아니면 보존"(비대칭).
 #   머지 성공 경로는 merge.sh 가 무조건 정리(머지=대상 브랜치에 보존)한다. 여기서는 실패/비완료
 #   터미널에서 #350 의 고아 워크트리를 정리하되, 그 작업이 다른 곳에 보존돼 있을 때만 정리한다.
@@ -516,6 +586,9 @@ in_integrate() {
       int_set_phase "$rd" "$key" integrating
       # 다리: push 대상으로 쓰기 전에 작업 브랜치가 없으면 loop 결과 커밋에서 생성(멱등).
       in_ensure_work_branch "$branch" "$spec" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      # 재실행 안전: 직전 실패/blocked 가 남긴 non-ff·autopilot-소유 stale 원격 브랜치/PR 을
+      # push 전에 정리(force 금지·미소유 보존) — non-ff push 거부를 막는다.
+      in_clear_stale_residue "$branch"
       int_log "$rd" "$key" "base sync → push → PR (branch=$branch)"
       in_base_sync   "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       # #452: rebase 경로에선 base_sync 가 분리 워크트리에서 원격으로 직접 push 하므로(INT_BASESYNC_PUSHED)
@@ -686,13 +759,21 @@ in_selftest() {
         local rb="${@: -1}"   # 마지막 인자 = 브랜치명(ls-remote --heads origin <branch>).
         if grep -Fxq "$rb" "$REMOTE_BRANCHES" 2>/dev/null; then printf 'deadbeef\trefs/heads/%s\n' "$rb"; fi ;;
       push) printf '%s\n' "$*" >> "$PUSHLOG" ;;
-      # merge-base --is-ancestor: MOCK_ANCESTOR=1 이면 조상(0), 기본 비조상(1).
-      merge-base) [[ "${MOCK_ANCESTOR:-0}" == "1" ]] && return 0 || return 1 ;;
+      # merge-base --is-ancestor: origin/* 조상 질의는 MOCK_ANCESTOR(base sync 용),
+      #   그 외(원격 tip→로컬 작업 커밋 ff 호환 질의)는 MOCK_REMOTE_FF(재실행 stale 판정용).
+      merge-base)
+        case "$*" in
+          *origin/*) [[ "${MOCK_ANCESTOR:-0}" == "1" ]] && return 0 || return 1 ;;
+          *)         [[ "${MOCK_REMOTE_FF:-0}" == "1" ]] && return 0 || return 1 ;;
+        esac ;;
       rev-parse)
         case "$*" in
           *--verify*refs/heads/*)
             local b="${*##*refs/heads/}"; b="${b%% *}"
             grep -Fxq "$b" "$BRANCHES" 2>/dev/null && return 0 || return 1 ;;
+          *refs/heads/*)   # 로컬 작업 커밋 조회(브랜치 존재 시 결정적 SHA, 없으면 실패).
+            local b="$*"; b="${b##*refs/heads/}"; b="${b%% *}"
+            grep -Fxq "$b" "$BRANCHES" 2>/dev/null && { echo "localcommit-$b"; return 0; } || return 1 ;;
           *HEAD*) echo "resultcommitsha7"; return 0 ;;
         esac ;;
       branch) printf '%s\n' "$2" >> "$BRANCHES" ;;   # branch <name> [<commit>]
@@ -707,10 +788,16 @@ in_selftest() {
 
   # mock forge: pr list(재사용 제어 MOCK_PR), pr create 기록.
   #   pr create 의 --body-file 내용을 PRBODY 로 캡처 — forge 전달 시점의 본문(줄바꿈 보존) 검증용.
-  local PRLOG="$TMP/prlog" PRBODY="$TMP/prbody"; : > "$PRLOG"; : > "$PRBODY"
+  local PRLOG="$TMP/prlog" PRBODY="$TMP/prbody" PRCLOSELOG="$TMP/prclose"; : > "$PRLOG"; : > "$PRBODY"; : > "$PRCLOSELOG"
   mock_forge() {
     case "$1 $2" in
       "pr list")   [[ -n "${MOCK_EXISTING_PR:-}" ]] && echo "$MOCK_EXISTING_PR" || true ;;
+      "pr view")   # --json author → 작성자 login(MOCK_PR_AUTHOR); --json reviews → login\tbody 줄들(MOCK_PR_REVIEWS).
+        case "$*" in
+          *"--json author"*)  printf '%s\n' "${MOCK_PR_AUTHOR:-}" ;;
+          *"--json reviews"*) printf '%b' "${MOCK_PR_REVIEWS:-}" ;;
+        esac ;;
+      "pr close")  printf '%s\n' "$3" >> "$PRCLOSELOG" ;;   # 재실행 stale PR close 기록.
       "pr create")
         printf '%s\n' "$*" >> "$PRLOG"
         local _prev='' _a
@@ -777,6 +864,43 @@ in_selftest() {
   chk "AC2 재사용 pr=55" "$(int_get_pr "$rd" "$kR")" "55"
   [[ ! -s "$PRLOG" ]] && ok "AC2 open PR 재사용(새 PR 미생성)" || bad "AC2 open PR 재사용(새 PR 미생성)"
   if grep -q 'rebase' "$GITLOG"; then bad "기존 PR 재통합 시 rebase 재작성(non-ff 위험)"; else ok "기존 PR 재통합 시 rebase 재작성 안 함(non-ff 회피)"; fi
+
+  # ---- AC(SPEC #462): 재실행 stale 잔여 정리 — autopilot-소유 non-ff 원격 작업 브랜치+PR 은
+  #   push 전에 PR close + 원격 브랜치 삭제(force 금지)로 정리해 non-ff push 실패를 막는다.
+  #   소유 신호 두 가지(결정적 브랜치명 원격 존재 + App봇 PR + *-formal-review 마커)가
+  #   모두 있을 때만 정리하고, ff 호환·외부 소유는 미훼손(force 금지·오삭제 방지). ----
+  local wbST="feat/20260604T000000-abc1234-x"
+  # (a) non-ff + autopilot-소유 → 정리(원격 삭제 + PR close) 후 통합 전진(rc=0).
+  local kST="x-st00aaaa"; : > "$PUSHLOG"; : > "$PRLOG"; : > "$PRCLOSELOG"; : > "$BRANCHES"; : > "$GITLOG"
+  st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
+  printf '%s\n' "$wbST" > "$REMOTE_BRANCHES"      # 결정적 브랜치명 원격 존재(신호1).
+  MOCK_EXISTING_PR="91" MOCK_PR_AUTHOR="courtesy-bot" \
+    MOCK_PR_REVIEWS="courtesy-bot\t<!-- claude-formal-review head_sha=x verdict=approve -->\n" \
+    MOCK_REMOTE_FF=0 in_integrate "$spec" "$rd" "$kST" >/dev/null; rc=$?
+  chk "AC#462 stale 정리 후 통합 rc=0(non-ff 실패 아님)" "$rc" "0"
+  grep -q -- '--delete' "$PUSHLOG" && ok "AC#462 stale 원격 작업 브랜치 삭제(non-ff 해소)" || bad "AC#462 stale 원격 작업 브랜치 삭제"
+  grep -Fxq "91" "$PRCLOSELOG" && ok "AC#462 stale PR close" || bad "AC#462 stale PR close"
+  if grep -qiE 'force|(^| )-f( |$)' "$GITLOG"; then bad "AC#462 정리 force 미사용"; else ok "AC#462 정리 force 미사용"; fi
+
+  # (b) ff 호환 원격(+PR) → 정리하지 않음(건강한 재사용 보존).
+  local kSF="x-st11bbbb"; : > "$PUSHLOG"; : > "$PRCLOSELOG"; : > "$BRANCHES"
+  st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
+  printf '%s\n' "$wbST" > "$REMOTE_BRANCHES"
+  MOCK_EXISTING_PR="92" MOCK_PR_AUTHOR="courtesy-bot" \
+    MOCK_PR_REVIEWS="courtesy-bot\t<!-- claude-formal-review head_sha=x verdict=approve -->\n" \
+    MOCK_REMOTE_FF=1 in_integrate "$spec" "$rd" "$kSF" >/dev/null
+  grep -q -- '--delete' "$PUSHLOG" && bad "AC#462 ff 호환 원격 삭제(오삭제)" || ok "AC#462 ff 호환 원격 미삭제(재사용 보존)"
+  [[ ! -s "$PRCLOSELOG" ]] && ok "AC#462 ff 호환 PR 미close" || bad "AC#462 ff 호환 PR 미close"
+
+  # (c) non-ff 이지만 외부 소유(비-봇 author·마커 없음) → 미훼손(force 금지·오삭제 방지).
+  local kSE="x-st22cccc"; : > "$PUSHLOG"; : > "$PRCLOSELOG"; : > "$BRANCHES"
+  st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
+  printf '%s\n' "$wbST" > "$REMOTE_BRANCHES"
+  MOCK_EXISTING_PR="93" MOCK_PR_AUTHOR="outside-human" MOCK_PR_REVIEWS="" \
+    MOCK_REMOTE_FF=0 in_integrate "$spec" "$rd" "$kSE" >/dev/null
+  grep -q -- '--delete' "$PUSHLOG" && bad "AC#462 외부 소유 동명 브랜치 삭제(오삭제)" || ok "AC#462 외부 소유 동명 브랜치 미삭제"
+  [[ ! -s "$PRCLOSELOG" ]] && ok "AC#462 외부 소유 PR 미close" || bad "AC#462 외부 소유 PR 미close"
+  : > "$REMOTE_BRANCHES"
 
   # ---- AC9: spec-gap BLOCKED → push·PR 없이 blocked-spec-gap ----
   local kS="x-sss3333"; : > "$PUSHLOG"; : > "$PRLOG"
