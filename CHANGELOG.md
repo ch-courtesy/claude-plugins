@@ -5,7 +5,7 @@
 ## autopilot 0.51.2
 
 ### 버그 수정
-- **create-task 재개(resume) 경로 두 결함 수정 — resume 접두사 충돌 + in_design 미검증** — (#443 PR #459에서 추가된 재개 경로) 두 가드를 create-task에 추가했다. (1) **제목 충돌**: 신규 등록 입력은 `<제목>\n\n<본문>`이라 제목이 첫 줄인데, 재개 분기 신호가 "첫 줄이 `resume`로 시작"뿐이어서 제목이 "resume…"인 신규 작성을 재개로 오인할 수 있었다. 이제 `resume <task-id>`의 `<task-id>`를 `get_task`로 해석해 **실존 태스크일 때만** 재개로 처리하고, 해석 실패면 첫 줄을 자연어 제목으로 보고 신규 등록한다. (2) **in_design 미검증**: 재개가 대상 status를 확인하지 않아 `done`·`in_progress`·`review` 등 종단/진행 태스크를 `resume`하면 본문 덮어쓰기 + `backlog` 회귀로 완료·진행 작업을 훼손할 수 있었다. 이제 본문 교체 전에 `get_task` status가 **`in_design`이 아니면 거부·중단**한다(set_body·전이 안 함). 두 가드는 단일 `get_task` 호출로 겸한다.
+- **forge integrate 재실행 시 stale 원격 브랜치/PR 로 인한 non-ff push 실패 수정** — 직전에 실패·blocked 된 태스크를 재실행하면, 1차 시도가 남긴 **stale 원격 작업 브랜치 + 열린 PR** 위로 새 커밋을 push 하려다 `non-fast-forward` 로 거부되어("integration: push 실패(force 금지)") 통합이 막혔다(수동으로 원격 브랜치 삭제 + PR close 필요). 이제 `integration.sh` 의 DONE 통합 경로가 push 전에 stale 잔여를 점검해, 원격 작업 브랜치가 현재 로컬 작업 커밋과 **non-ff 비호환**이고 **현재 실행 소유**(① 결정적 작업 브랜치명 `feat/<rid>-<slug>` 원격 존재 + ② 그 위 열린 PR 이 신뢰 봇(App bot) 작성이며 `*-formal-review` 마커 보유)로 식별되면 PR close + 원격 브랜치 삭제로 정리한 뒤 진행한다. **force 금지 유지**(브랜치 삭제는 history 재작성이 아님). 두 소유 신호가 모두 충족될 때만 정리하고, ff 호환이거나 외부 소유 동명 브랜치는 **건드리지 않는다**(오삭제 방지).
 
 ## autopilot 0.51.1
 
