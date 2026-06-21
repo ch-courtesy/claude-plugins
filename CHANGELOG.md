@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.50.2
+
+### 새 기능
+- **feature 인터뷰 재개(resume) 모드** — 이미 등록된 `in_design`(미해결 항목 잔존) 태스크의 본문을 인터뷰로 이어서 완성하고, 완료 시 create-task(등록 프리미티브)의 본문 갱신(set_body)으로 `backlog`로 전이한다. 대화형(자율 분석 아님).
+
 ## autopilot 0.50.1
 
 ### 버그 수정
