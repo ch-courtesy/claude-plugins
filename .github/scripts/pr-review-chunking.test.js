@@ -223,9 +223,21 @@ test('decide: APPROVE only when all approve, no findings, may_approve, no trunca
   }), 'APPROVE');
 });
 
-test('decide: COMMENT when any chunk verdict is not approve', () => {
+// #451: 모델이 0 findings 에서도 comment verdict 를 반환하는 비일관성 흡수 — comment 도 APPROVE.
+test('decide: APPROVE when a chunk verdict is comment but no findings (#451)', () => {
+  assert.strictEqual(M.decideReviewEvent({
+    chunkVerdicts: ['approve', 'comment'], mergedFindingsCount: 0,
+    mayApprove: true, anyTruncated: false,
+  }), 'APPROVE');
+});
+
+test('decide: COMMENT when a chunk verdict is request_changes/needs_context (불완전·차단)', () => {
   assert.strictEqual(M.decideReviewEvent({
     chunkVerdicts: ['approve', 'request_changes'], mergedFindingsCount: 0,
+    mayApprove: true, anyTruncated: false,
+  }), 'COMMENT');
+  assert.strictEqual(M.decideReviewEvent({
+    chunkVerdicts: ['comment', 'needs_context'], mergedFindingsCount: 0,
     mayApprove: true, anyTruncated: false,
   }), 'COMMENT');
 });

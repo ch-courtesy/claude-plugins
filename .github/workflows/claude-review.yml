@@ -1009,15 +1009,19 @@ jobs:
             const chunkVerdicts = reviewedResults.map((r) => r.verdict);
             const mayApprove = reviewedResults.every((r) => !!r.automation_safety?.may_approve);
             const anyTruncated = reviewedResults.some((r) => !!r.reviewed_context?.diff_truncated);
-            // verdict label kept for the idempotency marker (single, deterministic).
-            const verdict = chunkVerdicts.every((v) => v === 'approve') ? 'approve' : 'comment';
+            // #451: 모델이 0 findings 에서도 verdict:"comment" 를 반환하는 비일관성을 흡수한다.
+            // 리뷰가 완료된 한(approve|comment) findings 0 · 모델 승인 허용 · 미절단이면 APPROVE 한다.
+            // (needs_context/unavailable 처럼 리뷰가 불완전한 verdict 는 제외 — 불완전 리뷰는 승인하지 않는다.)
+            const allReviewed = chunkVerdicts.every((v) => v === 'approve' || v === 'comment');
+            const canApprove = (findings.length === 0 && allReviewed && mayApprove && !anyTruncated);
+            // verdict label kept for the idempotency marker (single, deterministic) — event 와 정합.
+            const verdict = canApprove ? 'approve' : 'comment';
 
             // Event decision — official review event is APPROVE or COMMENT only.
             // The changes-requested review state is abolished: blocking findings
             // surface as inline comments (inline-only policy), not a review state.
             let event;
-            if (findings.length === 0 && chunkVerdicts.every((v) => v === 'approve')
-                && mayApprove && !anyTruncated) {
+            if (canApprove) {
               event = 'APPROVE';
             } else {
               event = 'COMMENT';

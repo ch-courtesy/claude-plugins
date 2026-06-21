@@ -231,14 +231,16 @@ function needsChunking(estimatedDiffTokens, opts) {
   return (estimatedDiffTokens || 0) > threshold;
 }
 
-// 리뷰 이벤트 결정(전 청크 합산): 모든 청크 verdict 가 approve 이고, 병합된
-// findings 가 비어 있고, may_approve=true 이며, 어떤 청크도 truncate 되지
-// 않았고, 청크가 하나 이상일 때만 APPROVE. 그 외 COMMENT.
+// 리뷰 이벤트 결정(전 청크 합산): 리뷰가 완료된 한(모든 청크 verdict 가 approve|comment),
+// 병합된 findings 가 비어 있고, may_approve=true 이며, 어떤 청크도 truncate 되지 않았고,
+// 청크가 하나 이상일 때 APPROVE. 그 외 COMMENT.
+// #451: 모델이 0 findings 에서도 verdict:"comment" 를 반환하는 비일관성을 흡수하기 위해
+// approve 구두 verdict 를 강제하지 않는다(needs_context/unavailable 같은 불완전 리뷰는 제외).
 function decideReviewEvent({ chunkVerdicts, mergedFindingsCount, mayApprove, anyTruncated }) {
   const verdicts = Array.isArray(chunkVerdicts) ? chunkVerdicts : [];
   if (verdicts.length === 0) return 'COMMENT';
-  const allApprove = verdicts.every((v) => v === 'approve');
-  if (allApprove && mergedFindingsCount === 0 && !!mayApprove && !anyTruncated) {
+  const allReviewed = verdicts.every((v) => v === 'approve' || v === 'comment');
+  if (allReviewed && mergedFindingsCount === 0 && !!mayApprove && !anyTruncated) {
     return 'APPROVE';
   }
   return 'COMMENT';
