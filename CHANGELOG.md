@@ -2,7 +2,7 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
-## autopilot 0.51.2
+## autopilot 0.51.3
 
 ### 버그 수정
 - **forge integrate 재실행 시 stale 원격 브랜치/PR 로 인한 non-ff push 실패 수정** — 직전에 실패·blocked 된 태스크를 재실행하면, 1차 시도가 남긴 **stale 원격 작업 브랜치 + 열린 PR** 위로 새 커밋을 push 하려다 `non-fast-forward` 로 거부되어("integration: push 실패(force 금지)") 통합이 막혔다(수동으로 원격 브랜치 삭제 + PR close 필요). 이제 `integration.sh` 의 DONE 통합 경로가 push 전에 stale 잔여를 점검해, 원격 작업 브랜치가 현재 로컬 작업 커밋과 **non-ff 비호환**이고 **현재 실행 소유**(① 결정적 작업 브랜치명 `feat/<rid>-<slug>` 원격 존재 + ② 그 위 열린 PR 이 신뢰 봇(App bot) 작성이며 `*-formal-review` 마커 보유)로 식별되면 PR close + 원격 브랜치 삭제로 정리한 뒤 진행한다. **force 금지 유지**(브랜치 삭제는 history 재작성이 아님). 두 소유 신호가 모두 충족될 때만 정리하고, ff 호환이거나 외부 소유 동명 브랜치는 **건드리지 않는다**(오삭제 방지).
