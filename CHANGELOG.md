@@ -5,7 +5,7 @@
 ## autopilot 0.50.1
 
 ### 버그 수정
-- **forge integrate 가 공유 체크아웃을 오염시키던 문제 수정** — `in_base_sync` 가 작업 브랜치를 `git checkout` 한 뒤 복원하지 않아, execute-task 실행마다 저장소 메인 워킹디렉토리가 `feat/<id>` 브랜치로 남고 수동 복구가 필요했다(병렬 실행 시 경쟁). 이제 래퍼가 원래 HEAD 를 저장하고 종료 시(성공·실패 모든 경로) 진행 중 rebase 를 정리한 뒤 원래 브랜치로 복원한다.
+- **forge integrate 가 공유 체크아웃을 오염시키던 문제 수정** — `in_base_sync` 가 작업 브랜치를 공유 체크아웃에서 `git checkout`·rebase 한 뒤 복원하지 않아, execute-task 실행마다 저장소 메인 워킹디렉토리가 `feat/<id>` 브랜치로 남고 수동 복구가 필요했다(병렬 실행 시 서로의 브랜치를 덮어쓰는 경쟁). 이제 **전용 임시 워크트리**를 만들어 그 안에서 checkout·rebase 를 수행하고 끝나면 제거한다 — 공유 체크아웃을 전혀 건드리지 않으므로 **병렬에서도 안전**하다.
 
 ## autopilot 0.50.0
 

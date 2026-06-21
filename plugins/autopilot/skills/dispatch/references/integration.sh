@@ -270,27 +270,32 @@ in_autoresolve_rebase() {
 }
 
 # in_base_sync <branch> — 작업 브랜치를 origin/main 으로 정합(필요 시 rebase)한다.
-#   #452: 코어(_in_base_sync_core)는 공유 체크아웃을 `$branch` 로 전환하므로, 이 래퍼가 원래 HEAD 를
-#   저장하고 종료 시(성공·실패 모든 경로) 진행 중 rebase 를 정리한 뒤 원래 브랜치로 복원해 공유
-#   체크아웃 오염을 막는다. push 는 in_push_branch 가 ref 이름으로 수행하므로 체크아웃 유지가 불필요하다.
+#   #452: 코어(_in_base_sync_core)는 작업 브랜치를 checkout·rebase 한다. 이를 공유 체크아웃에서
+#   수행하면 (성공 시에도) 공유 체크아웃이 작업 브랜치로 남고, 병렬 실행 시 서로의 브랜치를 덮어쓰는
+#   경쟁이 생긴다. 그래서 **전용 임시 워크트리**를 만들어 그 안에서(git -C <wt>) 코어를 실행하고
+#   끝나면 제거한다 — 공유 체크아웃을 전혀 건드리지 않으므로 병렬에서도 안전하다. push 는
+#   in_push_branch 가 ref 이름으로 수행하므로 워크트리 유지가 불필요하다.
 in_base_sync() {
-  local _orig _rc
+  local branch="$1" _rc _wt _gd _save_git="$GIT_CMD"
+  _wt="$(mktemp -d)/wt"
   # shellcheck disable=SC2086
-  _orig="$($GIT_CMD symbolic-ref --quiet --short HEAD 2>/dev/null || $GIT_CMD rev-parse --quiet --verify HEAD 2>/dev/null || true)"
-  _in_base_sync_core "$@"; _rc=$?
-  if [[ -n "$_orig" ]]; then
-    # 진행 중 rebase 가 있을 때만 정리(코어가 mid-rebase 로 실패했을 수 있음). 성공 경로에선
-    # 불필요한 rebase 호출을 남기지 않는다.
-    local _gd
+  $GIT_CMD worktree add --quiet "$_wt" "$branch" \
+    || { in_die "전용 워크트리 생성 실패: $branch"; rmdir "$(dirname "$_wt")" 2>/dev/null || true; return 1; }
+  # 코어의 모든 git 호출을 전용 워크트리로 지정. 코어의 checkout "$branch" 는 워크트리가 이미 그
+  # 브랜치이므로 무해한 no-op 이다. 공유 체크아웃은 전혀 건드리지 않는다.
+  GIT_CMD="$_save_git -C $_wt"
+  _in_base_sync_core "$branch"; _rc=$?
+  # 실패-경로의 mid-rebase 만 조건부 정리(성공/조기반환 경로엔 불필요한 rebase 호출을 남기지 않음).
+  # shellcheck disable=SC2086
+  _gd="$($GIT_CMD rev-parse --absolute-git-dir 2>/dev/null || true)"
+  if [[ -n "$_gd" && ( -d "$_gd/rebase-merge" || -d "$_gd/rebase-apply" ) ]]; then
     # shellcheck disable=SC2086
-    _gd="$($GIT_CMD rev-parse --git-dir 2>/dev/null || true)"
-    if [[ -n "$_gd" && ( -d "$_gd/rebase-merge" || -d "$_gd/rebase-apply" ) ]]; then
-      # shellcheck disable=SC2086
-      $GIT_CMD rebase --abort >/dev/null 2>&1 || true
-    fi
-    # shellcheck disable=SC2086
-    $GIT_CMD checkout --quiet "$_orig" >/dev/null 2>&1 || true
+    $GIT_CMD rebase --abort >/dev/null 2>&1 || true
   fi
+  GIT_CMD="$_save_git"
+  # shellcheck disable=SC2086
+  $GIT_CMD worktree remove "$_wt" >/dev/null 2>&1 || true
+  rmdir "$(dirname "$_wt")" 2>/dev/null || true
   return "$_rc"
 }
 
@@ -680,8 +685,6 @@ in_selftest() {
         # 실제처럼: 존재하지 않는 브랜치 checkout 은 실패한다(무조건 성공 금지).
         grep -Fxq "$2" "$BRANCHES" 2>/dev/null || { echo "error: pathspec '$2' did not match" >&2; return 1; } ;;
       rebase|fetch) : ;;
-      # #452: in_base_sync 래퍼가 원래 HEAD 저장에 사용 — 고정 원본 브랜치를 모사.
-      symbolic-ref) printf 'orig-main\n' ;;
     esac
     return 0
   }
@@ -728,8 +731,9 @@ in_selftest() {
   chk "AC4 phase=review(blocked 아님)" "$(int_get_phase "$rd" "$kN")" "review"
   grep -Fxq "$wbN" "$BRANCHES" && ok "AC1 작업 브랜치가 loop 결과 커밋에서 생성됨" || bad "AC1 작업 브랜치가 loop 결과 커밋에서 생성됨"
   grep -q "$wbN" "$PUSHLOG" && ok "AC4 생성된 브랜치 push 전진" || bad "AC4 생성된 브랜치 push 전진"
-  # AC(#452): base_sync 가 공유 체크아웃을 원래 브랜치로 복원(마지막 checkout = orig) — 공유 체크아웃 오염 방지.
-  chk "AC#452 base_sync 후 공유 체크아웃 복원(orig)" "$(grep -E '^checkout ' "$GITLOG" | tail -1)" "checkout --quiet orig-main"
+  # AC(#452): base_sync 가 전용 워크트리에서 격리 실행한다(공유 체크아웃 미접촉·병렬 안전) — worktree add/remove 사용.
+  grep -qE '^worktree add ' "$GITLOG" && ok "AC#452 base_sync 가 전용 워크트리에서 격리 실행(공유 체크아웃 미접촉)" || bad "AC#452 base_sync 가 전용 워크트리에서 격리 실행"
+  grep -qE '^worktree remove ' "$GITLOG" && ok "AC#452 base_sync 가 전용 워크트리를 정리" || bad "AC#452 base_sync 가 전용 워크트리를 정리"
 
   # ---- AC: DONE → base sync→push→PR, phase=review, branch/pr 기록 ----
   local kA="x-aaa1111"
