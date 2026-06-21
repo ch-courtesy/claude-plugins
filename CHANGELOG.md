@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.51.1
+
+### 버그 수정
+- **loop 워커에 rules 인덱스 자체 주입 — versioning 등 카테고리 지침 비일관 적용 수정** — loop 구현 워커는 `claude --print`(일회성)로 실행되어 SessionStart 훅(project-init의 `rules-index.sh`)이 돌지 않아, 소비 프로젝트의 `<project-rules-index>`(예: `plugins/` 변경 시 `plugin.json` 버전 범프 지침)가 워커에 닿지 않았다. 그 결과 versioning 적용이 비결정적이어서 통합 버전게이트 blocked가 산발했다(#463, #450 잔여). 이제 `loop.sh`가 직접 워크트리 `rules/`를 훑어 동일한 `<project-rules-index>` 블록(경로 + 첫 H1 한 줄 목적)을 생성해 병합 워커 지침(CLAUDE.md/AGENTS.md)에 인라인한다. **project-init 무의존**(크로스플러그인 헬퍼 없이 autopilot 내부 소유)이며 `rules/`가 없으면 **no-op**(블록 없음·에러 없음) — 플러그인 자기완결 유지.
+
 ## autopilot 0.51.0
 
 ### 새 기능
