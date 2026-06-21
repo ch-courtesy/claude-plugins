@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.51.4
+
+### 버그 수정
+- **병렬 동일-버전 범프 시 충돌 미발생으로 재범프 안 돼 버전게이트 blocked 수정** — 두 태스크를 병렬 실행하며 둘 다 `plugin.json`을 **같은 버전**으로 범프하면, 먼저 머지된 쪽이 베이스를 그 버전으로 올려 늦은 쪽이 base와 **동률**이 되고, 머지 버전게이트가 "plugins/ 를 건드리지만 plugin.json 버전이 오르지 않았습니다"로 blocked되어 **수동 재범프**가 필요했다(#461·#462). 기존 충돌 기반 재적용(`in_resolve_version_conflict`)은 rebase 충돌 발생을 전제하는데, 동일-버전 범프는 version 변경이 이미 동일해 **git 충돌이 없어** 발동하지 않았고, 동률 매니페스트는 base와 완전히 동일해 변경 diff에도 잡히지 않았다. 이제 `integration.sh` DONE 통합 경로가 base sync·push 후 `in_ensure_version_ahead`로, 브랜치가 **워치 디렉토리에서 건드린 플러그인 루트의 매니페스트**(diff가 아니라 `ls-tree`로 발견)가 base보다 앞서지 않으면(`<=`) 새 베이스보다 한 단계 앞서게 **재범프 commit을 append**(history 재작성 아님 → 기존 원격 브랜치/PR이 있어도 **ff-safe**, force 금지)하고 원격 작업 브랜치로 직접 push한다. 격리는 #452와 동일하게 전용 분리(detached) 워크트리에서 수행해 공유 체크아웃을 건드리지 않는다. 버전이 이미 앞서면 **no-op**(불변)이며, 충돌 기반 재적용 경로는 그대로 보존된다.
+
 ## autopilot 0.51.3
 
 ### 버그 수정
