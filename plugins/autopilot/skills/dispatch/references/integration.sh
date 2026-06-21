@@ -269,14 +269,48 @@ in_autoresolve_rebase() {
   return 0
 }
 
+# in_base_sync <branch> — 작업 브랜치를 origin/main 으로 정합(필요 시 rebase)한다.
+#   #452: rebase 를 공유 체크아웃에서 수행하면 (성공 시에도) 공유 체크아웃이 작업 브랜치로 남고,
+#   병렬 실행 시 서로의 브랜치를 덮어쓰는 경쟁이 생긴다. 그래서 **전용 분리(detached) 임시 워크트리**를
+#   만들어 그 안에서(git -C <wt>) 코어를 실행하고 끝나면 제거한다 — 공유 체크아웃을 전혀 건드리지
+#   않으므로 병렬에서도 안전하다. `--detach` 라 같은 브랜치가 다른 곳(예: 이전 실행이 남긴 공유
+#   체크아웃)에 체크아웃돼 있어도 워크트리 생성이 실패하지 않는다. rebase 가 필요한 경우 그 결과를
+#   **원격 작업 브랜치로 직접 push** 하고(로컬 $branch ref 미갱신 → 공유 체크아웃 미오염) INT_BASESYNC_PUSHED
+#   를 세워 in_integrate 가 in_push_branch 를 건너뛰게 한다. rebase 불필요(조기 반환) 경우엔 in_push_branch 가 push.
 in_base_sync() {
+  local branch="$1" _rc _wt _gd _save_git="$GIT_CMD"
+  INT_BASESYNC_PUSHED=""
+  _wt="$(mktemp -d)/wt"
+  # shellcheck disable=SC2086
+  $GIT_CMD worktree add --quiet --detach "$_wt" "$branch" \
+    || { in_die "전용 워크트리 생성 실패: $branch"; rmdir "$(dirname "$_wt")" 2>/dev/null || true; return 1; }
+  # 코어의 모든 git 호출을 전용 워크트리(분리 HEAD)로 지정. 공유 체크아웃은 전혀 건드리지 않는다.
+  # 코어는 rebase 가 필요하면 그 결과를 원격으로 직접 push 하고 INT_BASESYNC_PUSHED=1 을 세운다.
+  GIT_CMD="$_save_git -C $_wt"
+  _in_base_sync_core "$branch"; _rc=$?
+  # 실패-경로의 mid-rebase 만 조건부 정리(성공/조기반환 경로엔 불필요한 rebase 호출을 남기지 않음).
+  # shellcheck disable=SC2086
+  _gd="$($GIT_CMD rev-parse --absolute-git-dir 2>/dev/null || true)"
+  if [[ -n "$_gd" && ( -d "$_gd/rebase-merge" || -d "$_gd/rebase-apply" ) ]]; then
+    # shellcheck disable=SC2086
+    $GIT_CMD rebase --abort >/dev/null 2>&1 || true
+  fi
+  GIT_CMD="$_save_git"
+  # shellcheck disable=SC2086
+  $GIT_CMD worktree remove "$_wt" >/dev/null 2>&1 || true
+  rmdir "$(dirname "$_wt")" 2>/dev/null || true
+  return "$_rc"
+}
+
+_in_base_sync_core() {
   local branch="$1"
   local tries="${DISPATCH_BASESYNC_RETRIES:-3}" i=0 pre post
   INT_AUTORESOLVE_FLAG=""
   # shellcheck disable=SC2086
   $GIT_CMD fetch origin "$DEFAULT_BRANCH" || { in_die "fetch 실패: origin/$DEFAULT_BRANCH"; return 1; }
-  # shellcheck disable=SC2086
-  $GIT_CMD checkout "$branch" || { in_die "checkout 실패: $branch"; return 1; }
+  # #452: 작업 브랜치를 checkout 하지 않는다 — 워크트리가 이미 그 커밋에서 분리(detached)돼 있고,
+  # 같은 브랜치를 checkout 하면 다른 워크트리에 체크아웃된 경우 충돌한다. rebase 는 분리 HEAD 에서
+  # 수행하고, 그 결과는 원격 작업 브랜치로 직접 push 한다(로컬 $branch ref 미갱신 → 공유 체크아웃 미오염).
   # origin/main 이 이미 브랜치 조상이면 동기화 불필요 — 재작성 없이 push 는 fast-forward.
   # shellcheck disable=SC2086
   if $GIT_CMD merge-base --is-ancestor "origin/$DEFAULT_BRANCH" "$branch" 2>/dev/null; then
@@ -303,10 +337,19 @@ in_base_sync() {
     $GIT_CMD fetch origin "$DEFAULT_BRANCH" 2>/dev/null || true
     # shellcheck disable=SC2086
     post="$($GIT_CMD rev-parse "origin/$DEFAULT_BRANCH" 2>/dev/null)"
-    [[ "$pre" == "$post" ]] && return 0
+    [[ "$pre" == "$post" ]] && break
     i=$((i+1))
     [[ "$i" -ge "$tries" ]] && { in_die "base sync 레이스 한도 초과($tries) — 사람 위임(force 금지): $branch"; return 1; }
   done
+  # #452: rebase 결과(분리 HEAD)를 원격 작업 브랜치로 **직접 push** 한다 — 로컬 $branch ref 를
+  # 갱신하지 않으므로, 그 브랜치가 공유 체크아웃에 체크아웃돼 있어도 공유 체크아웃을 더럽히지 않는다.
+  # (이 분기는 원격 브랜치 미존재 = 최초 통합이라 ff-safe.) in_integrate 는 INT_BASESYNC_PUSHED 를
+  # 보고 in_push_branch 를 건너뛴다.
+  # shellcheck disable=SC2086
+  $GIT_CMD push origin "HEAD:refs/heads/$branch" \
+    || { in_die "작업 브랜치 push 실패(force 금지): $branch"; return 1; }
+  INT_BASESYNC_PUSHED=1
+  return 0
 }
 
 in_push_branch() {
@@ -475,7 +518,9 @@ in_integrate() {
       in_ensure_work_branch "$branch" "$spec" || { int_set_phase "$rd" "$key" blocked; return 4; }
       int_log "$rd" "$key" "base sync → push → PR (branch=$branch)"
       in_base_sync   "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
-      in_push_branch "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      # #452: rebase 경로에선 base_sync 가 분리 워크트리에서 원격으로 직접 push 하므로(INT_BASESYNC_PUSHED)
+      # in_push_branch 를 건너뛴다. rebase 불필요(조기 반환) 경로에선 ref 이름으로 push.
+      [[ "${INT_BASESYNC_PUSHED:-}" == "1" ]] || in_push_branch "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       local title pr
       title="$(in_spec_title "$spec")"
       pr="$(in_ensure_pr "$branch" "$title" "$spec" "$rid")" || { int_set_phase "$rd" "$key" blocked; return 4; }
@@ -701,6 +746,12 @@ in_selftest() {
   chk "AC4 phase=review(blocked 아님)" "$(int_get_phase "$rd" "$kN")" "review"
   grep -Fxq "$wbN" "$BRANCHES" && ok "AC1 작업 브랜치가 loop 결과 커밋에서 생성됨" || bad "AC1 작업 브랜치가 loop 결과 커밋에서 생성됨"
   grep -q "$wbN" "$PUSHLOG" && ok "AC4 생성된 브랜치 push 전진" || bad "AC4 생성된 브랜치 push 전진"
+  # AC(#452): base_sync 가 전용 분리(detached) 워크트리에서 격리 실행한다(공유 체크아웃 미접촉·병렬 안전,
+  # 같은 브랜치가 다른 곳에 체크아웃돼 있어도 --detach 라 실패하지 않음). 성공 후 update-ref 로 작업 브랜치 ref 전진.
+  grep -qE '^worktree add .*--detach' "$GITLOG" && ok "AC#452 분리(detached) 워크트리 격리(브랜치 체크아웃 충돌 회피)" || bad "AC#452 분리(detached) 워크트리 격리"
+  grep -qE 'push origin HEAD:refs/heads/' "$PUSHLOG" && ok "AC#452 rebase 결과를 원격으로 직접 push(로컬 ref 미갱신)" || bad "AC#452 직접 push(HEAD:refs/heads)"
+  grep -qE '^update-ref refs/heads/' "$GITLOG" && bad "AC#452 update-ref 로 로컬 브랜치 ref 갱신(공유 체크아웃 오염 위험)" || ok "AC#452 로컬 브랜치 ref 직접 갱신 안 함(공유 체크아웃 미오염)"
+  grep -qE '^worktree remove ' "$GITLOG" && ok "AC#452 전용 워크트리 정리" || bad "AC#452 전용 워크트리 정리"
 
   # ---- AC: DONE → base sync→push→PR, phase=review, branch/pr 기록 ----
   local kA="x-aaa1111"
