@@ -67,5 +67,21 @@ grep -qE 'in_design.*backlog|backlog.*전이' "$CREATE" \
   || fail "R6: create-task 재개 완료(마커 0) 시 in_design→backlog 전이가 없음"
 ok "create-task: 재개 완료 in_design→backlog 전이"
 
+# === R7: create-task 재개 분기가 task-id 를 get_task 로 해석해 제목 충돌 방지 (#461 버그1) ===
+echo "=== R7: create-task 재개 신호 task-id 유효성 가드 ==="
+grep -q 'get_task' "$CREATE" \
+  || fail "R7: create-task 재개 분기가 get_task 로 task-id 유효성을 확인하지 않음"
+grep -qE '신규 등록' "$CREATE" \
+  || fail "R7: create-task 가 해석 실패한 task-id(=자연어 제목)를 신규 등록으로 처리하는 가드를 명시하지 않음"
+ok "create-task: 재개 신호 task-id get_task 해석 + 미해석시 신규 등록"
+
+# === R8: create-task 재개 진입 시 in_design 검증 — 비-in_design 거부 (#461 버그2) ===
+echo "=== R8: create-task 재개 in_design 검증 가드 ==="
+grep -qE 'in_design 이 아니면|in_design이 아니면|비-in_design|in_design 아니면' "$CREATE" \
+  || fail "R8: create-task 재개 진입 시 status 가 in_design 이 아니면 거부하는 가드가 없음"
+grep -qE '거부|중단' "$CREATE" \
+  || fail "R8: create-task 재개가 비-in_design 태스크를 거부/중단하지 않음(종단·진행 태스크 훼손 위험)"
+ok "create-task: 재개 진입 in_design 검증 + 비-in_design 거부"
+
 echo ""
-echo "=== 모든 #443 in_design 재개 경로 계약 테스트 통과 ==="
+echo "=== 모든 #443/#461 in_design 재개 경로 계약 테스트 통과 ==="
