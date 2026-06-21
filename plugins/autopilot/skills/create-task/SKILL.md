@@ -63,8 +63,14 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
 
 1. **입력 수신·경로 분기** — 작성자(`feature`/`fix`)가 넘긴 **완성 태스크 본문**(제목 + 목표/배경/제안/검증
    계획/완료 기준)을 입력으로 받는다. 본문 작성·인터뷰·분해는 하지 않는다(작성자의 몫). 입력 첫 줄이
-   `resume <task-id>`로 시작하면 **신규 등록이 아니라 기존 태스크 본문 갱신(재개)** 경로다(아래 「재개(resume)
-   경로」로 분기). 그 외에는 받은 입력에서 제목과 본문을 분리해 신규 등록을 진행한다.
+   `resume <task-id>`로 시작하고 **그 `<task-id>`가 실제 태스크로 해석되면** **신규 등록이 아니라 기존 태스크
+   본문 갱신(재개)** 경로다(아래 「재개(resume) 경로」로 분기). 그 외에는 받은 입력에서 제목과 본문을 분리해
+   신규 등록을 진행한다.
+   - **재개 신호 검증 (제목 충돌 방지)** — 신규 등록 입력은 `<제목>\n\n<본문>`이라 **제목이 첫 줄**이므로,
+     제목이 "resume…"으로 시작하는 신규 작성을 재개로 오인할 수 있다. 첫 줄이 `resume <task-id>` 꼴일 때
+     `bash "$ADAPTER" get_task --task-id <task-id>`로 그 id가 **실존 태스크로 해석되는지** 확인한다. 해석
+     성공이면 재개, 해석 실패(유효 task-id 형식이 아니거나 없는 id)면 첫 줄을 자연어 제목으로 보고 **신규
+     등록으로 처리**한다(전체 입력 = `<제목>\n\n<본문>`).
 2. **백엔드 준비** — 백엔드 미설정이면 `adapter init`(선택은 `AskUserQuestion`) 후 위 「백엔드 선택 SoT
    영속화」 헬퍼를 실행해 config를 메인까지 영속화한다(멱등).
 3. **등록** — 받은 본문을 그대로 등록한다(`create_task`의 초기 상태는 `backlog`다). 작성자가 의존 관계를
@@ -95,10 +101,17 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
 
 ## 재개(resume) 경로 — 기존 in_design 태스크 본문 갱신
 
-입력이 `resume <task-id>`로 시작하면 신규 `create_task`가 아니라 **이미 등록된 `in_design` 태스크의 본문을
-갱신**하고 상태를 재평가한다(작성자 `feature` 재개 모드가 인터뷰로 이어 완성한 본문이 들어온다). 신규 등록의
-2단계(백엔드 준비)는 이미 등록된 태스크이므로 생략한다.
+입력이 `resume <task-id>`로 시작하고 그 `<task-id>`가 실존 태스크로 해석되면 신규 `create_task`가 아니라
+**이미 등록된 `in_design` 태스크의 본문을 갱신**하고 상태를 재평가한다(작성자 `feature` 재개 모드가 인터뷰로
+이어 완성한 본문이 들어온다). 신규 등록의 2단계(백엔드 준비)는 이미 등록된 태스크이므로 생략한다.
 
+0. **재개 대상 검증 (get_task — in_design 가드)** — 본문을 교체하기 **전에** 대상 태스크의 status를 확인한다.
+   1단계의 재개 신호 검증에서 이미 호출한 `get_task` 결과(또는 여기서 `bash "$ADAPTER" get_task --task-id
+   <task-id>`)의 `status`가 **`in_design`이 아니면**(`done`·`in_progress`·`review`·`backlog`·`blocked`·
+   `cancelled`) — 즉 **비-in_design 태스크면** 재개를 **거부**하고 즉시 **중단**한다 — `set_body`·상태
+   전이를 하지 않는다. 재개는 "미해결
+   항목이 남은 `in_design` 태스크 이어 완성"만을 위한 경로이므로, 종단·진행 중 태스크에 본문 덮어쓰기 +
+   `backlog` 회귀를 적용하면 완료·진행 작업을 훼손한다. `in_design`이면 아래로 진행한다.
 1. **본문 교체 (set_body)** — 기존 `task-id`의 본문을 받은 갱신 본문으로 교체한다. 직접 구현하지 않고 위 5단계와
    동일하게 백엔드 `set_body` 동사에 위임한다(본문만 교체, status·`depends_on`·메타 보존):
    ```
