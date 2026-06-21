@@ -43,4 +43,20 @@ chk "B done" "$(bash "$ADAPTER" get_task --task-id "$b" | jq -r .status)" "done"
 out3="$(drain)"
 chk "3패스 ready=0" "$(printf '%s' "$out3" | jq -r .ready)" "0"
 
+# failed_ids 키는 항상 노출(성공 패스에선 빈 배열) — 드레인자 중앙 fix 호출 입력(#444)
+chk "성공 패스 failed_ids=[]" "$(printf '%s' "$out1" | jq -c '.failed_ids')" "[]"
+
+# 실패 신호 수거: 실패 mock(blocked + exit 1) → flow 가 노드 failed 로 표시 → failed_ids 에 task_id 노출
+cat > bin/exec-fail <<EOF
+#!/usr/bin/env bash
+# args: start <id> — 태스크를 blocked 로 두고 비-0 종료(execute-task 차단 모사)
+bash "$ADAPTER" set_status --task-id "\$2" --status blocked --reason "mock blocked" >/dev/null
+exit 1
+EOF
+chmod +x bin/exec-fail
+c="$(bash "$ADAPTER" create_task --title C --body '## 목표'$'\n'c | jq -r .task_id)"
+out4="$(ADAPTER_CMD="bash $ADAPTER" FLOW_CMD="bash $FLOW" EXECUTE_CMD="bash $TMP/bin/exec-fail" bash "$WT" start || true)"
+chk "4패스 failed>=1" "$(printf '%s' "$out4" | jq -r '.failed >= 1')" "true"
+chk "4패스 failed_ids 에 C 포함" "$(printf '%s' "$out4" | jq -r --arg c "$c" '.failed_ids | index($c) != null')" "true"
+
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail

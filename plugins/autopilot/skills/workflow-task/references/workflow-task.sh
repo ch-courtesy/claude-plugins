@@ -44,12 +44,17 @@ wt_start() {
   local out; out="$($FLOW_CMD run "$def" 2>&1)" || true
   rm -f "$def"
   # flow 결과 요약
-  local ok succ failed
+  local ok succ failed failed_ids
   ok="$(printf '%s' "$out" | jq -r '.ok // false' 2>/dev/null || echo false)"
   succ="$(printf '%s' "$out" | jq -r '(.succeeded // []) | length' 2>/dev/null || echo 0)"
   failed="$(printf '%s' "$out" | jq -r '(.failed // []) | length' 2>/dev/null || echo 0)"
-  jq -nc --argjson r "${#ids[@]}" --argjson s "${succ:-0}" --argjson f "${failed:-0}" --arg ok "$ok" \
-    '{ready:$r, succeeded:$s, failed:$f, flow_ok:($ok=="true")}'
+  # 실패 노드명(flow 노드 id = execute-task 가 blocked 로 둔 task_id). 드레인자(SKILL)가 이
+  # 핸들로 버그 신호를 감지해 중앙에서 fix 를 호출한다(SKILL.md 「버그 신호 수거」).
+  failed_ids="$(printf '%s' "$out" | jq -c '.failed // []' 2>/dev/null || echo '[]')"
+  [[ -n "$failed_ids" ]] || failed_ids='[]'
+  jq -nc --argjson r "${#ids[@]}" --argjson s "${succ:-0}" --argjson f "${failed:-0}" \
+    --argjson fids "$failed_ids" --arg ok "$ok" \
+    '{ready:$r, succeeded:$s, failed:$f, failed_ids:$fids, flow_ok:($ok=="true")}'
   [[ "${failed:-0}" -eq 0 ]] || return 1
 }
 

@@ -8,6 +8,7 @@ allowed-tools:
   - Bash(bash * execute-task.sh:*)
   - Bash(git rev-parse:*)
   - Read
+  - Skill
 ---
 
 # workflow-task
@@ -29,7 +30,31 @@ WT="$(git rev-parse --show-toplevel)/plugins/autopilot/skills/workflow-task/refe
 bash "$WT" start [--max-parallel N]
 ```
 
-출력은 한 줄 JSON(`{ready,succeeded,failed,flow_ok}`). 준비 태스크가 없으면 `{"ready":0,...}`로 즉시 종료.
+출력은 한 줄 JSON(`{ready,succeeded,failed,failed_ids,flow_ok}`). 준비 태스크가 없으면 `{"ready":0,...}`로 즉시
+종료. `failed_ids`는 이번 패스에서 `execute-task`가 `blocked`로 둔 태스크 id 배열로, 아래 「버그 신호 수거」의
+입력이다.
+
+## 버그 신호 수거 (드레인자 중앙 fix 호출)
+
+무인 자율 주행 중 워커(`execute-task`)가 구현·리뷰에서 막혀 `blocked`로 떨어지면, 그 실패는 종종 별도로
+진단·수정해야 할 버그 신호다. 이 드레이너가 **중앙에서** 그 신호를 수거해 `fix`로 넘긴다 — 개별 워커가
+스스로 버그 태스크를 만들지 않고, 드레인자 한 곳이 책임진다.
+
+이 단계는 workflow-task를 **스킬로 호출**한 오케스트레이션 맥락(모델 주재)에서 수행한다. 위 `.sh` 1패스
+드레인이 끝나면:
+
+1. `failed_ids`가 비어 있지 않으면, 각 id에 대해 `bash "$ADAPTER" append_log` 로그·`get_task`로 차단 사유를
+   확인해 버그 신호를 요약한다.
+2. **중앙에서 `fix`를 자율 맥락으로 호출**한다(사용자 대면 프롬프트 없음):
+   ```
+   Skill(skill="fix", args="<task-id> 실행이 <차단 사유>로 blocked — 정적 분석으로 진단해 수정 태스크 등록")
+   ```
+   `fix`가 정적 분석으로 진단해 본문을 뜨고 `create-task`로 등록한다(완성→`backlog` / 미해결→`in_design`).
+3. 등록된 수정 태스크는 `backlog`에 들어가 **다음 틱 드레인에 흡수**된다(이 패스에서 재실행하지 않는다 —
+   1패스 드레이너의 틱 기반 의존 해결을 그대로 활용). 무인 자율 주행 중 자가 수정 신호가 이렇게 순환한다.
+
+순수 헤드리스(cron→`.sh`) 경로는 모델이 없어 이 수거 단계를 수행하지 않는다(`.sh`는 `failed_ids`만 노출). 자가
+수정 순환이 필요하면 워크플로를 스킬로 주재 호출하거나, 상위 에이전트가 `failed_ids`를 읽어 `fix`를 호출한다.
 
 ## 무인 폴링 레시피
 
