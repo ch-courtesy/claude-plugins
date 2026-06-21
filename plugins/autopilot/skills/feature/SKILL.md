@@ -1,6 +1,6 @@
 ---
 name: feature
-description: 새 기능·변경·지침 의도를 명확화 인터뷰로 탐색해 자기완결적 태스크 본문(목표·배경·제안·검증 계획·완료 기준)을 작성하려 할 때 사용 — 인터뷰로 본문을 떠서 등록 프리미티브 create-task에 넘겨 태스크 백엔드에 등록한다. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 작성만 책임지고 등록·상태 전이는 create-task가 소유한다. 호출 'Skill(skill="feature", args="<자연어 기능 설명>")'.
+description: 새 기능·변경·지침 의도를 명확화 인터뷰로 탐색해 자기완결적 태스크 본문(목표·배경·제안·검증 계획·완료 기준)을 작성하려 할 때 사용 — 인터뷰로 본문을 떠서 등록 프리미티브 create-task에 넘겨 태스크 백엔드에 등록한다. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 작성만 책임지고 등록·상태 전이는 create-task가 소유한다. 신규 작성은 'Skill(skill="feature", args="<자연어 기능 설명>")', 미완성 in_design 태스크를 인터뷰로 이어 완성하는 재개는 'Skill(skill="feature", args="resume <task-id>")'.
 allowed-tools:
   - AskUserQuestion
   - Read
@@ -9,6 +9,7 @@ allowed-tools:
   - Bash(ls:*)
   - Bash(cat:*)
   - Bash(bash * adapter.sh:link_dependency)
+  - Bash(bash * adapter.sh:get_body)
 ---
 
 # feature
@@ -53,11 +54,35 @@ allowed-tools:
    등록 결과(task_id·url·최종 상태)와 다음 단계(`execute-task start <id>` 또는 `workflow-task start`) 안내는
    `create-task`가 책임진다. 이 스킬은 본문을 넘기는 데서 끝난다.
 
+## 재개(resume) 모드 — in_design 태스크 이어 완성
+
+`args="resume <task-id>"`로 호출되면 **신규 작성이 아니라 이미 등록된 `in_design`(미해결 항목이 남은) 태스크의
+본문을 인터뷰로 이어 완성**한다. 자율 분석이 아닌 **대화형 인터뷰 재개**다(자율 생성은 별도 경로). 이때 위
+워크플로 1·2(컨텍스트 탐색·범위 분해)는 건너뛰고 다음으로 대체한다:
+
+1. **기존 본문 로드** — 읽기 전용 동사로 현재 본문과 남은 `[NEEDS CLARIFICATION]` 마커를 불러온다(작성만 —
+   write 동사가 아니므로 경계를 깨지 않는다):
+   ```bash
+   ADAPTER="$(git rev-parse --show-toplevel)/plugins/autopilot/task-backend/adapter.sh"
+   bash "$ADAPTER" get_body --task-id "<task-id>"
+   ```
+2. **부족분 인터뷰** — `references/clarification.md` 깔때기 흐름으로, 본문의 `[NEEDS CLARIFICATION: <질문>]`
+   마커가 가리키는 **남은 항목만** 채운다(이미 잡힌 부분은 다시 묻지 않는다). 채워지면 해당 마커를 제거한다.
+3. **자체 검토** — `references/self-review.md` 5축으로 갱신 본문을 점검한다.
+4. **재개 위임** — 완성 본문 전체를 한 번 제시해 `AskUserQuestion`으로 단일 승인을 받은 뒤, **기존 태스크의
+   본문 갱신·상태 전이를 `create-task` 재개 경로로 위임**한다(신규 등록이 아니다):
+   ```
+   Skill(skill="create-task", args="resume <task-id>\n\n<갱신 본문>")
+   ```
+   `create-task`가 `set_body`로 본문을 교체하고, 마커가 0이면 `in_design → backlog`로 전이하며(남아 있으면
+   `in_design` 유지) 결과를 안내한다. 인터뷰로도 다 못 채워 마커가 남으면 본문에 마커를 남긴 채 넘긴다.
+
 ## 규칙
 
 - 대화형 작성자다(무인 폴러는 호출하지 않는다). 의존성은 `depends_on`으로만 표현한다.
-- **작성만** 한다 — 어댑터(`create_task`/`set_body`/`set_status`)를 직접 호출하지 않고, 파일을 만들지 않는다
-  (본문=SPEC, 백엔드가 SoT). 등록·전이는 `create-task`에 위임한다.
+- **작성만** 한다 — 어댑터의 **write 동사**(`create_task`/`set_body`/`set_status`)를 직접 호출하지 않고, 파일을
+  만들지 않는다(본문=SPEC, 백엔드가 SoT). 등록·전이는 `create-task`에 위임한다. 재개 모드의 `get_body`는
+  **읽기 전용**(컨텍스트 로드)이라 이 경계를 깨지 않는다.
 - 다른 스킬·`rules/`를 doc-link하지 않는다(플러그인 자기완결). spec 스킬의 참조를 사용하지 않는다.
 - `[NEEDS CLARIFICATION` 마커가 남아 있으면 무인 실행이 차단됨을 안내한다(잔존 시 등록 후 `create-task`가
   `in_design`으로 둔다).

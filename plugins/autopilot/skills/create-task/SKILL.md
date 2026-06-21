@@ -61,9 +61,10 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
 
 호출 시 단계를 TodoWrite로 등록한다. 결정·승인은 `AskUserQuestion`으로 받는다(자유 텍스트 질문 종결구 금지).
 
-1. **본문 수신** — 작성자(`feature`/`fix`)가 넘긴 **완성 태스크 본문**(제목 + 목표/배경/제안/검증 계획/완료
-   기준)을 입력으로 받는다. 본문 작성·인터뷰·분해는 하지 않는다(작성자의 몫). 받은 본문에서 제목과 본문을
-   분리한다.
+1. **입력 수신·경로 분기** — 작성자(`feature`/`fix`)가 넘긴 **완성 태스크 본문**(제목 + 목표/배경/제안/검증
+   계획/완료 기준)을 입력으로 받는다. 본문 작성·인터뷰·분해는 하지 않는다(작성자의 몫). 입력 첫 줄이
+   `resume <task-id>`로 시작하면 **신규 등록이 아니라 기존 태스크 본문 갱신(재개)** 경로다(아래 「재개(resume)
+   경로」로 분기). 그 외에는 받은 입력에서 제목과 본문을 분리해 신규 등록을 진행한다.
 2. **백엔드 준비** — 백엔드 미설정이면 `adapter init`(선택은 `AskUserQuestion`) 후 위 「백엔드 선택 SoT
    영속화」 헬퍼를 실행해 config를 메인까지 영속화한다(멱등).
 3. **등록** — 받은 본문을 그대로 등록한다(`create_task`의 초기 상태는 `backlog`다). 작성자가 의존 관계를
@@ -91,6 +92,23 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
    뿐 정의하지 않는다.
 6. **안내** — 최종 상태(`backlog`/`in_design`)와 함께 결과(task_id·url)와 다음 단계(`execute-task start <id>`
    또는 `workflow-task start`)를 안내한다.
+
+## 재개(resume) 경로 — 기존 in_design 태스크 본문 갱신
+
+입력이 `resume <task-id>`로 시작하면 신규 `create_task`가 아니라 **이미 등록된 `in_design` 태스크의 본문을
+갱신**하고 상태를 재평가한다(작성자 `feature` 재개 모드가 인터뷰로 이어 완성한 본문이 들어온다). 신규 등록의
+2단계(백엔드 준비)는 이미 등록된 태스크이므로 생략한다.
+
+1. **본문 교체 (set_body)** — 기존 `task-id`의 본문을 받은 갱신 본문으로 교체한다. 직접 구현하지 않고 위 5단계와
+   동일하게 백엔드 `set_body` 동사에 위임한다(본문만 교체, status·`depends_on`·메타 보존):
+   ```
+   bash "$ADAPTER" set_body --task-id <task-id> --body "<갱신 본문>"
+   ```
+2. **상태 재평가·전이 (소유)** — 갱신 본문의 `[NEEDS CLARIFICATION` 마커 유무로 4단계와 동일한 기준으로 전이한다:
+   - 마커가 **없으면**(완성) `bash "$ADAPTER" set_status --task-id <task-id> --status backlog`로 `in_design →
+     backlog` 전이한다.
+   - 마커가 **남아 있으면** `in_design`을 유지한다(추가 재개를 기다린다).
+3. **안내** — 최종 상태(`backlog`/`in_design`)와 결과(task_id·url), 다음 단계를 6단계와 동일하게 안내한다.
 
 ## 규칙
 
