@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.50.1
+
+### 버그 수정
+- **forge integrate 가 공유 체크아웃을 오염시키던 문제 수정** — `in_base_sync` 가 작업 브랜치를 `git checkout` 한 뒤 복원하지 않아, execute-task 실행마다 저장소 메인 워킹디렉토리가 `feat/<id>` 브랜치로 남고 수동 복구가 필요했다(병렬 실행 시 경쟁). 이제 래퍼가 원래 HEAD 를 저장하고 종료 시(성공·실패 모든 경로) 진행 중 rebase 를 정리한 뒤 원래 브랜치로 복원한다.
+
 ## autopilot 0.50.0
 
 ### 새 기능
