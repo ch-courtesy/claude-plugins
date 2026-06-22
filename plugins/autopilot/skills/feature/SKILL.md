@@ -1,6 +1,6 @@
 ---
 name: feature
-description: 새 기능·변경·지침 의도를 명확화 인터뷰로 탐색해 자기완결적 태스크 본문(목표·배경·제안·검증 계획·완료 기준)을 작성하려 할 때 사용 — 인터뷰로 본문을 떠서 등록 프리미티브 create-task에 넘겨 태스크 백엔드에 등록한다. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 작성만 책임지고 등록·상태 전이는 create-task가 소유한다. 신규 작성은 'Skill(skill="feature", args="<자연어 기능 설명>")', 미완성 in_design 태스크를 인터뷰로 이어 완성하는 재개는 'Skill(skill="feature", args="resume <task-id>")'.
+description: 새 기능·변경·지침 의도를 명확화 인터뷰로 탐색해 자기완결적 태스크 본문(frontmatter-first 스펙 — scope frontmatter·무엇을 만들 것인가·완료 조건(EARS)·범위·검증)을 작성하려 할 때 사용 — 인터뷰로 본문을 떠서 등록 프리미티브 create-task에 넘겨 태스크 백엔드에 등록한다. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 작성만 책임지고 등록·상태 전이는 create-task가 소유한다. 신규 작성은 'Skill(skill="feature", args="<자연어 기능 설명>")', 미완성 in_design 태스크를 인터뷰로 이어 완성하는 재개는 'Skill(skill="feature", args="resume <task-id>")'.
 allowed-tools:
   - AskUserQuestion
   - Read
@@ -35,8 +35,10 @@ allowed-tools:
 3. **명확화 인터뷰** — `references/clarification.md`의 깔때기형 단일 흐름으로 의도·제약·완료 조건을 짚는다.
    내부 커버리지 체크리스트(목적·성공기준·제약·위험)로 충분성만 점검한다.
 4. **접근법 비교** — 비자명한 결정이 있으면 2-3안·trade-off·추천을 제시(자명하면 생략).
-5. **태스크 본문 작성** — `references/task-body-template.md` 구조(목표/배경/제안/검증 계획/완료 기준)로 본문을
-   작성한다. 본문이 SPEC이다. 미해결 항목은 `[NEEDS CLARIFICATION: <질문>]` 마커로 남긴다.
+5. **태스크 본문 작성** — `references/task-body-template.md` frontmatter-first 구조(scope frontmatter +
+   무엇을 만들 것인가/목적/완료 조건(EARS)/범위/검증/제약/위험)로 본문을 작성한다. `scope.include` 는 step 1
+   에서 식별한 변경 대상으로 채운다(불명확하면 보수적으로 넓게). 완료 조건은 `references/ears-patterns.md`
+   5문장 패턴으로. 본문이 SPEC이다. 미해결 항목은 `[NEEDS CLARIFICATION: <질문>]` 마커로 남긴다.
 6. **자체 검토** — `references/self-review.md` 5축(placeholder·모순·범위·모호성·검증 가능성)을 점검·수정.
 7. **등록 위임** — 완성 본문 전체를 한 번 제시해 `AskUserQuestion`으로 단일 승인을 받은 뒤, **`create-task`를
    호출해 등록**한다:
@@ -92,6 +94,7 @@ allowed-tools:
 | 파일 | 역할 |
 |---|---|
 | `clarification.md` | 명확화 인터뷰 방법론(깔때기형 흐름·내부 커버리지·추천 답) |
-| `task-body-template.md` | 태스크 본문(=SPEC) 구조 |
+| `task-body-template.md` | 태스크 본문(=SPEC) frontmatter-first 구조 |
+| `ears-patterns.md` | 완료 조건 5문장 패턴·언어 모드(자체 소유) |
 | `decomposition-gate.md` | 다중 서브시스템 감지·발행 규칙 |
-| `self-review.md` | 자체 검토 5축 |
+| `self-review.md` | 자체 검토 5축(+scope.include) |

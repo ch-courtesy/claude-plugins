@@ -54,27 +54,36 @@ backlog → in_design → in_progress → review → done
 
 ## 태스크 본문 구조 (= SPEC, 플러그인 자체 정의)
 
-별도 SPEC 파일을 두지 않는다. 태스크 본문이 설계의 단일 출처다. 본문 섹션 순서(고정):
+별도 SPEC 파일을 두지 않는다. 태스크 본문이 설계의 단일 출처다. 본문은 **frontmatter-first 스펙 문서**다 —
+맨 앞 frontmatter(`scope`/선택 `ears_language`) + 본문 섹션(고정 순서). `# 제목` H1·`depends_on`은 본문에 두지
+않는다 — 제목·depends_on·status는 백엔드가 단일 저장한다(중복 회피). 섹션 세부는 작성자 스킬(`feature`/`fix`)의
+`task-body-template.md`가 소유하며 아래와 일치한다:
 
 ```markdown
-## 목표
-측정·확인 가능한 결과 상태 1~3문장.
+---
+scope:
+  include:
+    - <변경 대상 glob>
+  exclude:
+    - rules/**
+    - milestones/**
+    - AGENTS.md
+    - CLAUDE.md
+# ears_language: optional "ko" | "en" | "hybrid"; default "ko".
+---
 
-## 배경
-문제·상황·리스크.
-
-## 제안
-접근·구현 순서·대안과 선택 이유.
-
-## 검증 계획
-DoD 확인 방법(테스트·관찰 지표·수동 단계).
-
-## 완료 기준 (Definition of Done)
-- [ ] ...
+## 무엇을 만들 것인가
+## 목적 (왜)
+## 완료 조건          # 5문장 패턴(EARS); 작성자 스킬의 ears-patterns.md
+## 범위               # 포함 / 비-목표·제외
+## 검증
+## 제약 (있을 때만)
+## 위험 (있을 때만)
 ```
 
-`get_body`는 위 본문을 반환하고, `set_body`는 위 본문만 교체(status·frontmatter·depends_on 등 메타 보존)하며,
-`materialize`는 `# <title>` H1을 앞에 붙여 임시 spec 파일로 쓴다.
+`get_body`는 위 본문(frontmatter 포함)을 반환하고, `set_body`는 위 본문만 교체(status·메타 보존)하며,
+`materialize`는 본문 frontmatter 블록 뒤에 `# <title>` 을 주입해(frontmatter-first + 제목, 본문에 제목 중복
+없음) 임시 spec 파일로 쓴다. 본문에 frontmatter 가 없는 구형 태스크는 폴백으로 `# <title>` 을 앞에 붙인다.
 
 ## 의존성 (depends_on 단일 축)
 

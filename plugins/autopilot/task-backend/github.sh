@@ -158,9 +158,10 @@ be_append_log() {
 be_materialize() {
   local id; id="$(_argval --task-id "$@")"
   local dir="$TB_ROOT/.task-work/$id"; mkdir -p "$dir"; local sp="$dir/SPEC.md"
-  { printf '# %s\n\n' "$(gh issue view "$id" $(gh_repo_args) --json title -q .title)"
-    # 내부 depends_on 마커는 spec 본문에서 제외(lease 는 본문이 아닌 전용 코멘트라 본문에 없음)
-    gh_body "$id" | sed '/^<!-- autopilot:depends_on:.*-->$/d'; } > "$sp"
+  local title; title="$(gh issue view "$id" $(gh_repo_args) --json title -q .title)"
+  # 내부 depends_on 마커는 spec 본문에서 제외(lease 는 본문이 아닌 전용 코멘트라 본문에 없음). 제목은
+  # prepend 하지 않고 tb_emit_spec(adapter 공통)이 본문 frontmatter 뒤에 주입 → frontmatter-first.
+  gh_body "$id" | sed '/^<!-- autopilot:depends_on:.*-->$/d' | tb_emit_spec "$title" > "$sp"
   jq -nc --arg id "$id" --arg p "$sp" '{task_id:$id, spec_path:$p}'
 }
 

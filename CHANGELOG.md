@@ -2,6 +2,14 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.51.5
+
+### 버그 수정
+- **태스크-백엔드 materialize 가 frontmatter-first 가 아니라 모든 변경이 scope halt 되던 문제 수정** — loop scope 게이트(`read_scope_yaml`/`diff_vs_scope`)는 SPEC.md 1번째 줄이 `---`인 frontmatter-first 를 가정하나, 태스크-백엔드 계열 `be_materialize`(filesystem·github)는 `# <title>` 을 1번째 줄에 prepend 해 `scope.include` 가 비고 → `diff_vs_scope` 가 변경된 모든 파일을 "전부 위반"으로 halt 시켰다. 또 filesystem `fs_body` 가 본문의 모든 `^---$` 를 frontmatter 구분자로 소비해, 본문이 자체 scope frontmatter 를 담아도 `set_body`↔`get_body`·materialize 왕복에서 그 `---` 가 소실됐다. 이제 `fs_body` 는 처음 2개 `---` 만 구분자로 쓰고 이후 본문의 `---` 를 보존하며, materialize 는 공통 헬퍼(`tb_emit_spec`)로 제목을 prepend 하지 않고 본문 frontmatter 블록 **뒤에** `# <title>` 을 주입한다 → 결과 SPEC.md 는 frontmatter-first(게이트 동작) + 제목 포함 + 본문 제목 중복 없음. frontmatter 없는 구형 본문은 폴백(`# title` prepend)으로 처리한다.
+
+### 새 기능
+- **feature·fix 산출물을 구 spec 스킬과 내용 동등한 frontmatter-first 스펙 문서로 통일** — feature·fix `task-body-template` 이 scope/ears frontmatter + 스펙 섹션(무엇을 만들 것인가/목적/완료 조건(EARS)/범위/검증/제약/위험) 구조가 됐다(fix 는 진단 섹션을 목적 다음에 유지). `# 제목` H1·`depends_on` 은 본문에 두지 않고 백엔드가 단일 저장한다(중복 회피). 완료 조건 5문장 패턴은 feature·fix 각자의 `ears-patterns.md` 자체 사본으로 두어 spec 스킬을 참조하지 않는다(플러그인 자기완결). 두 스킬의 유일한 차이는 내용을 채우는 방법(feature=대화형 인터뷰, fix=무인 정적분석)이며 산출물 구조·규약은 동일하다.
+
 ## autopilot 0.51.4
 
 ### 버그 수정

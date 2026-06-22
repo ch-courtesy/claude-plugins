@@ -61,4 +61,18 @@ chk "claim 후 in_progress" "$(bash "$A" get_task --task-id "$d" | jq -r .status
 bash "$A" set_status --task-id "$d" --status done >/dev/null
 [[ -d "$TMP/.task-work/.claims/$d" ]] && bad "done 시 claim 해제" || ok "done 시 claim 해제"
 
+# --- #471: 본문 frontmatter(scope) 보존 + frontmatter-first materialize ---
+fmbody=$'---\nscope:\n  include:\n    - src/**\n  exclude:\n    - rules/**\n---\n\n## 무엇을 만들 것인가\n바디 본문\n'
+g="$(bash "$A" create_task --title "G" --body "$fmbody" | jq -r .task_id)"
+# fs_body 왕복: 본문 frontmatter --- 가 get_body 에서 보존
+chk "get_body 본문 frontmatter 보존(여는 ---)" "$(bash "$A" get_body --task-id "$g" | jq -r .body | head -1)" "---"
+chk "get_body scope.include 라인 보존" "$(bash "$A" get_body --task-id "$g" | jq -r .body | grep -c 'src/\*\*')" "1"
+# materialize frontmatter-first: 1번째 줄 ---, frontmatter 뒤 # title, 제목 H1 중복 0
+spg="$(bash "$A" materialize --task-id "$g" | jq -r .spec_path)"
+chk "materialize 1번째 줄 ---" "$(head -1 "$spg")" "---"
+grep -qx '# G' "$spg" && ok "materialize 제목 포함" || bad "materialize 제목 포함"
+chk "제목 H1 중복 없음" "$(grep -c '^# G$' "$spg")" "1"
+# loop read_scope_yaml(sed) 가 scope.include 를 비우지 않음
+chk "scope include 추출(loop sed)" "$(sed -n '1,/^---$/{1d;/^---$/d;p}' "$spg" | grep -c 'src/\*\*')" "1"
+
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail

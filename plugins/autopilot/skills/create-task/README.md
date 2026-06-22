@@ -1,7 +1,7 @@
 # create-task
 
 **무엇** — 외부 작성자(`feature` 인터뷰 작성자, `fix` 정적분석 작성자)가 떠 준 자기완결적 **태스크 본문**
-(목표·배경·제안·검증 계획·완료 기준)을 받아 선택된 백엔드(filesystem/github-project/beads)에 태스크로
+(frontmatter-first 스펙 — scope frontmatter·무엇을 만들 것인가·완료 조건(EARS) 등)을 받아 선택된 백엔드(filesystem/github-project/beads)에 태스크로
 **등록**하는 **등록 프리미티브**. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다.
 
 **무엇을 안 하나** — 인터뷰·범위 분해·정적분석 같은 **작성 로직을 갖지 않는다**(그것은 작성자
