@@ -21,6 +21,27 @@ tb_now_epoch() { date -u +%s; }
 # 프로젝트 루트 (git 우선, 아니면 cwd)
 tb_root() { git rev-parse --show-toplevel 2>/dev/null || pwd; }
 
+# tb_emit_spec <title>  (본문 = stdin) → materialize 용 SPEC.md 본문을 stdout 으로.
+#   본문이 frontmatter(--- … ---)로 시작하면 그 블록을 1번째 줄부터 그대로 두고(닫는 --- 까지) 그
+#   뒤에 `# <title>` 을 주입한다 → 결과는 frontmatter-first(loop scope 게이트 동작) + 제목 포함(spec
+#   동일) + 본문에 제목 중복 없음. frontmatter 가 없는 구형 본문은 폴백으로 `# <title>` 을 앞에 붙인다.
+#   백엔드 공통(filesystem·github be_materialize 가 호출). 백엔드는 adapter.sh 에 source 되므로 사용 가능.
+tb_emit_spec() {
+  awk -v title="$1" '
+    NR==1 {
+      if ($0 ~ /^---[[:space:]]*$/) { print; infm=1 }
+      else { print "# " title; print ""; print }
+      next
+    }
+    infm==1 {
+      print
+      if ($0 ~ /^---[[:space:]]*$/) { print ""; print "# " title; infm=0 }
+      next
+    }
+    { print }
+  '
+}
+
 TB_CONFIG="$(tb_root)/.autopilot/task-backend.json"
 
 # tb_cfg <jq-filter> [default]

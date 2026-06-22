@@ -28,7 +28,10 @@ fs_fm_set() {
 }
 
 # fs_body <file>  → frontmatter 뒤 본문
-fs_body() { awk 'BEGIN{n=0} /^---[[:space:]]*$/{n++; next} n>=2{print}' "$1"; }
+#   처음 2개의 `---` 만 백엔드 frontmatter 구분자로 소비하고, 그 뒤 줄은 본문의 `---`(본문이 자체
+#   scope frontmatter 를 담는 경우)을 포함해 verbatim 출력한다. set_body↔get_body·materialize 왕복에서
+#   본문 frontmatter 가 보존된다.
+fs_body() { awk 'BEGIN{n=0} /^---[[:space:]]*$/ && n<2 {n++; next} n>=2{print}' "$1"; }
 
 # fs_deps <file>  → depends_on id 한 줄씩
 fs_deps() {
@@ -194,7 +197,9 @@ be_materialize() {
   local f; f="$(fs_file "$id")"
   local dir="$TB_ROOT/.task-work/$id"; mkdir -p "$dir"
   local sp="$dir/SPEC.md"
-  { printf '# %s\n\n' "$(fs_fm_get "$f" title)"; fs_body "$f"; } > "$sp"
+  # 본문이 scope frontmatter 로 시작하면 그 블록 뒤에 제목을 주입(frontmatter-first + 제목, loop scope
+  # 게이트 동작). 없으면 폴백으로 제목을 앞에 붙인다. (tb_emit_spec = adapter.sh 공통)
+  fs_body "$f" | tb_emit_spec "$(fs_fm_get "$f" title)" > "$sp"
   jq -nc --arg id "$id" --arg p "$sp" '{task_id:$id, spec_path:$p}'
 }
 
