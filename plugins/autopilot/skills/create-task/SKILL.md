@@ -61,8 +61,9 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
 
 호출 시 단계를 TodoWrite로 등록한다. 결정·승인은 `AskUserQuestion`으로 받는다(자유 텍스트 질문 종결구 금지).
 
-1. **입력 수신·경로 분기** — 작성자(`feature`/`fix`)가 넘긴 **완성 태스크 본문**(제목 + 목표/배경/제안/검증
-   계획/완료 기준)을 입력으로 받는다. 본문 작성·인터뷰·분해는 하지 않는다(작성자의 몫). 입력 첫 줄이
+1. **입력 수신·경로 분기** — 작성자(`feature`/`fix`)가 넘긴 **완성 태스크 본문**(제목 + frontmatter-first 스펙:
+   scope frontmatter·무엇을 만들 것인가·완료 조건(EARS) 등)을 입력으로 받는다. 본문 작성·인터뷰·분해는 하지
+   않는다(작성자의 몫). 입력 첫 줄이
    `resume <task-id>`로 시작하고 **그 `<task-id>`가 실제 태스크로 해석되면** **신규 등록이 아니라 기존 태스크
    본문 갱신(재개)** 경로다(아래 「재개(resume) 경로」로 분기). 그 외에는 받은 입력에서 제목과 본문을 분리해
    신규 등록을 진행한다.

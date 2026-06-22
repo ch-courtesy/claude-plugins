@@ -57,9 +57,11 @@ allowed-tools:
    **읽고 추론하는 정적 분석으로만** 한다 — 버그를 실행·재현하거나 디버거를 붙이거나 실패 테스트를 구동하지
    않는다. 근본 원인은 **확정이 아닌 가설**로 프레이밍하고 증거를 `파일:줄`로 싣는다. 모호성 없이 특정할 수
    없으면 그 자리에 `[NEEDS CLARIFICATION: <구체 질문>]` 마커를 남긴다(추정으로 메우지 않는다).
-3. **태스크 본문 작성** — `references/task-body-template.md` 구조(목표/배경/제안/진단/검증 계획/완료 기준)로
-   본문을 작성한다. 본문이 SPEC이다. **진단 섹션**에 step 2 결과(증상·재현 맥락·근본 원인 가설·증거·마커)를
-   담고, **완료 기준**은 "해당 버그가 더 이상 관찰되지 않음 + 회귀를 막는 가드"를 관찰 가능·독립 검증 가능하게
+3. **태스크 본문 작성** — `references/task-body-template.md` frontmatter-first 구조(scope frontmatter +
+   무엇을 만들 것인가/목적/진단/완료 조건(EARS)/범위/검증/제약/위험)로 본문을 작성한다. `scope.include` 는
+   step 2 진단에서 식별한 변경 대상으로 채운다(불명확하면 보수적으로 넓게). 본문이 SPEC이다. **진단 섹션**에
+   step 2 결과(증상·재현 맥락·근본 원인 가설·증거·마커)를 담고, **완료 조건**은 `references/ears-patterns.md`
+   5문장 패턴으로 "해당 버그가 더 이상 관찰되지 않음 + 회귀를 막는 가드"를 관찰 가능·독립 검증 가능하게
    인코딩한다(구현 방법·진입 명령은 강제하지 않는다). 버그 수정은 대개 단일 단위이므로 보통 본문 하나를
    작성한다 — 둘 이상 독립 수정 지점이 분명하면 본문을 나눠 의존 순서로 등록한다.
 4. **자체 검토** — `references/self-review.md` 5축(placeholder·모순·범위·모호성·검증 가능성) + 진단 섹션 전용
@@ -96,6 +98,7 @@ allowed-tools:
 | 파일 | 역할 |
 |---|---|
 | `diagnosis.md` | 정적 분석 진단 절차(증상→근본 원인 가설, 정적 한정, 증거·마커 규칙) 단일 출처 (step 2) |
-| `task-body-template.md` | 태스크 본문(=SPEC) 구조 + 진단 섹션 형판 (step 3) |
-| `self-review.md` | 자체 검토 5축 + 진단 섹션 전용 점검 (step 4) |
+| `task-body-template.md` | 태스크 본문(=SPEC) frontmatter-first 구조 + 진단 섹션 형판 (step 3) |
+| `ears-patterns.md` | 완료 조건 5문장 패턴·언어 모드(자체 소유, step 3) |
+| `self-review.md` | 자체 검토 5축(+scope.include) + 진단 섹션 전용 점검 (step 4) |
 | `agent-prompts.md` | step 1·4 subagent 위임 brief (사실·발견만 보고; 결정은 메인) |
