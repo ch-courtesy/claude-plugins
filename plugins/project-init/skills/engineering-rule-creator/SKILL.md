@@ -17,7 +17,7 @@ allowed-tools:
 
 `templates/*.md` 중 하나를 `rules/engineering/<sub>.md`로 기록합니다. `<sub>`는 템플릿 파일명에서 확장자를 뺀 값입니다. 선택지, 입력값, 사후 작업은 템플릿 frontmatter에서 도출합니다.
 
-본 스킬은 **엔지니어링 카테고리의 sub-룰 디스패처**입니다. 형제 스킬(`context-rule-creator`)이 한 번의 백엔드 선택마다 컨텍스트 카테고리 디렉터리 아래 **고정된 sub-룰 한 쌍**(`rules/context/task-model.md`·`rules/context/task-ops.md`)을 함께 기록하는 것과 달리, 본 스킬은 같은 엔지니어링 카테고리 아래 여러 sub-룰(versioning·testing·linting 등 — 후속 task에서 확장)을 호출마다 하나씩 디렉터리 구조로 누적합니다.
+본 스킬은 **엔지니어링 카테고리의 sub-룰 디스패처**입니다. **1 호출 = 1 sub-룰**로, 한 번의 호출마다 같은 엔지니어링 카테고리 아래 sub-룰 하나(versioning·testing·linting 등 — 후속 task에서 확장)를 디렉터리 구조로 누적합니다.
 
 새 sub-룰을 추가하려면 `templates/` 아래에 새 마크다운 파일을 두면 되고, 이 SKILL.md는 변경하지 않습니다.
 

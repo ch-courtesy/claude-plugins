@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## project-init 0.22.0
+
+### 변경(깨짐)
+- **`context-rule-creator` 스킬 제거** — 컨텍스트 카테고리(`rules/context/task-model.md`·`task-ops.md`)를 생성하던 `project-init:context-rule-creator` 생성기를 제거했다. bootstrap·매니페스트·hooks·테스트는 `*-rule-creator/` 동적 스캔 방식이라 코드 수정 없이 카테고리 목록에서 자동으로 빠진다. 끊긴 참조 정리로 형제 스킬 2곳(`engineering-rule-creator`·`review-rule-creator`)의 비유 설명문을 비유 대상 없이 직접 기술하도록 재서술하고, codex 매니페스트의 `longDescription`·`defaultPrompt`에서 context-rule 언급을 제거했다.
+
 ## autopilot 0.51.5
 
 ### 버그 수정

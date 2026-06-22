@@ -1,6 +1,6 @@
 {
   "name": "project-init",
-  "version": "0.21.0",
+  "version": "0.22.0",
   "description": "새 프로젝트 시작 시 필요한 기본 지침과 도구를 자동으로 설정해주는 플러그인",
   "author": {
     "name": "예의상",
@@ -17,7 +17,7 @@
   "interface": {
     "displayName": "Project Init",
     "shortDescription": "새 프로젝트의 기본 지침과 운영 규칙을 빠르게 세팅합니다.",
-    "longDescription": "A local Codex plugin for bootstrapping new projects with reusable interaction guidance, context rules, engineering rules, and setup workflows.",
+    "longDescription": "A local Codex plugin for bootstrapping new projects with reusable interaction guidance, engineering rules, and setup workflows.",
     "developerName": "예의상",
     "category": "Productivity",
     "capabilities": [
@@ -26,7 +26,6 @@
     ],
     "defaultPrompt": [
       "새 프로젝트 초기 지침을 만들어줘.",
-      "이 저장소에 맞는 context rule을 작성해줘.",
       "엔지니어링 규칙 템플릿을 세팅해줘."
     ],
     "brandColor": "#0F766E"
