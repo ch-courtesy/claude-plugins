@@ -38,7 +38,7 @@ allowed-tools:
 3. **회귀·역사적 맥락** (`history`) — 변경이 기존 의도·이전 결정을 깨는지.
 4. **저장소 가이드라인 준수** (`guideline`) — `CLAUDE.md`·`rules/`·워크플로 문서와의 충돌.
 
-각 lens dispatch 양식은 `references/agent-prompts.md` 에 있다. 규모 임계가 충족될 때만 가산 발동하는 적대 렌즈 정의가 필요하면 `plugins/autopilot/skills/spec/references/personas.md`(단일 출처)에 있다 — 여기서 복제하지 않는다.
+각 lens dispatch 양식은 `references/agent-prompts.md` 에 있다. 규모 임계가 충족될 때만 가산 발동하는 적대 렌즈 정의가 필요하면 `plugins/autopilot/references/personas.md`(단일 출처)에 있다 — 여기서 복제하지 않는다.
 
 ## 중재 게이트 (결정적)
 

@@ -61,7 +61,7 @@ DONE 직전 Completeness, Quality, Discipline(YAGNI·패턴·scope), Testing(실
 
 Self-Review와 완료 결정 **사이**에서, 변경이 **비자명**하면(이번 이터 diff 100줄 이상 **또는** 관여 수용기준 수 2개 이상) 완료 결정 전에 세 적대 렌즈로 변경을 점검한다. 자명한 변경은 발동하지 않는다(비용 통제).
 
-- 렌즈 정의의 단일 출처는 선행 spec 스킬의 페르소나 카탈로그 `plugins/autopilot/skills/spec/references/personas.md`(contrarian·minimalist·constraint-auditor)다. 이 헌법은 렌즈 정의를 **복제하지 않고 참조**한다(정의 표류 방지).
+- 렌즈 정의의 단일 출처는 페르소나 카탈로그 `plugins/autopilot/references/personas.md`(contrarian·minimalist·constraint-auditor)다. 이 헌법은 렌즈 정의를 **복제하지 않고 참조**한다(정의 표류 방지).
 - 세 렌즈는 렌즈 태그별 **발견만 보고**한다. 위임된 보조 검토자에게 맡길 때도 발견만 받고 최종 완료·차단 결정은 내리게 하지 않는다(brief는 `references/agent-prompts.md`).
 - 완료·수정·의심점 기록 결정은 항상 워커가 한다. 발견이 **미해결 의심**을 가리키면 조용히 완료로 전이하지 말고 노트의 `## 의심점`에 그 의심을 기록하고 다음 이터로 넘긴다.
 - 이 검증은 기존 4-Level Verifier(Existence·Substantive·Wired·Runtime)와 Self-Review를 **약화·우회하지 않고 그 위에 가산**된다. 4-Level 통과는 여전히 DONE의 전제다.
