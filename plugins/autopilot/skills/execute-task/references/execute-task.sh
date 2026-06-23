@@ -5,7 +5,7 @@
 #   loop.sh 로 구현(포그라운드) → DONE/BLOCKED 분류 → forge 어댑터로 integrate→review→merge →
 #   백엔드 상태 전이(review/done/blocked). 의존성·DAG 는 다루지 않는다(workflow-task 가 fan-out).
 #
-# 재사용 엔진(런타임 호출, 그대로 둠): loop.sh(ralph), forge 어댑터(dispatch 워커 헬퍼 래핑).
+# 재사용 엔진(런타임 호출, 그대로 둠): loop.sh(ralph), forge 어댑터(통합/리뷰/머지 엔진 래핑).
 # 백엔드 연동: task-backend/adapter.sh. 무인 실행: 대화형 호출 없음, 차단은 blocked 상태+로그.
 #
 # 모킹: ADAPTER_CMD / LOOP_CMD / FORGE_CMD 환경변수로 엔진 치환(테스트).
@@ -172,7 +172,7 @@ et_start() {
   if [[ -n "$pr" ]]; then
     # PR(forge) 경로: review 라운드(=rl_round, $FORGE_CMD review)의 반환코드로 분기한다(#426).
     #   리워크로 진전 가능 → 진행 / 진전 불가 → 빠른 실패 / 깨끗+비동기 승인 대기만 → 폴링 유지.
-    #   반환코드 계약(dispatch review-loop.sh rl_round, 소비만 — 변경 없음):
+    #   반환코드 계약(forge/lib review-loop.sh rl_round, 소비만 — 변경 없음):
     #     30 = approve         → 머지 진행(merge.sh 가 미해결 [blocking] 가산 게이트를 머지 직전 재검증).
     #     0  = 재작업 재푸시(진전) → 새 head 가 올라갔으니 재리뷰 위해 루프 계속(무의미 대기 아님).
     #     10 = 에스컬레이션/라운드상한/핑퐁(진전 불가) → 폴링 상한 더 안 기다리고 즉시 blocked.

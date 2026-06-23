@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-loop.sh — autopilot:dispatch per-SPEC 리뷰 오케스트레이션 (M3)
+# review-loop.sh — forge per-SPEC 리뷰 오케스트레이션 (M3)
 #
 # 책임 (열린 PR 을 승인까지 끌고 가는 한 라운드):
 #   - 판정 산출: autopilot:review 생산자(REVIEW_PRODUCE_CMD)를 한 SPEC(키)에 대해 **1회**
@@ -141,7 +141,7 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
 
 # 기본: autopilot:review 생산자를 per-SPEC 키(=--task)로 1회 호출.
 rl_produce_review_skill() {
-  bash "$RL_SCRIPT_DIR/../../review/references/review.sh" run --task "$1"
+  bash "$RL_SCRIPT_DIR/../../skills/review/references/review.sh" run --task "$1"
 }
 
 # 기본: 자율 실행기(loop)에 SPEC 델타 위임. loop 는 --branch 미지원이므로 같은 PR 브랜치 위

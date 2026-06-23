@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# integration.sh — autopilot:dispatch per-SPEC 통합 (M2)
+# integration.sh — forge per-SPEC 통합 (M2)
 #
 # 책임 ("loop DONE" 과 "리뷰 승인 요청(PR)" 사이의 다리):
 #   - 종료 신호 판정: loop 의 공개 구조화 상태(`status --json`)로만 child 종료 의도를
@@ -42,7 +42,7 @@ if ! declare -f int_set >/dev/null 2>&1; then
   . "$IN_SCRIPT_DIR/lib-integration.sh"
 fi
 
-LOOP_CMD_DEFAULT="bash $IN_SCRIPT_DIR/../../loop/references/loop.sh"
+LOOP_CMD_DEFAULT="bash $IN_SCRIPT_DIR/../../skills/loop/references/loop.sh"
 LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 GIT_CMD="${GIT_CMD:-git}"
 FORGE_CMD="${FORGE_CMD:-gh}"

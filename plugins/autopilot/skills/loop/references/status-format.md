@@ -21,7 +21,7 @@ b2c3d4e5f6a7   terminal  DONE,NOTES.txt       7      2026-05-27T09:11Z    /abs/p
 
 ## `--json` 구조화 출력 (기계 판독)
 
-`status --json [<spec-path>]` 는 위 표 대신 기계 판독 가능한 JSON 을 출력한다. 호출 레이어(예: `dispatch`)가 종료 상태를 판정할 때 **컬럼 위치·자유 텍스트 부분 문자열 일치에 의존하지 않도록** 하는 단일 출처다.
+`status --json [<spec-path>]` 는 위 표 대신 기계 판독 가능한 JSON 을 출력한다. 호출 레이어(예: `execute-task`/`workflow-task`)가 종료 상태를 판정할 때 **컬럼 위치·자유 텍스트 부분 문자열 일치에 의존하지 않도록** 하는 단일 출처다.
 
 - 인자에 `<spec-path>` 가 있으면 JSON object 1줄. 기록이 없으면 `state` 가 `absent`.
 - 인자가 없으면 전체 스캔 결과를 JSON array 1줄로(기록 없으면 `[]`).

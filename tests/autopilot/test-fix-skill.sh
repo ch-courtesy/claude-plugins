@@ -1,14 +1,12 @@
 #!/usr/bin/env bash
 # 신규 fix 스킬 정적 계약 검증 (#444).
 #
-# 계약: repair(SPEC-파일 계열)는 불변으로 두고, 그것을 참고해 task-backend 계열
-#  버그 작성자 fix 를 신설한다.
+# 계약: task-backend 계열 버그 작성자 fix 스킬.
 #  - fix = 정적 분석 버그 작성자. 증상·실패 신호에서 본문(진단 섹션 포함)을 자율 생성해
 #    등록 프리미티브 create-task 로 등록을 위임한다(파일 미생성, 본문=SoT).
-#  - fix 는 플러그인 자기완결 — spec/repair 의 참조나 rules/ 를 doc-link 하지 않고
-#    방법론을 자체 소유한다(feature 와 동일 패턴).
+#  - fix 는 플러그인 자기완결 — 외부 스킬 참조나 rules/ 를 doc-link 하지 않고
+#    방법론을 자체 소유한다(feature 와 동일 패턴). (구 spec/repair 미의존 — 둘 다 제거됨.)
 #  - workflow-task 드레인자가 버그·실패 신호를 감지해 중앙에서 fix 를 호출한다(틱 기반 흡수).
-#  - repair 는 개명·경계 개정 없이 그대로 보존된다.
 # (SKILL.md 는 LLM 지침 산문이므로 핵심 계약 어구를 정적으로 검증한다.)
 
 set -euo pipefail
@@ -16,7 +14,6 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SKILLS="$REPO_ROOT/plugins/autopilot/skills"
 FIX="$SKILLS/fix"
-REPAIR="$SKILLS/repair"
 CREATE="$SKILLS/create-task"
 WT="$SKILLS/workflow-task"
 
@@ -92,16 +89,6 @@ echo "=== S9: fix 상태 전이 backlog/in_design ==="
 grep -q 'backlog' "$FIX/SKILL.md" || fail "S9: fix에 backlog 전이 언급 없음"
 grep -q 'in_design' "$FIX/SKILL.md" || fail "S9: fix에 in_design 전이 언급 없음"
 ok "fix: backlog/in_design 전이 명시"
-
-# === S10: repair 불변 — 구조·name 보존 ===
-echo "=== S10: repair 불변(구조·name 보존) ==="
-[[ -f "$REPAIR/SKILL.md" ]] || fail "S10: repair/SKILL.md 부재(불변 위반)"
-grep -qE '^name:[[:space:]]*repair[[:space:]]*$' "$REPAIR/SKILL.md" \
-  || fail "S10: repair frontmatter name 변경됨"
-for f in references/diagnosis.md references/spec-diagnosis-section.md references/agent-prompts.md; do
-  [[ -f "$REPAIR/$f" ]] || fail "S10: repair/$f 부재(불변 위반)"
-done
-ok "repair: 구조·name 보존"
 
 # === S11: create-task 가 fix 를 작성자로 인지(짝 정합) ===
 echo "=== S11: create-task fix 짝 정합 ==="

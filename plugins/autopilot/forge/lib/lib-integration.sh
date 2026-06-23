@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lib-integration.sh — autopilot:dispatch per-SPEC 통합 상태 헬퍼 (M1)
+# lib-integration.sh — forge per-SPEC 통합 상태 헬퍼 (M1)
 #
 # 책임:
 #   - 한 SPEC 의 통합(push→PR)·리뷰·머지 라이프사이클 상태를 dispatch 의 기존 run

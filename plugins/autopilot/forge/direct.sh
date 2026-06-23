@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # direct.sh — forge 어댑터 direct 구현 (origin 없음: 로컬 review + ff-only 직접 머지).
-# dispatch 워커 헬퍼의 -direct 경로를 감싸 재사용. forge.sh 가 source. FG_REF = dispatch references.
+# 통합/리뷰/머지 엔진 헬퍼의 -direct 경로를 감싸 재사용. forge.sh 가 source. FG_REF = forge/lib.
 
 fg_integrate() {  # <spec> <run_dir> <key>
   bash "$FG_REF/integration.sh" integrate-direct "$@"

@@ -2,7 +2,7 @@
 
 한 작업의 변경(diff)을 리뷰할 때 워커가 **4개의 lens 서브에이전트를 병렬·독립**으로 dispatch 하는 brief. 각 lens 는 서로의 결론을 **보지 못한다**(합의 투표 아님). 각 lens 는 자기 관점의 **발견(findings)만 보고**하고, 판정·중복 제거·신뢰도 게이팅·최종 verdict 는 **결정적 중재 게이트(`review.sh`)**가 한다.
 
-> 적대 렌즈(contrarian·minimalist·constraint-auditor)가 필요할 때 그 정의는 `plugins/autopilot/skills/spec/references/personas.md`(단일 출처)를 **참조**한다 — 여기서 복제하지 않는다.
+> 적대 렌즈(contrarian·minimalist·constraint-auditor)가 필요할 때 그 정의는 `plugins/autopilot/references/personas.md`(단일 출처)를 **참조**한다 — 여기서 복제하지 않는다.
 
 ## 공통 출력 계약 (모든 lens)
 

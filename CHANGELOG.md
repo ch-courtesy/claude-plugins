@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.52.0
+
+### 변경(깨짐)
+- **구 파이프라인 스킬 `spec`·`repair`·`dispatch` 제거** — 신 파이프라인(`feature`/`fix`→`create-task`→`execute-task`/`workflow-task`)이 구 파이프라인을 기능적으로 대체 완료(진입 스킬 `using-autopilot`는 이미 `feature`/`fix`로 라우팅)함에 따라 세 스킬을 제거했다. 단순 삭제는 런타임을 연쇄로 깨뜨리므로(생존 스킬이 이들 내부의 공유 리소스를 참조), 삭제에 앞서 공유 리소스를 중립 위치로 이전했다: 통합/리뷰/머지 엔진(`integration.sh`·`merge.sh`·`review-loop.sh`·`lib-integration.sh`)을 `skills/dispatch/references/` → `forge/lib/`로(forge·execute-task·workflow-task가 forge 경유로 재사용), 적대 렌즈 페르소나 카탈로그(`personas.md`)를 `skills/spec/references/` → `plugins/autopilot/references/`로(loop·review가 단일 출처로 참조). `forge.sh` 앵커(`FG_REF`)와 loop·review의 모든 런타임/테스트 경로를 새 위치로 갱신했다. 매니페스트(`plugin.json`·`marketplace.json`) description을 생존 스킬 구성으로 재서술했다. 재사용 엔진의 동작·계약은 불변(이전만 수행).
+
 ## project-init 0.22.0
 
 ### 변경(깨짐)

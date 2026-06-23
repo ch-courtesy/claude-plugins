@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# merge.sh — autopilot:dispatch per-SPEC 머지 (M4)
+# merge.sh — forge per-SPEC 머지 (M4)
 #
 # 책임 (파이프라인 종착: "리뷰가 approve 로 수렴하면 머지되고 SPEC 은 done(=머지됨)이 된다"):
 #   - 버전 범프 게이트: 머지될 변경이 워치 디렉토리(plugins/)를 건드리면 같은 변경 안에서
@@ -45,7 +45,7 @@ set -uo pipefail
 
 GIT_CMD="${GIT_CMD:-git}"
 FORGE_CMD="${FORGE_CMD:-gh}"
-LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../loop/references/loop.sh"
+LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../skills/loop/references/loop.sh"
 LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 WATCH_DIRS="${WATCH_DIRS:-plugins/}"
