@@ -5,7 +5,7 @@
 워커가 `.loop/signals/` 디렉토리에 파일을 만들어 표현한다.
 
 **언제** — 검증 가능한 완료 조건이 적힌 SPEC 한 건을 격리 작업 공간에서 사람 개입 없이 구현시키고 싶을 때.
-spec·repair 가 떠 둔 SPEC 을 dispatch 가 SPEC 1건당 워커로 위임하는 흐름의 단일-SPEC 실행 단위.
+태스크 백엔드 기반 실행기(`execute-task`/`workflow-task`)가 SPEC 1건당 자율 구현 단위로 재사용하는 최소 실행기.
 
 **호출** — `Skill(skill="loop", args="<subcommand> [<args>]")` (subcommand: `start`/`status`/`stop`/`list`/`cleanup`/`logs`).
 

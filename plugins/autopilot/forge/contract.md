@@ -16,7 +16,7 @@ origin url 없음            → direct  (로컬 review + ff-only 직접 머지)
 ## 동사 (3개)
 
 각 동사는 origin 호스트별 구현(`github.sh`/`gitlab.sh`/`direct.sh`)으로 라우팅된다. 출력·반환코드는 내부에서
-재사용하는 dispatch 워커 헬퍼(`integration.sh`/`review-loop.sh`/`merge.sh`) 계약을 그대로 표면화한다.
+재사용하는 통합/리뷰/머지 엔진(`integration.sh`/`review-loop.sh`/`merge.sh`) 계약을 그대로 표면화한다.
 
 | 동사 | 인자 | 내부 위임(github / direct) |
 |---|---|---|
@@ -43,5 +43,5 @@ origin url 없음            → direct  (로컬 review + ff-only 직접 머지)
 
 ## 런타임 재사용
 
-github/direct 구현은 기존 dispatch 워커 헬퍼(`<plugin>/skills/dispatch/references/`)를 **감싸 호출**한다(복제
+github/direct 구현은 통합/리뷰/머지 엔진(`<plugin>/forge/lib/`)을 **감싸 호출**한다(복제
 금지, 엔진 .sh 는 그대로 둠). gitlab 구현은 v1 미구현 — 호출 시 명확한 안내 후 비-0 exit(조용한 실패 금지).

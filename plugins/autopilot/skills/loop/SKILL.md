@@ -55,7 +55,7 @@ driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `CLAUDE
 
 ### status / stop / list / cleanup / logs
 
-각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. `status --json [<spec>]`은 기계 판독 가능한 구조화 상태(JSON)를 출력해 호출 레이어(dispatch 등)가 컬럼 위치·부분 문자열 일치 없이 종료 상태를 판정하게 한다. lock은 워크트리 생성 전에 획득해 race 보호. 경로 상세는 `loop.sh paths <spec>`. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 `signals/` 비어있지 않음 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
+각각 `Bash(bash $SKILL_DIR/references/loop.sh <subcommand> [args])`로 위임하고 결과를 요약한다. `status` 형식은 `references/status-format.md`. `status --json [<spec>]`은 기계 판독 가능한 구조화 상태(JSON)를 출력해 호출 레이어(`execute-task`/`workflow-task` 등)가 컬럼 위치·부분 문자열 일치 없이 종료 상태를 판정하게 한다. lock은 워크트리 생성 전에 획득해 race 보호. 경로 상세는 `loop.sh paths <spec>`. `list`는 작업트리를 스캔해 실행을 열거한다. `cleanup`은 `signals/` 비어있지 않음 확인 후(또는 `--force`) 워크트리와 lock을 제거한다.
 
 ### env / gates / paths / deps
 

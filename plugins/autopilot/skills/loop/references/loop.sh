@@ -767,7 +767,7 @@ print_run_status() {
 # ----- subcommand: status -----
 # status [--json] [<spec-path>]
 #   --json : 기계 판독 가능한 구조화 상태 출력. 단일 spec → JSON object,
-#            전체 스캔 → JSON array. dispatch 등 호출 레이어의 종료상태 판정용
+#            전체 스캔 → JSON array. execute-task/workflow-task 등 호출 레이어의 종료상태 판정용
 #            단일 출처(컬럼 위치·부분 문자열 일치 비의존). signals 는 raw fact
 #            배열이며 DONE/BLOCKED 의미 해석은 호출자 컨벤션(driver 미파싱).
 cmd_status() {

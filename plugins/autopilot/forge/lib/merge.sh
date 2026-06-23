@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# merge.sh — autopilot:dispatch per-SPEC 머지 (M4)
+# merge.sh — forge per-SPEC 머지 (M4)
 #
 # 책임 (파이프라인 종착: "리뷰가 approve 로 수렴하면 머지되고 SPEC 은 done(=머지됨)이 된다"):
 #   - 버전 범프 게이트: 머지될 변경이 워치 디렉토리(plugins/)를 건드리면 같은 변경 안에서

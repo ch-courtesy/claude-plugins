@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# integration.sh — autopilot:dispatch per-SPEC 통합 (M2)
+# integration.sh — forge per-SPEC 통합 (M2)
 #
 # 책임 ("loop DONE" 과 "리뷰 승인 요청(PR)" 사이의 다리):
 #   - 종료 신호 판정: loop 의 공개 구조화 상태(`status --json`)로만 child 종료 의도를

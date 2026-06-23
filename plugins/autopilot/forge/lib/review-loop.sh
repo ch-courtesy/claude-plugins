@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# review-loop.sh — autopilot:dispatch per-SPEC 리뷰 오케스트레이션 (M3)
+# review-loop.sh — forge per-SPEC 리뷰 오케스트레이션 (M3)
 #
 # 책임 (열린 PR 을 승인까지 끌고 가는 한 라운드):
 #   - 판정 산출: autopilot:review 생산자(REVIEW_PRODUCE_CMD)를 한 SPEC(키)에 대해 **1회**
