@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# github.sh — forge 어댑터 github 구현 (PR, gh). dispatch 워커 헬퍼를 감싸 재사용.
-# forge.sh 가 source 해 fg_<verb> 를 호출. FG_REF = dispatch references 경로.
+# github.sh — forge 어댑터 github 구현 (PR, gh). 통합/리뷰/머지 엔진 헬퍼를 감싸 재사용.
+# forge.sh 가 source 해 fg_<verb> 를 호출. FG_REF = forge/lib 경로.
 
 fg_integrate() {  # <spec> <run_dir> <key>
   bash "$FG_REF/integration.sh" integrate "$@"

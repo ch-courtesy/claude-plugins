@@ -5,12 +5,12 @@
 #   (c) 폴링 상한/간격 env override
 #   (d) 즉시 APPROVED → 대기(sleep) 없이 머지(회귀)
 #   (e) direct(PR 없음) 경로는 폴링 미적용(기존 동작 보존)
-#   (f) dispatch 머지 게이트(merge.sh mg_approval_gate)는 단발 검사로 유지
+#   (f) 머지 게이트(forge/lib/merge.sh mg_approval_gate)는 단발 검사로 유지
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ET="$HERE/../references/execute-task.sh"
 ADAPTER="$HERE/../../../task-backend/adapter.sh"
-MERGE="$HERE/../../dispatch/references/merge.sh"
+MERGE="$HERE/../../../forge/lib/merge.sh"
 fail=0; ok(){ echo "PASS  $1"; }; bad(){ echo "FAIL  $1"; fail=1; }
 chk(){ [[ "$2" == "$3" ]] && ok "$1" || bad "$1 (want '$3' got '$2')"; }
 

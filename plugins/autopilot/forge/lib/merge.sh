@@ -45,7 +45,7 @@ set -uo pipefail
 
 GIT_CMD="${GIT_CMD:-git}"
 FORGE_CMD="${FORGE_CMD:-gh}"
-LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../loop/references/loop.sh"
+LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../skills/loop/references/loop.sh"
 LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 WATCH_DIRS="${WATCH_DIRS:-plugins/}"

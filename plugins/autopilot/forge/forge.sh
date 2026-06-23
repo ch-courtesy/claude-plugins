@@ -29,9 +29,9 @@ fg_load() {
   local impl="$FG_DIR/$host.sh"
   [[ -f "$impl" ]] || fg_die "forge 구현 없음: $impl"
   FG_HOST="$host"
-  # 재사용할 dispatch 워커 헬퍼 경로 — **스크립트 위치 기준**으로 계산(설치형 플러그인 호환).
-  # 소비 프로젝트 git 루트 아래를 가정하지 않는다(forge/ 의 형제 skills/dispatch/references).
-  FG_REF="$(cd "$FG_DIR/../skills/dispatch/references" && pwd)"
+  # 통합/리뷰/머지 엔진 헬퍼 경로 — **스크립트 위치 기준**으로 계산(설치형 플러그인 호환).
+  # 소비 프로젝트 git 루트 아래를 가정하지 않는다(forge/ 의 하위 lib/).
+  FG_REF="$FG_DIR/lib"
   # shellcheck disable=SC1090
   source "$impl"
 }
