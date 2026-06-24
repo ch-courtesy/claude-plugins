@@ -68,13 +68,13 @@ if grep -rqE 'repair 고유|create-task 자체 소유|feature 자체 소유' "$F
 fi
 ok "fix 참조: 타 스킬 소유 표기 부재"
 
-# === S7: fix task-body-template 에 진단 섹션 + 완료 기준 ===
-echo "=== S7: fix 본문 템플릿 진단 섹션 + 완료 기준 ==="
+# === S7: fix task-body-template 에 진단 섹션 + 완료 조건 ===
+echo "=== S7: fix 본문 템플릿 진단 섹션 + 완료 조건 ==="
 grep -qE '^##[[:space:]]*진단' "$FIX/references/task-body-template.md" \
   || fail "S7: fix task-body-template에 '## 진단' 섹션 없음"
-grep -q '완료 기준' "$FIX/references/task-body-template.md" \
-  || fail "S7: fix task-body-template에 완료 기준 없음"
-ok "fix 본문 템플릿: 진단 섹션 + 완료 기준"
+grep -qE '^##[[:space:]]*완료 조건' "$FIX/references/task-body-template.md" \
+  || fail "S7: fix task-body-template에 '## 완료 조건' 섹션 없음"
+ok "fix 본문 템플릿: 진단 섹션 + 완료 조건"
 
 # === S8: fix 진단은 정적 한정 + 가설 프레이밍 + 마커 ===
 echo "=== S8: fix diagnosis 정적 한정 + 마커 ==="
