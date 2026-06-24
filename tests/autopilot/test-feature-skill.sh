@@ -84,5 +84,21 @@ if grep -rq 'create-task 자체 소유' "$FEATURE/references/"; then
 fi
 ok "feature 참조: 소유 표기 갱신"
 
+# === S10: task-body-template — DoD-요구 테스트 경로를 scope.include에 포함 규칙(#483) ===
+# loop scope 게이트(diff_vs_scope)는 scope 밖 파일 작성을 halt 하므로, 완료 조건이
+# 회귀 테스트를 요구하면 그 테스트 경로가 scope.include 안에 있어야 RED 테스트를 쓸 수 있다.
+echo "=== S10: feature 본문 템플릿 — DoD-요구 테스트 경로 scope.include 포함 규칙 ==="
+grep -q '회귀 가드' "$FEATURE/references/task-body-template.md" \
+  || fail "S10: feature task-body-template에 '회귀 가드' 테스트 경로 규칙 없음"
+grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FEATURE/references/task-body-template.md" \
+  || fail "S10: feature task-body-template에 테스트 경로의 scope.include 포함 규칙(한 줄) 없음"
+ok "feature task-body-template: DoD-요구 테스트 경로 scope.include 포함 규칙"
+
+# === S11: self-review 축6 — DoD-요구 테스트 경로 점검 항목(#483) ===
+echo "=== S11: feature self-review 축6 — DoD-요구 테스트 경로 점검 ==="
+grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FEATURE/references/self-review.md" \
+  || fail "S11: feature self-review 축6에 테스트 경로 scope.include 점검 항목(한 줄) 없음"
+ok "feature self-review: DoD-요구 테스트 경로 점검 항목"
+
 echo ""
 echo "=== 모든 #445 작성/등록 분리 계약 테스트 통과 ==="

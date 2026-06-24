@@ -90,6 +90,22 @@ grep -q 'backlog' "$FIX/SKILL.md" || fail "S9: fix에 backlog 전이 언급 없�
 grep -q 'in_design' "$FIX/SKILL.md" || fail "S9: fix에 in_design 전이 언급 없음"
 ok "fix: backlog/in_design 전이 명시"
 
+# === S10: task-body-template — DoD-요구 테스트 경로를 scope.include에 포함 규칙(#483) ===
+# loop scope 게이트(diff_vs_scope)는 scope 밖 파일 작성을 halt 하므로, 완료 조건이
+# 회귀 가드 테스트를 요구하면 그 테스트 경로가 scope.include 안에 있어야 RED 테스트를 쓸 수 있다.
+echo "=== S10: fix 본문 템플릿 — DoD-요구 테스트 경로 scope.include 포함 규칙 ==="
+grep -q '회귀 가드' "$FIX/references/task-body-template.md" \
+  || fail "S10: fix task-body-template에 '회귀 가드' 테스트 경로 규칙 없음"
+grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FIX/references/task-body-template.md" \
+  || fail "S10: fix task-body-template에 테스트 경로의 scope.include 포함 규칙(한 줄) 없음"
+ok "fix task-body-template: DoD-요구 테스트 경로 scope.include 포함 규칙"
+
+# === S10b: self-review 축6 — DoD-요구 테스트 경로 점검 항목(#483) ===
+echo "=== S10b: fix self-review 축6 — DoD-요구 테스트 경로 점검 ==="
+grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FIX/references/self-review.md" \
+  || fail "S10b: fix self-review 축6에 테스트 경로 scope.include 점검 항목(한 줄) 없음"
+ok "fix self-review: DoD-요구 테스트 경로 점검 항목"
+
 # === S11: create-task 가 fix 를 작성자로 인지(짝 정합) ===
 echo "=== S11: create-task fix 짝 정합 ==="
 grep -q 'fix' "$CREATE/SKILL.md" \

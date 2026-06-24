@@ -48,6 +48,10 @@ scope:
 
 - **frontmatter-first** — 본문 첫 줄은 `---`(여는 frontmatter). `scope.include` 는 step 1 인터뷰에서 식별한
   변경 대상 glob 으로 채운다. 불명확하면 보수적으로 넓게 잡고 **위험**에 명시한다.
+- **DoD-요구 테스트 경로 포함** — 완료 조건이 회귀 가드 테스트 추가/수정을 요구하면, 그 테스트 파일·디렉터리 경로를 `scope.include` 에 포함한다.
+  loop 은 scope 밖 파일을 쓰면 halt 하므로, 완료 조건이 요구하는 산출물(특히 회귀 테스트)은 모두 scope 에 반영해야 RED 테스트를 작성할 수 있다.
+- **plugins/ 변경 시 버전 산출물 포함(권장)** — `plugins/` 를 바꾸는 SPEC 은 워커가 버전 안내(versioning)대로
+  매니페스트를 올릴 수 있도록 `plugin.json`·`CHANGELOG.md` 도 `scope.include` 에 넣길 권장한다(강제 아님).
 - **WHAT/HOW 방어선** — 무엇을 만들 것인가·완료 조건에는 "무엇"만. 기술 선택·경로·라이브러리는 제약에.
 - **완료 조건**은 `references/ears-patterns.md`의 5문장 패턴으로, 각 항목이 관찰 가능하고 독립적으로 테스트
   가능해야 한다(실행 스킬이 이걸로 검증).
