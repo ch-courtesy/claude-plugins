@@ -16,6 +16,26 @@ PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 
 fail() { echo "FAIL: $1"; exit 1; }
 
+MIN_VER="0.55.0"
+
+# version_ge A B → exit 0 if A >= B (semver major.minor.patch 숫자 비교).
+# 패턴 열거가 아닌 순서 비교라 미만 대역 누락(false pass)이 없다.
+# 파싱 불가(비숫자 필드) 시 2를 반환해 호출부가 명확히 fail 처리한다.
+version_ge() {
+  local IFS=.
+  local -a av bv
+  read -r -a av <<< "$1"
+  read -r -a bv <<< "$2"
+  local i an bn
+  for i in 0 1 2; do
+    an="${av[i]:-0}"; bn="${bv[i]:-0}"
+    [[ "$an" =~ ^[0-9]+$ && "$bn" =~ ^[0-9]+$ ]] || return 2
+    if (( an > bn )); then return 0; fi
+    if (( an < bn )); then return 1; fi
+  done
+  return 0
+}
+
 echo "=== 파일 존재 ==="
 for f in "$USING" "$EXEC" "$WF" "$PLUGIN_JSON"; do
   [[ -f "$f" ]] || fail "$f 부재"
@@ -61,14 +81,27 @@ grep -q '자가개선-비활성' "$WF" || fail "workflow-task에 자가개선-�
 echo "OK"
 
 echo ""
+echo "=== 버전 비교 회귀 케이스 (경계 표본) ==="
+# >= 0.55.0 충족해야 하는 표본 (major>=1 포함)
+for v in 0.55.0 0.55.1 0.60.0 1.0.0; do
+  version_ge "$v" "$MIN_VER" || fail "표본 $v 는 >= $MIN_VER 여야 하는데 미달 판정"
+done
+# < 0.55.0 — 누락 대역(0.5.*~0.9.*, 0.10.*~0.49.*) 포함, 모두 fail 처리되어야 함
+for v in 0.6.0 0.49.0 0.54.9 0.0.1; do
+  if version_ge "$v" "$MIN_VER"; then
+    fail "표본 $v 는 < $MIN_VER 여야 하는데 충족 판정 (false pass)"
+  fi
+done
+echo "OK"
+
+echo ""
 echo "=== plugin.json 버전 >= 0.55.0 ==="
 PLUGIN_VER=$(grep -oE '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$PLUGIN_JSON" \
   | head -1 | sed -E 's/.*"([0-9][^"]*)".*/\1/')
-case "$PLUGIN_VER" in
-  0.0.*|0.1.*|0.2.*|0.3.*|0.4.*|0.50.*|0.51.*|0.52.*|0.53.*|0.54.*)
-    fail "자가개선 정책 추가 후 version $PLUGIN_VER < 0.55.0" ;;
-esac
-echo "OK: version $PLUGIN_VER >= 0.55.0"
+if ! version_ge "$PLUGIN_VER" "$MIN_VER"; then
+  fail "자가개선 정책 추가 후 version $PLUGIN_VER < $MIN_VER"
+fi
+echo "OK: version $PLUGIN_VER >= $MIN_VER"
 
 echo ""
 echo "=== 모든 테스트 통과 ==="
