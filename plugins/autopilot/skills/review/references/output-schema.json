@@ -74,6 +74,7 @@
       }
     },
     "automation_safety": {
+      "$comment": "may_approve 는 verdict 에서 결정적으로 파생된다: may_approve = (verdict==approve). 하니스(review.sh:180)·CI 자동승인 게이트(claude-review.yml)·본 스키마의 단일 출처 규칙(#480). 모델의 무기준 자가판정으로 두지 않는다 — clean 리뷰(verdict=approve)는 자동승인하고, 자동승인이 부적절하면 리뷰어가 finding 을 내어 verdict 를 comment 로 낮춘다.",
       "type": "object",
       "additionalProperties": false,
       "required": ["may_approve", "may_request_changes", "reason"],
