@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.56.1
+
+### 버그 수정
+- **forge review-loop 의 rework 가 detached 구현 워크트리에서도 feat 브랜치를 대상으로 동작 + 재구현 실패 escalate 에 유발 finding 표면화 (갭 X+Z)** — `rl_implement_loop` 이 종전에는 `git worktree list` 에서 **feat 브랜치가 체크아웃된 워크트리만** 찾았는데, 구현 워크트리는 `worktree add --detach` 로 만들어져 어떤 로컬 브랜치에도 체크아웃돼 있지 않아 매치 0 → 항상 실패 → escalate 했다(리뷰 finding 이 있어도 rework 가 진행되지 못함). 이제 feat 브랜치 체크아웃 워크트리를 못 찾으면 **feat 브랜치(로컬 ref)가 존재하는지 확인 후** 그 브랜치를 체크아웃한 전용 임시 워크트리를 만들어 그 안에서 loop 를 secondary 모드로 수행한다(끝나면 정리). ref 가 없으면 거짓 성공 대신 비-0(에스컬레이션)으로 엉뚱한 체크아웃 push 금지 불변식을 보존한다. 또한 재구현 실패로 escalate 할 때 reason 에 **rework 를 유발한 PR 인라인 finding(must) 요약**을 포함해, 오케스트레이터가 'false escalation' 으로 오진해 정당한 차단을 수동 머지로 덮는 일을 막는다. 회귀 가드(review-loop selftest)가 (a) detached 워크트리에서 feat 브랜치 확보 후 rework 수행, (b) feat ref 부재 시 비-0, (c) escalate reason 에 유발 finding 포함을 단언한다.
+
 ## autopilot 0.56.0
 
 ### 버그 수정
