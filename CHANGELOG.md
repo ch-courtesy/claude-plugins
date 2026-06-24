@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.55.0
+
+### 변경(호환)
+- **자가개선 blocked-수집을 `using-autopilot`로 승격(always-on, 단일 소유자) + 카테고리→행동 매핑·재귀 상한** — blocked 신호를 자가-진단·수정 등록으로 잇는 자가개선 수집이 실행 경로(단일 `execute-task` / 무인 `workflow-task` 드레인)와 무관하게 **항상 발동**하도록 통합했다. 종전에는 `using-autopilot`엔 always-on 가이던스만, `workflow-task`엔 operational이나 드레인-전용으로 이원화돼 **단일 `execute-task`에서 막힌 태스크는 자동 자가-수정이 안 됐다**. 이제 `using-autopilot` 「자가개선 정책」이 (a) 카테고리 enum, (b) 카테고리→행동 매핑(`spec-gap`→해당 SPEC scope 보정 / `tool-defect`→`fix`로 새 수정 스펙 등록 / `ops`→운영 정리), (c) 재귀 상한을 **단일 정의**한다. `execute-task`·`workflow-task`는 blocked의 `category`를 **표면화만** 하고, 그 category를 읽은 오케스트레이팅 세션이 양 경로에서 동일 정책대로 행동한다(코드 강제가 아니라 가이던스). 자가개선이 생성한 fix 태스크 본문에는 `자가개선-비활성` 마커를 부여하고, 단일·드레인 양 경로가 이를 존중해 그 태스크가 다시 blocked돼도 추가 자가개선을 트리거하지 않는다(**depth-1 재귀 상한**). 회귀 가드(`tests/autopilot/test-self-improvement-policy.sh`)가 단일 경로 category 표면화·카테고리 매핑 명문화·비활성 플래그 존중의 정적 존재를 단언한다.
+
 ## autopilot 0.54.0
 
 ### 변경(호환)
