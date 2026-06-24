@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.54.0
+
+### 변경(호환)
+- **작성 스킬(feature·fix)이 DoD-요구 회귀 테스트 경로를 scope.include에 포함하도록 방법론 보강** — feature·fix 양쪽 `task-body-template.md`(작성 규칙)와 `self-review.md`(축6 scope.include 점검)에 "완료 조건이 회귀 가드 테스트 추가/수정을 요구하면 그 테스트 파일·디렉터리 경로를 `scope.include` 에 포함한다"는 규칙·점검을 추가했다. loop scope 게이트(`diff_vs_scope`)는 scope 밖 파일 작성을 halt 하므로, 작성된 SPEC 이 회귀 테스트 경로를 scope 밖에 두면 헌법 Iron Law(production 전 RED 테스트)와 맞물려 TDD 를 시작도 못 하고 구조적으로 blocked(`spec-gap`)됐다. 작성 단계에서 scope 를 DoD 와 정합시켜 이 spurious blocked 를 근본 제거한다. 더불어 `plugins/` 변경 SPEC 은 `plugin.json`·`CHANGELOG.md` 도 scope 에 넣길 권장하는 한 줄을 덧붙였다(강제 아님). 두 회귀 가드 테스트(`test-feature-skill.sh` S10·S11, `test-fix-skill.sh` S10·S10b)가 규칙·점검의 존재를 단언한다.
+
 ## autopilot 0.53.0
 
 ### 변경(깨짐)
