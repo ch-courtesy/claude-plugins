@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.53.0
+
+### 변경(깨짐)
+- **forge 머지 엔진에서 프로젝트-소유 버전 범프 게이트 제거(정책-불간섭)** — 머지 엔진(`forge/lib/merge.sh`)이 plugins/ 변경 시 `plugin.json` 버전 범프를 단언하던 게이트(`mg_version_gate`와 보조 함수군·`WATCH_DIRS`·`version-gate` 서브커맨드·`blocked: version-bump` 종착)와, 그 게이트를 충족시키려 존재하던 통합 엔진(`forge/lib/integration.sh`)의 병렬 동일-버전 자동 재범프(`in_ensure_version_ahead`)·버전-전용 충돌 결정적 해소(`in_conflict_version_only`·`in_resolve_version_conflict`·`in_reapply_bump`)를 제거했다. 버전 범프는 컨슈밍 프로젝트 소유 정책(`rules/engineering/versioning.md`)이므로 범용 플러그인이 이를 집행하는 것은 계층 역전이며, 게이트 구현이 `plugin.json`·`plugins/`를 하드코딩해 다른 형태(`package.json`·`pyproject.toml`)의 프로젝트에서 오작동하는 비이식성 결함이었다. 이제 머지 경로는 정책-중립 게이트(PR 존재·승인·ff-only)만 유지하고 버전 정책에 간섭하지 않는다. `plugin.json` 충돌은 일반 rebase 충돌 전략으로 귀결된다. 버전 강제가 필요하면 컨슈밍 프로젝트가 자기 CI로 도입한다(플러그인은 강제하지 않음).
+
 ## autopilot 0.52.0
 
 ### 변경(깨짐)
