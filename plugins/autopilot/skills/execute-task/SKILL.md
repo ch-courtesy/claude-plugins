@@ -49,6 +49,13 @@ bash "$EXEC" status|stop|logs <task-id>
 
 - **무인 실행**: 드레인 경로에서 호출되므로 대화형 호출(AskUserQuestion 등)을 하지 않는다. 차단은 `blocked`
   상태 + 진행 로그로 표현한다.
+- **blocked `category` 표면화 (자가개선 seam)**: loop 워커가 차단을 쓰면 그 `signals/BLOCKED` 본문 첫 줄은
+  헌법 규약상 `category:`(`config-gap`·`spec-gap`·`architecture-gap`·`environment-gap`·`other`)를 싣는다 —
+  execute-task의 한 실행이 이 BLOCKED 신호를 그대로 남긴다(새 훅 없이 category가 이미 노출됨). 이 category는
+  `using-autopilot` 「자가개선 정책」(단일 소유)의 카테고리→행동 매핑이 소비한다 — **단일 실행 경로에서도**
+  오케스트레이팅 세션이 그 신호의 category를 읽어 매핑대로 자가개선을 발동한다(코드가 자동 발동하는 게 아니라
+  신호가 category를 노출하고 세션이 정책대로 행동한다). 단, 태스크 본문에 `자가개선-비활성` 마커가 있으면
+  자가개선을 재트리거하지 않는다(depth-1 상한 존중).
 - 플러그인 자기완결 — `rules/`나 다른 스킬을 doc-link하지 않는다. 상태 집합·전이의 단일 출처는 플러그인
   `task-backend/contract.md`.
 - 의존성·DAG는 다루지 않는다 — 단일 태스크만. 여러 태스크의 fan-out은 `workflow-task`가 한다.
