@@ -169,76 +169,20 @@ in_ensure_work_branch() {
 
 # =====================================================================
 # 3) git 통합 — base sync(rebase, ff 가능 시) → push. force 금지.
-#    타겟 전진으로 인한 충돌은 워커가 자율 해결한다(결정적 버전 해소 + 일반 충돌은
-#    전략 해소 + 비결정 표시로 머지 전 재검증 유도). 자동 해결·재동기화·재시도는 non-force.
-#    정책 단일 출처: 본 절(결정적 헬퍼) + 워커 계약(subagent-prompt.md).
+#    타겟 전진으로 인한 충돌은 워커가 전략으로 자율 해소하고 비결정 표시로 머지 전 재검증을
+#    유도한다(버전 범프 정책은 컨슈밍 프로젝트 소유 — plugin.json 충돌도 일반 충돌로 처리).
+#    자동 해결·재동기화·재시도는 non-force. 정책 단일 출처: 본 절 + 워커 계약(subagent-prompt.md).
 # =====================================================================
 
-# INT_AUTORESOLVE_FLAG — 직전 base sync 에서 '비결정(일반) 충돌'을 전략으로 해소했으면
-#   'needs-verify'. 워커는 이 표시가 있으면 머지 전 검증(완료 조건/selftest)을 재실행하고
-#   통과할 때만 진행한다(거짓 green 방지). 결정적(버전-only) 해소만 있었으면 비어 있음.
+# INT_AUTORESOLVE_FLAG — 직전 base sync 에서 충돌을 전략으로 해소했으면 'needs-verify'.
+#   워커는 이 표시가 있으면 머지 전 검증(완료 조건/selftest)을 재실행하고 통과할 때만
+#   진행한다(거짓 green 방지). 충돌 해소가 없었으면 비어 있음.
 INT_AUTORESOLVE_FLAG=""
 
-# in_json_version <ref> <path> — ref 의 plugin.json version 값(예 0.39.0). 없으면 빈 문자열.
-in_json_version() {
-  # shellcheck disable=SC2086
-  $GIT_CMD show "$1:$2" 2>/dev/null \
-    | grep -m1 -E '"version"[[:space:]]*:' \
-    | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"?([0-9][0-9.]*)"?.*/\1/'
-}
-
-# in_reapply_bump <target> <base> <our> — base→our 의 최상위 증가 필드(major/minor/patch)를
-#   target 위에 재적용한 새 버전 echo. 범프 레벨을 못 가리면 target 의 patch+1(보수적 최소 증가).
-#   결과는 항상 target 보다 엄격히 크다(작업 브랜치 범프 의도 보존 + 타겟 전진 반영).
-in_reapply_bump() {
-  local tgt="$1" base="$2" our="$3" oldIFS="$IFS"
-  IFS=.; # shellcheck disable=SC2206
-  local -a t=($tgt) b=($base) o=($our); IFS="$oldIFS"
-  local lvl=2 i bi oi
-  for ((i=0;i<3;i++)); do
-    bi="${b[i]:-0}"; oi="${o[i]:-0}"; bi="${bi//[!0-9]/}"; oi="${oi//[!0-9]/}"
-    [[ -n "$bi" ]] || bi=0; [[ -n "$oi" ]] || oi=0
-    if (( 10#$oi > 10#$bi )); then lvl=$i; break; fi
-  done
-  local -a r=("${t[0]:-0}" "${t[1]:-0}" "${t[2]:-0}") j
-  for ((j=0;j<3;j++)); do r[j]="${r[j]//[!0-9]/}"; [[ -n "${r[j]}" ]] || r[j]=0; done
-  r[lvl]=$(( 10#${r[lvl]} + 1 ))
-  for ((j=lvl+1;j<3;j++)); do r[j]=0; done
-  printf '%s.%s.%s\n' "${r[0]}" "${r[1]}" "${r[2]}"
-}
-
-# in_conflict_version_only <file> — 충돌 블록(<<< ~ >>>) 안 비-마커 라인이 모두 "version" 라인이면 0.
-#   결정적(버전-only) 충돌 판정 — 그 외(코드 의미) 충돌과 구분한다.
-in_conflict_version_only() {
-  awk '
-    /^<<<<<<< /{inc=1; seen=1; next}
-    /^=======$/{next}
-    /^>>>>>>> /{inc=0; next}
-    inc && $0 !~ /"version"[[:space:]]*:/ { bad=1 }
-    END { exit ((seen && !bad)?0:1) }
-  ' "$1"
-}
-
-# in_resolve_version_conflict <file> — 진행 중 rebase 의 버전-only 충돌 결정적 해소.
-#   새 베이스(HEAD=origin/main) plugin.json 전체를 취하고 version 만 in_reapply_bump 값으로.
-in_resolve_version_conflict() {
-  local f="$1" tgt our base mb newv
-  tgt="$(in_json_version HEAD "$f")"          # rebase 중 HEAD = 새 베이스(origin/main)
-  our="$(in_json_version REBASE_HEAD "$f")"   # 재적용 중 작업 커밋
-  # shellcheck disable=SC2086
-  mb="$($GIT_CMD merge-base REBASE_HEAD HEAD 2>/dev/null)"
-  base="$(in_json_version "$mb" "$f")"
-  newv="$(in_reapply_bump "$tgt" "$base" "$our")"
-  [[ -n "$newv" ]] || return 1
-  # shellcheck disable=SC2086
-  $GIT_CMD show "HEAD:$f" 2>/dev/null \
-    | sed -E "s/(\"version\"[[:space:]]*:[[:space:]]*\")[0-9][0-9.]*(\")/\1$newv\2/" > "$f" || return 1
-  return 0
-}
-
 # in_autoresolve_rebase <branch> — 진행 중(충돌 정지) rebase 를 자율 해결.
-#   파일별: plugin.json 버전-only → 결정적 해소; 그 외 → DISPATCH_CONFLICT_STRATEGY
-#   (기본 incoming=재적용 중 작업 커밋 쪽 --theirs, base=새 베이스 쪽 --ours) + 비결정 표시.
+#   파일별: DISPATCH_CONFLICT_STRATEGY (기본 incoming=재적용 중 작업 커밋 쪽 --theirs,
+#   base=새 베이스 쪽 --ours) + 비결정 표시. plugin.json 버전 충돌도 일반 충돌로 처리한다
+#   (버전 범프 정책은 컨슈밍 프로젝트 소유 — 통합 엔진은 버전-전용 해소를 집행하지 않음).
 #   닫으면 rebase --continue 후 0, 닫지 못하면 abort 후 1. force 미사용.
 in_autoresolve_rebase() {
   local branch="$1" f resolved_general=0 unmerged
@@ -247,16 +191,12 @@ in_autoresolve_rebase() {
   [[ -n "$unmerged" ]] || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
-    if [[ "$f" =~ (^|/)plugin\.json$ ]] && in_conflict_version_only "$f"; then
-      in_resolve_version_conflict "$f" || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
-    else
-      # shellcheck disable=SC2086
-      case "${DISPATCH_CONFLICT_STRATEGY:-incoming}" in
-        base) $GIT_CMD checkout --ours   -- "$f" 2>/dev/null || true ;;
-        *)    $GIT_CMD checkout --theirs -- "$f" 2>/dev/null || true ;;
-      esac
-      resolved_general=1
-    fi
+    # shellcheck disable=SC2086
+    case "${DISPATCH_CONFLICT_STRATEGY:-incoming}" in
+      base) $GIT_CMD checkout --ours   -- "$f" 2>/dev/null || true ;;
+      *)    $GIT_CMD checkout --theirs -- "$f" 2>/dev/null || true ;;
+    esac
+    resolved_general=1
     # shellcheck disable=SC2086
     $GIT_CMD add -- "$f" 2>/dev/null || true
   done <<< "$unmerged"
@@ -358,109 +298,6 @@ _in_base_sync_core() {
 in_push_branch() {
   # shellcheck disable=SC2086
   $GIT_CMD push origin "$1" || { in_die "push 실패(force 금지): $1"; return 1; }
-}
-
-# =====================================================================
-# 3b2) 병렬 동일-버전 범프 자동 재범프 — base sync 후, feat 브랜치 plugin.json 버전이
-#   새 베이스(origin/main)보다 **앞서지 않으면(<=)** 새 베이스보다 한 단계 앞서게 재범프한다.
-#   배경: 두 작업이 같은 버전으로 범프하면 늦은 쪽 rebase 에 version 변경이 이미 적용된 동일
-#   변경이라 git 충돌이 없고(in_resolve_version_conflict 미발동), 머지 단계 버전게이트가 동률을
-#   blocked 처리한다(수동 재범프 유발). 재범프는 history 재작성이 아닌 **append commit** 이라
-#   기존 원격 브랜치/PR 이 있어도 ff-safe(force 불필요). 충돌 기반 재적용 경로(in_resolve_version_conflict)는
-#   그대로 보존한다.
-# =====================================================================
-
-# in_semver_gt <new> <old> — new 가 old 보다 큰 SemVer 면 0. old 가 비면(신규 매니페스트) new 만
-#   있으면 0(앞섬). 동일/작으면 1. 외부 도구 없이 필드별 숫자 비교(bash 3.2).
-in_semver_gt() {
-  local new="$1" old="$2"
-  [[ -n "$new" ]] || return 1
-  [[ -n "$old" ]] || return 0
-  local oldIFS="$IFS"; IFS=.
-  # shellcheck disable=SC2206
-  local -a na=($new) oa=($old); IFS="$oldIFS"
-  local i n o
-  for ((i=0; i<3; i++)); do
-    n="${na[i]:-0}"; o="${oa[i]:-0}"; n="${n//[!0-9]/}"; o="${o//[!0-9]/}"
-    [[ -n "$n" ]] || n=0; [[ -n "$o" ]] || o=0
-    if (( 10#$n > 10#$o )); then return 0; fi
-    if (( 10#$n < 10#$o )); then return 1; fi
-  done
-  return 1
-}
-
-# _in_ensure_version_ahead_core <branch> <wt> — 분리 워크트리(wt, 분리 HEAD=origin/$branch tip) 안에서
-#   브랜치가 워치 디렉토리(plugins)에서 건드린 플러그인의 plugin.json 이 base(origin/main)보다 앞서지
-#   않으면 한 단계 앞서게 재기입·commit·push(HEAD:refs/heads/$branch, ff append) 한다.
-#   중요: 병렬 동일-버전 범프에서는 늦은 쪽 plugin.json 이 base 와 **완전히 동일**해 diff(변경 매니페스트)에
-#   잡히지 않는다. 그래서 변경 파일이 아니라 **건드린 플러그인 루트의 매니페스트**를 ls-tree 로 찾아
-#   버전이 앞서는지 검사한다(머지 버전게이트가 동률을 차단하는 바로 그 조건과 정렬). 재범프할 게
-#   없으면 no-op(이미 앞섬·워치 미접촉 → 불변).
-_in_ensure_version_ahead_core() {
-  local branch="$1" wt="$2" m base our newv any=0 touched roots root manifests
-  local wd="${INT_WATCH_DIRS:-plugins}"   # versioning.md 워치 디렉토리(머지 게이트 기본과 동일).
-  # 브랜치가 워치 디렉토리에서 건드린 파일(origin/main..HEAD).
-  # shellcheck disable=SC2086
-  touched="$($GIT_CMD diff --name-only "origin/$DEFAULT_BRANCH...HEAD" 2>/dev/null | grep -E "^$wd/" || true)"
-  [[ -n "$touched" ]] || return 0   # 워치 디렉토리 미접촉 → 버전게이트 차단 대상 아님(불변).
-  # 건드린 최상위 플러그인 루트(<wd>/<name>) 별로 그 매니페스트가 base 보다 앞서도록 보장.
-  roots="$(printf '%s\n' "$touched" | sed -E "s#^($wd/[^/]+)(/.*)?\$#\1#" | sort -u)"
-  while IFS= read -r root; do
-    [[ -n "$root" ]] || continue
-    # shellcheck disable=SC2086
-    manifests="$($GIT_CMD ls-tree -r --name-only HEAD -- "$root" 2>/dev/null | grep -E '(^|/)plugin\.json$' || true)"
-    while IFS= read -r m; do
-      [[ -n "$m" ]] || continue
-      base="$(in_json_version "origin/$DEFAULT_BRANCH" "$m")"
-      our="$(in_json_version HEAD "$m")"
-      in_semver_gt "$our" "$base" && continue   # 이미 앞섬 → 불변(criterion 3).
-      newv="$(in_reapply_bump "$base" "$base" "$our")"
-      [[ -n "$newv" ]] || continue
-      # 새 베이스보다 한 단계 앞선 버전으로 매니페스트 version 라인만 재기입(나머지 내용 보존).
-      mkdir -p "$(dirname "$wt/$m")" 2>/dev/null || true
-      # shellcheck disable=SC2086
-      $GIT_CMD show "HEAD:$m" 2>/dev/null \
-        | sed -E "s/(\"version\"[[:space:]]*:[[:space:]]*\")[0-9][0-9.]*(\")/\1$newv\2/" > "$wt/$m" \
-        || { in_die "버전 재기입 실패: $m"; return 1; }
-      # shellcheck disable=SC2086
-      $GIT_CMD add -- "$m" || { in_die "재범프 add 실패: $m"; return 1; }
-      printf 'version-ahead: rebump %s -> %s (%s, branch=%s)\n' "$our" "$newv" "$m" "$branch" >&2
-      any=1
-    done <<< "$manifests"
-  done <<< "$roots"
-  [[ "$any" == "1" ]] || return 0   # 모두 이미 앞섬 → push 없이 종료(불변).
-  # shellcheck disable=SC2086
-  $GIT_CMD commit -m "chore: 병렬 동일-버전 충돌 회피 재범프(새 베이스 위로 전진)" >/dev/null \
-    || { in_die "재범프 commit 실패: $branch"; return 1; }
-  # append push(ff-safe, force 금지). 기존 PR 이 있으면 head 가 전진해 재리뷰가 자연 처리한다.
-  # shellcheck disable=SC2086
-  $GIT_CMD push origin "HEAD:refs/heads/$branch" \
-    || { in_die "재범프 push 실패(force 금지): $branch"; return 1; }
-  return 0
-}
-
-# in_ensure_version_ahead <branch> — base sync·push 후 호출. #452 격리와 동일하게 공유 체크아웃을
-#   건드리지 않도록 전용 분리(detached) 워크트리에서 재범프를 수행하고 정리한다. origin 최신 상태를
-#   먼저 fetch 해 진짜 원격 tip(origin/$branch) 기준으로 판단한다(base_sync 의 모든 반환 경로 후 통일 처리).
-in_ensure_version_ahead() {
-  local branch="$1" _wt _rc=0 _save_git="$GIT_CMD"
-  # shellcheck disable=SC2086
-  $GIT_CMD fetch origin "$DEFAULT_BRANCH" >/dev/null 2>&1 || true
-  # shellcheck disable=SC2086
-  $GIT_CMD fetch origin "$branch" >/dev/null 2>&1 || true
-  _wt="$(mktemp -d)/wt"
-  # 원격 tip(origin/$branch) 우선, 없으면 로컬 $branch 에서 분리 체크아웃(최초 통합 등).
-  # shellcheck disable=SC2086
-  $GIT_CMD worktree add --quiet --detach "$_wt" "origin/$branch" >/dev/null 2>&1 \
-    || $GIT_CMD worktree add --quiet --detach "$_wt" "$branch" >/dev/null 2>&1 \
-    || { in_die "재범프 전용 워크트리 생성 실패: $branch"; rmdir "$(dirname "$_wt")" 2>/dev/null || true; return 1; }
-  GIT_CMD="$_save_git -C $_wt"
-  _in_ensure_version_ahead_core "$branch" "$_wt"; _rc=$?
-  GIT_CMD="$_save_git"
-  # shellcheck disable=SC2086
-  $GIT_CMD worktree remove "$_wt" >/dev/null 2>&1 || true
-  rmdir "$(dirname "$_wt")" 2>/dev/null || true
-  return "$_rc"
 }
 
 # =====================================================================
@@ -697,9 +534,6 @@ in_integrate() {
       # #452: rebase 경로에선 base_sync 가 분리 워크트리에서 원격으로 직접 push 하므로(INT_BASESYNC_PUSHED)
       # in_push_branch 를 건너뛴다. rebase 불필요(조기 반환) 경로에선 ref 이름으로 push.
       [[ "${INT_BASESYNC_PUSHED:-}" == "1" ]] || in_push_branch "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
-      # 병렬 동일-버전 범프 자동 재범프: feat 버전이 새 베이스보다 앞서지 않으면 한 단계 앞서게
-      # 재범프(ff append)해 버전게이트 동률 blocked 를 막는다(이미 앞서면 no-op).
-      in_ensure_version_ahead "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       local title pr
       title="$(in_spec_title "$spec")"
       pr="$(in_ensure_pr "$branch" "$title" "$spec" "$rid")" || { int_set_phase "$rd" "$key" blocked; return 4; }
@@ -851,8 +685,8 @@ in_selftest() {
   #   브랜치 존재를 실제로 모사한다(BRANCHES 파일) — checkout 을 무조건 성공시키지 않는다(AC5).
   #   rev-parse --verify refs/heads/<b> = 브랜치 존재 검사, rev-parse HEAD = 결과 커밋,
   #   branch <name> [<commit>] = 브랜치 생성(force 금지 보장됨).
-  local PUSHLOG="$TMP/pushlog" GITLOG="$TMP/gitlog" BRANCHES="$TMP/branches" REMOTE_BRANCHES="$TMP/remotebranches" COMMITLOG="$TMP/commitlog"
-  : > "$PUSHLOG"; : > "$GITLOG"; : > "$BRANCHES"; : > "$REMOTE_BRANCHES"; : > "$COMMITLOG"
+  local PUSHLOG="$TMP/pushlog" GITLOG="$TMP/gitlog" BRANCHES="$TMP/branches" REMOTE_BRANCHES="$TMP/remotebranches"
+  : > "$PUSHLOG"; : > "$GITLOG"; : > "$BRANCHES"; : > "$REMOTE_BRANCHES"
   mock_git() {
     # 선행 -C <dir> 흡수(loop 결과 워크트리에서 결과 커밋을 읽을 때 사용).
     if [[ "$1" == "-C" ]]; then shift 2; fi
@@ -883,19 +717,6 @@ in_selftest() {
           *HEAD*) echo "resultcommitsha7"; return 0 ;;
         esac ;;
       branch) printf '%s\n' "$2" >> "$BRANCHES" ;;   # branch <name> [<commit>]
-      # version-ahead 재범프 경로 모사: diff(워치 접촉 파일)·ls-tree(플러그인 루트 매니페스트)·show(버전)·add·commit.
-      #   기본(MOCK_* 미설정)엔 접촉 없음/빈 버전 → ensure_version_ahead 가 no-op(기존 테스트 불변).
-      diff)
-        if [[ "$*" == *"--name-only"* && "$*" == *"...HEAD"* ]]; then printf '%s\n' ${MOCK_TOUCHED:-}; fi ;;
-      ls-tree)
-        printf '%s\n' ${MOCK_MANIFESTS:-} ;;   # ls-tree -r --name-only HEAD -- <root>
-      show)
-        case "$2" in
-          origin/*) [[ -n "${MOCK_BASE_VER:-}" ]] && echo "  \"version\": \"${MOCK_BASE_VER}\"," ;;
-          *)        [[ -n "${MOCK_OUR_VER:-}"  ]] && echo "  \"version\": \"${MOCK_OUR_VER}\","  ;;
-        esac ;;
-      add) : ;;
-      commit) printf '%s\n' "$*" >> "$COMMITLOG" ;;
       checkout)
         # 실제처럼: 존재하지 않는 브랜치 checkout 은 실패한다(무조건 성공 금지).
         grep -Fxq "$2" "$BRANCHES" 2>/dev/null || { echo "error: pathspec '$2' did not match" >&2; return 1; } ;;
@@ -1198,27 +1019,15 @@ SPECEOF
   [[ -s "$PUSHLOG" || -s "$GITLOG" ]] && ok "git/push 실제 수행됨" || bad "git/push 실제 수행됨"
   if grep -qiE 'force|(^| )-f( |$)' "$GITLOG"; then bad "force 미사용"; else ok "force 미사용(git 인자에 force 없음)"; fi
 
-  # ---- AC: 자동 충돌 해결 — 결정적 버전 해소 산식(in_reapply_bump: 타겟 위 의도 범프 재적용) ----
-  chk "AC reapply minor"          "$(in_reapply_bump 0.38.1 0.38.0 0.39.0)" "0.39.0"
-  chk "AC reapply minor leapfrog" "$(in_reapply_bump 0.40.0 0.38.0 0.39.0)" "0.41.0"
-  chk "AC reapply patch"          "$(in_reapply_bump 0.38.5 0.38.0 0.38.1)" "0.38.6"
-  chk "AC reapply major"          "$(in_reapply_bump 1.2.3 0.38.0 1.0.0)"   "2.0.0"
-  chk "AC reapply no-bump→patch"  "$(in_reapply_bump 0.38.1 0.38.0 0.38.0)" "0.38.2"
-
-  # ---- AC: 버전-only 충돌 판정(결정적 vs 코드 의미 구분) ----
-  local cvf="$TMP/conf_ver.json" ccf="$TMP/conf_code.sh"
-  printf '{\n<<<<<<< HEAD\n  "version": "0.38.1",\n=======\n  "version": "0.39.0",\n>>>>>>> x\n}\n' > "$cvf"
-  printf 'f(){\n<<<<<<< HEAD\n  echo a\n=======\n  echo b\n>>>>>>> x\n}\n' > "$ccf"
-  in_conflict_version_only "$cvf" && ok "AC 버전-only 충돌 인식" || bad "AC 버전-only 충돌 인식"
-  in_conflict_version_only "$ccf" && bad "AC 코드 충돌을 버전-only 로 오인" || ok "AC 코드 충돌은 버전-only 아님(결정적 해소 제외)"
-
   # ---- AC: in_autoresolve_rebase 일반(비결정) 충돌 → 전략 해소 + needs-verify 표시(워커 재검증 유도) ----
+  #   #482: plugin.json 버전 충돌도 결정적 해소가 아니라 일반 전략으로 처리된다(버전 범프 정책 비간섭).
   local U2LOG="$TMP/arlog"; : > "$U2LOG"; rm -f "$TMP/ar_done"
   mock_git_ar() {
     local a; for a in "$@"; do case "$a" in *force*|-f) echo "FORCE USED" >&2; exit 99;; esac; done
     printf '%s\n' "$*" >> "$U2LOG"
     if [[ "$1" == "diff" && "$*" == *--diff-filter=U* ]]; then
-      [[ -f "$TMP/ar_done" ]] || echo "src/foo.sh"   # add 전엔 미해결, add 후엔 해결됨.
+      # add 전엔 미해결(코드 파일 + plugin.json 동시 충돌), add 후엔 해결됨.
+      [[ -f "$TMP/ar_done" ]] || printf '%s\n%s\n' "src/foo.sh" "plugins/autopilot/.claude-plugin/plugin.json"
       return 0
     fi
     [[ "$1" == "add" ]] && : > "$TMP/ar_done"
@@ -1230,35 +1039,20 @@ SPECEOF
   chk "AC autoresolve 일반 충돌 rc=0" "$rc" "0"
   chk "AC autoresolve 비결정→needs-verify" "$INT_AUTORESOLVE_FLAG" "needs-verify"
   grep -q 'checkout --theirs' "$U2LOG" && ok "AC autoresolve incoming 전략=--theirs(작업 커밋 쪽)" || bad "AC autoresolve incoming 전략=--theirs"
+  grep -q 'checkout --theirs -- plugins/autopilot/.claude-plugin/plugin.json' "$U2LOG" \
+    && ok "AC#482 plugin.json 버전 충돌도 일반 전략(--theirs)으로 처리(결정적 해소 제거)" \
+    || bad "AC#482 plugin.json 버전 충돌 일반 전략 처리(--theirs)"
   grep -q 'rebase --continue' "$U2LOG" && ok "AC autoresolve rebase --continue 로 진행" || bad "AC autoresolve rebase --continue"
   if grep -qiE 'force' "$U2LOG"; then bad "AC autoresolve force 미사용"; else ok "AC autoresolve force 미사용"; fi
   INT_AUTORESOLVE_FLAG=""
 
-  # ---- AC(#467): 병렬 동일-버전 범프 — feat 버전이 새 베이스보다 앞서지 않으면(<=) 자동 재범프(ff append). ----
-  #   #461·#462 시나리오: 둘 다 0.51.2 범프, #461 먼저 머지로 main 0.51.2 → #462 동률 → 버전게이트 blocked.
-  #   통합 경로가 origin/main 보다 한 단계 앞서게 재범프(0.51.3) commit 을 append·push 해 수동 개입 제거.
-  #   현실 모사: 늦은 쪽 plugin.json 은 base 와 동일(0.51.2)이라 diff(변경 파일)엔 비-매니페스트(feature.txt)만
-  #   잡힌다. 매니페스트는 ls-tree 로 플러그인 루트에서 발견해 동률을 검사·재범프한다.
-  local kVA="x-va00001"; : > "$PUSHLOG"; : > "$COMMITLOG"
-  st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
-  out="$(MOCK_EXISTING_PR="77" MOCK_TOUCHED="plugins/autopilot/feature.txt" \
-         MOCK_MANIFESTS="plugins/autopilot/.claude-plugin/plugin.json" \
-         MOCK_BASE_VER="0.51.2" MOCK_OUR_VER="0.51.2" in_integrate "$spec" "$rd" "$kVA" 2>&1)"; rc=$?
-  chk "AC#467 동률 통합 rc=0(blocked 아님)" "$rc" "0"
-  [[ -s "$COMMITLOG" ]] && ok "AC#467 동률 → 재범프 commit append" || bad "AC#467 동률 → 재범프 commit append"
-  grep -qE 'push origin HEAD:refs/heads/feat/' "$PUSHLOG" && ok "AC#467 재범프를 원격 작업 브랜치로 직접 push(ff append)" || bad "AC#467 재범프 직접 push(HEAD:refs/heads)"
-  grep -q 'rebump 0.51.2 -> 0.51.3' <<< "$out" && ok "AC#467 새 베이스보다 한 단계 앞서게 재범프(0.51.2 -> 0.51.3)" || bad "AC#467 재범프 산식(0.51.2 -> 0.51.3) (got: $(grep -o 'rebump[^\n]*' <<< "$out" | head -1))"
-  if grep -qiE 'force' "$PUSHLOG" "$GITLOG"; then bad "AC#467 재범프 force 미사용"; else ok "AC#467 재범프 force 미사용"; fi
-
-  # ---- AC(#467): 버전이 이미 앞선 정상 경로 불변 — 재범프 no-op(commit·push 없음). ----
-  local kVB="x-va00002"; : > "$PUSHLOG"; : > "$COMMITLOG"
-  st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
-  out="$(MOCK_EXISTING_PR="77" MOCK_TOUCHED="plugins/autopilot/feature.txt" \
-         MOCK_MANIFESTS="plugins/autopilot/.claude-plugin/plugin.json" \
-         MOCK_BASE_VER="0.51.2" MOCK_OUR_VER="0.51.3" in_integrate "$spec" "$rd" "$kVB" 2>&1)"; rc=$?
-  chk "AC#467 이미 앞선 통합 rc=0" "$rc" "0"
-  [[ ! -s "$COMMITLOG" ]] && ok "AC#467 이미 앞섬 → 재범프 commit 없음(불변)" || bad "AC#467 이미 앞섬 → 재범프 commit 없음(불변)"
-  if grep -qE 'push origin HEAD:refs/heads/feat/' "$PUSHLOG"; then bad "AC#467 이미 앞섬인데 재범프 push(불변 위반)"; else ok "AC#467 이미 앞섬 → 재범프 push 없음(불변)"; fi
+  # ---- 회귀 가드(#482): 버전-전용 충돌 해소·동일-버전 자동 재범프 경로가 제거됐다(정책-불간섭) ----
+  #   버전 범프는 컨슈밍 프로젝트 소유 정책(versioning.md) — 통합 엔진은 버전 함수로 집행하지 않는다.
+  local _fn
+  for _fn in in_reapply_bump in_conflict_version_only in_resolve_version_conflict \
+             in_semver_gt in_ensure_version_ahead _in_ensure_version_ahead_core in_json_version; do
+    if declare -f "$_fn" >/dev/null 2>&1; then bad "회귀: $_fn 함수 잔존(버전 경로 미제거)"; else ok "회귀: $_fn 함수 제거됨"; fi
+  done
 
   echo "----"
   [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"

@@ -2,8 +2,6 @@
 # merge.sh — forge per-SPEC 머지 (M4)
 #
 # 책임 (파이프라인 종착: "리뷰가 approve 로 수렴하면 머지되고 SPEC 은 done(=머지됨)이 된다"):
-#   - 버전 범프 게이트: 머지될 변경이 워치 디렉토리(plugins/)를 건드리면 같은 변경 안에서
-#     plugin.json 버전이 올랐는지 단언한다. 안 올랐으면 머지 차단(비완료 종착).
 #   - 머지: 백엔드 가용 여부로 라우팅. **백엔드(forge host) 가용 시 로컬 머지 금지** — 호스트의
 #     PR 기반 서버사이드 머지로만 통합한다(로컬 `git checkout <base>` 안 함). 백엔드/origin 미가용
 #     (direct)일 때만 default 브랜치에 fast-forward 전용(--ff-only) 로컬 머지(+base push)한다. 머지
@@ -22,14 +20,12 @@
 #   - force(강제) 머지·push 금지. 머지는 git merge --ff-only 만.
 #   - 작업 공간은 직접 지우지 않고 loop 공개 cleanup 으로만 위임.
 #   - per-SPEC 상태는 lib-integration.sh(run-dir + 키)로만. 키는 호출자 주입.
-#   - 버전 게이트는 rules/engineering/versioning.md 실행자.
 #
 # 모든 외부 인터페이스(git·forge·loop CLI)는 주입 가능. mock 으로 독립 검증
 # (self-referential: 실제 머지·PR 미수행). bash 3.2+ 호환.
 #
 # 환경 변수 (mock 치환 가능):
 #   GIT_CMD/FORGE_CMD/LOOP_CMD/DEFAULT_BRANCH   integration.sh 와 공유.
-#   WATCH_DIRS      버전 워치 디렉토리 prefix(기본: plugins/).
 
 set -uo pipefail
 
@@ -48,7 +44,6 @@ FORGE_CMD="${FORGE_CMD:-gh}"
 LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../skills/loop/references/loop.sh"
 LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
-WATCH_DIRS="${WATCH_DIRS:-plugins/}"
 MERGE_APPROVAL_CMD="${MERGE_APPROVAL_CMD:-mg_approval_gh}"
 # 서버사이드 PR 머지 완료 확인 폴링 — `--auto`(예약) 성공을 곧 머지 완료로 보지 않고 실제
 # PR state==MERGED 를 폴링 확인한다(예약만 되고 미머지인 상태로 완료 처리되는 것 방지).
@@ -159,69 +154,6 @@ mg_approval_gate() {
   local decision
   decision="$($MERGE_APPROVAL_CMD "$1" | tr -d '[:space:]')"
   [[ "$decision" == "APPROVED" ]]
-}
-
-# ===== 1) 버전 범프 게이트 — versioning.md 실행자 =====
-mg_merge_changed_files() {
-  # shellcheck disable=SC2086
-  $GIT_CMD diff --name-only "origin/$DEFAULT_BRANCH...$1" 2>/dev/null
-}
-mg_touches_watch_dir() {
-  mg_merge_changed_files "$1" | grep -qE "^$WATCH_DIRS" 2>/dev/null
-}
-mg_changed_manifests() {
-  mg_merge_changed_files "$1" | grep -E '(^|/)plugin\.json$' || true
-}
-# mg_json_version <ref> <path> — 해당 ref 의 plugin.json 에서 version 값(예 0.19.0) 추출.
-#   없으면 빈 문자열. diff 라인 존재가 아니라 실제 값을 본다.
-mg_json_version() {
-  # shellcheck disable=SC2086
-  $GIT_CMD show "$1:$2" 2>/dev/null \
-    | grep -m1 -E '"version"[[:space:]]*:' \
-    | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"?([0-9][0-9.]*)"?.*/\1/'
-}
-
-# mg_semver_gt <new> <old> — new 가 old 보다 큰 SemVer 면 0, 아니면 1.
-#   old 가 비었으면(신규 매니페스트) new 만 있으면 0(증가로 간주). major.minor.patch 를
-#   필드별 숫자 비교(bash 3.2, 외부 도구 없이).
-mg_semver_gt() {
-  local new="$1" old="$2"
-  [[ -n "$new" ]] || return 1
-  [[ -n "$old" ]] || return 0
-  local oldIFS="$IFS"; IFS=.
-  # shellcheck disable=SC2206
-  local -a na=($new) oa=($old); IFS="$oldIFS"
-  local i n o
-  for ((i=0; i<3; i++)); do
-    n="${na[i]:-0}"; o="${oa[i]:-0}"
-    n="${n//[!0-9]/}"; o="${o//[!0-9]/}"
-    [[ -n "$n" ]] || n=0; [[ -n "$o" ]] || o=0
-    if (( 10#$n > 10#$o )); then return 0; fi
-    if (( 10#$n < 10#$o )); then return 1; fi
-  done
-  return 1   # 모든 필드 동일 → 증가 아님(같은 값 재기입·재정렬 차단).
-}
-
-# mg_manifest_version_bumped <branch> — 변경된 plugin.json 중 하나라도 base 대비
-#   실제 SemVer 가 증가했으면 0. 추가된 "version" 라인 존재가 아니라 old/new 값 비교.
-mg_manifest_version_bumped() {
-  local branch="$1" m oldv newv
-  while IFS= read -r m; do
-    [[ -n "$m" ]] || continue
-    oldv="$(mg_json_version "origin/$DEFAULT_BRANCH" "$m")"
-    newv="$(mg_json_version "$branch" "$m")"
-    if mg_semver_gt "$newv" "$oldv"; then return 0; fi
-  done < <(mg_changed_manifests "$branch")
-  return 1
-}
-# mg_version_gate <branch> — 워치 디렉토리 건드리는데 범프 없으면 1(차단). 없으면 0.
-mg_version_gate() {
-  local branch="$1"
-  if mg_touches_watch_dir "$branch"; then
-    mg_manifest_version_bumped "$branch" && return 0
-    return 1
-  fi
-  return 0
 }
 
 # ===== 2) 머지 직렬화 락 — run-dir 단위(mkdir 원자성) =====
@@ -410,15 +342,16 @@ mg_sweep_merged_branches() {
   return 0
 }
 
-# ===== 5) 메인 진입 — 버전 게이트 통과 시 머지하고 phase=merged =====
+# ===== 5) 메인 진입 — 게이트 통과 시 머지하고 phase=merged =====
 # mg_merge_finish <spec> <run_dir> <key> [pr] [direct]
 #   direct=1 이면 direct 서브모드(forge 백엔드 미가용 — PR 없이 **로컬 ff-only** 머지) 계약으로,
 #   PR 보강·승인 게이트·PR 출력을 건너뛴다. direct≠1(forge 백엔드 가용)은 PR 기반 **서버사이드
 #   머지**로만 통합하고 로컬 base 체크아웃을 하지 않는다(백엔드 가용 시 로컬 머지 금지).
-#   version 범프 게이트·직렬화 락·작업공간 정리는 두 서브모드 공통.
+#   직렬화 락·작업공간 정리는 두 서브모드 공통. 버전 범프 정책은 컨슈밍 프로젝트 소유라
+#   머지 엔진은 간섭하지 않는다(정책-불간섭).
 #   머지는 분리 approver 승인을 전제하지 않고 가용 토큰으로 수행한다(리뷰 수렴은 상위 책임).
 #   반환: 0=머지 완료(phase=merged) / 1=차단(phase=blocked, 비완료 종착 — forge PR 없음·미승인·
-#         버전게이트·서버사이드 머지 실패).
+#         서버사이드 머지 실패).
 mg_merge_finish() {
   local spec="$1" rd="$2" key="$3" pr="${4:-}" direct="${5:-}"
   [[ -n "$spec" && -n "$rd" && -n "$key" ]] || { mg_die "사용: merge.sh finish <spec> <run_dir> <key> [pr] [direct]"; return 1; }
@@ -452,16 +385,7 @@ mg_merge_finish() {
     return 1
   fi
 
-  # 2) 버전 범프 게이트(비완료 종착).
-  if ! mg_version_gate "$branch"; then
-    int_set_phase "$rd" "$key" blocked
-    int_log "$rd" "$key" "버전 게이트 차단: plugins/ 변경에 plugin.json 범프 없음 — 머지 안 함(비완료 종착)"
-    echo "key:     $key"
-    echo "blocked: version-bump — plugins/ 를 건드리지만 plugin.json 버전이 오르지 않았습니다."
-    return 1
-  fi
-
-  # 3) 머지 실행 — 백엔드 가용 여부로 라우팅. **백엔드(forge) 가용 시 로컬 머지 금지**.
+  # 2) 머지 실행 — 백엔드 가용 여부로 라우팅. **백엔드(forge) 가용 시 로컬 머지 금지**.
   #    direct=1(forge 백엔드/origin 미가용) → 로컬 ff-only(checkout+ff+push). review 스킬이
   #      phase 로 승인 보증하는 로컬 direct 머지(PR/서버 없음).
   #    direct≠1(forge 백엔드 가용, PR 존재) → 호스트의 PR 기반 서버사이드 머지만. 로컬
@@ -475,7 +399,7 @@ mg_merge_finish() {
     mg_merge_pr_serverside "$rd" "$pr" "$branch" || { int_set_phase "$rd" "$key" blocked; return 1; }
   fi
 
-  # 4) 완료. 머지 확정 후 사후 단계로 정리한다(순서: 워크트리 정리 → 작업 브랜치 삭제).
+  # 3) 완료. 머지 확정 후 사후 단계로 정리한다(순서: 워크트리 정리 → 작업 브랜치 삭제).
   #    워크트리를 먼저 위임 정리해야 그 워크트리에 체크아웃된 작업 브랜치를 로컬에서 삭제할 수 있다.
   #    정리 실패는 경고로 표면화하되 머지·완료 판정을 뒤집지 않는다(아래 헬퍼들이 rc 0 유지).
   #    작업 브랜치 삭제는 **direct(로컬) 머지에서만** 워커가 수행한다. 서버사이드 경로는 머지가
@@ -503,22 +427,22 @@ mg_usage() {
 usage: merge.sh <command> [args]
 
 Commands:
-  version-gate <branch>            버전 범프 게이트 판정(0=통과,1=차단).
   finish <spec> <run_dir> <key> [pr] [direct]
-                                   버전 게이트 통과 시 직렬화 ff-only 머지(가용 토큰) 후
+                                   승인 게이트 통과 시 직렬화 ff-only 머지(가용 토큰) 후
                                    phase=merged + 작업 공간 정리 위임. direct=1 이면 PR 없이.
   sweep [target]                   dispatch 자기 출처 작업 브랜치 중 target(미지정 시 DEFAULT_BRANCH)
                                    에 머지된 것만 force 없이 일괄 삭제. 미머지·비-dispatch 브랜치는
                                    보존. 부분 실패는 경고로 격리. 명시 요청 정비 진입점.
 
-환경 변수: GIT_CMD FORGE_CMD LOOP_CMD DEFAULT_BRANCH WATCH_DIRS SWEEP_BRANCH_SIGNATURE_RE
+환경 변수: GIT_CMD FORGE_CMD LOOP_CMD DEFAULT_BRANCH SWEEP_BRANCH_SIGNATURE_RE
 EOF
   return 1
 }
 
 # =====================================================================
-# selftest — mock 인터페이스로 버전 게이트·ff-only·직렬화 락·force 미사용 검증.
-#   (분리 approver 요구 없음 — 머지는 버전 게이트 통과 시 가용 토큰으로 수행.)
+# selftest — mock 인터페이스로 ff-only·직렬화 락·force 미사용·승인 게이트 검증.
+#   (분리 approver 요구 없음 — 머지는 승인 게이트 통과 시 가용 토큰으로 수행.)
+#   (버전 범프 정책은 컨슈밍 프로젝트 소유 — 머지 엔진 비간섭.)
 # =====================================================================
 mg_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
@@ -532,22 +456,16 @@ mg_selftest() {
       ls-remote)
         # 기본 mock: 작업 브랜치가 원격에 존재한다고 본다(forge 머지 성공 경로의 원격 삭제 검증).
         echo "deadbeef refs/heads/work"; return 0 ;;
-      diff)
-        if [[ "$*" == *"--name-only"* ]]; then printf '%s\n' ${MOCK_FILES:-}; return 0; fi
-        ;;
-      show)
-        # git show <ref>:<path> — plugin.json version 값 시뮬(실제 값 비교 경로).
-        #   base(origin/*)=1.0.0. branch: MOCK_BUMP=1 → 1.1.0(증가), MOCK_BUMP=same →
-        #   1.0.0(동일, 차단되어야 함), 그 외 → 1.0.0.
-        case "$2" in
-          origin/*) echo '  "version": "1.0.0"' ;;
-          *) if [[ "${MOCK_BUMP:-}" == "1" ]]; then echo '  "version": "1.1.0"'; else echo '  "version": "1.0.0"'; fi ;;
-        esac
-        ;;
     esac
     return 0
   }
-  mock_forge() { echo "forge $*" >> "$trace"; return 0; }
+  # mock forge: 서버사이드 머지 발행은 성공, state 폴링은 MERGED 를 돌려줘 완료를 모사한다
+  #   (mg_merge_pr_serverside 의 "발행 ≠ 완료" 계약 — state==MERGED 확인 후에야 0 반환).
+  mock_forge() {
+    echo "forge $*" >> "$trace"
+    case "$*" in *"pr view"*state*) echo "MERGED" ;; esac
+    return 0
+  }
   mock_loop() { echo "loop $*" >> "$trace"; return 0; }
   mock_approval() { echo "${MOCK_APPROVED:-APPROVED}"; }
   GIT_CMD=mock_git; FORGE_CMD=mock_forge; LOOP_CMD=mock_loop; MERGE_APPROVAL_CMD=mock_approval
@@ -562,11 +480,10 @@ mg_selftest() {
   setup() { local k="$1"; int_set_branch "$rd" "$k" "feat/run1-$k"; int_set_pr "$rd" "$k" 77; }
   reset() { : > "$trace"; }
 
-  # ---- forge: 워치 변경 없음 → 서버사이드 PR 머지 + phase=merged + cleanup (approver 불필요) ----
+  # ---- forge: 승인됨 → 서버사이드 PR 머지 + phase=merged + cleanup (approver 불필요) ----
   #   백엔드 가용 경로는 로컬 checkout/ff/push 를 타지 않고 호스트 PR 머지로만 통합한다.
   reset; setup k1
-  MOCK_FILES="README.md" MOCK_BUMP="" \
-    mg_merge_finish "$spec" "$rd" k1 >/dev/null 2>&1; local rc=$?
+  mg_merge_finish "$spec" "$rd" k1 >/dev/null 2>&1; local rc=$?
   chk "forge 머지 rc=0(approver 불필요)" "$rc" "0"
   has 'forge pr merge' && ok "서버사이드 PR 머지 호출" || bad "서버사이드 PR 머지 호출"
   if has 'git checkout main'; then bad "forge 가용인데 로컬 checkout main(로컬머지 금지 위반)"; else ok "로컬 checkout main 미호출"; fi
@@ -582,7 +499,7 @@ mg_selftest() {
   # ---- forge: 서버사이드 머지 실패(권한·브랜치 보호 등) → 차단(rc=1), 조용한 성공 금지 ----
   reset; setup kssfail
   mock_forge_mergefail() { echo "forge $*" >> "$trace"; case "$1 $2" in "pr merge") return 1;; esac; return 0; }
-  FORGE_CMD=mock_forge_mergefail MOCK_FILES="README.md" MOCK_BUMP="" \
+  FORGE_CMD=mock_forge_mergefail \
     mg_merge_finish "$spec" "$rd" kssfail >/dev/null 2>&1; rc=$?
   chk "서버사이드 머지 실패 rc=1(차단)" "$rc" "1"
   chk "서버사이드 머지 실패 phase=blocked" "$(int_get_phase "$rd" kssfail)" "blocked"
@@ -590,7 +507,7 @@ mg_selftest() {
 
   # ---- forge: PR 미승인(reviewDecision!=APPROVED) → 차단(승인 전 머지 차단, PR #353 회귀 가드) ----
   reset; setup knapp
-  MOCK_FILES="README.md" MOCK_APPROVED="REVIEW_REQUIRED" \
+  MOCK_APPROVED="REVIEW_REQUIRED" \
     mg_merge_finish "$spec" "$rd" knapp >/dev/null 2>&1; rc=$?
   chk "forge 미승인 rc=1(차단)" "$rc" "1"
   if has 'git merge --ff-only'; then bad "미승인인데 머지함"; else ok "미승인 → 머지 안 함"; fi
@@ -599,57 +516,38 @@ mg_selftest() {
   if has 'push origin --delete'; then bad "차단인데 원격 브랜치 삭제함(보존 위반)"; else ok "차단 → 원격 브랜치 보존"; fi
   if has 'branch -d'; then bad "차단인데 로컬 브랜치 삭제함(보존 위반)"; else ok "차단 → 로컬 브랜치 보존"; fi
 
-  # ---- forge: plugins/ 변경 + 범프 없음 → 차단(비완료 종착 rc=1) ----
-  reset; setup k4
-  MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="" \
-    mg_merge_finish "$spec" "$rd" k4 >/dev/null 2>&1; rc=$?
-  chk "워치+범프없음 rc=1(차단)" "$rc" "1"
-  if has 'git merge --ff-only'; then bad "범프없음 머지 안 함"; else ok "범프없음 머지 안 함"; fi
-  chk "차단 phase=blocked" "$(int_get_phase "$rd" k4)" "blocked"
-
-  # ---- forge: plugins/ 변경 + 범프 있음 → 서버사이드 머지 ----
-  reset; setup k5
-  MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="1" \
-    mg_merge_finish "$spec" "$rd" k5 >/dev/null 2>&1; rc=$?
-  chk "워치+범프있음 rc=0" "$rc" "0"
-  has 'forge pr merge' && ok "범프시 서버사이드 머지" || bad "범프시 서버사이드 머지"
-  if has 'git checkout main'; then bad "범프 forge인데 로컬 checkout(로컬머지 금지 위반)"; else ok "범프 forge → 로컬 checkout 미호출"; fi
-
-  # ---- 같은 version 값 재기입(라인은 추가되나 값 동일) → 차단 (Codex blocking 회귀 가드) ----
-  reset; setup k6
-  MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="same" \
-    mg_merge_finish "$spec" "$rd" k6 >/dev/null 2>&1; rc=$?
-  chk "동일 버전 재기입 rc=1(차단)" "$rc" "1"
-  if has 'git merge --ff-only'; then bad "동일 버전인데 머지함"; else ok "동일 버전 → 머지 안 함"; fi
+  # ---- 회귀 가드(#482): 머지 엔진은 버전 범프 정책에 간섭하지 않는다(정책-불간섭) ----
+  #   버전 범프는 컨슈밍 프로젝트 소유 정책(versioning.md)이므로 플러그인 머지 엔진은 게이트로
+  #   집행하지 않는다. plugins/ 를 건드린 브랜치가 plugin.json 범프 없이도 버전 사유로 차단되지
+  #   않고(승인됨이면 서버사이드 머지로 통과), 버전 게이트 함수·차단 메시지가 잔존하지 않아야 한다.
+  if declare -f mg_version_gate >/dev/null 2>&1; then bad "회귀: mg_version_gate 함수 잔존(게이트 미제거)"; else ok "회귀: mg_version_gate 함수 제거됨"; fi
+  reset; setup kvg
+  out="$(mg_merge_finish "$spec" "$rd" kvg 2>&1)"; rc=$?
+  chk "회귀: plugins/ 변경+범프없음 rc=0(버전 비차단)" "$rc" "0"
+  chk "회귀: phase=merged(버전 게이트 부재)" "$(int_get_phase "$rd" kvg)" "merged"
+  case "$out" in *version-bump*) bad "회귀: version-bump 차단 메시지 잔존";; *) ok "회귀: version-bump 차단 메시지 없음";; esac
 
   # ---- forge: PR 없음(보강 실패·상태 손상) → 차단(rc=1), merge/push 미호출 (codex blocking/96 가드) ----
   reset
   int_set_branch "$rd" knopr "feat/run1-knopr"   # PR 미설정(int_set_pr 안 함) → int_get_pr 빈 값
-  MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" knopr >/dev/null 2>&1; rc=$?
+  mg_merge_finish "$spec" "$rd" knopr >/dev/null 2>&1; rc=$?
   chk "forge PR없음 rc=1(차단)" "$rc" "1"
   if has 'git merge --ff-only'; then bad "forge PR없음인데 머지/push 호출됨(차단 실패)"; else ok "forge PR없음 머지/push 미호출"; fi
   chk "forge PR없음 phase=blocked" "$(int_get_phase "$rd" knopr)" "blocked"
   # 대조: direct=1 은 PR 없이도 머지(PR 게이트는 forge 전용).
   reset
   int_set_branch "$rd" kdnopr "feat/run1-kdnopr"
-  MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdnopr "" 1 >/dev/null 2>&1; rc=$?
+  mg_merge_finish "$spec" "$rd" kdnopr "" 1 >/dev/null 2>&1; rc=$?
   chk "direct PR없음 rc=0(머지)" "$rc" "0"
   has 'git merge --ff-only' && ok "direct PR없음에도 머지함(forge 전용 게이트)" || bad "direct PR없음인데 머지 안 됨(게이트가 direct에 오적용)"
 
-  # ---- direct=1 → PR 없이 머지(version gate·ff-only 유지) ----
+  # ---- direct=1 → PR 없이 ff-only 머지 ----
   reset; setup kd1   # setup 은 int_set_pr 77 을 심는다 — direct 경로가 이 stale PR 을 끌어오면 안 된다.
-  out="$(MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kd1 "" 1 2>/dev/null)"; rc=$?
+  out="$(mg_merge_finish "$spec" "$rd" kd1 "" 1 2>/dev/null)"; rc=$?
   chk "direct 머지 rc=0" "$rc" "0"
   has 'git merge --ff-only' && ok "direct ff-only 머지" || bad "direct ff-only 머지"
   chk "direct phase=merged" "$(int_get_phase "$rd" kd1)" "merged"
   case "$out" in *77*) bad "direct stale PR(77) 미출력";; *) ok "direct stale PR(77) 미출력";; esac
-
-  # ---- direct=1 이어도 version gate 는 유지(차단) ----
-  reset; setup kd2
-  MOCK_FILES="plugins/autopilot/.claude-plugin/plugin.json" MOCK_BUMP="" \
-    mg_merge_finish "$spec" "$rd" kd2 "" 1 >/dev/null 2>&1; rc=$?
-  chk "direct version gate 차단 rc=1" "$rc" "1"
-  if has 'git merge --ff-only'; then bad "direct 범프없음 머지 안 함"; else ok "direct 범프없음 머지 안 함"; fi
 
   # ---- 브랜치 삭제 실패 → 경고로 표면화, 머지 판정(merged)은 유지(정리는 사후 단계) ----
   #   작업 브랜치 삭제는 direct(로컬) 머지 경로의 사후 단계 — direct=1 로 검증한다.
@@ -664,11 +562,10 @@ mg_selftest() {
     esac
     case "$1" in
       ls-remote) echo "deadbeef refs/heads/work"; return 0 ;;  # 원격에 존재 → 삭제 시도되고 실패해 WARN
-      show) case "$2" in origin/*) echo '  "version": "1.0.0"';; *) echo '  "version": "1.0.0"';; esac ;;
     esac
     return 0
   }
-  err="$(GIT_CMD=mock_git_delfail MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdelfail "" 1 2>&1 >/dev/null)"; rc=$?
+  err="$(GIT_CMD=mock_git_delfail mg_merge_finish "$spec" "$rd" kdelfail "" 1 2>&1 >/dev/null)"; rc=$?
   chk "삭제 실패해도 머지 rc=0" "$rc" "0"
   chk "삭제 실패해도 phase=merged" "$(int_get_phase "$rd" kdelfail)" "merged"
   case "$err" in *WARN*) ok "브랜치 삭제 실패 경고 표면화";; *) bad "브랜치 삭제 실패 경고 표면화(조용한 실패 금지)";; esac
@@ -683,11 +580,10 @@ mg_selftest() {
     case "$1" in
       ls-remote) return 0 ;;  # 원격에 브랜치 없음 = 빈 출력
       push) case "$*" in *--delete*) return 1;; esac ;;  # 호출되면 실패(원격에 없으므로)
-      show) case "$2" in origin/*) echo '  "version": "1.0.0"';; *) echo '  "version": "1.0.0"';; esac ;;
     esac
     return 0
   }
-  err="$(GIT_CMD=mock_git_noremote MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" kdnoremote "" 1 2>&1 >/dev/null)"; rc=$?
+  err="$(GIT_CMD=mock_git_noremote mg_merge_finish "$spec" "$rd" kdnoremote "" 1 2>&1 >/dev/null)"; rc=$?
   chk "원격 미존재 direct 머지 rc=0" "$rc" "0"
   if has 'push origin --delete feat/run1-kdnoremote'; then bad "원격 미존재인데 원격 삭제 시도(불필요)"; else ok "원격 미존재 → 원격 삭제 미시도"; fi
   case "$err" in *"원격 작업 브랜치 삭제 실패"*) bad "원격 미존재인데 spurious WARN 방출";; *) ok "원격 미존재 → spurious WARN 없음";; esac
@@ -701,7 +597,7 @@ mg_selftest() {
 
   # ---- force 미사용 (mock_git force 보면 exit99; 위 머지 케이스 통과 = 미사용) ----
   reset; setup k7
-  MOCK_FILES="README.md" mg_merge_finish "$spec" "$rd" k7 >/dev/null 2>&1
+  mg_merge_finish "$spec" "$rd" k7 >/dev/null 2>&1
   if grep -qiE 'force|(^| )-f( |$)' "$trace"; then bad "force 미사용"; else ok "force 미사용(git 인자에 force 없음)"; fi
 
   # ---- sweep — dispatch 자기 출처 작업 브랜치 중 대상 머지된 것만 일괄 삭제 ----
@@ -857,7 +753,6 @@ BR
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   SUB="${1:-}"; shift || true
   case "$SUB" in
-    version-gate) [[ $# -ge 1 ]] || mg_usage; mg_version_gate "$1" && echo pass || { echo block; exit 1; } ;;
     finish)       mg_merge_finish "$@" ;;
     sweep)        mg_sweep_merged_branches "$@" ;;
     selftest)     mg_selftest ;;
