@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.56.0
+
+### 버그 수정
+- **loop 워크트리 base 를 로컬 체크아웃 HEAD 가 아닌 origin/<default-branch> 기준으로 (stale base 방지)** — `loop.sh` 가 워크트리를 만들 때 부모 체크아웃의 `HEAD` 를 그대로 base 로 잡던 것을, caller 가 주입한 base ref(기본값 = fetch 한 `origin/<default-branch>` tip)로 시작하도록 고쳤다. 공유 체크아웃이 origin 보다 뒤처져 있어도 워커가 stale 트리에서 작업하지 않아, 직전 머지가 이동·삭제한 파일을 옛 위치로 보고 SPEC scope(현재 경로)와 어긋나던 wrong-layout 편집·중간 rebase 충돌과 수동-ff 운영 부담을 제거한다. caller 는 `--base-ref REF`(CLI) 또는 `AUTOPILOT_BASE_REF`(env)로 base 를 override 할 수 있다(미지정 시 origin 기본). origin 미가용(fetch 실패, airgap)이면 종전대로 로컬 HEAD 로 fallback 하되 경고 로그를 남겨 가시화한다. BASE_SHA(게이트 diff 기준)도 base SHA 로 박제돼 scope·oscillation 게이트가 origin tip 기준으로 정합된다. 회귀 가드(`tests/test-loop-base-ref.sh`)가 (a) stale 로컬→origin tip, (b) 주입 ref 사용, (c) fetch 실패 fallback+경고를 단언한다.
+
 ## autopilot 0.55.0
 
 ### 변경(호환)

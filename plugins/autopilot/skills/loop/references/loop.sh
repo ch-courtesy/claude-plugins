@@ -2,7 +2,7 @@
 # loop.sh — 스펙 파일 기반 로컬 자율 루프 드라이버 (subcommand 기반)
 #
 # 사용:
-#   bash .../loop/references/loop.sh start  <spec-path> [--max-iterations N] [--wall-clock-minutes N]
+#   bash .../loop/references/loop.sh start  <spec-path> [--max-iterations N] [--wall-clock-minutes N] [--base-ref REF]
 #   bash .../loop/references/loop.sh status [<spec-path>]
 #   bash .../loop/references/loop.sh stop   <spec-path>
 #   bash .../loop/references/loop.sh list
@@ -16,6 +16,8 @@
 # 환경 변수:
 #   MAX_ITERATIONS         이터 상한 (기본: 30)
 #   WALL_CLOCK_MINUTES     시계 캡 (기본: 120)
+#   AUTOPILOT_BASE_REF     워크트리 base ref 주입 (미지정 시 fetch 한
+#                          origin/<default-branch>; --base-ref 가 우선)
 #   AUTOPILOT_WORKER_VENDOR  worker CLI 선택 (기본: claude; claude|codex)
 #   AUTOPILOT_WORKER_FAIL_STREAK_LIMIT  worker 비정상 exit 연속 허용 (기본: 3)
 
@@ -380,6 +382,48 @@ read_base_sha() {
   printf '%s' "$sha"
 }
 
+# origin 의 기본 브랜치명 추정 — 네트워크 없이 우선 origin/HEAD 심볼릭 ref 에서,
+# 없으면 remote show(네트워크) 질의, 그래도 없으면 main 으로 fallback.
+detect_default_branch() {
+  local repo="$1" b
+  b=$(git -C "$repo" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
+  b="${b#origin/}"
+  [[ -n "$b" ]] && { printf '%s\n' "$b"; return 0; }
+  b=$(git -C "$repo" remote show origin 2>/dev/null \
+        | sed -n 's/^[[:space:]]*HEAD branch:[[:space:]]*//p' | head -1 || true)
+  [[ -n "$b" ]] && { printf '%s\n' "$b"; return 0; }
+  printf 'main\n'
+}
+
+# 워크트리 base ref 결정. stdout 으로 base 커밋 SHA 출력.
+#   1) caller 가 BASE_REF 를 주입하면 그 ref 를 해석해 사용(origin fetch 생략).
+#   2) 미지정이면 origin/<default-branch> 를 fetch 해 그 tip 을 base 로 사용.
+#   3) origin 미가용(fetch 실패)이면 로컬 HEAD 로 fallback 하고 경고를 stderr 에 남긴다.
+# 로컬 체크아웃 HEAD 의 staleness 가 워커 base 로 전파되지 않게 하는 것이 목적(#488).
+resolve_base_ref() {
+  local repo="$1" sha
+
+  # 1) caller 주입 우선
+  if [[ -n "${BASE_REF:-}" ]]; then
+    sha=$(git -C "$repo" rev-parse --verify --quiet "${BASE_REF}^{commit}" 2>/dev/null) \
+      || die "주입된 base ref 를 해석할 수 없음: $BASE_REF"
+    printf '%s\n' "$sha"
+    return 0
+  fi
+
+  # 2) 기본: fetch 한 origin/<default-branch> tip
+  local def_branch; def_branch=$(detect_default_branch "$repo")
+  if git -C "$repo" fetch --quiet origin "$def_branch" 2>/dev/null; then
+    sha=$(git -C "$repo" rev-parse --verify --quiet "FETCH_HEAD^{commit}" 2>/dev/null || true)
+    [[ -z "$sha" ]] && sha=$(git -C "$repo" rev-parse --verify --quiet "origin/$def_branch^{commit}" 2>/dev/null || true)
+    [[ -n "$sha" ]] && { printf '%s\n' "$sha"; return 0; }
+  fi
+
+  # 3) fallback: 로컬 HEAD + 경고 (offline·airgap 에서도 loop 이 돌게)
+  echo "[$(now_iso)] 경고: origin/$def_branch fetch 실패 — 로컬 HEAD 로 fallback (stale base 위험)." >&2
+  git -C "$repo" rev-parse HEAD
+}
+
 # 변경 파일이 scope.include 안인지 검사. 위반 파일 목록 출력(있으면).
 diff_vs_scope() {
   local base_sha="$1"
@@ -563,11 +607,16 @@ iterate() {
 # 이미 동일 전용 워크트리가 있으면(같은 스펙 재기동) 재사용한다.
 prepare_workspace() {
   if [[ ! -d "$WT" ]]; then
-    echo "[$(now_iso)] 워크트리 생성: $WT (detached HEAD)"
-    git -C "$SPEC_DIR" worktree add --detach "$WT" HEAD \
+    # base 는 로컬 체크아웃 HEAD 가 아니라 caller 주입 ref(기본=fetch 한
+    # origin/<default-branch>) 기준 — 공유 체크아웃 staleness 가 워커 base 로
+    # 전파되지 않게 한다(#488). origin 미가용 시 로컬 HEAD fallback(경고).
+    local base_sha; base_sha=$(resolve_base_ref "$SPEC_DIR") \
+      || die "base ref 해석 실패"
+    echo "[$(now_iso)] 워크트리 생성: $WT (detached HEAD $base_sha)"
+    git -C "$SPEC_DIR" worktree add --detach "$WT" "$base_sha" \
       || die "git worktree add 실패: $WT"
     mkdir -p "$LOOP_DIR/iterations" "$LOOP_DIR/signals"
-    git -C "$WT" rev-parse HEAD > "$LOOP_DIR/BASE_SHA" \
+    printf '%s\n' "$base_sha" > "$LOOP_DIR/BASE_SHA" \
       || die "BASE SHA 캡처 실패: $LOOP_DIR/BASE_SHA"
   else
     echo "[$(now_iso)] 기존 워크트리 사용: $WT"
@@ -639,14 +688,19 @@ cmd_start() {
   require_tool yq
   require_tool "$(worker_executable)"
 
-  local max_iterations_override="" wall_clock_minutes_override=""
+  local max_iterations_override="" wall_clock_minutes_override="" base_ref_override=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --max-iterations) max_iterations_override="$2"; shift 2 ;;
       --wall-clock-minutes) wall_clock_minutes_override="$2"; shift 2 ;;
+      --base-ref) base_ref_override="$2"; shift 2 ;;
       *) die "알 수 없는 옵션: $1" ;;
     esac
   done
+
+  # 워크트리 base ref 주입 — CLI(--base-ref) 우선, 없으면 env(AUTOPILOT_BASE_REF),
+  # 둘 다 없으면 빈 값(=resolve_base_ref 가 fetch 한 origin/<default-branch> 기본).
+  BASE_REF="${base_ref_override:-${AUTOPILOT_BASE_REF:-}}"
 
   compute_paths "$input"
 
