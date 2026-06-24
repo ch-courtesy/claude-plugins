@@ -177,6 +177,8 @@ mediate() {
           skipped_files: ($ctx.skipped_files // [])
         },
         automation_safety: {
+          # may_approve 는 verdict 에서 결정적으로 파생한다(단일 출처 규칙, #480).
+          # CI 자동승인 게이트(claude-review.yml)·output-schema.json 도 동일 규칙을 따른다.
           may_approve: ($verdict == "approve"),
           may_request_changes: (($blocking | length) > 0),
           reason: (if $unavail then "안전하게 approve 불가(컨텍스트 불완전)"

@@ -257,7 +257,16 @@ grep -qF "submit('COMMENT')" "$WORKFLOW" \
   || fail "APPROVE 실패 시 같은 inline 코멘트로 COMMENT 강등 제출 부재 (AC7)"
 grep -qF 'may_approve' "$WORKFLOW" \
   || fail "approve safety gate(may_approve) 부재"
-ok "check 6: 단일 inline 리뷰 제출 (APPROVE/COMMENT) + 승인 본문(요약 미작성) + 멱등 + APPROVE fallback"
+# #480: 자동승인 게이트는 모델의 무기준 자가판정(automation_safety.may_approve)이
+# 아니라 리뷰 verdict 에서 결정적으로 파생돼야 한다(하니스 review.sh:180 과 동일 규칙).
+# 모델 필드 의존이 잔존하면 findings 0·미절단 clean 리뷰조차 보수적 false 로 막혀
+# 삭제류 정상 PR 이 spurious blocked 된다(#477/#479).
+if grep -qF 'r.automation_safety?.may_approve' "$WORKFLOW"; then
+  fail "자동승인 게이트가 모델 자가판정 automation_safety.may_approve 에 의존 — verdict 파생으로 정합 필요 (#480)"
+fi
+grep -qF 'const mayApprove = (findings.length === 0 && allReviewed && !anyTruncated)' "$WORKFLOW" \
+  || fail "mayApprove 가 verdict 파생(findings 0·allReviewed·미절단) predicate 로 산출되지 않음 (#480)"
+ok "check 6: 단일 inline 리뷰 제출 (APPROVE/COMMENT) + 승인 본문(요약 미작성) + 멱등 + APPROVE fallback + verdict-파생 게이트(#480)"
 
 echo ""
 echo "=== check 7: 별도 마커 관리형 이슈 레벨 코멘트 게시 경로 부재 (AC6) ==="

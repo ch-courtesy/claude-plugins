@@ -238,5 +238,32 @@ echo "$res"   | grep -q "$stillfp" && fail "H16: 유지 스레드가 잘못 reso
 echo "$unres" | grep -q "$stillfp" || fail "H16: 유지 스레드가 unresolved 에 없음"
 ok "H16 스레드 라이프사이클: resolved=$gonefp, unresolved=$stillfp"
 
+# === H17: automation_safety.may_approve = (pipeline_verdict==approve) ===
+# may_approve 는 verdict 에서 결정적으로 파생된다(review.sh:180). CI claude-review
+# 게이트(claude-review.yml)도 동일 규칙(verdict 파생)이어야 하며(#480), 모델 자가판정에
+# 의존하지 않는다. 이 불변식이 하니스·CI 양쪽 산출의 단일 출처다.
+echo "=== H17: may_approve = (verdict==approve) 파생 불변식 ==="
+export REVIEW_STATE_DIR="$WORK/state-h17a"
+set_mocks "$(mk_ctx false false)" "$(mk_spec '["AC1","AC2"]')" "$(mk_lens '[]' '["AC1","AC2"]' false)" "$(mk_threads '')"
+out="$(run_review t17a)" || fail "H17a: run 비정상 종료"
+v="$(echo "$out" | jq -r '.pipeline_verdict')"
+ma="$(echo "$out" | jq -r '.automation_safety.may_approve')"
+[[ "$v" == "approve" && "$ma" == "true" ]] || fail "H17a: approve 인데 may_approve=$ma (true 기대)"
+export REVIEW_STATE_DIR="$WORK/state-h17b"
+set_mocks "$(mk_ctx false false)" "$(mk_spec '["AC1"]')" "$(mk_lens "$GOOD_BLOCKING" '["AC1"]' false)" "$(mk_threads '')"
+out="$(run_review t17b)" || fail "H17b: run 비정상 종료"
+v="$(echo "$out" | jq -r '.pipeline_verdict')"
+ma="$(echo "$out" | jq -r '.automation_safety.may_approve')"
+[[ "$v" != "approve" && "$ma" == "false" ]] || fail "H17b: non-approve(verdict=$v)인데 may_approve=$ma (false 기대)"
+# CI 게이트(claude-review.yml)가 모델 자가판정이 아니라 verdict 파생임을 교차 확인.
+# 플러그인 자기완결을 위해 파일이 있을 때만 검사한다(소비 리포 밖 설치 시 graceful skip).
+CI_WORKFLOW="${CI_WORKFLOW:-$SCRIPT_DIR/../../../../../.github/workflows/claude-review.yml}"
+if [[ -f "$CI_WORKFLOW" ]]; then
+  if grep -qF 'r.automation_safety?.may_approve' "$CI_WORKFLOW"; then
+    fail "H17: CI 게이트가 모델 자가판정 automation_safety.may_approve 에 의존 — verdict 파생 불일치 (#480)"
+  fi
+fi
+ok "H17 may_approve 파생 불변식 (하니스·CI 일관)"
+
 echo ""
 echo "ALL HARNESS TESTS PASSED"
