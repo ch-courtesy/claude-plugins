@@ -5,9 +5,9 @@
 #     (b) 대기 중 [blocking] 가 resolved 되면 승인→머지(done)
 #     (c) blocking 없음 + APPROVED → 대기 없이 머지(done)
 #     (d) 조회 실패(보수적 차단=대기) → 상한까지 미해결 → blocked, merge 미호출
-#   단위(et_blocking_inline_gh, gh 모킹):
-#     미해결+head+신뢰봇+[blocking] → 차단(rc1); resolved/old-head/non_blocking → clear(rc0);
-#     head 미확정/조회실패 → 보수적 차단(rc1)
+#   단위(et_blocking_inline_gh, gh 모킹) — 태그 무관 모든 미해결 스레드 차단(#493):
+#     미해결+head+신뢰봇 → 차단(rc1)([blocking]·[non_blocking]·무태그 공통);
+#     resolved/old-head/비신뢰봇 → clear(rc0); head 미확정/조회실패 → 보수적 차단(rc1)
 #   자동 resolve 금지: 소스에 resolve 뮤테이션 호출 부재
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -136,13 +136,21 @@ chk "(u2) resolved → clear(rc0)" "$(ubg H1 "o n" "$TMP/gq_resolved.json")" "0"
 # old head(commit.oid!=head) → clear(rc0)
 chk "(u3) old-head blocking → clear(rc0)" "$(ubg H2 "o n" "$TMP/gq_block.json")" "0"
 
-# non_blocking 태그 → clear(rc0)
+# non_blocking 태그도 미해결이면 차단(rc1) — 태그 무관 모든 미해결 스레드 차단(#493)
 cat > gq_nonblock.json <<'EOF'
 {"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
 {"isResolved":false,"comments":{"nodes":[{"author":{"login":"courtesy-bot"},"commit":{"oid":"H1"},"body":"**[non_blocking/20] nit**"}]}}
 ]}}}}}
 EOF
-chk "(u4) non_blocking → clear(rc0)" "$(ubg H1 "o n" "$TMP/gq_nonblock.json")" "0"
+chk "(u4) 미해결 non_blocking → 차단(rc1)" "$(ubg H1 "o n" "$TMP/gq_nonblock.json")" "1"
+
+# 태그 없는 미해결 스레드도 차단(rc1) — 차단 판정이 태그에 의존하지 않음(#493)
+cat > gq_notag.json <<'EOF'
+{"data":{"repository":{"pullRequest":{"reviewThreads":{"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[
+{"isResolved":false,"comments":{"nodes":[{"author":{"login":"courtesy-bot"},"commit":{"oid":"H1"},"body":"태그 없는 일반 코멘트"}]}}
+]}}}}}
+EOF
+chk "(u7) 태그 없는 미해결 스레드 → 차단(rc1)" "$(ubg H1 "o n" "$TMP/gq_notag.json")" "1"
 
 # head 미확정(빈값) → 보수적 차단(rc1)
 chk "(u5) head 미확정 → 보수적 차단(rc1)" "$(ubg "" "o n" "$TMP/gq_block.json")" "1"

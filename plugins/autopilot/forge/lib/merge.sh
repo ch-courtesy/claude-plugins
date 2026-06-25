@@ -60,13 +60,8 @@ mg_die() { echo "merge: $*" >&2; return 1; }
 #       남긴 본문 마커 `<!-- <prefix> head_sha=<sha> verdict=approve -->`(prefix=*-formal-review).
 # 신뢰 봇 로그인(App bot / github-actions[bot])만 마커를 신뢰한다(위조 마커 거부).
 REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtesy-bot)}"
-# 차단성 인라인 태그(리터럴 부분문자열) — 리뷰 워크플로 본문 `**[<severity>/<conf>] title**` 형식
-# (.github/workflows/{codex,claude}-review.yml). `[blocking` 는 `[non_blocking` 을 매치하지 않음.
-# 봇 컨벤션 결합을 끊기 위해 주입 가능 변수로 둔다(awk index() 리터럴 매치 → awk별 escape 비의존).
-BLOCKING_TAG="${BLOCKING_TAG:-[blocking}"
-
-# mg_blocking_inline_gate <pr> <head> — 현재 head 에 신뢰봇이 남긴 **미해결** [blocking] 인라인이
-#   하나라도 있으면 1(차단), 없으면 0(통과).
+# mg_blocking_inline_gate <pr> <head> — 현재 head 에 신뢰봇이 남긴 **미해결 리뷰 스레드(태그 무관, #493)**
+#   가 하나라도 있으면 1(차단), 없으면 0(통과).
 #   - 미해결 판정: 리뷰 스레드 isResolved(GraphQL). resolve 된 스레드는 제외 → resolve→재리뷰
 #     워크플로 데드락 방지(commit_id 일치만으로 영구 차단하지 않음).
 #   - 현재 head 대응: 코멘트 commit.oid==head(재푸시로 head 가 바뀌면 outdated 는 자동 해소).
@@ -75,7 +70,7 @@ BLOCKING_TAG="${BLOCKING_TAG:-[blocking}"
 mg_blocking_inline_gate() {
   local pr="$1" head="$2" on owner name raw out
   if [[ -z "$head" ]]; then
-    echo "merge: 승인 차단 — 현재 head 미확정으로 [blocking] 인라인 검증 불가(default-deny)" >&2
+    echo "merge: 승인 차단 — 현재 head 미확정으로 미해결 리뷰 스레드 검증 불가(default-deny)" >&2
     return 1
   fi
   # shellcheck disable=SC2086
@@ -110,11 +105,11 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
         | .comments.nodes[]
         | (.author.login // "")+"\t"+(.commit.oid // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)" \
     || { echo "merge: 승인 차단 — 리뷰 스레드 파싱 실패(default-deny)" >&2; return 1; }
-  # 미해결 + 현재 head 대응(field2==head) + [blocking] 태그(field3 리터럴) 줄의 login 을 신뢰봇 grep.
+  # 미해결 + 현재 head 대응(field2==head) 줄의 login 을 신뢰봇 grep(태그 무관, #493).
   if printf '%s\n' "$out" \
-       | awk -F'\t' -v h="$head" -v tag="$BLOCKING_TAG" '$2==h && index($3,tag)>0 {print $1}' \
+       | awk -F'\t' -v h="$head" '$2==h {print $1}' \
        | grep -qE "$REVIEW_BOT_LOGINS_RE"; then
-    echo "merge: 승인 차단 — 신뢰봇이 현재 head($head)에 남긴 미해결 [blocking] 인라인 존재" >&2
+    echo "merge: 승인 차단 — 신뢰봇이 현재 head($head)에 남긴 미해결 리뷰 스레드 존재" >&2
     return 1
   fi
   return 0
@@ -122,7 +117,7 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
 
 # mg_approval_gh <pr> — 승인이면 "APPROVED" 출력(없으면 빈 값). 주입 가능(MERGE_APPROVAL_CMD).
 #   승인 신호(reviewDecision==APPROVED 또는 현재 head verdict=approve 마커)가 있어도, 현재 head 의
-#   신뢰봇 미해결 [blocking] 인라인이 있으면 승인을 가린다(가산 차단, PR #385 회귀 가드).
+#   신뢰봇 미해결 리뷰 스레드가 있으면 승인을 가린다(가산 차단, PR #385 회귀 가드).
 mg_approval_gh() {
   local pr="$1" decision head approved=""
   # shellcheck disable=SC2086
@@ -143,7 +138,7 @@ mg_approval_gh() {
     approved=1
   fi
   [[ -n "$approved" ]] || return 0
-  # 승인 신호가 있어도 현재 head 의 신뢰봇 [blocking] 인라인이 가린다(차단되면 APPROVED 미출력).
+  # 승인 신호가 있어도 현재 head 의 신뢰봇 미해결 리뷰 스레드가 가린다(차단되면 APPROVED 미출력).
   mg_blocking_inline_gate "$pr" "$head" || return 0
   echo "APPROVED"
 }
@@ -656,7 +651,7 @@ BR
   if grep -qiE 'force|(^| )-f( |$)' "$trace"; then bad "sweep force 미사용"; else ok "sweep force 미사용"; fi
 
   # =====================================================================
-  # 승인 게이트 ── 현재 head 의 신뢰봇 미해결 [blocking] 인라인이 approve 를 가린다(PR #385).
+  # 승인 게이트 ── 현재 head 의 신뢰봇 **미해결 스레드(태그 무관, #493)** 가 approve 를 가린다(PR #385).
   #   mg_approval_gh 를 직접 호출(merge_finish 경로는 MERGE_APPROVAL_CMD 가 mock 이라
   #   gh-경로를 안 탐). FORGE_CMD 를 시나리오 변수로 구동하는 mock 으로 치환.
   # =====================================================================
@@ -687,13 +682,22 @@ BR
   local MARK="courtesy-bot\t<!-- claude-formal-review head_sha=$H verdict=approve -->\n"
   local BLK; BLK="$(thr false "github-actions[bot]" "$H" "**[blocking/98] 차단 지적**")"
   local OK_C; OK_C="$(thr false "github-actions[bot]" "$H" "**[non_blocking/85] 정보성**")"
+  local NOTAG; NOTAG="$(thr false "github-actions[bot]" "$H" "태그 없는 일반 코멘트")"
+  # EMPTY: 미해결 스레드 없음 — 승인신호(마커/#432) 검증 시 게이트가 끼어들지 않도록 filler 로 사용.
+  local EMPTY='{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}'
 
   # AC2: APPROVED 인데 현재 head 신뢰봇 미해결 [blocking] → 승인 아님(차단).
   chk "AC2 approved+head [blocking] → 차단(빈값)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$BLK" ag)" ""
-  # AC1: blocking 없음 + APPROVED → APPROVED 통과.
-  chk "AC1 approved+blocking없음 → APPROVED" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$OK_C" ag)" "APPROVED"
+  # #493: 미해결이면 태그 무관 차단 — APPROVED 라도 미해결 non_blocking 스레드는 승인을 가린다.
+  chk "#493 approved+미해결 non_blocking → 차단(빈값)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$OK_C" ag)" ""
+  # #493: 태그 없는 미해결 스레드도 차단(차단 판정이 태그에 의존하지 않음).
+  chk "#493 approved+태그없는 미해결 스레드 → 차단(빈값)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$NOTAG" ag)" ""
+  # AC1: 미해결 스레드 없음 + APPROVED → APPROVED 통과.
+  chk "AC1 approved+미해결 스레드 없음 → APPROVED" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$EMPTY" ag)" "APPROVED"
   # isResolved: resolve 된 스레드의 [blocking] → 차단 안 함(APPROVED) — resolve→재리뷰 데드락 방지.
   chk "resolved 스레드 [blocking] → 차단 안 함(APPROVED)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_THREADS="$(thr true "github-actions[bot]" "$H" "**[blocking/98] 해결됨**")" ag)" "APPROVED"
@@ -709,9 +713,9 @@ BR
   # AC2: 강등 승인 마커(verdict=approve) + head 미해결 [blocking] → 차단.
   chk "AC2 마커승인+head [blocking] → 차단(빈값)" \
     "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_THREADS="$BLK" ag)" ""
-  # 강등 승인 마커 + blocking 없음 → APPROVED.
-  chk "마커승인+blocking없음 → APPROVED" \
-    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_THREADS="$OK_C" ag)" "APPROVED"
+  # 강등 승인 마커 + 미해결 스레드 없음 → APPROVED.
+  chk "마커승인+미해결 스레드 없음 → APPROVED" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK" SC_THREADS="$EMPTY" ag)" "APPROVED"
   # #432: 봇 로그인 정규식을 login 필드 단독에 적용해야 앵커(\[bot\]$/^github-actions$)가 성립.
   #   결합 라인(login\tbody) grep 회귀 가드 — [bot]/github-actions 계열 마커 승인 감지.
   local MARK_GA="github-actions[bot]\t<!-- claude-formal-review head_sha=$H verdict=approve -->\n"
@@ -719,13 +723,13 @@ BR
   local MARK_EVIL="evil-user\t<!-- forged head_sha=$H verdict=approve -->\n"
   local MARK_OLD="github-actions[bot]\t<!-- claude-formal-review head_sha=otherSHA verdict=approve -->\n"
   chk "#432 github-actions[bot] 마커승인 → APPROVED" \
-    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_GA" SC_THREADS="$OK_C" ag)" "APPROVED"
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_GA" SC_THREADS="$EMPTY" ag)" "APPROVED"
   chk "#432 codex[bot] 마커승인 → APPROVED" \
-    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_CX" SC_THREADS="$OK_C" ag)" "APPROVED"
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_CX" SC_THREADS="$EMPTY" ag)" "APPROVED"
   chk "#432 비신뢰(evil-user) 마커 → 미승인(빈값)" \
-    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_EVIL" SC_THREADS="$OK_C" ag)" ""
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_EVIL" SC_THREADS="$EMPTY" ag)" ""
   chk "#432 head 불일치 마커 → 미승인(빈값)" \
-    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_OLD" SC_THREADS="$OK_C" ag)" ""
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$H" SC_REVIEWS="$MARK_OLD" SC_THREADS="$EMPTY" ag)" ""
   # AC5: 스레드 조회 실패 + APPROVED → default-deny(차단).
   chk "AC5 스레드 조회 실패 → default-deny(차단)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$H" SC_API_FAIL=1 ag)" ""
