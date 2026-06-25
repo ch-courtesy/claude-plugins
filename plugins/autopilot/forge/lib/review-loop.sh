@@ -146,16 +146,34 @@ rl_produce_review_skill() {
 
 # 기본: 자율 실행기(loop)에 SPEC 델타 위임. loop 는 --branch 미지원이므로 같은 PR 브랜치 위
 # 재구현은 그 브랜치가 체크아웃된 워크트리 안에서 loop 를 secondary 모드로 호출해 수행한다
-# (SPEC 위험 섹션). 그 작업 브랜치 워크트리를 찾지 못하면 **거짓 성공 대신 실패(비-0)** 를
-# 반환해 호출자가 에스컬레이션하게 한다 — 엉뚱한 체크아웃의 변경을 push 하지 않는다.
-# (selftest 에선 IMPLEMENT_CMD 가 mock 으로 대체되어 이 경로를 타지 않는다.)
+# (SPEC 위험 섹션).
+#   (1) feat 브랜치가 이미 체크아웃된 워크트리가 있으면 그 안에서 수행.
+#   (2) 없으면(구현 워크트리는 `worktree add --detach` 라 어떤 로컬 브랜치에도 미체크아웃 — 갭X)
+#       feat 브랜치(로컬 ref)가 **실제로 존재할 때만** 그 브랜치를 체크아웃한 전용 임시 워크트리를
+#       만들어 그 안에서 loop 를 수행한다. feat 브랜치 ref 확인 후에만 진행하므로 엉뚱한 체크아웃의
+#       변경을 push 하지 않는 불변식이 보존된다. ref 가 없으면 거짓 성공 대신 비-0(에스컬레이션 유도).
+# (selftest 갭X 케이스를 빼면 IMPLEMENT_CMD 가 mock 으로 대체되어 이 경로를 타지 않는다.)
 rl_implement_loop() {
-  local spec="$1" branch="$2" wt
+  local spec="$1" branch="$2" wt rc tmpwt
   wt="$(${GIT_CMD:-git} worktree list --porcelain 2>/dev/null \
     | awk -v b="refs/heads/$branch" '$1=="worktree"{w=$2} $1=="branch"&&$2==b{print w; exit}')"
-  [[ -n "$wt" ]] || return 1
+  if [[ -n "$wt" ]]; then
+    # shellcheck disable=SC2086
+    ( cd "$wt" && ${LOOP_CMD:-true} start "$spec" >/dev/null 2>&1 )
+    return $?
+  fi
+  # feat 브랜치 ref 가 없으면 확보 불가 — 엉뚱한 체크아웃 push 금지 불변식(거짓 성공 대신 비-0).
+  ${GIT_CMD:-git} rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 || return 1
+  tmpwt="$(mktemp -d)/wt"
   # shellcheck disable=SC2086
-  ( cd "$wt" && ${LOOP_CMD:-true} start "$spec" >/dev/null 2>&1 )
+  ${GIT_CMD:-git} worktree add --quiet "$tmpwt" "$branch" >/dev/null 2>&1 \
+    || { rmdir "$(dirname "$tmpwt")" 2>/dev/null || true; return 1; }
+  # shellcheck disable=SC2086
+  ( cd "$tmpwt" && ${LOOP_CMD:-true} start "$spec" >/dev/null 2>&1 ); rc=$?
+  # shellcheck disable=SC2086
+  ${GIT_CMD:-git} worktree remove --force "$tmpwt" >/dev/null 2>&1 || true
+  rmdir "$(dirname "$tmpwt")" 2>/dev/null || true
+  return $rc
 }
 
 # ===== 리뷰 메타 파싱 (사람/head 게이트 전용) =====
@@ -316,9 +334,12 @@ rl_round() {
 
   local delta; delta="$(rl_spec_delta "$rd" "$key" "$base" "$pr" "$mustfile")"
   # 구현이 작업 브랜치에서 실패하면 거짓 성공·엉뚱한 push 대신 에스컬레이션(자동수정 보류).
+  # 갭Z: rework 를 유발한 PR 인라인 finding(must)을 reason 에 표면화 — 정당한 차단성 escalate 임을
+  #   오케스트레이터가 식별해 'false escalation' 오진·수동 머지 우회를 막는다.
   # shellcheck disable=SC2086
   if ! $IMPLEMENT_CMD "$delta" "$branch"; then
-    rl_escalate "$rd" "$key" "재구현 실패 — 작업 브랜치($branch) 워크트리에서 구현 불가(자동수정 보류)"
+    local fz; fz="$(tr '\n' ';' < "$mustfile" | sed -E 's/;+$//; s/;/; /g')"
+    rl_escalate "$rd" "$key" "재구현 실패 — 작업 브랜치($branch) 워크트리 확보 불가(자동수정 보류). 유발 finding: $fz"
     return 10
   fi
   in_push_branch "$branch"
@@ -539,9 +560,34 @@ rl_selftest() {
   # ---- 재구현 실패 → 거짓 성공·엉뚱한 push 대신 에스컬레이션 ----
   local kF="f-fff9"
   forge_review sha-FFF changes '구현 불가 항목' > "$RV/119.review"
-  IMPLEMENT_CMD='false' rl_round "$rd" "$kF" "$base" 119 "feat/run1-f" >/dev/null 2>&1; rc=$?
+  out="$(IMPLEMENT_CMD='false' rl_round "$rd" "$kF" "$base" 119 "feat/run1-f" 2>/dev/null)"; rc=$?
   chk "구현 실패 → 에스컬레이션(rc=10)" "$rc" "10"
   if grep -q 'feat/run1-f' "$PUSHLOG"; then bad "구현 실패인데 push 함"; else ok "구현 실패 → push 안 함"; fi
+  # 갭Z: rework 유발 finding 을 escalate reason 에 표면화(정상 차단을 오케스트레이터가 식별).
+  case "$out" in *구현\ 불가\ 항목*) ok "갭Z 재구현 실패 escalate 에 유발 finding 포함";; *) bad "갭Z 재구현 실패 escalate 에 유발 finding 포함 (out='$out')";; esac
+
+  # ---- 갭X: detached 구현 워크트리 + 존재하는 feat 브랜치 → rework 가 feat 브랜치 워크트리 확보 ----
+  #   selftest 는 IMPLEMENT_CMD 를 mock 으로 두지만, 이 케이스는 실제 rl_implement_loop 를 진짜 git
+  #   으로 구동해 detached 구현 워크트리에서도 feat 브랜치를 대상으로 loop 가 도는지 검증한다(갭X 회귀 가드).
+  local GX; GX="$(mktemp -d)"
+  ( cd "$GX"
+    git init -q && git config user.email t@t && git config user.name t || exit 1
+    git commit -q --allow-empty -m init
+    git branch feat/gx                              # 통합이 생성한 로컬 feat ref(어디에도 미체크아웃)
+    git worktree add -q --detach "$GX/impl" HEAD    # 구현 워크트리 = detached HEAD
+    printf '#!/usr/bin/env bash\ngit rev-parse --abbrev-ref HEAD > "%s/branch.seen"\n' "$GX" > "$GX/loopmock"
+    chmod +x "$GX/loopmock"
+    cd "$GX/impl"                                   # 현실 시나리오: detached 구현 워크트리 안에서 호출
+    GIT_CMD=git LOOP_CMD="$GX/loopmock" rl_implement_loop "$GX/spec.md" feat/gx )
+  if [[ "$(cat "$GX/branch.seen" 2>/dev/null)" == "feat/gx" ]]; then
+    ok "갭X detached 워크트리에서 feat 브랜치 확보 후 rework"
+  else
+    bad "갭X detached 워크트리에서 feat 브랜치 확보 후 rework (seen='$(cat "$GX/branch.seen" 2>/dev/null)')"
+  fi
+  # feat 브랜치 ref 부재 → 확보 불가 → 비-0(엉뚱한 체크아웃 push 금지 불변식 보존).
+  ( cd "$GX" && GIT_CMD=git LOOP_CMD="$GX/loopmock" rl_implement_loop "$GX/spec.md" feat/nope ); rc=$?
+  chk "갭X feat 브랜치 부재 → 확보 불가(비-0)" "$rc" "1"
+  rm -rf "$GX"
 
   # ---- approve(PR 상태/마커) → 머지 진행가능, 추가 라운드·구현 미시작(로컬 review 미호출) ----
   local kB="b-bbb2"; : > "$IMPLLOG"
