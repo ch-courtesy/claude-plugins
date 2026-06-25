@@ -25,15 +25,12 @@ REVIEW_MAX="${REVIEW_MAX:-5}"
 APPROVAL_WAIT_MAX="${APPROVAL_WAIT_MAX:-360}"          # 총 대기 상한(초, 논리 누적)
 APPROVAL_POLL_INTERVAL="${APPROVAL_POLL_INTERVAL:-20}" # 폴링 간격(초)
 APPROVAL_CHECK_CMD="${APPROVAL_CHECK_CMD:-et_approval_gh}"  # <pr> → 승인이면 rc0 (mock 치환 가능)
-# 미해결 [blocking] 인라인 가산 게이트. <pr> → 차단 없음(clear)이면 rc0, blocking 존재/조회실패면 rc1.
+# 미해결 리뷰 스레드 가산 게이트(태그 무관, #493). <pr> → 차단 없음(clear)이면 rc0, 미해결 스레드 존재/조회실패면 rc1.
 #   approval 신호와 AND 결합돼 승인 판정을 가린다(mock 치환 가능). merge.sh mg_blocking_inline_gate 미러.
 BLOCKING_CHECK_CMD="${BLOCKING_CHECK_CMD:-et_blocking_inline_gh}"
 SLEEP_CMD="${SLEEP_CMD:-sleep}"                        # 폴링 sleep (테스트 no-op 치환 가능)
 # 신뢰 봇 로그인(.github/workflows/{codex,claude}-review.yml 컨벤션) — merge.sh mg_approval_gh 와 동일.
 REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtesy-bot)}"
-# 차단성 인라인 태그(리터럴 부분문자열) — merge.sh BLOCKING_TAG 와 동일 컨벤션. `[blocking` 는
-# `[non_blocking` 을 매치하지 않는다(awk index() 리터럴 매치).
-BLOCKING_TAG="${BLOCKING_TAG:-[blocking}"
 
 die() { echo "execute-task: $*" >&2; exit 1; }
 
@@ -41,7 +38,7 @@ die() { echo "execute-task: $*" >&2; exit 1; }
 #   승인 신호 두 가지(merge.sh mg_approval_gh / review-loop rl_review_fetch_gh 와 동일 컨벤션):
 #     (a) 공식 APPROVE 리뷰 → reviewDecision==APPROVED.
 #     (b) App 토큰 self-approve 불가로 APPROVE→COMMENT 강등된 신뢰 봇의 현재 head verdict=approve 마커.
-#   머지 직전 merge.sh 의 단발 승인 게이트(미해결 [blocking] 인라인 가산 차단 포함)가 재검증한다.
+#   머지 직전 merge.sh 의 단발 승인 게이트(미해결 리뷰 스레드 가산 차단 포함)가 재검증한다.
 et_approval_gh() {
   local pr="$1" decision head
   [[ -n "$pr" ]] || return 1
@@ -60,10 +57,10 @@ et_approval_gh() {
      | grep -qE "$REVIEW_BOT_LOGINS_RE"
 }
 
-# et_blocking_inline_gh <pr> — 현재 head 에 신뢰봇이 남긴 **미해결**(isResolved=false) [blocking]
-#   인라인 스레드가 없으면 0(clear=머지 가능), 하나라도 있으면 1(차단=대기).
-#   merge.sh mg_blocking_inline_gate / review-loop.sh 와 동일 컨벤션(BLOCKING_TAG, commit.oid==head,
-#   신뢰봇 로그인). 게이트는 스레드를 **스스로 resolve 하지 않는다** — resolved 전이는 봇/리뷰어
+# et_blocking_inline_gh <pr> — 현재 head 에 신뢰봇이 남긴 **미해결**(isResolved=false) 리뷰 스레드가
+#   없으면 0(clear=머지 가능), 하나라도 있으면 1(차단=대기) — 태그 무관(#493).
+#   merge.sh mg_blocking_inline_gate / review-loop.sh 와 동일 컨벤션(commit.oid==head, 신뢰봇 로그인).
+#   게이트는 스레드를 **스스로 resolve 하지 않는다** — resolved 전이는 봇/리뷰어
 #   책임이고 여기선 폴링으로 관찰만 한다. head/owner·name 미확정·조회/파싱 실패는 보수적 차단
 #   (default-deny=1)하되, 호출자(폴링 루프)의 상한과 결합돼 영구 멈춤은 없다.
 et_blocking_inline_gh() {
@@ -93,11 +90,11 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
         | .comments.nodes[]
         | (.author.login // "")+"\t"+(.commit.oid // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)" \
     || return 1   # 파싱 실패 → 보수적 차단
-  # 미해결 + 현재 head 대응(field2==head) + [blocking] 태그(field3 리터럴) 줄의 login 을 신뢰봇 grep.
+  # 미해결 + 현재 head 대응(field2==head) 줄의 login 을 신뢰봇 grep(태그 무관, #493).
   if printf '%s\n' "$out" \
-       | awk -F'\t' -v h="$head" -v tag="$BLOCKING_TAG" '$2==h && index($3,tag)>0 {print $1}' \
+       | awk -F'\t' -v h="$head" '$2==h {print $1}' \
        | grep -qE "$REVIEW_BOT_LOGINS_RE"; then
-    return 1   # 신뢰봇 미해결 [blocking] 존재 → 차단
+    return 1   # 신뢰봇 미해결 리뷰 스레드 존재 → 차단
   fi
   return 0
 }
@@ -173,11 +170,11 @@ et_start() {
     # PR(forge) 경로: review 라운드(=rl_round, $FORGE_CMD review)의 반환코드로 분기한다(#426).
     #   리워크로 진전 가능 → 진행 / 진전 불가 → 빠른 실패 / 깨끗+비동기 승인 대기만 → 폴링 유지.
     #   반환코드 계약(forge/lib review-loop.sh rl_round, 소비만 — 변경 없음):
-    #     30 = approve         → 머지 진행(merge.sh 가 미해결 [blocking] 가산 게이트를 머지 직전 재검증).
+    #     30 = approve         → 머지 진행(merge.sh 가 미해결 스레드 가산 게이트를 머지 직전 재검증).
     #     0  = 재작업 재푸시(진전) → 새 head 가 올라갔으니 재리뷰 위해 루프 계속(무의미 대기 아님).
     #     10 = 에스컬레이션/라운드상한/핑퐁(진전 불가) → 폴링 상한 더 안 기다리고 즉시 blocked.
     #     20 = 할 일 없음(깨끗한 코드가 비동기 봇 승인만 대기) → 기존 APPROVAL_WAIT_MAX 폴링 유지(#419).
-    #          이때만 폴링이 의미: 승인 = 호스팅 승인 신호 AND 현재 head 미해결 [blocking] 인라인 없음.
+    #          이때만 폴링이 의미: 승인 = 호스팅 승인 신호 AND 현재 head 미해결 리뷰 스레드 없음.
     #     기타 비-0 = 미정의 신호 → 보수적 즉시 blocked(default-deny). rl_round 미경유 호출은 없다.
     case "$APPROVAL_POLL_INTERVAL" in ''|*[!0-9]*|0) APPROVAL_POLL_INTERVAL=1;; esac
     # 비숫자/빈값 상한은 산술 비교((( waited >= MAX )))를 0>=0 으로 망가뜨려 즉시 오종료(또는

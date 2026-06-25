@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.56.2
+
+### 버그 수정
+- **미해결 리뷰 스레드면 태그 무관 머지 차단(미해결 non_blocking finding 의 silent 머지 방지, 갭 Y)** — 머지 승인 게이트가 종전에는 현재 head 의 **`[blocking]` 태그가 붙은** 미해결 인라인 스레드만 차단하고 `[non_blocking]` 미해결 스레드는 APPROVED 와 함께 통과시켰다. 그 결과 미해결 non_blocking finding(실제 버그 포함, #489)이 추적 없이 머지돼 사후 별도 수정(#490)이 필요했다. 이제 세 곳의 게이트(`merge.sh` `mg_blocking_inline_gate`·`execute-task.sh` `et_blocking_inline_gh`·`review-loop.sh` `rl_review_fetch_gh`)가 **태그 필터(`BLOCKING_TAG`)를 제거**해 현재 head 에 신뢰봇이 남긴 **미해결(isResolved=false) 리뷰 스레드가 하나라도 있으면 태그 무관하게 차단**한다(head 일치·신뢰봇 login·resolve 제외 컨벤션은 유지). 진행하려면 finding 을 수정하거나 해명 댓글을 단 뒤 스레드를 resolve 해야 한다 → "머지됨 = 모든 리뷰 지적이 반영 또는 명시적 resolve" 가 보장돼 리뷰 유실이 사라진다. 기존 `[blocking]` 차단은 더 강한 "모든 미해결 차단" 규칙에 포함돼 회귀 없이 유지된다. 회귀 가드(merge selftest·execute-task blocking-gate·review-loop selftest)가 (a) 미해결 non_blocking·무태그 스레드 → 차단, (b) resolve 후 → 통과, (c) `[blocking]`·old-head·비신뢰봇·조회실패 동작 유지를 단언한다.
+
 ## autopilot 0.56.1
 
 ### 버그 수정

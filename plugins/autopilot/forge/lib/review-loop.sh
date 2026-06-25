@@ -51,9 +51,6 @@ set -uo pipefail
 
 REVIEW_ROUNDS_MAX="${REVIEW_ROUNDS_MAX:-3}"
 REVIEW_BOT_LOGIN_RE="${REVIEW_BOT_LOGIN_RE:-(\[bot\]$|claude|github-actions)}"
-# 차단성 인라인 태그(리터럴 부분문자열) — 리뷰 워크플로 본문 `**[<severity>/<conf>] title**` 형식
-# (.github/workflows/{codex,claude}-review.yml). `[blocking` 는 `[non_blocking` 미매치. 주입 가능.
-BLOCKING_TAG="${BLOCKING_TAG:-[blocking}"
 
 REVIEW_FETCH_CMD="${REVIEW_FETCH_CMD:-rl_review_fetch_gh}"
 REVIEW_PRODUCE_CMD="${REVIEW_PRODUCE_CMD:-rl_produce_review_skill}"
@@ -114,11 +111,11 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
             | (.author.login // "")+"\t"+(.commit.oid // "")+"\t"+((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)" || crc=1
     fi
   fi
-  # 신뢰봇이 현재 head 에 남긴 미해결 [blocking] 인라인 — approve 를 가리는 가산 차단(PR #385).
+  # 신뢰봇이 현재 head 에 남긴 미해결 리뷰 스레드 — approve 를 가리는 가산 차단(태그 무관, #493; PR #385).
   if [[ $crc -ne 0 ]]; then
     blocking="FETCH_FAILED"
   elif printf '%s\n' "$comments" \
-       | awk -F'\t' -v h="$head" -v tag="$BLOCKING_TAG" '$2==h && index($3,tag)>0 {print $1}' \
+       | awk -F'\t' -v h="$head" '$2==h {print $1}' \
        | grep -qE "$REVIEW_BOT_LOGIN_RE"; then
     blocking=1
   fi
@@ -130,7 +127,7 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
   elif [[ "$blocking" == "FETCH_FAILED" ]]; then
     # 인라인 조회 실패 → 거짓 승인 금지. changes 로 표면화(무진전 가드가 에스컬레이션 유도).
     echo "verdict: changes"
-    echo "finding: [blocking] 인라인 조회 실패 — default-deny(보수적 차단), 확인 필요"
+    echo "finding: 미해결 리뷰 스레드 조회 실패 — default-deny(보수적 차단), 확인 필요"
   elif [[ -n "$findings" ]]; then
     echo "verdict: changes"
     echo "finding: $findings"
@@ -699,7 +696,7 @@ rl_selftest() {
   chk "AC7 direct unavailable 에스컬레이션(rc=10)" "$rc" "10"
 
   # =====================================================================
-  # AC4/AC5/AC6: rl_review_fetch_gh — 현재 head 신뢰봇 미해결 [blocking] 인라인이
+  # AC4/AC5/AC6: rl_review_fetch_gh — 현재 head 신뢰봇 **미해결 스레드(태그 무관, #493)** 가
   #   approve 를 가린다(verdict=approve → changes). gh 를 시나리오 변수 mock 으로 치환.
   #   SC_* 는 substitution 안에서 env-prefix 해야 함수 환경에 도달한다.
   # =====================================================================
@@ -729,8 +726,12 @@ rl_selftest() {
 
   chk "AC4 approve+head [blocking] → changes" \
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GBLK" rvg)" "changes"
-  chk "AC4 approve+blocking없음(정보성) → approve" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GOKC" rvg)" "approve"
+  # #493: 미해결이면 태그 무관 차단 — approve 라도 미해결 non_blocking 스레드는 changes 로 표면화.
+  chk "approve+미해결 non_blocking(정보성) → changes(태그 무관)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GOKC" rvg)" "changes"
+  # #493: 태그 없는 미해결 스레드도 차단(차단 판정이 태그에 의존하지 않음).
+  chk "approve+태그없는 미해결 스레드 → changes" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "github-actions[bot]" "$GH" "태그 없는 일반 코멘트")" rvg)" "changes"
   chk "AC4 비승인+head [blocking] → changes" \
     "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_THREADS="$GBLK" rvg)" "changes"
   chk "resolved 스레드 [blocking]+approve → approve(차단 안 함)" \
