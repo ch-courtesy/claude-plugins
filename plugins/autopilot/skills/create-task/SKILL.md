@@ -6,6 +6,7 @@ allowed-tools:
   - Read
   - Bash(bash * adapter.sh:*)
   - Bash(bash * persist-backend-config.sh:*)
+  - Bash(bash * scope-coverage-check.sh:*)
   - Bash(git rev-parse:*)
   - Bash(git log:*)
   - Bash(ls:*)
@@ -74,7 +75,17 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
      등록으로 처리**한다(전체 입력 = `<제목>\n\n<본문>`).
 2. **백엔드 준비** — 백엔드 미설정이면 `adapter init`(선택은 `AskUserQuestion`) 후 위 「백엔드 선택 SoT
    영속화」 헬퍼를 실행해 config를 메인까지 영속화한다(멱등).
-3. **등록** — 받은 본문을 그대로 등록한다(`create_task`의 초기 상태는 `backlog`다). 작성자가 의존 관계를
+3. **scope-coverage 검증** — 등록 전에 scope-coverage 검증을 수행한다. 본문 frontmatter의
+   `scope.include`에서 소스 경로를 읽어, 그 소스를 덮는 **기존** 테스트 경로가 scope.include에 함께 있는지
+   확인한다. 매핑 관례의 단일 출처는 `references/scope-coverage-map.md`다:
+   ```
+   CHECKER="$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/scope-coverage-check.sh"
+   echo "<본문>" | bash "$CHECKER"
+   ```
+   누락이 있으면 `SCOPE_COVERAGE_WARNING` 과 누락 경로 목록을 출력한다. **등록을 막지 않는다** — 경고를
+   작성자에게 보고하고 다음 단계로 진행한다. 인터랙티브 맥락에서는 `AskUserQuestion`으로 scope.include에
+   추가할지 확인할 수 있다. 스크립트는 항상 0 exit이므로 경고 유무와 관계없이 다음 단계로 진행된다.
+4. **등록** — 받은 본문을 그대로 등록한다(`create_task`의 초기 상태는 `backlog`다). 작성자가 의존 관계를
    넘겼으면 `--depends-on`으로 함께 전달한다:
    ```
    bash "$ADAPTER" create_task --title "<제목>" --body "<본문>" [--depends-on "<선행id,...>"]   # → task_id
@@ -83,13 +94,13 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
    ```
    bash "$ADAPTER" link_dependency --task-id "<후행>" --depends-on-id "<선행>"
    ```
-4. **등록-후 상태 전이 (소유)** — 등록 직후 본문의 `[NEEDS CLARIFICATION` 마커 유무로 최종 상태를 분기한다.
+5. **등록-후 상태 전이 (소유)** — 등록 직후 본문의 `[NEEDS CLARIFICATION` 마커 유무로 최종 상태를 분기한다.
    이 전이는 이 등록 프리미티브가 소유한다:
    - 마커가 **없으면**(완성 SPEC) 초기 상태 `backlog`를 유지한다 — 전이를 생략하거나 명시적으로
      `bash "$ADAPTER" set_status --task-id <id> --status backlog` 를 호출한다.
    - 마커가 **남아 있으면**(미해결 잔존) `bash "$ADAPTER" set_status --task-id <id> --status in_design` 로
      상태를 전이한다.
-5. **본문 갱신은 set_body에 위임** — 등록된 태스크의 본문을 나중에 갱신해야 하면(예: `in_design` 태스크의
+6. **본문 갱신은 set_body에 위임** — 등록된 태스크의 본문을 나중에 갱신해야 하면(예: `in_design` 태스크의
    SPEC 보강) 직접 구현하지 않고 백엔드 `set_body` 동사에 위임한다(본문만 교체, status·`depends_on`·메타
    보존):
    ```
@@ -97,7 +108,7 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
    ```
    `set_body`의 정의·구현은 백엔드 소관이다(`task-backend/contract.md`). 이 스킬은 그 동사를 **노출·호출**할
    뿐 정의하지 않는다.
-6. **안내** — 최종 상태(`backlog`/`in_design`)와 함께 결과(task_id·url)와 다음 단계(`execute-task start <id>`
+7. **안내** — 최종 상태(`backlog`/`in_design`)와 함께 결과(task_id·url)와 다음 단계(`execute-task start <id>`
    또는 `workflow-task start`)를 안내한다.
 
 ## 재개(resume) 경로 — 기존 in_design 태스크 본문 갱신

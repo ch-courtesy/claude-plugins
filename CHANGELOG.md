@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.57.0
+
+### 새 기능
+- **create-task 등록 시 scope-coverage 검증 (기존 테스트 경로 누락 자동 플래그, #498)** — `create-task`가 SPEC 본문을 등록하기 전에 `scope.include`의 소스 경로마다 프로젝트 테스트 트리의 관례적 테스트 경로(`skills/<S>/` → `tests/autopilot/test-<S>*.sh` / `tests/autopilot/<S>/`)가 scope에 함께 있는지 자동 검증한다. 누락이 있으면 `SCOPE_COVERAGE_WARNING`과 경로 목록을 출력해 작성자가 채우도록 플래그한다(등록 차단 아님). 기존 테스트가 없는 신규 소스·테스트-only 변경·frontmatter 없는 본문은 오탐 없이 통과한다. 이로써 소스를 scope에 넣었지만 그 소스를 덮는 기존 테스트가 scope 밖에 남아 loop이 spec-gap으로 halt되던 반복 패턴(#480·#493)을 등록 단계에서 미리 차단한다. 매핑 관례의 단일 출처는 `skills/create-task/references/scope-coverage-map.md`. #483(새 회귀 테스트는 작성자 명시)은 회귀 없이 유지하며, 이 기능은 기존 테스트 경로를 시스템이 보완 검증하는 역할 분담이다.
+
 ## autopilot 0.56.3
 
 ### 변경(호환)
