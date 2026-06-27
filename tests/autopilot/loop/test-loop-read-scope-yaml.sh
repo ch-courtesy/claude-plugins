@@ -7,13 +7,13 @@
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOOP_SH="$SCRIPT_DIR/../references/loop.sh"
+LOOP_SH="$SCRIPT_DIR/../../../plugins/autopilot/skills/loop/references/loop.sh"
 
 command -v yq  >/dev/null 2>&1 || { echo "SKIP: yq 미설치"; exit 0; }
 command -v git >/dev/null 2>&1 || { echo "SKIP: git 미설치"; exit 0; }
 
 # loop.sh 를 source 해 함수만 사용 (dispatcher 는 BASH_SOURCE guard 로 비실행).
-# shellcheck source=../references/loop.sh
+# shellcheck source=../../../plugins/autopilot/skills/loop/references/loop.sh
 source "$LOOP_SH"
 set +e   # loop.sh 가 켠 errexit 해제 — 테스트는 조건 분기를 직접 제어
 

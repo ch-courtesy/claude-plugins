@@ -6,7 +6,7 @@
 #   단위(et_approval_gh, gh 모킹): 봇 로그인 매치(통과)/비신뢰·위조·head불일치(거부)/경로 a(APPROVED) 불변.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ET="$HERE/../references/execute-task.sh"
+ET="$HERE/../../../plugins/autopilot/skills/execute-task/references/execute-task.sh"
 fail=0; ok(){ echo "PASS  $1"; }; bad(){ echo "FAIL  $1"; fail=1; }
 chk(){ [[ "$2" == "$3" ]] && ok "$1" || bad "$1 (want '$3' got '$2')"; }
 

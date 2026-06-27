@@ -23,7 +23,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILL_DIR="$SCRIPT_DIR/.."
+SKILL_DIR="$SCRIPT_DIR/../../../plugins/autopilot/skills/review"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REVIEW_SH="$SKILL_DIR/references/review.sh"
 AGENT_PROMPTS="$SKILL_DIR/references/agent-prompts.md"

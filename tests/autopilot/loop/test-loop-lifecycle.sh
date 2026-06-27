@@ -16,7 +16,7 @@
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOOP_SH="$SCRIPT_DIR/../references/loop.sh"
+LOOP_SH="$SCRIPT_DIR/../../../plugins/autopilot/skills/loop/references/loop.sh"
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git 미설치"; exit 0; }
 command -v yq  >/dev/null 2>&1 || { echo "SKIP: yq 미설치"; exit 0; }

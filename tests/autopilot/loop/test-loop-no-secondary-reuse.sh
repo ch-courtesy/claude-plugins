@@ -15,12 +15,12 @@
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOOP_SH="$SCRIPT_DIR/../references/loop.sh"
+LOOP_SH="$SCRIPT_DIR/../../../plugins/autopilot/skills/loop/references/loop.sh"
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git 미설치"; exit 0; }
 
 # loop.sh source — dispatcher 는 BASH_SOURCE guard 로 비실행.
-# shellcheck source=../references/loop.sh
+# shellcheck source=../../../plugins/autopilot/skills/loop/references/loop.sh
 source "$LOOP_SH"
 set +e   # loop.sh 의 errexit 해제
 
