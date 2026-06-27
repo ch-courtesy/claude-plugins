@@ -5,7 +5,7 @@
 # 생성하고 워커 컨텍스트(_loop_merged)에 포함하는지 검증한다.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REFS="$SCRIPT_DIR/../references"
+REFS="$SCRIPT_DIR/../../../plugins/autopilot/skills/loop/references"
 LOOP_SH="$REFS/loop.sh"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }

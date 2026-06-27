@@ -4,7 +4,7 @@
 # CLAUDE.md/AGENTS.md 로 cp 덮어써 워커가 프로젝트 지침(versioning 등)을 보지 못했다.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REFS="$SCRIPT_DIR/../references"
+REFS="$SCRIPT_DIR/../../../plugins/autopilot/skills/loop/references"
 LOOP_SH="$REFS/loop.sh"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }

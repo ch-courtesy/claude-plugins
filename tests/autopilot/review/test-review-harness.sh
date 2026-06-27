@@ -25,7 +25,7 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REVIEW_SH="$SCRIPT_DIR/../references/review.sh"
+REVIEW_SH="$SCRIPT_DIR/../../../plugins/autopilot/skills/review/references/review.sh"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -257,7 +257,7 @@ ma="$(echo "$out" | jq -r '.automation_safety.may_approve')"
 [[ "$v" != "approve" && "$ma" == "false" ]] || fail "H17b: non-approve(verdict=$v)인데 may_approve=$ma (false 기대)"
 # CI 게이트(claude-review.yml)가 모델 자가판정이 아니라 verdict 파생임을 교차 확인.
 # 플러그인 자기완결을 위해 파일이 있을 때만 검사한다(소비 리포 밖 설치 시 graceful skip).
-CI_WORKFLOW="${CI_WORKFLOW:-$SCRIPT_DIR/../../../../../.github/workflows/claude-review.yml}"
+CI_WORKFLOW="${CI_WORKFLOW:-$SCRIPT_DIR/../../../.github/workflows/claude-review.yml}"
 if [[ -f "$CI_WORKFLOW" ]]; then
   if grep -qF 'r.automation_safety?.may_approve' "$CI_WORKFLOW"; then
     fail "H17: CI 게이트가 모델 자가판정 automation_safety.may_approve 에 의존 — verdict 파생 불일치 (#480)"

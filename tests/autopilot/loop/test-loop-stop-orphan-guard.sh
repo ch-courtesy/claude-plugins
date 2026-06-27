@@ -18,12 +18,12 @@
 
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOOP_SH="$SCRIPT_DIR/../references/loop.sh"
+LOOP_SH="$SCRIPT_DIR/../../../plugins/autopilot/skills/loop/references/loop.sh"
 
 command -v git >/dev/null 2>&1 || { echo "SKIP: git 미설치"; exit 0; }
 
 # loop.sh source — dispatcher 는 BASH_SOURCE guard 로 비실행.
-# shellcheck source=../references/loop.sh
+# shellcheck source=../../../plugins/autopilot/skills/loop/references/loop.sh
 source "$LOOP_SH"
 # loop.sh 는 `set -euo pipefail` 을 켜므로, 의도적 비-0 rc 캡처(stop 실패 경로 등)가
 # errexit 로 테스트를 중단시키지 않게 errexit 만 해제한다(테스트가 rc 를 직접 검사).

@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.56.3
+
+### 변경(호환)
+- **배포되는 플러그인 디렉터리 안의 디렉터리형 테스트를 프로젝트 `tests/` 트리로 이전 (배포 산출물에서 dev 테스트 제거)** — `plugins/autopilot/` 하위에 박혀 있던 디렉터리형 테스트를 프로젝트 테스트 트리로 옮겼다: `skills/loop/tests/`→`tests/autopilot/loop/`, `skills/execute-task/tests/`→`tests/autopilot/execute-task/`, `skills/review/tests/`→`tests/autopilot/review/`, `forge/tests/`→`tests/forge/`. 컨슈머에게 배포되는 산출물(플러그인 디렉터리)에서 dev 아티팩트를 제거하고, 소스↔테스트 매핑을 프로젝트 레벨로 일관화한다. 이동한 18개 테스트가 소스를 참조하던 상대 경로(`$SCRIPT_DIR/../references/…`, `$HERE/../forge.sh`, CI 워크플로 경로 등)를 새 위치 기준으로 갱신했고, 전체 스위트가 새 위치에서 green 임을 확인했다(테스트 내용 변경 없음 — 이동·경로 갱신만). 소스 `.sh` 내장 self-test 함수는 디렉터리형이 아니므로 비대상. 본 변경은 #499 scope(loop·execute-task·review·forge) 한정이며, 그 외 스킬의 테스트 디렉터리 이전은 후속 작업이다.
+
 ## autopilot 0.56.2
 
 ### 버그 수정

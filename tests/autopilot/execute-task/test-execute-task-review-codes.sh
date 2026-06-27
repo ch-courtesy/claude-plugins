@@ -8,8 +8,8 @@
 #   (20) 할 일 없음(깨끗+비동기 승인대기) → 기존 APPROVAL_WAIT_MAX 폴링 유지(회귀)
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ET="$HERE/../references/execute-task.sh"
-ADAPTER="$HERE/../../../task-backend/adapter.sh"
+ET="$HERE/../../../plugins/autopilot/skills/execute-task/references/execute-task.sh"
+ADAPTER="$HERE/../../../plugins/autopilot/task-backend/adapter.sh"
 fail=0; ok(){ echo "PASS  $1"; }; bad(){ echo "FAIL  $1"; fail=1; }
 chk(){ [[ "$2" == "$3" ]] && ok "$1" || bad "$1 (want '$3' got '$2')"; }
 
