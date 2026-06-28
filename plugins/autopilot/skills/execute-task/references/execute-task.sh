@@ -11,7 +11,11 @@
 # 모킹: ADAPTER_CMD / LOOP_CMD / FORGE_CMD 환경변수로 엔진 치환(테스트).
 set -euo pipefail
 
-ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# 링크드 워크트리 안에서 호출할 때 --show-toplevel 은 워크트리 루트를 반환해 중첩 경로가 생긴다.
+# worktree list --porcelain 의 첫 항목(항상 메인 워크트리)으로 메인 리포 루트를 확정하고,
+# 구버전 git(< 2.7) 또는 git 미설치 환경은 --show-toplevel 으로 폴백한다.
+ROOT_DIR="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10); exit}')" || true
+[[ -n "$ROOT_DIR" ]] || ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 PLUGIN="$ROOT_DIR/plugins/autopilot"
 # 플러그인 자신이 소비처가 아닐 때(설치형): 스크립트 위치 기준으로도 해석
 [[ -d "$PLUGIN" ]] || PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
