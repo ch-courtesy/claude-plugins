@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.60.0
+
+### 버그 수정
+- **execute-task SIGKILL 후 heartbeat orphan이 lease 영구 갱신 — stale 감지 불가 수정 (#506)** — `execute-task.sh` 의 heartbeat subshell 이 `trap cleanup_hb EXIT` 로 보호받지 못하는 SIGKILL 경로에서 orphan 이 돼 `renew_lease` 를 60s 마다 계속 호출하고 태스크가 `in_progress` 로 영구 박제되던 버그를 수정했다. 부모 PID(`PARENT_PID=$$`)를 subshell 시작 전에 캡처하고, heartbeat 루프 첫머리에 `kill -0 "$PARENT_PID" 2>/dev/null || exit 0` 을 추가해 부모 프로세스가 어떤 이유로든 종료되면 heartbeat 가 다음 인터벌 내에 자가종료한다. SIGTERM·정상 exit 경로의 기존 `cleanup_hb` 동작에 변경 없음. 회귀 가드(`tests/autopilot/execute-task/test-execute-task-sigkill-heartbeat.sh`)가 SIGKILL 후 heartbeat PID 가 `HEARTBEAT_INTERVAL` 내에 종료됨을 단언한다.
+
 ## autopilot 0.59.0
 
 ### 버그 수정

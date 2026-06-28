@@ -125,8 +125,13 @@ et_start() {
   $LOOP_CMD cleanup "$sp" --force >/dev/null 2>&1 || true
 
   # 백그라운드 heartbeat (lease 갱신). 연속 실패 시 lease 를 잃어 이중 실행 위험 → fail-fast 로 메인 중단.
+  # SIGKILL orphan 방지: 부모 PID 를 미리 캡처해 subshell 에서 생존 확인 후 자가종료.
+  local PARENT_PID=$$
   ( fail=0
     while true; do
+      # orphan 자가종료: 부모(execute-task 메인 프로세스)가 종료되면 heartbeat 도 즉시 종료.
+      # trap EXIT 는 SIGKILL 을 잡지 못하므로 주기적으로 부모 생존 여부를 확인한다.
+      kill -0 "$PARENT_PID" 2>/dev/null || exit 0
       if $ADAPTER_CMD renew_lease --task-id "$id" --owner "$owner" >/dev/null 2>&1; then fail=0
       else fail=$((fail+1)); if (( fail >= 3 )); then
         echo "execute-task: heartbeat lease 갱신 연속 실패 — 작업 중단($id)" >&2
