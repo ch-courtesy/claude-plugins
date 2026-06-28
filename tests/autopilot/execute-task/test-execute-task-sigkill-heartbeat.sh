@@ -3,8 +3,11 @@
 #   execute-task가 SIGKILL로 종료될 때, heartbeat subshell이 부모 생존 확인 후
 #   스스로 종료해야 한다(orphan으로 lease를 영구 갱신하는 버그 회귀 방지).
 #
-#   RED → SIGKILL 후 heartbeat가 orphan으로 살아남으면 FAIL.
-#   GREEN → fix 후 heartbeat가 HEARTBEAT_INTERVAL 내에 자가종료하면 PASS.
+#   TC1: SIGKILL 후 heartbeat orphan이 살아남으면 FAIL.
+#   TC2: 세마포어 파일(/tmp/execute-task-<PID>.alive)이 실행 중 존재하지 않으면 FAIL
+#         (PID 재사용 방지 메커니즘 부재 → 비-Linux에서 SIGTERM+PID재사용 시 orphan 재발).
+#
+#   GREEN → fix 후 TC1·TC2 모두 통과.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ET="$HERE/../../../plugins/autopilot/skills/execute-task/references/execute-task.sh"
@@ -12,6 +15,7 @@ ADAPTER="$HERE/../../../plugins/autopilot/task-backend/adapter.sh"
 fail=0; ok(){ echo "PASS  $1"; }; bad(){ echo "FAIL  $1"; fail=1; }
 
 TMP="$(mktemp -d)"
+ET_PID=""
 HB_PID_FILE="$TMP/hb.pid"
 cleanup_test(){
   # 남은 백그라운드 프로세스 정리
@@ -20,6 +24,8 @@ cleanup_test(){
     [[ -n "$hbp" ]] && kill "$hbp" 2>/dev/null || true
   fi
   jobs -p 2>/dev/null | xargs -r kill 2>/dev/null || true
+  # 세마포어 파일 잔재 정리 (SIGKILL 시 EXIT trap 미실행으로 남을 수 있음)
+  [[ -n "$ET_PID" ]] && rm -f "/tmp/execute-task-${ET_PID}.alive" 2>/dev/null || true
   rm -rf "$TMP"
 }
 trap cleanup_test EXIT
@@ -67,7 +73,7 @@ LOOP_CMD="bash $TMP/bin/loop" \
 FORGE_CMD=":" \
 HEARTBEAT_INTERVAL=1 \
 bash "$ET" start "$id" &
-ET_PID=$!
+ET_PID=$!   # 세마포어 파일 경로 예측: /tmp/execute-task-${ET_PID}.alive
 
 # heartbeat가 첫 renew_lease 호출해 HB_PID_FILE에 기록될 때까지 대기(최대 5s)
 waited=0
@@ -88,6 +94,15 @@ if ! kill -0 "$HB_PID" 2>/dev/null; then
   bad "heartbeat PID $HB_PID 가 초기 실행 중이 아님 — 테스트 셋업 이상"
   kill "$ET_PID" 2>/dev/null || true
   echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail
+fi
+
+# TC2: 세마포어 파일 생성 확인 (PID 재사용 방지 메커니즘, fix 전 → FAIL)
+# execute-task 실행 중 /tmp/execute-task-${ET_PID}.alive 가 존재해야 한다.
+# 비-Linux fallback 에서 SIGTERM+PID재사용 시 heartbeat 가 오인하지 않도록 막는 역할.
+if [[ -f "/tmp/execute-task-${ET_PID}.alive" ]]; then
+  ok "세마포어 파일 생성됨 (/tmp/execute-task-${ET_PID}.alive)"
+else
+  bad "세마포어 파일 없음 — PID 재사용 방지 메커니즘 미구현 (kill-0 fallback만 있음)"
 fi
 
 # execute-task 메인 프로세스에 SIGKILL

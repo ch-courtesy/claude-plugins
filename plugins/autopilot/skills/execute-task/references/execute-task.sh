@@ -100,7 +100,11 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
 }
 
 HB_PID=""
-cleanup_hb() { [[ -n "${HB_PID:-}" ]] && kill "$HB_PID" 2>/dev/null || true; }
+PARENT_ALIVE_FILE=""
+cleanup_hb() {
+  [[ -n "${HB_PID:-}" ]] && kill "$HB_PID" 2>/dev/null || true
+  [[ -n "${PARENT_ALIVE_FILE:-}" ]] && rm -f "$PARENT_ALIVE_FILE" 2>/dev/null || true
+}
 trap cleanup_hb EXIT
 
 et_start() {
@@ -126,13 +130,17 @@ et_start() {
 
   # 백그라운드 heartbeat (lease 갱신). 연속 실패 시 lease 를 잃어 이중 실행 위험 → fail-fast 로 메인 중단.
   # SIGKILL orphan 방지: 부모 PID 와 시작 시간을 미리 캡처해 subshell 에서 생존 확인 후 자가종료.
-  # /proc 가용 시(Linux) 시작 시간도 비교해 PID 재사용으로 인한 orphan 재발을 방지한다.
+  # /proc 가용 시(Linux): 시작 시간 비교로 PID 재사용·SIGKILL 양쪽 감지. 비가용 시: 세마포어+kill-0.
   local PARENT_PID=$$
   local PARENT_STARTTIME; PARENT_STARTTIME="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
+  # 세마포어 파일: EXIT trap 삭제 → SIGTERM 후 PID 재사용 시에도 heartbeat 가 정상 종료로 오인 없음.
+  # SIGKILL 시 EXIT trap 미실행으로 파일 잔존 가능 — 이 경우 kill-0 이 SIGKILL 감지를 보완한다.
+  PARENT_ALIVE_FILE="/tmp/execute-task-$$.alive"
+  touch "$PARENT_ALIVE_FILE" 2>/dev/null || PARENT_ALIVE_FILE=""
   ( fail=0
     while true; do
       # orphan 자가종료: 부모(execute-task 메인 프로세스)가 종료되면 heartbeat 도 즉시 종료.
-      # /proc 가용 시: 존재 + 시작 시간 비교(PID 재사용 구분). 비가용 시: kill -0 fallback.
+      # /proc 가용 시: 존재 + 시작 시간 비교(PID 재사용 구분). 비가용 시: 세마포어+kill-0 이중 확인.
       if [[ -n "$PARENT_STARTTIME" ]]; then
         if [[ -r "/proc/$PARENT_PID/stat" ]]; then
           [[ "$(awk '{print $22}' "/proc/$PARENT_PID/stat" 2>/dev/null)" == "$PARENT_STARTTIME" ]] || exit 0
@@ -140,6 +148,9 @@ et_start() {
           exit 0
         fi
       else
+        # 비-Linux: 세마포어 파일(SIGTERM+PID 재사용 방지) + kill-0(SIGKILL 감지) 이중 확인.
+        # 파일이 설정됐고 삭제됐으면 EXIT trap 실행됨(정상/SIGTERM 종료) → 자가종료.
+        if [[ -n "${PARENT_ALIVE_FILE:-}" && ! -f "$PARENT_ALIVE_FILE" ]]; then exit 0; fi
         kill -0 "$PARENT_PID" 2>/dev/null || exit 0
       fi
       if $ADAPTER_CMD renew_lease --task-id "$id" --owner "$owner" >/dev/null 2>&1; then fail=0
