@@ -56,4 +56,35 @@ id3="$(bash "$ADAPTER" create_task --title "T3" --body '## 목표'$'\n'z | jq -r
 MOCK_RESULT=BLOCKED run start "$id3" >/dev/null 2>&1 || true
 chk "BLOCKED → blocked" "$(status_of "$id3")" "blocked"
 
+# 4) ROOT_DIR 회귀: 링크드 워크트리 안에서 호출해도 run_dir 이 메인 리포 루트에 생성됨
+T2="$(mktemp -d)"
+trap 'rm -rf "$TMP" "$T2"' EXIT
+git init -q "$T2"
+git -C "$T2" config user.email t@t
+git -C "$T2" config user.name t
+git -C "$T2" commit -q --allow-empty -m "init"
+git -C "$T2" worktree add -q "$T2/.task-work/wt" --detach
+# 완전 목 어댑터 (git root 비의존 — adapter.sh 는 --show-toplevel 기반이어서 worktree 내에서 오동작)
+mkdir -p "$T2/bin"
+cat > "$T2/bin/adapter_wt" << AMOCK
+#!/usr/bin/env bash
+case "\$1" in
+  materialize) echo '{"spec_path":"$T2/dummy.md"}';;
+  claim)        echo '{"claimed":true}';;
+  renew_lease|set_status|append_log) exit 0;;
+  *) exit 0;;
+esac
+AMOCK
+chmod +x "$T2/bin/adapter_wt"
+touch "$T2/dummy.md"
+# 링크드 워크트리 안에서 execute-task.sh 실행 (run_dir 생성 지점까지 도달: --stop-at review 없음)
+(cd "$T2/.task-work/wt"
+ ADAPTER_CMD="bash $T2/bin/adapter_wt" LOOP_CMD="bash $TMP/bin/loop" FORGE_CMD="bash $TMP/bin/forge" \
+ MOCK_RESULT=DONE HEARTBEAT_INTERVAL=1 APPROVAL_CHECK_CMD=true BLOCKING_CHECK_CMD=true SLEEP_CMD=: \
+ bash "$ET" start wt_task >/dev/null 2>&1 || true)
+# run_dir 이 메인 리포 루트($T2)에 생성됐으면 ROOT_DIR 이 올바르게 결정된 것
+[[ -d "$T2/.autopilot/runs/wt_task" ]] \
+  && ok "4) worktree-내-호출 → run_dir 메인 루트 생성" \
+  || bad "4) worktree-내-호출 → run_dir 메인 루트 생성"
+
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail

@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.59.1
+
+### 버그 수정
+- **execute-task가 링크드 워크트리 안에서 호출될 때 중첩 .task-work/ 경로 생성 (#520)** — `execute-task.sh`의 `ROOT_DIR` 결정 로직이 `git rev-parse --show-toplevel`만 사용해, 링크드 워크트리(`.task-work/<id>/.worktree`) 안에서 호출하면 워크트리 자신의 루트를 메인 리포 루트로 잘못 판정했다. 이로 인해 `.task-work/<id>/.worktree/.task-work/<id>/.worktree` 같은 중첩 경로와 `.autopilot/runs/`의 잘못된 위치 생성이 발생했다. 이제 `git worktree list --porcelain`의 첫 항목(항상 메인 워크트리)을 파싱해 `ROOT_DIR`을 메인 리포 루트로 고정하고, 구버전 git(< 2.7) 또는 git 미설치 환경은 기존 `--show-toplevel` 폴백으로 처리한다. 이로써 호출 위치와 무관하게 `.task-work/`와 `.autopilot/runs/`가 항상 메인 리포 루트 기준으로 생성된다. 회귀 가드(`test-execute-task-lifecycle.sh` 케이스 4)가 링크드 워크트리에서 호출 시 `run_dir`이 메인 리포 루트에 생성됨을 단언한다.
+
 ## autopilot 0.59.0
 
 ### 버그 수정
