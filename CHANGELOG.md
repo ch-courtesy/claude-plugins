@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.61.0
+
+### 버그 수정
+- **execute-task가 `review` 상태에서 crash 되면 영구 고착 — 자동 회수 경로 없음 수정 (#507)** — `execute-task.sh`가 `set_status review` 를 호출하고 forge 단계(integrate→review→merge)에 진입한 뒤 crash 되면, `github.sh`의 `be_list_ready`가 `review` 상태를 반환하지 않고 lease도 없어 수동 개입 없이는 회수가 불가능했다. 두 곳을 수정했다. (1) `github.sh` — `be_set_status`가 `review` 전이 시 `gh_set_lease(owner="review")`로 진입 시각을 lease에 기록하고, `be_list_ready`에 `review)` 케이스를 추가해 `TB_REVIEW_TTL`(기본 1800초) 초과 시 stale로 판정해 회수한다(lease 미기록 구버전 호환: lease=0 → 회수하지 않는 보수적 default-deny). (2) `execute-task.sh` — forge 진입 직전 `run_dir/review_entered` 마커를 찍는다. 재진입 시(마커 존재) loop 단계를 건너뛰고 forge 단계부터 이어받는다(구현 재실행 방지). `--stop-at review` 경로는 forge 미진입이므로 마커를 찍지 않아 재진입 경로로 오전환되지 않는다. 기존 `in_progress` stale 감지 동작에 회귀 없음. 회귀 가드(`tests/autopilot/execute-task/test-execute-task-review-reentry.sh`)가 (a) 정상 경로에서 `review_entered` 생성과 loop.start 1회를 단언, (b) 재진입 경로에서 loop.start 미호출과 done 도달을 단언, (c) `--stop-at review` 경로에서 마커 미생성을 단언한다.
+
 ## autopilot 0.60.0
 
 ### 버그 수정

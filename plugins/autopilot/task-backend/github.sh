@@ -94,6 +94,8 @@ be_set_status() {
   [[ -n "$old" ]] && gh issue edit "$id" $(gh_repo_args) --remove-label "status:$old" >/dev/null 2>&1 || true
   gh issue edit "$id" $(gh_repo_args) --add-label "status:$s" >/dev/null 2>&1 || tb_die "라벨 status:$s 설정 실패(라벨 존재 필요)"
   if [[ "$s" == "in_progress" ]]; then gh_set_lease "$id" "$(tb_now_epoch)" "$(_argval --owner "$@")"; fi
+  # review 진입 시각을 lease 에 기록(owner="review"). heartbeat 없는 forge 단계의 crash 감지에 사용.
+  if [[ "$s" == "review" ]]; then gh_set_lease "$id" "$(tb_now_epoch)" "review"; fi
   [[ "$s" == "done" ]] && gh issue close "$id" $(gh_repo_args) >/dev/null 2>&1 || true
   jq -nc --arg id "$id" --arg s "$s" '{task_id:$id, status:$s}'
 }
@@ -142,6 +144,14 @@ be_list_ready() {
         # 어느 호스트든 회수 가능.
         local lr; lr="$(gh_get_lease "$id")"; [[ -n "$lr" ]] || lr=0
         (( now - lr > ttl )) && ready=1
+        ;;
+      review)
+        # forge 단계(heartbeat 없음)에서 crash 되면 lease 가 stale 해진다. TTL 초과 시 회수.
+        # be_set_status review 에서 gh_set_lease(owner="review") 로 진입 시각을 기록하므로
+        # lease 가 없으면(진입 시각 미기록 = 구버전 호환) 회수하지 않는다(보수적 default-deny).
+        local rt="${TB_REVIEW_TTL:-1800}"
+        local lr; lr="$(gh_get_lease "$id")"; [[ -n "$lr" ]] || lr=0
+        [[ "$lr" -gt 0 ]] && (( now - lr > rt )) && ready=1
         ;;
     esac
     (( ready )) && out="$(printf '%s' "$out" | jq -c --arg id "$id" --arg t "$title" '. + [{task_id:$id, title:$t}]')"
