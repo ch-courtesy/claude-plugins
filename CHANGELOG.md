@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## project-init 0.23.0
+
+### 새 기능
+- **create-skill 스킬 신규 추가 — 인터뷰 기반 SKILL.md 작성 가이드** — `skills/create-skill/`을 신규 생성했다. 새 스킬(SKILL.md)을 설계·작성할 때 루브릭 30항목 품질 기준을 작성 단계에 내장해 BLOCKER·MAJOR 0 목표로 스킬을 완성하는 7단계 절차를 제공한다. `references/quality-criteria.md`에 규칙 17항목·모델 13항목 자가점검 체크리스트를 자체 소유하고(skill-rubric 직접 참조 없음), `references/skill-template.md`에 SKILL.md 구조 틀을 동봉한다. SKILL.md 본문에 "description 완결성" 원칙(WHAT+WHEN+키워드를 description에 내장 → 예외처리 지침 불필요)을 명시해 이 원칙의 단일 소유처로 삼는다.
+
 ## autopilot 0.58.0
 
 ### 버그 수정
