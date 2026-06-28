@@ -5,7 +5,7 @@
 ## autopilot 0.60.0
 
 ### 버그 수정
-- **execute-task SIGKILL 후 heartbeat orphan이 lease 영구 갱신 — stale 감지 불가 수정 (#506)** — `execute-task.sh` 의 heartbeat subshell 이 `trap cleanup_hb EXIT` 로 보호받지 못하는 SIGKILL 경로에서 orphan 이 돼 `renew_lease` 를 계속 호출하고 태스크가 `in_progress` 로 영구 박제되던 버그를 수정했다. 부모 PID·시작 시간을 subshell 시작 전에 캡처하고, heartbeat 루프 첫머리에 부모 생존 확인 후 자가종료 로직을 추가했다. **감지 방식**: Linux(`/proc` 가용)는 `/proc/PID/stat` 시작 시간 비교로 SIGKILL·PID 재사용 양쪽 감지; 비-Linux는 세마포어 파일(`/tmp/execute-task-$$.alive`, EXIT trap 삭제)만 사용해 SIGTERM·정상 종료를 감지(`kill -0` 는 PID 재사용 시 다른 프로세스를 부모로 오인해 orphan 재발 가능성이 있어 제외, 비-Linux SIGKILL 은 허용된 한계). SIGTERM·정상 exit 경로의 기존 `cleanup_hb` 동작에 변경 없음. 회귀 가드(`test-execute-task-sigkill-heartbeat.sh`)가 SIGKILL 후 heartbeat 자가종료와 세마포어 파일 생성 두 조건을 모두 단언한다.
+- **execute-task SIGKILL 후 heartbeat orphan이 lease 영구 갱신 — stale 감지 불가 수정 (#506)** — `execute-task.sh` 의 heartbeat subshell 이 `trap cleanup_hb EXIT` 로 보호받지 못하는 SIGKILL 경로에서 orphan 이 돼 `renew_lease` 를 계속 호출하고 태스크가 `in_progress` 로 영구 박제되던 버그를 수정했다. 부모 PID·시작 시간을 subshell 시작 전에 캡처하고, heartbeat 루프 첫머리에 부모 생존 확인 후 자가종료 로직을 추가했다. **감지 방식**: Linux(`/proc` 가용)는 `/proc/PID/stat` 시작 시간 비교로 SIGKILL·PID 재사용 양쪽 감지; 비-Linux는 `$BASHPID` 기반 ppid 확인(`ps -o ppid=`)으로 SIGKILL 후 re-parenting을 감지하고, 세마포어 파일(`/tmp/execute-task-$$.alive`)로 SIGTERM·정상 종료를 보완(`kill -0` 는 PID 재사용 시 orphan 재발 가능성이 있어 제외). SIGTERM·정상 exit 경로의 기존 `cleanup_hb` 동작에 변경 없음. 회귀 가드(`test-execute-task-sigkill-heartbeat.sh`)가 SIGKILL 후 heartbeat 자가종료와 세마포어 파일 생성 두 조건을 모두 단언한다.
 
 ## autopilot 0.59.0
 
