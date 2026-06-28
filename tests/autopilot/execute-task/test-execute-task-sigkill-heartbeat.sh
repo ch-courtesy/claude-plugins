@@ -94,7 +94,7 @@ fi
 kill -9 "$ET_PID" 2>/dev/null || true
 wait "$ET_PID" 2>/dev/null || true
 
-# heartbeat가 자가종료할 때까지 대기(최대 HEARTBEAT_INTERVAL*3=3s + 버퍼)
+# heartbeat가 자가종료할 때까지 대기(최대 4s — HEARTBEAT_INTERVAL*3 + 여유)
 waited_hb=0
 while kill -0 "$HB_PID" 2>/dev/null && (( waited_hb < 20 )); do
   sleep 0.2; waited_hb=$((waited_hb+1))

@@ -125,13 +125,23 @@ et_start() {
   $LOOP_CMD cleanup "$sp" --force >/dev/null 2>&1 || true
 
   # 백그라운드 heartbeat (lease 갱신). 연속 실패 시 lease 를 잃어 이중 실행 위험 → fail-fast 로 메인 중단.
-  # SIGKILL orphan 방지: 부모 PID 를 미리 캡처해 subshell 에서 생존 확인 후 자가종료.
+  # SIGKILL orphan 방지: 부모 PID 와 시작 시간을 미리 캡처해 subshell 에서 생존 확인 후 자가종료.
+  # /proc 가용 시(Linux) 시작 시간도 비교해 PID 재사용으로 인한 orphan 재발을 방지한다.
   local PARENT_PID=$$
+  local PARENT_STARTTIME; PARENT_STARTTIME="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
   ( fail=0
     while true; do
       # orphan 자가종료: 부모(execute-task 메인 프로세스)가 종료되면 heartbeat 도 즉시 종료.
-      # trap EXIT 는 SIGKILL 을 잡지 못하므로 주기적으로 부모 생존 여부를 확인한다.
-      kill -0 "$PARENT_PID" 2>/dev/null || exit 0
+      # /proc 가용 시: 존재 + 시작 시간 비교(PID 재사용 구분). 비가용 시: kill -0 fallback.
+      if [[ -n "$PARENT_STARTTIME" ]]; then
+        if [[ -r "/proc/$PARENT_PID/stat" ]]; then
+          [[ "$(awk '{print $22}' "/proc/$PARENT_PID/stat" 2>/dev/null)" == "$PARENT_STARTTIME" ]] || exit 0
+        else
+          exit 0
+        fi
+      else
+        kill -0 "$PARENT_PID" 2>/dev/null || exit 0
+      fi
       if $ADAPTER_CMD renew_lease --task-id "$id" --owner "$owner" >/dev/null 2>&1; then fail=0
       else fail=$((fail+1)); if (( fail >= 3 )); then
         echo "execute-task: heartbeat lease 갱신 연속 실패 — 작업 중단($id)" >&2
