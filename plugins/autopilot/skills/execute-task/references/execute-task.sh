@@ -104,7 +104,11 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
 }
 
 HB_PID=""
-cleanup_hb() { [[ -n "${HB_PID:-}" ]] && kill "$HB_PID" 2>/dev/null || true; }
+PARENT_ALIVE_FILE=""
+cleanup_hb() {
+  [[ -n "${HB_PID:-}" ]] && kill "$HB_PID" 2>/dev/null || true
+  [[ -n "${PARENT_ALIVE_FILE:-}" ]] && rm -f "$PARENT_ALIVE_FILE" 2>/dev/null || true
+}
 trap cleanup_hb EXIT
 
 et_start() {
@@ -129,8 +133,35 @@ et_start() {
   $LOOP_CMD cleanup "$sp" --force >/dev/null 2>&1 || true
 
   # 백그라운드 heartbeat (lease 갱신). 연속 실패 시 lease 를 잃어 이중 실행 위험 → fail-fast 로 메인 중단.
+  # SIGKILL orphan 방지: 부모 PID 와 시작 시간을 미리 캡처해 subshell 에서 생존 확인 후 자가종료.
+  # /proc 가용 시(Linux): 시작 시간 비교로 PID 재사용·SIGKILL 양쪽 감지. 비가용 시: ppid+세마포어 조합.
+  local PARENT_PID=$$
+  local PARENT_STARTTIME; PARENT_STARTTIME="$(awk '{print $22}' /proc/$$/stat 2>/dev/null || true)"
+  # 세마포어 파일: EXIT trap 삭제 → SIGTERM 후 PID 재사용 시에도 heartbeat 가 정상 종료로 오인 없음.
+  # SIGKILL 시 EXIT trap 미실행으로 파일 잔존 가능 — 비-Linux 는 ppid 기반으로 SIGKILL 도 감지.
+  PARENT_ALIVE_FILE="/tmp/execute-task-$$.alive"
+  touch "$PARENT_ALIVE_FILE" 2>/dev/null || PARENT_ALIVE_FILE=""
   ( fail=0
     while true; do
+      # orphan 자가종료: 부모(execute-task 메인 프로세스)가 종료되면 heartbeat 도 즉시 종료.
+      # /proc 가용 시: 존재 + 시작 시간 비교(PID 재사용 구분). 비가용 시: ppid(SIGKILL)+세마포어(SIGTERM).
+      if [[ -n "$PARENT_STARTTIME" ]]; then
+        if [[ -r "/proc/$PARENT_PID/stat" ]]; then
+          [[ "$(awk '{print $22}' "/proc/$PARENT_PID/stat" 2>/dev/null)" == "$PARENT_STARTTIME" ]] || exit 0
+        else
+          exit 0
+        fi
+      else
+        # 비-Linux: ppid 기반(SIGKILL 포함) + 세마포어(SIGTERM/정상 종료) 조합.
+        # SIGKILL 후 subshell 이 init 에 re-parent → ppid ≠ PARENT_PID → 자가종료.
+        # $BASHPID(bash 4+): subshell 자신의 PID. ps -o ppid= 는 macOS/BSD 이식성 높음.
+        if [[ -n "${BASHPID:-}" ]]; then
+          _ppid="$(ps -o ppid= -p "$BASHPID" 2>/dev/null | tr -d ' ')"
+          if [[ -n "$_ppid" ]]; then [[ "$_ppid" == "$PARENT_PID" ]] || exit 0; fi
+        fi
+        # 세마포어: EXIT trap 기반(SIGTERM/정상 종료). $BASHPID 미지원 시 주요 감지 수단.
+        if [[ -n "${PARENT_ALIVE_FILE:-}" && ! -f "$PARENT_ALIVE_FILE" ]]; then exit 0; fi
+      fi
       if $ADAPTER_CMD renew_lease --task-id "$id" --owner "$owner" >/dev/null 2>&1; then fail=0
       else fail=$((fail+1)); if (( fail >= 3 )); then
         echo "execute-task: heartbeat lease 갱신 연속 실패 — 작업 중단($id)" >&2
