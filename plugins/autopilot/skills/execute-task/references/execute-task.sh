@@ -129,6 +129,11 @@ et_start() {
   local claimed; claimed="$($ADAPTER_CMD claim --task-id "$id" --owner "$owner" | jq -r '.claimed // false')"
   if [[ "$claimed" != "true" ]]; then echo "execute-task: 이미 다른 실행자가 점유 — skip ($id)"; return 0; fi
 
+  # review 재진입 감지: 이전 실행이 forge 단계 진입 전에 review_entered 마커를 찍었으면 loop 생략.
+  local run_dir="$ROOT_DIR/.autopilot/runs/$id"
+  local reentry=0
+  [[ -f "$run_dir/review_entered" ]] && reentry=1
+
   # reclaim: 죽은 워커 잔재 정리(있으면) — loop 가 notes/worktree 로 이어받음
   $LOOP_CMD cleanup "$sp" --force >/dev/null 2>&1 || true
 
@@ -171,28 +176,34 @@ et_start() {
     done ) &
   HB_PID=$!
 
-  # 구현 (포그라운드 블로킹)
-  $LOOP_CMD start "$sp" || true
+  if (( ! reentry )); then
+    # 구현 (포그라운드 블로킹)
+    $LOOP_CMD start "$sp" || true
 
-  # 분류
-  local sj signals; sj="$($LOOP_CMD status --json "$sp" 2>/dev/null || echo '{}')"
-  # loop status --json 은 JSON 계약 → 필수 의존성 jq 로 읽는다(미선언 yq 회피).
-  signals="$(printf '%s' "$sj" | jq -r '.signals[]?' 2>/dev/null || true)"
-  if printf '%s\n' "$signals" | grep -Fxq BLOCKED; then
-    $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "loop BLOCKED" >/dev/null
-    $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "loop BLOCKED" >/dev/null
-    return 1
-  fi
-  if ! printf '%s\n' "$signals" | grep -Fxq DONE; then
-    $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "loop 미완(DONE 신호 없음)" >/dev/null
-    return 1
-  fi
+    # 분류
+    local sj signals; sj="$($LOOP_CMD status --json "$sp" 2>/dev/null || echo '{}')"
+    # loop status --json 은 JSON 계약 → 필수 의존성 jq 로 읽는다(미선언 yq 회피).
+    signals="$(printf '%s' "$sj" | jq -r '.signals[]?' 2>/dev/null || true)"
+    if printf '%s\n' "$signals" | grep -Fxq BLOCKED; then
+      $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "loop BLOCKED" >/dev/null
+      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "loop BLOCKED" >/dev/null
+      return 1
+    fi
+    if ! printf '%s\n' "$signals" | grep -Fxq DONE; then
+      $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "loop 미완(DONE 신호 없음)" >/dev/null
+      return 1
+    fi
 
-  $ADAPTER_CMD set_status --task-id "$id" --status review >/dev/null
-  if [[ "$stop_at" == "review" ]]; then echo "execute-task: review 단계 정지 ($id)"; return 0; fi
+    $ADAPTER_CMD set_status --task-id "$id" --status review >/dev/null
+    if [[ "$stop_at" == "review" ]]; then echo "execute-task: review 단계 정지 ($id)"; return 0; fi
+  else
+    echo "execute-task: review 재진입 — forge 단계부터 재시작 ($id)" >&2
+  fi
 
   # forge: integrate → review(승인까지 반복, 가드) → merge (origin 라우팅)
-  local run_dir="$ROOT_DIR/.autopilot/runs/$id"; mkdir -p "$run_dir"
+  # crash 후 재진입 경로 표지: forge 진입 직전에 찍어, 이후 crash 시 다음 실행이 loop 를 재실행하지 않도록 한다.
+  mkdir -p "$run_dir"
+  touch "$run_dir/review_entered" 2>/dev/null || true
   local key="$id"
   local iout branch pr=""
   iout="$($FORGE_CMD integrate "$sp" "$run_dir" "$key" 2>&1)" || {
