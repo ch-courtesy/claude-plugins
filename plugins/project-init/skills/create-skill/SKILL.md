@@ -49,7 +49,7 @@ description 초안을 사용자에게 보여주고 수정 여부를 확인한다
 
 절차에 필요한 도구를 allowed-tools에 열거한다. 참고:
 
-- 사용자 선택이 필요하면 `AskUserQuestion`
+- 사용자 선택이 필요하면 구조화된 사용자 질문 기능
 - 파일 읽기: `Read`, `Glob`
 - 파일 쓰기: `Write`
 - 디렉토리 생성: `Bash(mkdir -p:*)`
