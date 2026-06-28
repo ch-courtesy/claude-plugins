@@ -32,7 +32,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ----- 헬퍼 -----
 die() {
-  echo "ERROR: $*" >&2
+  printf 'ERROR: %b\n' "$*" >&2
   exit 1
 }
 
