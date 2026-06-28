@@ -2,10 +2,10 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
-## project-init 0.23.0
+## autopilot 0.59.0
 
-### 새 기능
-- **create-skill 스킬 신규 추가 — 인터뷰 기반 SKILL.md 작성 가이드** — `skills/create-skill/`을 신규 생성했다. 새 스킬(SKILL.md)을 설계·작성할 때 루브릭 30항목 품질 기준을 작성 단계에 내장해 BLOCKER·MAJOR 0 목표로 스킬을 완성하는 7단계 절차를 제공한다. `references/quality-criteria.md`에 규칙 17항목·모델 13항목 자가점검 체크리스트를 자체 소유하고(skill-rubric 직접 참조 없음), `references/skill-template.md`에 SKILL.md 구조 틀을 동봉한다. SKILL.md 본문에 "description 완결성" 원칙(WHAT+WHEN+키워드를 description에 내장 → 예외처리 지침 불필요)을 명시해 이 원칙의 단일 소유처로 삼는다.
+### 버그 수정
+- **using-autopilot 버그 라우팅 stale("fix 없음 과도기") 제거 + 자가개선 step 1 체크포인트 강화 (#504)** — (1) `using-autopilot` SKILL.md의 모든 "과도기" 문구("전용 버그 작성자 `fix`가 아직 없고", "fix 머지 전까지 `feature`가 버그 본문도 작성", "fix 머지 후 버그→`fix`로 전환")를 제거하고 버그·증상·실패 신호 라우팅을 `feature`에서 `fix`로 전환했다. 이제 절대 우선 섹션·트리거 섹션 헤더(`### 버그·증상·실패 → fix`)·파이프라인 다이어그램·brainstorming-first override·Red flags·예외 절이 모두 `fix`를 가리킨다. `fix` 정적 분석으로 해소 불가한 모호성이 남으면(`[NEEDS CLARIFICATION]` 마커) `feature` 인터뷰 재개 경로(`Skill(skill="feature", args="resume <task-id")`)로 완성하는 경로도 명시했다. (2) 자가개선 행동 순서 step 1에 "step 1 산출물 요구사항: 카테고리(`spec-gap`/`tool-defect`/`ops`/결함-아님) **와** 근본 원인 후보를 명시한 뒤에만 step 2로 진입한다 — 진단 없이 step 2(`fix` 스펙 작성)로 직행하면 step 1 미완으로 간주한다"를 추가했다. Red flags 테이블에 "비정상이 보이는데 진단은 나중에, 일단 `fix`부터 → 진단 산출물(카테고리 + 근본 원인 후보) 없이 `fix`를 호출하지 않는다" 행을 추가했다. 회귀 가드(`tests/autopilot/using-autopilot/test-using-autopilot-routing.sh`)가 (a) 버그 라우팅이 `fix`를 가리키는가, (b) 과도기 문구가 없는가, (c) step 1 산출물 요구사항이 있는가, (d) Red flags 진단-차단 항목이 있는가, (e) `[NEEDS CLARIFICATION]` → feature resume 경로가 있는가를 단언한다.
 
 ## autopilot 0.58.0
 

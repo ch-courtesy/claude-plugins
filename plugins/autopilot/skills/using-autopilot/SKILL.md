@@ -1,22 +1,22 @@
 ---
 name: using-autopilot
-description: Use at the start of any session in an autopilot-installed project — routes every new code-change signal to a mandatory authoring/registration entry point before any other response. Feature intent (기능 추가·지침 작성·새로 만들기) routes to the new authoring skill feature, which interviews the intent into a task body (=SPEC) and registers it via the create-task registration primitive; bug·symptom·failing-test signals (버그·증상·실패 테스트 고치기) route to the same feature authoring skill in the interim — a dedicated fix authoring skill does not yet exist, and the registration-only create-task no longer authors, so feature authors bug task bodies too until fix lands. This overrides generic brainstorming-first guidance for such work. Also routes self-improvement signals — anomalous behavior of autopilot's own task skills (create-task/execute-task/workflow-task) observed during use (wrong blocked, pointless waiting, contradictory state, unexpected failure) — to the feature authoring skill: diagnose, and if a real defect, author the fix as a self-contained spec via feature (which registers it through create-task) rather than just working around it.
+description: Use at the start of any session in an autopilot-installed project — routes every new code-change signal to a mandatory authoring/registration entry point before any other response. Feature intent (기능 추가·지침 작성·새로 만들기) routes to the authoring skill feature, which interviews the intent into a task body (=SPEC) and registers it via the create-task registration primitive; bug·symptom·failing-test signals (버그·증상·실패 테스트 고치기) route to the fix authoring skill, which reads code·logs·failure signals and narrows to a root-cause hypothesis to author a bug task body (=SPEC) and registers it via create-task (unresolvable ambiguity leaves [NEEDS CLARIFICATION] markers; a feature resume path completes it interactively). This overrides generic brainstorming-first guidance for such work. Also routes self-improvement signals — anomalous behavior of autopilot's own task skills (create-task/execute-task/workflow-task) observed during use (wrong blocked, pointless waiting, contradictory state, unexpected failure) — to a step-gated self-improvement procedure: diagnose first (category + root-cause hypothesis as step 1 output), then act by category (spec-gap→SPEC scope fix, tool-defect→fix spec authoring, ops→operational cleanup), rather than just working around it.
 ---
 
 # using-autopilot
 **REQUIRED RUNTIME CONTRACT:** `../../references/runtime-capabilities.md`를 읽고 스킬 호출과 사용자 질문을 현재 런타임 기능에 맞춘다.
 
 
-autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다. 새 코드 변경은 **의도를 먼저 자기완결적 태스크로 등록하는 것**에서 출발한다. 작성(authoring)과 등록(registration)이 분리되어 있다 — **기능 의도든 버그·증상·실패든 모두 작성자 `feature`** 가 첫 단계다(과도기: 전용 버그 작성자 `fix`가 아직 없고 등록 전용 `create-task`는 더 이상 작성하지 않으므로, `fix` 머지 전까지 `feature`가 버그 본문도 작성한다). `feature`는 명확화 인터뷰로 의도를 탐색해 태스크 본문(=SPEC)을 떠서 **등록 프리미티브 `create-task`** 로 넘겨 백엔드에 등록한다. 등록 이후 실행 단계(`execute-task` 단일 실행 / `workflow-task` 무인 드레인) 선택·안내는 `create-task`가 책임진다. 이 스킬은 **올바른 진입점(`feature`)으로의 라우팅까지만** 강제한다.
+autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다. 새 코드 변경은 **의도를 먼저 자기완결적 태스크로 등록하는 것**에서 출발한다. 작성(authoring)과 등록(registration)이 분리되어 있다 — **기능 의도는 작성자 `feature`**, **버그·증상·실패는 작성자 `fix`** 가 첫 단계다. `feature`는 명확화 인터뷰로 기능 의도를 탐색해 태스크 본문(=SPEC)을 떠서 **등록 프리미티브 `create-task`** 로 넘겨 백엔드에 등록한다. `fix`는 코드·로그·실패 신호를 정적 분석으로 진단해 버그 태스크 본문(=SPEC)을 떠서 같은 `create-task`로 등록한다(정적 분석으로 해소 불가한 모호성은 `[NEEDS CLARIFICATION]` 마커를 남기며, 이 경우 `feature` 인터뷰 재개로 완성한다). 등록 이후 실행 단계(`execute-task` 단일 실행 / `workflow-task` 무인 드레인) 선택·안내는 `create-task`가 책임진다. 이 스킬은 **올바른 진입점(`feature`/`fix`)으로의 라우팅까지만** 강제한다.
 
 ---
 
 > ## 🚨 절대 우선 — 다른 어떤 것보다 먼저 (협상 불가)
 >
-> 새 코드 변경 신호를 감지하면, **다른 어떤 응답·도구 호출·탐색보다 먼저** 작성자 `feature`를 호출한다. 과도기엔 기능 의도든 버그든 진입점은 하나다:
+> 새 코드 변경 신호를 감지하면, **다른 어떤 응답·도구 호출·탐색보다 먼저** 올바른 작성자를 호출한다:
 >
 > - **기능 의도**(무엇을 만들까·새 동작 추가·지침 작성·문서 편집·새로 만들기·기존 SPEC/태스크 구현) → `feature` 호출 (`Skill(skill="feature", args="<자연어 기능 설명>")`). `feature`가 인터뷰로 본문(=SPEC)을 떠서 `create-task`로 등록한다.
-> - **버그·증상·실패**(잘못된 동작을 고쳐달라·이 버그/에러·테스트가 실패해) → **과도기 동안 같은 `feature` 호출** (`Skill(skill="feature", args="<자연어 버그 설명>")`). 등록 전용 `create-task`는 작성하지 않으므로 자연어 버그를 직접 보내지 않는다. 전용 버그 작성자 `fix`가 머지되면 버그는 `fix`로 전환한다.
+> - **버그·증상·실패**(잘못된 동작을 고쳐달라·이 버그/에러·테스트가 실패해) → `fix` 호출 (`Skill(skill="fix", args="<자연어 버그 설명>")`). `fix`가 정적 분석으로 진단해 버그 본문(=SPEC)을 떠서 `create-task`로 등록한다. 정적 분석으로 해소 불가한 모호성은 `[NEEDS CLARIFICATION]` 마커로 남기며, 그 경우 `feature` 인터뷰 재개로 완성한다(`Skill(skill="feature", args="resume <task-id")`).
 >
 > 두 경로 모두 등록 이후 실행 단계(`execute-task`/`workflow-task`) 선택·안내는 `create-task`가 책임지며, 이 스킬은 거기까지의 라우팅만 강제한다.
 >
@@ -26,7 +26,7 @@ autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다
 
 ## 트리거 (이 중 하나라도 해당되면 진입점 먼저)
 
-자연어로 다음 의도가 보이면 새 코드 변경 신호다. **기능 의도든 버그·증상·실패든 과도기엔 모두 작성자 `feature`로** 보낸다(`fix` 머지 전까지).
+자연어로 다음 의도가 보이면 새 코드 변경 신호다. **기능 의도는 `feature`로, 버그·증상·실패는 `fix`로** 보낸다.
 
 ### 기능 의도 → `feature`
 
@@ -36,13 +36,13 @@ autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다
 - **기존 SPEC/태스크 구현** — `<경로>/SPEC.md 구현`, "이 SPEC 구현해줘", "SPEC대로 만들어줘", "이 태스크 구현"처럼 기존 SPEC 파일·태스크의 구현·구현 확인. SPEC/태스크를 **읽기/검증**하는 것은 예외지만, 그것을 **구현**하는 것은 코드-변경 신호다.
 - **새로 만들기** — "X 스킬/플러그인/모듈 만들꺼야", "X 새로 만들어줘"
 
-### 버그·증상·실패 → `feature` (과도기, `fix` 머지 전까지)
+### 버그·증상·실패 → `fix`
 
 - **버그 수정** — "X 고쳐줘", "X가 안 돼", "이 버그 잡아줘"처럼 잘못된(결함) 동작을 바로잡는 요청.
 - **증상·오류** — "이 에러 나", "이 예외/크래시", "결과가 이상해"처럼 관찰된 증상·오류 신호.
 - **실패 테스트** — "이 테스트가 실패해", "테스트 깨졌어"처럼 실패 테스트를 통과시켜 달라는 요청.
 
-`feature`의 명확화 인터뷰(집요함·결정 트리·추천 답·코드 우선)가 **기능 의도와 버그·증상**을 모두 태스크 본문(=SPEC)으로 흡수하므로, 별도의 사전 설계 단계 없이 그것이 곧 첫 단계다. 신호 여부가 모호하면 사용자에게 한 번 확인한다. 과도기엔 기능이든 버그든 모두 `feature`로 보내므로 둘을 가를 필요가 없다(`fix` 머지 후 버그→`fix`로 전환).
+`fix`가 코드·로그·실패 신호를 읽고 정적 분석으로 진단해 버그 태스크 본문(=SPEC)을 뜬다. 신호 여부가 모호하면 사용자에게 한 번 확인한다. 기능 의도인지 버그·증상인지 구분이 필요하다 — 잘못된(결함) 동작이면 `fix`, 새로 원하는 동작이면 `feature`.
 
 ## 자가개선 정책 (단일 소유자) — task 스킬 blocked·비정상 → 카테고리별 행동
 
@@ -57,7 +57,7 @@ autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다
   - 매핑 불명(`other` 등)이면 적대적 진단으로 위 셋 중 하나로 분류하거나 "결함 아님"으로 종결한다.
 
 - **행동 순서** — 비정상을 단순 우회·수동 처리로 끝내지 말고 **자가개선 판단을 시작**한다:
-  1. **적대적 진단** — 실제 결함인지 적대적으로 진단한다. 가능하면 결정적으로 재현·검증한다(일회성/환경 요인 배제).
+  1. **적대적 진단** — 실제 결함인지 적대적으로 진단한다. 가능하면 결정적으로 재현·검증한다(일회성/환경 요인 배제). **step 1 산출물 요구사항**: 카테고리(`spec-gap`/`tool-defect`/`ops`/결함-아님) **와** 근본 원인 후보를 명시한 뒤에만 step 2로 진입한다 — 진단 없이 step 2(`fix` 스펙 작성)로 직행하면 step 1 미완으로 간주한다.
   2. **카테고리별 행동** — 위 매핑대로: `spec-gap`→SPEC scope 보정, `tool-defect`→`fix`로 수정 스펙 작성·등록, `ops`→운영 정리.
   3. **평소 실행 경로로 처리** — 등록된 수정 스펙은 `create-task`가 안내하는 평소 실행 단계(`execute-task` 단일 실행 / `workflow-task` 무인 드레인)로 처리한다.
 
@@ -78,7 +78,7 @@ autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다
 
 ## brainstorming-first 강제와의 관계 (명시적 override)
 
-`superpowers:using-superpowers`는 "creating features / building components 같은 창작 작업엔 무조건 `superpowers:brainstorming`을 먼저"를 강제한다. **autopilot이 설치된 프로젝트에서, 위 트리거에 해당하는 새 코드 변경 작업에 한해 이 강제를 대체한다** — brainstorming 대신, 기능 의도든 버그·증상·실패든 과도기엔 **`feature`** 가 첫 단계다.
+`superpowers:using-superpowers`는 "creating features / building components 같은 창작 작업엔 무조건 `superpowers:brainstorming`을 먼저"를 강제한다. **autopilot이 설치된 프로젝트에서, 위 트리거에 해당하는 새 코드 변경 작업에 한해 이 강제를 대체한다** — brainstorming 대신, 기능 의도는 **`feature`**, 버그·증상·실패는 **`fix`** 가 첫 단계다.
 
 근거(왜 이 규칙이 그 자리에서 더 구체적이고 우선하는가):
 
@@ -92,10 +92,11 @@ milestone 규모(다중 독립 서브시스템)는 `feature`의 **범위 분해 
 
 | 생각 | 현실 |
 |---|---|
-| "일단 brainstorming부터 하자" | autopilot 프로젝트의 새 코드 변경은 진입점(과도기엔 기능·버그 모두 feature)이 첫 단계다. brainstorming이 아니다. |
+| "일단 brainstorming부터 하자" | autopilot 프로젝트의 새 코드 변경은 진입점(기능→feature, 버그·증상→fix)이 첫 단계다. brainstorming이 아니다. |
 | "이건 너무 사소해서 태스크까지는…" | 사소한 변경일수록 진입점이 빠르게 끝난다. 자기완결 의도 문서(태스크 본문=SPEC)는 항상 남긴다. |
 | "바로 코드부터 짜자" | 의도(검증 가능한 완료 조건) 없이 구현하지 않는다. 진입점 → 구현. |
-| "버그니까 그냥 바로 고치자" | 버그 수정도 의도를 먼저 태스크로 뜬다. "X 고쳐줘"·"이 에러"·"테스트 실패"는 과도기엔 `feature`가 먼저다(`fix` 머지 후 `fix`). |
+| "버그니까 그냥 바로 고치자" | 버그 수정도 의도를 먼저 태스크로 뜬다. "X 고쳐줘"·"이 에러"·"테스트 실패"는 `fix`가 먼저다. |
+| "비정상이 보이는데 진단은 나중에, 일단 `fix`부터" | 자가개선 행동 순서 step 1(적대적 진단 + 카테고리·근본 원인 후보 명시)을 완료하지 않고 step 2(`fix` 스펙 작성)로 직행하면 step 1 미완이다. 진단 산출물(카테고리 + 근본 원인 후보) 없이 `fix`를 호출하지 않는다. |
 | "먼저 코드베이스를 좀 둘러보고" | 탐색은 `feature`의 컨텍스트·명확화 단계가 수행한다. 그 안에서 한다. |
 | "먼저 코드를 파악·이해해야 시작하지" | 이해 필요는 라우팅의 예외가 아니다. 먼저 실행하고, 이해는 `feature`의 탐색 단계에서 한다. |
 | "기존 SPEC/태스크를 구현/확인하는 것뿐이니까" | SPEC/태스크 읽기·검증은 예외지만 구현은 코드-변경 신호다. `SPEC.md 구현`은 `feature` 먼저. |
@@ -110,15 +111,16 @@ milestone 규모(다중 독립 서브시스템)는 `feature`의 **범위 분해 
 - 새 코드 변경이 **아닌** 작업: 순수 질의응답, 코드 읽기·설명, 검색, 단순 디버깅(원인 조사·로그 분석으로 끝내고 수정은 하지 않음), 운영 명령(테스트 실행·상태 조회).
 - 사용자가 라우팅을 건너뛰라고 **명시적으로** 지시한 경우(사용자 지침이 최우선).
 
-이 예외는 위 정당한 경우에만 적용된다 — 「합리화 구멍 차단」의 세 경우(이해-먼저 탐색, SPEC/태스크 구현, 문서·지침 편집)는 예외가 아니라 코드-변경 신호이므로 여기로 끌어오지 않는다. 단순 디버깅은 원인 조사·로그 분석으로 **끝나는** 경우만 예외이며, 그 조사가 **수정 요청**으로 넘어가면 그때는 과도기 버그 경로 `feature`가 먼저다. 반대로, 정당한 예외(순수 질의응답·코드 읽기·검색·조사로 끝나는 디버깅·운영 명령)를 게이트로 끌어오는 것도 오류다.
+이 예외는 위 정당한 경우에만 적용된다 — 「합리화 구멍 차단」의 세 경우(이해-먼저 탐색, SPEC/태스크 구현, 문서·지침 편집)는 예외가 아니라 코드-변경 신호이므로 여기로 끌어오지 않는다. 단순 디버깅은 원인 조사·로그 분석으로 **끝나는** 경우만 예외이며, 그 조사가 **수정 요청**으로 넘어가면 그때는 버그 경로 `fix`가 먼저다. 반대로, 정당한 예외(순수 질의응답·코드 읽기·검색·조사로 끝나는 디버깅·운영 명령)를 게이트로 끌어오는 것도 오류다.
 
 feature 흐름이 **진행 중**일 때 사용자 부정 피드백("이거 아님", "아님", "????")은 **흐름 종료 신호가 아니다** — 현재 단계 실행 방식에 대한 수정 요청이다. 피드백에 따라 현재 단계를 수정하고 흐름을 계속한다. 흐름을 취소하거나 임의 처리(파일 직접 생성, AskUserQuestion 남발)로 이탈하지 않는다.
 
 ## 파이프라인
 
 ```
-기능 의도        → autopilot:feature (인터뷰: 태스크 본문=SPEC 작성) → autopilot:create-task (등록) ─┬→ execute-task (단일 실행)
-버그·증상·실패   → autopilot:feature (과도기: 인터뷰 작성) ───────────→ autopilot:create-task (등록) ─┴→ workflow-task (무인 드레인)
+기능 의도        → autopilot:feature (인터뷰: 태스크 본문=SPEC 작성) ──→ autopilot:create-task (등록) ─┬→ execute-task (단일 실행)
+버그·증상·실패   → autopilot:fix    (정적 분석: 버그 본문=SPEC 작성) ──→ autopilot:create-task (등록) ─┴→ workflow-task (무인 드레인)
+                              └→ [NEEDS CLARIFICATION] → autopilot:feature resume → create-task
 ```
 
-`using-autopilot`은 **올바른 진입점(`feature`/`create-task`)으로의 라우팅까지만** 책임진다. 작성자 `feature`는 인터뷰로 본문(=SPEC)을 떠서 `create-task`에 넘기고, 등록 프리미티브 `create-task`는 그 본문을 백엔드에 등록하고 등록-후 상태 전이를 소유한다. 하류(`execute-task`/`workflow-task`)는 오리엔테이션으로만 표시한 것이며, 그 선택·기동·안내는 등록 이후 `create-task`의 책임이다. 전용 버그 작성자 `fix`가 아직 없으므로, 과도기엔 버그도 `feature`를 진입점으로 둔다(`feature`가 버그 본문을 작성해 `create-task`로 등록; `fix` 머지 후 버그→`fix`로 전환).
+`using-autopilot`은 **올바른 진입점(`feature`/`fix`)으로의 라우팅까지만** 책임진다. 작성자 `feature`는 인터뷰로 본문(=SPEC)을 떠서 `create-task`에 넘기고, 작성자 `fix`는 정적 분석으로 버그 본문을 떠서 `create-task`에 넘긴다. 등록 프리미티브 `create-task`는 본문을 백엔드에 등록하고 등록-후 상태 전이를 소유한다. 하류(`execute-task`/`workflow-task`)는 오리엔테이션으로만 표시한 것이며, 그 선택·기동·안내는 등록 이후 `create-task`의 책임이다. 버그·증상·실패는 `fix`를 진입점으로 둔다(`fix`가 정적 분석으로 버그 본문을 작성해 `create-task`로 등록). 정적 분석으로 해소 불가한 모호성(`[NEEDS CLARIFICATION]`)은 `feature` 인터뷰 재개로 완성한다.
