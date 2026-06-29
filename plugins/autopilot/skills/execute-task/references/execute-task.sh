@@ -269,6 +269,8 @@ et_start() {
   if $FORGE_CMD merge "$sp" "$run_dir" "$key" "$pr"; then
     $ADAPTER_CMD set_status --task-id "$id" --status done >/dev/null
     $ADAPTER_CMD append_log --task-id "$id" --marker handoff --text "merged ${branch:+($branch)}" >/dev/null
+    rm -rf "$(dirname "$sp")" 2>/dev/null || true   # .task-work/<id>/ 정리
+    rm -rf "$run_dir" 2>/dev/null || true             # .autopilot/runs/<id>/ 정리
     echo "execute-task: done ($id)"
   else
     $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "merge 실패" >/dev/null
