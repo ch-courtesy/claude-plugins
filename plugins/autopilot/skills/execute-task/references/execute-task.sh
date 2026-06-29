@@ -198,6 +198,7 @@ et_start() {
     if [[ "$stop_at" == "review" ]]; then echo "execute-task: review 단계 정지 ($id)"; return 0; fi
   else
     echo "execute-task: review 재진입 — forge 단계부터 재시작 ($id)" >&2
+    $ADAPTER_CMD set_status --task-id "$id" --status review >/dev/null
   fi
 
   # forge: integrate → review(승인까지 반복, 가드) → merge (origin 라우팅)
