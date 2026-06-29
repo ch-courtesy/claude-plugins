@@ -100,5 +100,19 @@ grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FEATURE/referen
   || fail "S11: feature self-review 축6에 테스트 경로 scope.include 점검 항목(한 줄) 없음"
 ok "feature self-review: DoD-요구 테스트 경로 점검 항목"
 
+# === S12: feature task-body-template — test_sweep_paths 동시 선언 규칙(#509) ===
+# scope.include에 기존 테스트 파일이 있으면 test_sweep_paths에도 선언해야 loop의
+# 테스트 약화 게이트(HALT)를 통과할 수 있다.
+echo "=== S12: feature 본문 템플릿 — test_sweep_paths 동시 선언 규칙 ==="
+grep -q 'test_sweep_paths' "$FEATURE/references/task-body-template.md" \
+  || fail "S12: feature task-body-template에 test_sweep_paths 동시 선언 규칙 없음"
+ok "feature task-body-template: test_sweep_paths 동시 선언 규칙"
+
+# === S13: feature self-review 축6 — test_sweep_paths 점검 항목(#509) ===
+echo "=== S13: feature self-review 축6 — test_sweep_paths 점검 항목 ==="
+grep -q 'test_sweep_paths' "$FEATURE/references/self-review.md" \
+  || fail "S13: feature self-review 축6에 test_sweep_paths 점검 항목 없음"
+ok "feature self-review: test_sweep_paths 점검 항목"
+
 echo ""
 echo "=== 모든 #445 작성/등록 분리 계약 테스트 통과 ==="

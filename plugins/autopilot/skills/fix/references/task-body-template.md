@@ -69,6 +69,9 @@ scope:
   loop 은 scope 밖 파일을 쓰면 halt 하므로, 완료 조건이 요구하는 산출물(특히 회귀 테스트)은 모두 scope 에 반영해야 RED 테스트를 작성할 수 있다.
   - **#483 (작성자 명시)**: 완료 조건이 요구하는 **새** 회귀 테스트 경로 — 작성자가 scope.include에 명시.
   - **scope-coverage (#498, 시스템 검증)**: scope 내 소스를 덮는 **기존** 테스트 경로 누락 — 등록 시 create-task가 자동 플래그.
+- **test_sweep_paths 동시 선언** — `scope.include`에 기존 테스트 파일 경로가 있으면 `test_sweep_paths`에도
+  선언한다(누락 시 loop.sh의 테스트 약화 게이트가 HALT — `scope.include`에 테스트를 넣되 `test_sweep_paths`를
+  빠뜨리면 loop이 기존 테스트 변경을 탐지해 실행을 중단한다).
 - **plugins/ 변경 시 버전 산출물 포함(권장)** — `plugins/` 를 바꾸는 SPEC 은 워커가 버전 안내(versioning)대로
   매니페스트를 올릴 수 있도록 `plugin.json`·`CHANGELOG.md` 도 `scope.include` 에 넣길 권장한다(강제 아님).
 - **WHAT/HOW 방어선** — 무엇을 고칠지·완료 조건에는 "무엇"만. 기술 선택·경로·라이브러리는 제약/제안으로.
