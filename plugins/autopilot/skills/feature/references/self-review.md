@@ -11,6 +11,8 @@
 6. **scope.include** — frontmatter `scope.include` 가 비어 있지 않고, 식별한 변경 대상을 합리적으로 덮는가
    (과좁으면 정당한 변경이 halt 되므로 불명확할 땐 보수적으로 넓게). 특히 완료 조건이 테스트(회귀 가드)를
    요구하면 그 테스트 경로가 `scope.include` 에 포함됐는가(누락 시 loop 이 RED 테스트를 scope 밖이라 halt).
+   또한 `scope.include`에 기존 테스트 파일 경로가 있으면 `test_sweep_paths`에도 선언됐는가(누락 시 loop의
+   테스트 약화 게이트 HALT).
 
 ## 규모 임계 시 적대 렌즈(가산)
 

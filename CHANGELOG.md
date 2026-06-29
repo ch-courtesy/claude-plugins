@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.61.1
+
+### 버그 수정
+- **fix/feature self-review 축6·task-body-template에 `test_sweep_paths` 동시 선언 안내 누락 (#509)** — `scope.include`에 기존 테스트 파일 경로를 선언했으나 `test_sweep_paths`를 빠뜨리면 loop.sh의 테스트 약화 게이트가 HALT하는데, 이 의존 관계가 self-review와 task-body-template 어디에도 명시되지 않아 작성자가 누락을 잡을 수 없었다. fix/feature 양쪽 self-review 축6 끝에 "scope.include에 기존 테스트 파일 경로가 있으면 test_sweep_paths에도 선언됐는가(누락 시 loop의 테스트 약화 게이트 HALT)" 체크 항목을 추가하고, 양쪽 task-body-template 작성 규칙에 "test_sweep_paths 동시 선언" 규칙을 추가했다. 회귀 가드(`test-fix-skill.sh` S10c/S10d · `test-feature-skill.sh` S12/S13 · `test-feature-resume.sh` R9)가 각 문서의 규칙 존재를 단언한다.
+
 ## autopilot 0.61.0
 
 ### 버그 수정

@@ -106,6 +106,20 @@ grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FIX/references/
   || fail "S10b: fix self-review 축6에 테스트 경로 scope.include 점검 항목(한 줄) 없음"
 ok "fix self-review: DoD-요구 테스트 경로 점검 항목"
 
+# === S10c: fix task-body-template — test_sweep_paths 동시 선언 규칙(#509) ===
+# scope.include에 기존 테스트 파일이 있으면 test_sweep_paths에도 선언해야 loop의
+# 테스트 약화 게이트(HALT)를 통과할 수 있다.
+echo "=== S10c: fix 본문 템플릿 — test_sweep_paths 동시 선언 규칙 ==="
+grep -q 'test_sweep_paths' "$FIX/references/task-body-template.md" \
+  || fail "S10c: fix task-body-template에 test_sweep_paths 동시 선언 규칙 없음"
+ok "fix task-body-template: test_sweep_paths 동시 선언 규칙"
+
+# === S10d: fix self-review 축6 — test_sweep_paths 점검 항목(#509) ===
+echo "=== S10d: fix self-review 축6 — test_sweep_paths 점검 항목 ==="
+grep -q 'test_sweep_paths' "$FIX/references/self-review.md" \
+  || fail "S10d: fix self-review 축6에 test_sweep_paths 점검 항목 없음"
+ok "fix self-review: test_sweep_paths 점검 항목"
+
 # === S11: create-task 가 fix 를 작성자로 인지(짝 정합) ===
 echo "=== S11: create-task fix 짝 정합 ==="
 grep -q 'fix' "$CREATE/SKILL.md" \
