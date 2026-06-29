@@ -111,6 +111,7 @@ usage: adapter.sh <verb> [args]
   set_status --task-id ID --status S [--reason R]
   link_dependency --task-id ID --depends-on-id ID
   append_log --task-id ID --marker decision|handoff|blocked --text T
+  claim --task-id ID --owner S         # stale 판정 + 실행권 획득의 단일 진입점 (GitHub 공유 lease 기반)
   list_ready | backend | selftest
 EOF
       exit 2;;
@@ -147,6 +148,9 @@ tb_selftest() {
   local mr; mr="$(cd "$TMP" && bash "$A" materialize --task-id "$id2")"
   local sp; sp="$(printf '%s' "$mr" | jq -r .spec_path)"
   [[ -f "$TMP/$sp" || -f "$sp" ]] && ok "materialize 파일 생성" || bad "materialize 파일 생성 ($sp)"
+  # help 출력에 claim 동사 포함 확인 (회귀 가드)
+  local help_out; help_out="$(bash "$A" help 2>&1 || true)"
+  [[ "$help_out" == *"claim"* ]] && ok "help에 claim 포함" || bad "help에 claim 미포함"
   echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"
   rm -rf "$TMP"
   return $fail
