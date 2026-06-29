@@ -1,6 +1,6 @@
 ---
 name: workflow-rule-creator
-description: 현재 프로젝트에 맞는 워크플로 sub-룰(workflow rule — SPEC 설계 산출물 레이아웃·단계 게이트 등)을 `rules/workflow/<sub>.md`로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 워크플로 sub-룰 지침·workflow rule을 새로 만들고 싶어 할 때 — "워크플로 지침 생성", "워크플로 룰 만들어줘", "spec-layout sub-룰 작성", "SPEC 산출물 레이아웃/경로 지침 세팅", "설계→구현→리뷰 흐름 게이트 규칙 만들기" 같은 표현을 포함합니다.
+description: 현재 프로젝트에 맞는 워크플로 sub-룰(workflow rule — 단계 게이트 등)을 `rules/workflow/<sub>.md`로 생성하거나 갱신할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 워크플로 sub-룰 지침·workflow rule을 새로 만들고 싶어 할 때 — "워크플로 지침 생성", "워크플로 룰 만들어줘", "설계→구현→리뷰 흐름 게이트 규칙 만들기" 같은 표현을 포함합니다.
 allowed-tools:
   - AskUserQuestion
   - Read
@@ -36,7 +36,7 @@ allowed-tools:
 
    필수 필드가 없는 템플릿은 후보에서 제외하고 사용자에게 알립니다.
 
-3. **전체 생성 (선택 없음).** 어느 sub-룰을 쓸지 묻는 선택 질문 없이, 열거된 **모든 sub-룰을 고정 순서(`spec-layout` → `stage-gates`)로 각각 생성**합니다. 이하 4·4-bis·5단계는 생성 대상 각 sub-룰에 대해 반복 적용합니다.
+3. **전체 생성 (선택 없음).** 어느 sub-룰을 쓸지 묻는 선택 질문 없이, 열거된 **모든 sub-룰을 고정 순서(`stage-gates`)로 각각 생성**합니다. 이하 4·4-bis·5단계는 생성 대상 각 sub-룰에 대해 반복 적용합니다.
 
 4. **정적 입력.** `inputs`가 있으면 순서대로 묻습니다. 값은 `value` 또는 `label`을 사용하고, 비어 있지 않은 "Other"도 허용합니다. (템플릿 본문은 이중 중괄호 표기의 placeholder 토큰을 쓰며, 이 SKILL.md 본문에서는 그 토큰을 중괄호 없이 이름으로 — 예: `name` placeholder — 지칭합니다.) 수집된 값은 해당 입력의 `name`에 대응하는 placeholder에 치환하고, 응답 누락·빈 값은 그 placeholder를 보존합니다.
 
