@@ -114,16 +114,17 @@ scope:
 | `append_log` | `--task-id <id> --marker decision|handoff|blocked --text <s>` | `{"task_id","logged":true}` |
 | `materialize` | `--task-id <id>` | `{"task_id","spec_path"}` (`.task-work/<id>/SPEC.md`) |
 | `renew_lease` | `--task-id <id> [--owner <s>]` | `{"task_id","lease_renewed_at"}` |
-| `claim` | `--task-id <id> --owner <s>` | `{"task_id","claimed":true|false}` |
+| `claim` | `--task-id <id> --owner <s>` | `{"task_id","claimed":true|false}` (stale 판정의 단일 진입점 — stale lease 탈취 + 신규 점유 원자적 게이트) |
 
 관리 동사: `init`(config 생성/갱신), `selftest`(계약 자체 검증), `backend`(현재 백엔드 출력).
 
-### claim (원자적 실행권 획득 — 중복 실행 방지)
+### claim (stale 판정 + 실행권 획득의 단일 진입점)
 
-`list_ready` 조회와 in_progress 전이 사이의 경쟁으로 같은 태스크가 이중 실행되는 것을 막기 위해, 실행자는
-구현 시작 **전에 `claim` 으로 원자적으로 실행권을 획득**한다(단순 `set_status in_progress` 금지). 성공 시
-`claimed:true`(+ status를 in_progress로 전이, lease 초기화), 이미 신선한 lease로 점유 중이면 `claimed:false`
-(실행자는 조용히 skip). lease가 **stale**이면 탈취한다(크래시 워커 회수).
+`claim` 은 **stale 판정의 단일 진입점**이다 — lease가 **stale**(크래시·행 워커)이면 자동으로 탈취해 실행권을
+획득하고, 신선한 점유가 없으면 신규로 원자적 점유한다. `list_ready` 조회와 in_progress 전이 사이의 경쟁도
+차단하므로, 실행자는 구현 시작 **전에 반드시 `claim` 을 호출**한다(단순 `set_status in_progress` 금지). 성공
+시 `claimed:true`(+ status를 in_progress로 전이, lease 초기화), 이미 신선한 lease로 점유 중이면
+`claimed:false`(실행자는 조용히 skip).
 
 - **filesystem**: `.task-work/.claims/<id>` 디렉토리 `mkdir`(원자적 CAS)로 게이트. 종단 상태(done/blocked/
   cancelled) 전이 시 자동 해제.

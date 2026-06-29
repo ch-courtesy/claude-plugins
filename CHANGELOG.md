@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.61.3
+
+### 버그 수정
+- **adapter.sh help에 claim 동사 누락 + contract.md claim 설명에서 stale 판정 역할이 묻힘 (#508)** — `adapter.sh` help 출력에 `claim --task-id ID --owner S`와 "stale 판정 + 실행권 획득의 단일 진입점 (GitHub 공유 lease 기반)" 설명을 추가했다(라우팅에는 존재하나 help에 없어 인터페이스 탐색 시 발견 불가). `contract.md` 동사 표의 `claim` 항에 "(stale 판정의 단일 진입점 — stale lease 탈취 + 신규 점유 원자적 게이트)" 부제를 추가하고, claim 섹션 제목을 "stale 판정 + 실행권 획득의 단일 진입점"으로, 섹션 본문을 stale 판정 역할을 첫 문장에 내세우도록 재서술했다. `tb_selftest`에 help 출력 `claim` 포함 회귀 가드를 추가했다.
+
 ## autopilot 0.61.2
 
 ### 새 기능
