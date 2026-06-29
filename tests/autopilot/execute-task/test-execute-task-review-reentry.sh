@@ -41,6 +41,7 @@ EOF
 chmod +x bin/forge
 
 # mock adapter: claim 항상 true, set_status 결과를 MOCK_STATUS_FILE 에 기록.
+# MOCK_STATUS_LOG 가 설정되면 모든 set_status 호출의 상태값을 줄 단위로 append.
 cat > bin/adapter_mock << 'EOF'
 #!/usr/bin/env bash
 case "$1" in
@@ -56,6 +57,7 @@ case "$1" in
       i=$((i+1))
     done
     if [[ -n "$s" && -n "${MOCK_STATUS_FILE:-}" ]]; then printf '%s' "$s" > "$MOCK_STATUS_FILE"; fi
+    if [[ -n "$s" && -n "${MOCK_STATUS_LOG:-}" ]]; then printf '%s\n' "$s" >> "$MOCK_STATUS_LOG"; fi
     printf '{"task_id":"X","status":"%s"}\n' "$s";;
   renew_lease|append_log)
     printf '{"task_id":"X"}\n';;
@@ -90,14 +92,17 @@ chk "(a) loop.start 1회" "$(awk '/^start$/{c++}END{print c+0}' "$clog_a")" "1"
 
 # --- (b) 재진입: review_entered 존재 → loop.start 미호출 → forge → done ---
 # 완전 mock adapter: claim 항상 true (filesystem claim lock 우회)
-st_b="$TMP/st_b"
+st_b="$TMP/st_b"; slog_b="$TMP/sl_b"
 mkdir -p "$TMP/.autopilot/runs/Xb"
 touch "$TMP/.autopilot/runs/Xb/review_entered"
 clog_b="$TMP/loop_b.log"; : > "$clog_b"
-MOCK_WD="$TMP" MOCK_STATUS_FILE="$st_b" LOOP_CALL_LOG="$clog_b" \
+MOCK_WD="$TMP" MOCK_STATUS_FILE="$st_b" MOCK_STATUS_LOG="$slog_b" LOOP_CALL_LOG="$clog_b" \
   run_mock start Xb >/dev/null 2>&1 || true
 chk "(b) 재진입 → done" "$(cat "$st_b" 2>/dev/null || echo '')" "done"
 chk "(b) 재진입: loop.start 미호출" "$(awk '/^start$/{c++}END{print c+0}' "$clog_b")" "0"
+grep -qx "review" "$slog_b" 2>/dev/null \
+  && ok "(b) 재진입: set_status review 호출됨" \
+  || bad "(b) 재진입: set_status review 호출됨"
 
 # --- (c) --stop-at review: review_entered 미생성, forge 미진입 ---
 st_c="$TMP/st_c"
