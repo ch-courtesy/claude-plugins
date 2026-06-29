@@ -4,8 +4,8 @@
 
 ## autopilot 0.61.2
 
-### 버그 수정
-- **execute-task 재진입 경로에서 `set_status review` 미호출 — forge 구간 stale TTL 300s 오적용 수정 (#527)** — PR #522(review 상태 crash 회수)에서 도입된 reentry else 블록이 `set_status review` 호출을 누락해, 재진입 forge 구간이 `in_progress` 상태(TTL=300s)로 진행됐다. heartbeat가 ~300s 동안 갱신을 멈추면 `be_list_ready`가 false positive stale 판정으로 다른 워커가 태스크를 재탈취할 수 있었다. reentry else 블록 내 forge 진입 직전에 `set_status review` 한 줄을 추가해 정상 경로와 동일하게 TTL=1800s(`TB_REVIEW_TTL`)가 적용되도록 수정했다. 회귀 가드(`test-execute-task-review-reentry.sh`)에 `(b) 재진입: set_status review 호출됨` 단언과 `MOCK_STATUS_LOG` append 추적을 추가해 재진입 경로의 상태 전이 순서를 검증한다.
+### 새 기능
+- **execute-task done 전이 시 `.task-work/<id>/`·`.autopilot/runs/<id>/` 자동 정리** — done 전이 후 두 디렉터리가 메인 워킹트리에 누적되던 문제를 해소했다. `execute-task.sh`의 done 경로에서 `append_log handoff` 직후 `rm -rf "$(dirname "$sp")"` 및 `rm -rf "$run_dir"` 를 실행해 두 산출물을 자동 삭제한다. blocked·stop-at-review 경로에서는 삭제하지 않아 디버깅 보존. 회귀 가드(`test-execute-task-lifecycle.sh` 케이스 1·2·3·4)가 done 케이스 두 디렉터리 부재, stop-at-review·blocked 케이스 task-work 잔존, 링크드 워크트리 경로 정확성을 단언한다.
 
 ## autopilot 0.61.1
 
