@@ -68,7 +68,7 @@ description 초안을 사용자에게 보여주고 수정 여부를 확인한다
 
 ### 5. 품질 자가점검
 
-`references/quality-criteria.md`를 읽고 설계 내용을 30항목 기준으로 점검한다.
+`../../shared/rubric/criteria.md`를 읽고 설계 내용을 30항목 기준으로 점검한다.
 BLOCKER 항목은 반드시 해소하고, MAJOR 항목은 0을 목표로 한다.
 
 ### 6. 파일 작성
@@ -91,13 +91,14 @@ BLOCKER·MAJOR 잔여가 있으면 수정을 권고한다.
 - 사용자에게 선택·승인·해명을 요청할 때는 현재 런타임의 구조화된 사용자 질문 기능을 우선 사용한다.
   구조화된 사용자 질문 기능을 사용할 수 없으면 동일 선택지를 간결한 직접 질문으로 제시한다.
   기능 부재를 이유로 추천값을 임의로 적용하거나 무응답을 동의로 간주하지 않는다.
-- `references/quality-criteria.md`는 5단계에서 읽는다 — 사전에 읽지 않는다.
+- `../../shared/rubric/criteria.md`는 5단계에서 읽는다 — 사전에 읽지 않는다.
 - `references/skill-template.md`는 6단계에서 읽는다.
 - 기존 파일은 사용자 명시 동의 없이 덮어쓰지 않는다.
+- 루브릭 30항목 기준의 단일 출처는 `../../shared/rubric/criteria.md`다 — 사본을 만들지 않는다.
 
 ## references
 
 | 파일 | 용도 | 읽는 시점 |
 |------|------|-----------|
-| `references/quality-criteria.md` | 루브릭 30항목 자가점검 체크리스트 | 5단계 — 품질 자가점검 |
+| `../../shared/rubric/criteria.md` | 루브릭 30항목 자가점검 체크리스트 (단일 출처) | 5단계 — 품질 자가점검 |
 | `references/skill-template.md` | SKILL.md 구조 틀 | 6단계 — 파일 작성 |
