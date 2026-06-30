@@ -20,7 +20,7 @@ SKILL.md 품질 개선이 필요할 때 활성화된다.
 ## 진입점·포인터
 
 - 동작 명세(절차·규칙)의 단일 출처: [`SKILL.md`](./SKILL.md)
-- 루브릭 30항목 자가점검 체크리스트: [`references/quality-criteria.md`](./references/quality-criteria.md)
+- 루브릭 30항목 자가점검 체크리스트(단일 출처): [`../../shared/rubric/criteria.md`](../../shared/rubric/criteria.md)
 - SKILL.md 구조 틀: [`references/skill-template.md`](./references/skill-template.md)
 
 > 이 문서는 폴더 진입점용 요약이다. 진행 순서·규칙 본문은 `SKILL.md`에만 두며 여기서 복제하지 않는다.
