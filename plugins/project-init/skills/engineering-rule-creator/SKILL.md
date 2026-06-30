@@ -1,6 +1,6 @@
 ---
 name: engineering-rule-creator
-description: 현재 프로젝트에 맞는 엔지니어링 sub-룰(릴리스 버전 규약(versioning)·SemVer/CalVer·버전업 강제·변경 기록(changelog) 등)을 `rules/engineering/<sub>.md` 파일로 생성·갱신·수정할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 "엔지니어링 규칙/지침 만들어줘", "릴리스 버전 규약 세워줘", "버전업 규칙 정해줘", "changelog 정책 잡아줘"처럼 엔지니어링 sub-룰 지침을 새로 작성하거나 갱신하고 싶어 할 때.
+description: 현재 프로젝트에 맞는 엔지니어링 sub-룰(릴리스 버전 규약(versioning)·SemVer/CalVer·버전업 강제 등)을 `rules/engineering/<sub>.md` 파일로 생성·갱신·수정할 때 활성화됩니다. project-init 초기화 흐름 중 호출되거나, 사용자가 "엔지니어링 규칙/지침 만들어줘", "릴리스 버전 규약 세워줘", "버전업 규칙 정해줘"처럼 엔지니어링 sub-룰 지침을 새로 작성하거나 갱신하고 싶어 할 때.
 allowed-tools:
   - AskUserQuestion
   - Read
