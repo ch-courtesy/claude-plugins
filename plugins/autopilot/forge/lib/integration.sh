@@ -457,18 +457,36 @@ in_spec_issue() {
   ' "$1"
 }
 
+# in_done_summary <spec_path> — loop 공개 logs 인터페이스(`loop logs`)에서 워커가 signals/DONE
+#   에 남긴 완료 요약(diff 기반 무엇을·왜) 본문을 추출한다. DONE 신호가 없거나 본문이 비어 있으면
+#   빈 출력(호출자가 '## 작업 내용' 섹션을 생략). 내부 signals 파일을 직접 열지 않고, `logs` 출력의
+#   "===== signals/DONE =====" 섹션만 골라낸다(다음 "===== " 섹션 경계에서 닫음, in_pr_summary 와
+#   동일 패턴).
+in_done_summary() {
+  # shellcheck disable=SC2086
+  $LOOP_CMD logs "$1" 2>/dev/null | awk '
+    /^===== signals\/DONE =====$/ { insec = 1; next }
+    insec && /^===== / { exit }
+    insec { print }
+  '
+}
+
 # in_pr_body <spec_path> <run-id> — 구조화 PR 본문(결정적) stdout. dispatch·execute-task 공용.
 #   자동 리뷰 식별 줄(주체별 자동 생성 표기 + "자동 적대 리뷰") + 추적성 + 실행 컨텍스트(run-id)
-#   + 조건부 이슈 cross-reference(Refs #n, rules/context.md 형식) + 요약(SPEC 의도 섹션, 없으면 생략).
+#   + 조건부 이슈 cross-reference(Refs #n, rules/context.md 형식) + 요약(SPEC 의도 섹션, 없으면 생략)
+#   + execute-task 한정 작업 내용(loop DONE 완료 요약, 없으면 생략; #539).
 #   originator 판정은 spec 경로의 임시 materialize 마커(execute-task 의 .task-work/<id>/SPEC.md
 #   컨벤션)로 한다:
 #     - execute-task: 임시 SPEC 경로는 리뷰어에게 무의미·로컬 레이아웃 누출이라 박지 않고(생략),
 #       주체를 정확히 표기(execute-task)하며 추적성은 task-run·이슈 참조(Refs #n)로 표현한다.
-#     - dispatch: 실제 repo SPEC 경로(추적 가치 있음)·dispatch-run 으로 기존 표현을 회귀 없이 유지.
+#       실제로 무엇을 했는지는 loop DONE 완료 요약을 '## 작업 내용' 섹션으로 추가한다.
+#     - dispatch: 실제 repo SPEC 경로(추적 가치 있음)·dispatch-run 으로 기존 표현을 회귀 없이 유지
+#       ('## 작업 내용' 섹션은 추가하지 않는다 — execute-task 발신 PR 한정).
 in_pr_body() {
-  local spec="$1" rid="$2"
+  local spec="$1" rid="$2" is_execute_task=0
   case "$spec" in
     *"/.task-work/"*|".task-work/"*)
+      is_execute_task=1
       printf '🤖 이 PR 은 execute-task 가 자동 생성했으며 자동 적대 리뷰를 거칩니다.\n\n'
       printf 'task-run: %s\n' "$rid"
       ;;
@@ -483,6 +501,12 @@ in_pr_body() {
   local summary; summary="$(in_pr_summary "$spec")"
   if [[ -n "${summary//[$' \t\n']/}" ]]; then
     printf '\n## 요약\n\n%s\n' "$summary"
+  fi
+  if [[ "$is_execute_task" == "1" ]]; then
+    local done_summary; done_summary="$(in_done_summary "$spec")"
+    if [[ -n "${done_summary//[$' \t\n']/}" ]]; then
+      printf '\n## 작업 내용\n\n%s\n' "$done_summary"
+    fi
   fi
 }
 
@@ -990,11 +1014,37 @@ SPECEOF
   case "$body" in *'task-run: 777'*) ok "ET: 태스크 run 추적성";; *) bad "ET: 태스크 run 추적성";; esac
   case "$body" in *'ET 요약 줄.'*) ok "ET: 요약 섹션 보존";; *) bad "ET: 요약 섹션 보존";; esac
 
+  # ---- AC(#539): execute-task DONE 작업 내용 — loop 공개 logs(signals/DONE 섹션)에서 워커
+  #   완료 요약을 읽어 '## 작업 내용' 섹션으로 포함한다(내부 signals 파일 직접 열람 아님,
+  #   $LOOP_CMD logs 경유). specET 의 basename 이 "SPEC.md" 라 mock_loop 의 logs 는
+  #   $LP/SPEC.md.logs 를 읽는다(mock 의 basename-키 컨벤션). ----
+  printf '\n===== signals/DONE =====\n무엇을: X 함수 수정\n왜: 버그 수정\n' > "$LP/SPEC.md.logs"
+  body="$(in_pr_body "$specET" "777")"
+  case "$body" in *'## 작업 내용'*) ok "ET: DONE 요약 있음 → 작업 내용 섹션 포함";; *) bad "ET: DONE 요약 있음 → 작업 내용 섹션 포함";; esac
+  case "$body" in *'무엇을: X 함수 수정'*'왜: 버그 수정'*) ok "ET: 작업 내용 섹션에 DONE 요약 본문 보존";; *) bad "ET: 작업 내용 섹션에 DONE 요약 본문 보존";; esac
+
+  # ---- AC(#539): DONE 신호는 있으나 본문이 비어있음 → 작업 내용 섹션 생략 ----
+  printf '\n===== signals/DONE =====\n' > "$LP/SPEC.md.logs"
+  body="$(in_pr_body "$specET" "777")"
+  case "$body" in *'## 작업 내용'*) bad "ET: DONE 요약 비어있음 → 작업 내용 섹션 생략";; *) ok "ET: DONE 요약 비어있음 → 작업 내용 섹션 생략";; esac
+
+  # ---- AC(#539): DONE 신호 자체가 없음 → 작업 내용 섹션 생략 ----
+  : > "$LP/SPEC.md.logs"
+  body="$(in_pr_body "$specET" "777")"
+  case "$body" in *'## 작업 내용'*) bad "ET: DONE 신호 부재 → 작업 내용 섹션 생략";; *) ok "ET: DONE 신호 부재 → 작업 내용 섹션 생략";; esac
+
   # ---- originator=dispatch 회귀 가드: 기존 본문 표현(라벨·SPEC 경로·dispatch-run) 유지 ----
   body="$(in_pr_body "$specB" "ridDG")"
   case "$body" in *'dispatch 가 자동 생성'*) ok "회귀: dispatch 라벨 유지";; *) bad "회귀: dispatch 라벨 유지";; esac
   case "$body" in *'dispatch-run: ridDG'*) ok "회귀: dispatch-run 유지";; *) bad "회귀: dispatch-run 유지";; esac
   case "$body" in *"SPEC: $specB"*) ok "회귀: dispatch SPEC 경로 유지";; *) bad "회귀: dispatch SPEC 경로 유지";; esac
+
+  # ---- 회귀(#539): dispatch 경로는 DONE 요약이 있어도 '## 작업 내용' 섹션을 추가하지 않는다
+  #   ($spec 의 basename 도 "SPEC.md" 라 같은 mock 로그 파일을 공유 — 의도적 재사용). ----
+  printf '\n===== signals/DONE =====\n무엇을: Y\n' > "$LP/SPEC.md.logs"
+  body="$(in_pr_body "$spec" "ridDG2")"
+  case "$body" in *'## 작업 내용'*) bad "회귀: dispatch 경로 작업 내용 섹션 미추가(DONE 요약 있어도)";; *) ok "회귀: dispatch 경로 작업 내용 섹션 미추가(DONE 요약 있어도)";; esac
+  : > "$LP/SPEC.md.logs"
 
   # ---- PR 생성이 --body-file 로 멀티라인 본문을 forge 에 전달(줄바꿈 보존) ----
   local kB="x-bbb0000"; : > "$PRLOG"; : > "$PRBODY"; : > "$PUSHLOG"
