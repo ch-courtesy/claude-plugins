@@ -31,11 +31,23 @@ allowed-tools:
 
 ```
 EXEC="$(git rev-parse --show-toplevel)/plugins/autopilot/skills/execute-task/references/execute-task.sh"
-bash "$EXEC" start <task-id> [--stop-at review]
+bash "$EXEC" start <task-id> [--stop-at review]   # ← run_in_background: true 필수 (아래 참고)
 bash "$EXEC" status|stop|logs <task-id>
 ```
 
 `status|stop|logs`는 task-id를 spec 경로로 해석해 loop 엔진에 위임한다.
+
+> **`start`는 반드시 `run_in_background: true`(또는 동등한 비동기 실행 메커니즘)로 호출한다.**
+> `start`는 구현 루프 + 리뷰 승인 폴링(`APPROVAL_WAIT_MAX` 기본 360 s) + 머지를 직렬 실행하므로
+> 정상 경로도 10분을 초과할 수 있다. 동기 실행 시 런타임 도구의 타임아웃에 걸려 PR 생성·머지 단계가
+> 중단된다. `status`·`stop`·`logs`는 단명(短命) 조회이므로 동기 호출로 무방하다.
+>
+> background 완료 notification 수신 후 결과를 확인한다:
+> ```
+> bash "$EXEC" logs <task-id>          # 상세 실행 로그
+> bash "$EXEC" status <task-id>        # DONE / BLOCKED / 진행 중 요약
+> ```
+> status가 `blocked`이면 태스크 백엔드의 차단 사유·category를 확인하고 자가개선 절차를 밟는다.
 
 ## 재사용 엔진 (런타임 호출, 그대로 둠)
 
