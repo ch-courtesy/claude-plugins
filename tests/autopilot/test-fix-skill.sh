@@ -134,5 +134,16 @@ grep -q 'failed_ids' "$WT/references/workflow-task.sh" \
   || fail "S12: workflow-task.sh가 failed_ids를 노출하지 않음"
 ok "workflow-task: 드레인자 중앙 fix + failed_ids"
 
+# === S13: fix diagnosis 레드플래그/합리화 차단 섹션 (#543) ===
+echo "=== S13: fix diagnosis 레드플래그/합리화 차단 ==="
+grep -qE '레드플래그' "$FIX/references/diagnosis.md" \
+  || fail "S13: fix diagnosis에 레드플래그 섹션 없음"
+grep -q '정적 분석 한정 위반' "$FIX/references/diagnosis.md" \
+  || fail "S13: fix diagnosis 레드플래그에 재현·실행 충동 → 정적 분석 한정 위반 대응 없음"
+if grep -qE 'superpowers|systematic-debugging' "$FIX/references/diagnosis.md"; then
+  fail "S13: fix diagnosis가 외부 스킬명을 doc-link함(자기완결 위반)"
+fi
+ok "fix diagnosis: 레드플래그 + 자기완결 유지"
+
 echo ""
 echo "=== 모든 #444 fix 스킬 계약 테스트 통과 ==="
