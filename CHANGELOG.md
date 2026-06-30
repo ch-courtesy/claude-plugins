@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.61.5
+
+### 새 기능
+- **execute-task PR 본문에 실제 작업 내용 섹션 추가 (#539)** — execute-task 가 자동 생성하는 PR 본문에는 태스크 추적성(task-run·Refs)과 SPEC 의도(요약)는 있었으나, 실제로 무엇을 했는지(diff 기반 작업 내용)가 없어 리뷰어가 PR 만 보고 작업 내용을 파악할 수 없었다. `forge/lib/integration.sh`에 `in_done_summary`를 추가해 loop 의 공개 인터페이스(`loop logs`)에서 워커가 `signals/DONE`에 남긴 완료 요약을 읽고(내부 signals 파일 직접 열람 없음), `in_pr_body`가 execute-task 발신 PR(`.task-work/<id>/SPEC.md` 경로)에 한해 `## 작업 내용` 섹션으로 포함한다. DONE 요약이 비어있거나 없으면 섹션을 생략한다. dispatch 발신 PR 본문은 회귀 없이 그대로다.
+
 ## autopilot 0.61.3
 
 ### 버그 수정
