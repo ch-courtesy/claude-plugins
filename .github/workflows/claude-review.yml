@@ -421,6 +421,14 @@ jobs:
         with:
           name: claude-review-prep
 
+      - name: Fetch PR head for follow-up context
+        if: ${{ needs.prep.outputs.claude_workflow_changed != 'true' }}
+        env:
+          PR_NUMBER: ${{ needs.prep.outputs.pr_number }}
+        run: |
+          git fetch --no-tags --depth=1 origin \
+            "+refs/pull/$PR_NUMBER/head:refs/remotes/pull/$PR_NUMBER/head"
+
       - name: Load chunk prompt
         id: load-prompt
         if: ${{ needs.prep.outputs.claude_workflow_changed != 'true' }}
