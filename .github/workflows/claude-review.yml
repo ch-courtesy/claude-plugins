@@ -422,7 +422,7 @@ jobs:
           name: claude-review-prep
 
       - name: Fetch PR head for follow-up context
-        if: ${{ needs.prep.outputs.claude_workflow_changed != 'true' }}
+        if: ${{ needs.prep.outputs.claude_workflow_changed != 'true' && needs.prep.outputs.pr_number != '' }}
         env:
           PR_NUMBER: ${{ needs.prep.outputs.pr_number }}
         run: |
