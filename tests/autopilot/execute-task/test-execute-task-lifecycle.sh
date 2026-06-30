@@ -16,7 +16,8 @@ mkdir -p bin
 cat > bin/loop <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
-  start|cleanup) exit 0;;
+  start) touch loop.start.called 2>/dev/null; exit 0;;
+  cleanup) exit 0;;
   status) printf '{"state":"terminal","signals":["%s"]}\n' "${MOCK_RESULT:-DONE}";;
   *) exit 0;;
 esac
@@ -90,5 +91,22 @@ touch "$T2/dummy.md"
 [[ -d "$T2/.autopilot/runs" ]] \
   && ok "4) worktree-내-호출 → run_dir 메인 루트 생성" \
   || bad "4) worktree-내-호출 → run_dir 메인 루트 생성"
+
+# 5) status=done 선제 가드: 잔존 .task-work/.autopilot 디렉토리 정리 + 파이프라인(loop) 미재실행(#541)
+id5="$(bash "$ADAPTER" create_task --title "T5" --body '## 목표'$'\n'w | jq -r .task_id)"
+bash "$ADAPTER" set_status --task-id "$id5" --status done >/dev/null
+mkdir -p "$TMP/.task-work/$id5" "$TMP/.autopilot/runs/$id5"
+touch "$TMP/.task-work/$id5/SPEC.md" "$TMP/.autopilot/runs/$id5/LOG.md"
+rm -f "$TMP/loop.start.called"
+run start "$id5" >/dev/null
+[[ ! -d "$TMP/.task-work/$id5" ]] && ok "5) done 선제: task-work 정리" || bad "5) done 선제: task-work 정리"
+[[ ! -d "$TMP/.autopilot/runs/$id5" ]] && ok "5) done 선제: run-dir 정리" || bad "5) done 선제: run-dir 정리"
+chk "5) done 선제: status 유지" "$(status_of "$id5")" "done"
+[[ ! -f "$TMP/loop.start.called" ]] && ok "5) done 선제: 파이프라인 미재실행(loop 미호출)" || bad "5) done 선제: 파이프라인 미재실행(loop 미호출)"
+
+# 6) 멱등: 두 디렉토리 모두 이미 없는 상태에서 재호출해도 에러·디렉토리 생성 없이 안전 종료
+run start "$id5" >/dev/null
+[[ ! -d "$TMP/.task-work/$id5" && ! -d "$TMP/.autopilot/runs/$id5" ]] \
+  && ok "6) 멱등 재호출: 디렉토리 미생성" || bad "6) 멱등 재호출: 디렉토리 미생성"
 
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail
