@@ -12,7 +12,7 @@
 ## 언제 (When)
 
 project-init 초기화 흐름에서 엔지니어링 카테고리 지침을 만들 때, 또는 사용자가
-릴리스 버전 규약(versioning)·버전업 강제·changelog 정책 등 엔지니어링 sub-룰을
+릴리스 버전 규약(versioning)·버전업 강제 등 엔지니어링 sub-룰을
 새로 작성·갱신하려 할 때. (정확한 트리거 표현은 `SKILL.md` frontmatter `description`.)
 
 ## 어떻게 호출 (How)

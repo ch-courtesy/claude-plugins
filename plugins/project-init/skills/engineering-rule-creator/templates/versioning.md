@@ -1,6 +1,6 @@
 ---
 label: 버전 관리 (versioning)
-description: 버전 규약·단일 출처·변경 기록·워치 디렉토리를 한 문서로 정의하고, 기본 브랜치 머지에 버전업을 강제합니다.
+description: 버전 규약·단일 출처·워치 디렉토리를 한 문서로 정의하고, 기본 브랜치 머지에 버전업을 강제합니다.
 recommended: true
 inputs:
   - name: scheme
@@ -26,19 +26,6 @@ inputs:
       - label: "전용 파일"
         description: "VERSION·__version__.py·version.txt 등 단일 텍스트 파일"
         value: "전용 버전 파일 (예: VERSION·__version__.py·version.txt)"
-  - name: changelog_location
-    header: "변경 기록"
-    question: "변경 기록(changelog)은 어디에 누적하는가?"
-    options:
-      - label: "CHANGELOG.md"
-        description: "리포 루트의 단일 마크다운. Keep a Changelog 양식 권장"
-        value: "리포 루트의 `CHANGELOG.md`"
-      - label: "GitHub Releases"
-        description: "release note 본문. 자동 생성 또는 수동 작성"
-        value: "GitHub Releases note"
-      - label: "분할 fragment"
-        description: "릴리스 시 합쳐지는 fragment 파일(towncrier·changesets 등)"
-        value: "릴리스 시 합쳐지는 fragment (예: towncrier·changesets)"
 dynamic_inputs:
   - name: watch_directories
     header: "워치 디렉토리"
@@ -51,7 +38,7 @@ dynamic_inputs:
 
 # 버전 관리 지침
 
-릴리스 버전 번호, 단일 출처, 변경 기록, 버전업 강제 대상을 정하는 규칙입니다. 같은 산출물에 두 버전이 노출되지 않게 합니다.
+릴리스 버전 번호, 단일 출처, 버전업 강제 대상을 정하는 규칙입니다. 같은 산출물에 두 버전이 노출되지 않게 합니다.
 
 ## 버전 규약
 
@@ -68,14 +55,6 @@ dynamic_inputs:
 
 - 코드·문서·CI·배포 산출물의 버전 값은 모두 SoT에서 파생합니다.
 - 버전 증가는 SoT 갱신 commit으로 시작합니다. 파생 위치는 파이프라인 또는 명시적 동기화 스크립트로 갱신합니다.
-
-## 변경 기록 (Changelog)
-
-이 프로젝트의 변경 기록은 **{{changelog_location}}** 에 누적합니다.
-
-- 사용자 가시 변경은 릴리스 직전이 아니라 머지될 때 기록합니다.
-- 최소 분류: 새 기능, 변경(호환), 변경(깨짐), 버그 수정, 보안.
-- 사용자 가시 영향이 없는 내부 변경은 changelog 대신 commit 히스토리로 충분합니다.
 
 ## 워치 디렉토리 (watch directories)
 
@@ -94,15 +73,18 @@ dynamic_inputs:
 - "다음 릴리스에 묶기"·"hotfix 예외"는 위반입니다. 예외가 필요하면 먼저 이 룰을 갱신합니다.
 - PR 머지 차단, hotfix, 경고 등 대응 정책과 자동 감지(CI·hook·PR check)는 별도로 정합니다.
 - 워치 디렉토리 변경 여부는 머지 대상 diff의 파일 경로로 판정합니다. 공백·줄바꿈도 변경으로 셉니다.
+- **parity 예외**: 여러 산출물(매니페스트 등)이 자동 검증으로 동일 버전 값을 강제받고, 이번 변경의
+  scope가 그 전체 동기화를 포함하지 않아 일부만 올리면 그 검증이 깨지는 경우에 한해 버전업을 보류할 수
+  있습니다. 보류 시 사유·영향받는 산출물·해소 계획을 commit 메시지에 명시하고, 전체 동기화는 가능한
+  빨리 후속 변경으로 처리합니다. 이 예외는 두 버전 노출을 영구화하지 않습니다.
 
 ## 릴리스 절차 (요지)
 
 1. **버전 자리 결정** — 머지된 변경을 규약에 따라 분류하고 다음 버전을 정합니다.
 2. **SoT 갱신** — 단일 출처를 새 버전으로 갱신합니다.
-3. **변경 기록 마무리** — 다음 버전 헤더 아래 항목을 모으거나 fragment를 합칩니다.
-4. **tag·릴리스** — 새 버전 tag·release를 만듭니다. SoT가 tag이면 이 단계가 SoT 갱신입니다.
-5. **배포 산출물 게시** — 빌드·배포가 SoT를 읽어 같은 버전으로 게시합니다.
+3. **tag·릴리스** — 새 버전 tag·release를 만듭니다. SoT가 tag이면 이 단계가 SoT 갱신입니다.
+4. **배포 산출물 게시** — 빌드·배포가 SoT를 읽어 같은 버전으로 게시합니다.
 
 ## 위반 발견 시
 
-두 버전 노출, changelog 누락, 워치 디렉토리 변경의 버전업 누락을 발견하면 즉시 멈추고 SoT·변경 기록을 정상화합니다. 다음 릴리스로 미루지 않습니다.
+두 버전 노출, 워치 디렉토리 변경의 버전업 누락을 발견하면 즉시 멈추고 SoT를 정상화합니다. 다음 릴리스로 미루지 않습니다.

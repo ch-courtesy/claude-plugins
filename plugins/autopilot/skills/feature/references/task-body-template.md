@@ -56,7 +56,7 @@ scope:
   선언한다(누락 시 loop.sh의 테스트 약화 게이트가 HALT — `scope.include`에 테스트를 넣되 `test_sweep_paths`를
   빠뜨리면 loop이 기존 테스트 변경을 탐지해 실행을 중단한다).
 - **plugins/ 변경 시 버전 산출물 포함(권장)** — `plugins/` 를 바꾸는 SPEC 은 워커가 버전 안내(versioning)대로
-  매니페스트를 올릴 수 있도록 `plugin.json`·`CHANGELOG.md` 도 `scope.include` 에 넣길 권장한다(강제 아님).
+  매니페스트를 올릴 수 있도록 `plugin.json` 도 `scope.include` 에 넣길 권장한다(강제 아님).
 - **WHAT/HOW 방어선** — 무엇을 만들 것인가·완료 조건에는 "무엇"만. 기술 선택·경로·라이브러리는 제약에.
 - **완료 조건**은 `references/ears-patterns.md`의 5문장 패턴으로, 각 항목이 관찰 가능하고 독립적으로 테스트
   가능해야 한다(실행 스킬이 이걸로 검증).
