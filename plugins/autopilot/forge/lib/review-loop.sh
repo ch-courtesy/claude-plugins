@@ -75,10 +75,21 @@ rl_review_fetch_gh() {
   # 봇 로그인 정규식은 **login 필드 단독**에 적용해야 앵커(\[bot\]$)가 성립한다 — login\tbody
   #   결합 라인에 grep 하면 본문 때문에 앵커가 깨진다(#432). awk 로 현재 head 의 verdict=approve
   #   마커를 가진 리뷰의 login 만 추출 → 그 login 을 신뢰봇 grep(아래 [blocking] 인라인 게이트와 동일).
-  if [[ -z "$approve" && -n "$head" ]] && gh pr view "$pr" --json reviews \
-        --jq '.reviews[] | (.author.login // "") + "\t" + ((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null \
+  #   리뷰 본문(login\tbody)은 1회 조회해 승인 마커·공식 재리뷰 실재 증거(#549) 검사에 공용한다.
+  local rbodies=""
+  [[ -n "$head" ]] && rbodies="$(gh pr view "$pr" --json reviews \
+        --jq '.reviews[] | (.author.login // "") + "\t" + ((.body // "")|gsub("[\n\t]";" "))' 2>/dev/null)"
+  if [[ -z "$approve" && -n "$rbodies" ]] && printf '%s\n' "$rbodies" \
        | awk -F'\t' -v h="$head" '$2 ~ ("head_sha=" h "[^>]*verdict=approve") {print $1}' \
        | grep -qE "$REVIEW_BOT_LOGIN_RE"; then approve=1; fi
+  # 현재 head 에 대한 공식 재리뷰 실재 증거 — 신뢰봇의 *-formal-review 마커(verdict 무관; 워크플로는
+  #   approve/comment 모두 마커를 게시). GitHub 는 과거 커밋의 미해결 인라인 코멘트 앵커가 살아 있으면
+  #   commit.oid 를 최신 head 로 재매핑하므로, oid==head 만으로는 "이번 head 가 재평가됨"을 뜻하지
+  #   않는다(#549 거짓 핑퐁). 증거 없으면 아래에서 재매핑 스레드를 새 차단 지적으로 채택하지 않는다.
+  local reviewed=""
+  if [[ -n "$rbodies" ]] && printf '%s\n' "$rbodies" \
+       | awk -F'\t' -v h="$head" '$2 ~ ("-formal-review[^>]*head_sha=" h) {print $1}' \
+       | grep -qE "$REVIEW_BOT_LOGIN_RE"; then reviewed=1; fi
   # 현재 head 미해결(isResolved=false) 스레드의 인라인 코멘트만 조회(GraphQL): login\tcommit_oid\tbody.
   #   resolve 된 스레드는 제외해 resolve→재리뷰 데드락을 막는다. raw JSON 을 jq 로 필터
   #   (mock=raw 반환으로 isResolved 필터를 결정적 검증). 조회/owner 확정 실패·head 미확정은
@@ -128,10 +139,12 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
     # 인라인 조회 실패 → 거짓 승인 금지. changes 로 표면화(무진전 가드가 에스컬레이션 유도).
     echo "verdict: changes"
     echo "finding: 미해결 리뷰 스레드 조회 실패 — default-deny(보수적 차단), 확인 필요"
-  elif [[ -n "$findings" ]]; then
+  elif [[ -n "$findings" && -n "$reviewed" ]]; then
     echo "verdict: changes"
     echo "finding: $findings"
   else
+    # 지적이 없거나, 있어도 현재 head 공식 재리뷰 증거가 없으면(재매핑 추정) 대기(#549).
+    #   blocking 에 의한 approve 가림(#493)은 위에서 그대로 유지된다 — 거짓 승인은 없다.
     echo "verdict: pending"
   fi
 }
@@ -723,21 +736,26 @@ rl_selftest() {
   local GH="sha-GH"
   local GBLK; GBLK="$(thr false "github-actions[bot]" "$GH" "**[blocking/98] 차단 지적**")"
   local GOKC; GOKC="$(thr false "github-actions[bot]" "$GH" "**[non_blocking/85] 정보성**")"
+  # 비승인 공식 리뷰 마커(verdict=comment) — 인라인 지적을 남긴 공식 재리뷰의 실재 증거(#549).
+  local MARK_RC2="github-actions[bot]\t<!-- claude-formal-review head_sha=$GH verdict=comment -->\n"
+  local MARK_RCOLD2="github-actions[bot]\t<!-- claude-formal-review head_sha=oldSHA verdict=comment -->\n"
 
+  # 인라인 지적이 있는 케이스는 그 지적을 남긴 공식 재리뷰의 마커(MARK_RC2, #549 증거)를 동반한다
+  #   — 실제 워크플로는 인라인 지적 제출 시 항상 verdict=comment 마커 리뷰를 함께 게시한다.
   chk "AC4 approve+head [blocking] → changes" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GBLK" rvg)" "changes"
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_REVIEWS="$MARK_RC2" SC_THREADS="$GBLK" rvg)" "changes"
   # #493: 미해결이면 태그 무관 차단 — approve 라도 미해결 non_blocking 스레드는 changes 로 표면화.
   chk "approve+미해결 non_blocking(정보성) → changes(태그 무관)" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GOKC" rvg)" "changes"
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_REVIEWS="$MARK_RC2" SC_THREADS="$GOKC" rvg)" "changes"
   # #493: 태그 없는 미해결 스레드도 차단(차단 판정이 태그에 의존하지 않음).
   chk "approve+태그없는 미해결 스레드 → changes" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "github-actions[bot]" "$GH" "태그 없는 일반 코멘트")" rvg)" "changes"
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_REVIEWS="$MARK_RC2" SC_THREADS="$(thr false "github-actions[bot]" "$GH" "태그 없는 일반 코멘트")" rvg)" "changes"
   chk "AC4 비승인+head [blocking] → changes" \
-    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_THREADS="$GBLK" rvg)" "changes"
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_RC2" SC_THREADS="$GBLK" rvg)" "changes"
   chk "resolved 스레드 [blocking]+approve → approve(차단 안 함)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr true "github-actions[bot]" "$GH" "**[blocking/98] 해결됨**")" rvg)" "approve"
   chk "pagination: 2페이지의 [blocking]+approve → changes" \
-    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "github-actions[bot]" "$GH" "**[non_blocking/80] 1p**")$(thr false "github-actions[bot]" "$GH" "**[blocking/98] 2p**")" rvg)" "changes"
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_REVIEWS="$MARK_RC2" SC_THREADS="$(thr false "github-actions[bot]" "$GH" "**[non_blocking/80] 1p**")$(thr false "github-actions[bot]" "$GH" "**[blocking/98] 2p**")" rvg)" "changes"
   chk "AC3 outdated [blocking]+approve → approve(차단 안 함)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "github-actions[bot]" "oldSHA" "**[blocking/98] 이전**")" rvg)" "approve"
   chk "AC3 비신뢰봇 [blocking]+approve → approve(차단 안 함)" \
@@ -757,6 +775,18 @@ rl_selftest() {
     "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_EVIL2" SC_THREADS="$GEMPTY" rvg)" "pending"
   chk "#432 head 불일치 마커 → 미승인(pending)" \
     "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_OLD2" SC_THREADS="$GEMPTY" rvg)" "pending"
+  # #549 거짓 핑퐁 가드: GitHub 는 과거 커밋의 미해결 인라인 코멘트 앵커가 살아 있으면 commit.oid 를
+  #   최신 head 로 재매핑한다 — oid==head 만으로 "이번 head 재평가됨"을 뜻하지 않는다. 현재 head 에
+  #   대한 신뢰봇 *-formal-review 마커(verdict 무관)가 없으면 재매핑 스레드를 새 차단 지적으로
+  #   채택하지 않고 pending(대기)으로 보고한다.
+  chk "#549 재리뷰 마커 없는 재매핑 스레드 → pending" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_THREADS="$GBLK" rvg)" "pending"
+  chk "#549 구 head 마커만 존재(재매핑) → pending" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_RCOLD2" SC_THREADS="$GBLK" rvg)" "pending"
+  chk "#549 approve 결정+마커 없는 재매핑 스레드 → pending(거짓 승인·거짓 changes 모두 아님)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GBLK" rvg)" "pending"
+  chk "#549 현재 head 재리뷰 마커(비승인) 존재+미해결 스레드 → changes(가드 유지)" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_RC2" SC_THREADS="$GBLK" rvg)" "changes"
   chk "AC5 인라인 조회 실패 → changes(default-deny)" \
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rvg)" "changes"
   out="$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rl_review_fetch_gh 205 2>/dev/null)"
