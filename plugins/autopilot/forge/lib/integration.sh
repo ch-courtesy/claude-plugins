@@ -418,7 +418,7 @@ in_cleanup_failed_worktree() {
 
 # =====================================================================
 # 4) PR 생성/재사용 — 같은 head 의 open PR 이 있으면 재사용.
-#    본문은 정적 한 줄이 아니라 in_pr_body 의 구조화 본문(SPEC 추적성·요약·실행 컨텍스트).
+#    본문은 정적 한 줄이 아니라 in_pr_body 의 구조화 본문(이슈 참조·요약·작업 내용).
 # =====================================================================
 
 in_existing_open_pr() {
@@ -471,55 +471,45 @@ in_done_summary() {
   '
 }
 
-# in_pr_body <spec_path> <run-id> — 구조화 PR 본문(결정적) stdout. dispatch·execute-task 공용.
-#   자동 리뷰 식별 줄(주체별 자동 생성 표기 + "자동 적대 리뷰") + 추적성 + 실행 컨텍스트(run-id)
-#   + 조건부 이슈 cross-reference(Refs #n, rules/context.md 형식) + 요약(SPEC 의도 섹션, 없으면 생략)
+# in_pr_body <spec_path> — 구조화 PR 본문(결정적) stdout. dispatch·execute-task 공용.
+#   사람이 읽는 실질 내용만 담는다(#554 — 자동생성 안내 문구·run 추적 줄 없음):
+#   조건부 이슈 cross-reference(Refs #n, rules/context.md 형식) + 요약(SPEC 의도 섹션, 없으면 생략)
 #   + execute-task 한정 작업 내용(loop DONE 완료 요약, 없으면 생략; #539).
 #   originator 판정은 spec 경로의 임시 materialize 마커(execute-task 의 .task-work/<id>/SPEC.md
-#   컨벤션)로 한다:
-#     - execute-task: 임시 SPEC 경로는 리뷰어에게 무의미·로컬 레이아웃 누출이라 박지 않고(생략),
-#       주체를 정확히 표기(execute-task)하며 추적성은 task-run·이슈 참조(Refs #n)로 표현한다.
-#       실제로 무엇을 했는지는 loop DONE 완료 요약을 '## 작업 내용' 섹션으로 추가한다.
-#     - dispatch: 실제 repo SPEC 경로(추적 가치 있음)·dispatch-run 으로 기존 표현을 회귀 없이 유지
-#       ('## 작업 내용' 섹션은 추가하지 않는다 — execute-task 발신 PR 한정).
+#   컨벤션)로 한다 — '## 작업 내용' 섹션은 execute-task 발신 PR 한정.
+#   첫 요소(Refs 또는 요약)가 선행 공백 줄 없이 시작하도록 블록 사이에만 빈 줄을 넣는다.
 in_pr_body() {
-  local spec="$1" rid="$2" is_execute_task=0
+  local spec="$1" is_execute_task=0 first=1
   case "$spec" in
-    *"/.task-work/"*|".task-work/"*)
-      is_execute_task=1
-      printf '🤖 이 PR 은 execute-task 가 자동 생성했으며 자동 적대 리뷰를 거칩니다.\n\n'
-      printf 'task-run: %s\n' "$rid"
-      ;;
-    *)
-      printf '🤖 이 PR 은 dispatch 가 자동 생성했으며 자동 적대 리뷰를 거칩니다.\n\n'
-      printf 'SPEC: %s\n' "$spec"
-      printf 'dispatch-run: %s\n' "$rid"
-      ;;
+    *"/.task-work/"*|".task-work/"*) is_execute_task=1 ;;
   esac
   local issue; issue="$(in_spec_issue "$spec")"
-  [[ -n "$issue" ]] && printf 'Refs #%s\n' "$issue"
+  if [[ -n "$issue" ]]; then printf 'Refs #%s\n' "$issue"; first=0; fi
   local summary; summary="$(in_pr_summary "$spec")"
   if [[ -n "${summary//[$' \t\n']/}" ]]; then
-    printf '\n## 요약\n\n%s\n' "$summary"
+    [[ "$first" == 1 ]] || printf '\n'
+    printf '## 요약\n\n%s\n' "$summary"
+    first=0
   fi
   if [[ "$is_execute_task" == "1" ]]; then
     local done_summary; done_summary="$(in_done_summary "$spec")"
     if [[ -n "${done_summary//[$' \t\n']/}" ]]; then
-      printf '\n## 작업 내용\n\n%s\n' "$done_summary"
+      [[ "$first" == 1 ]] || printf '\n'
+      printf '## 작업 내용\n\n%s\n' "$done_summary"
     fi
   fi
 }
 
-# in_ensure_pr <branch> <title> <spec> <run-id> — open PR 재사용 또는 신규 생성. PR 번호 echo.
-#   신규 생성 PR 에만 자동 리뷰 표시를 단다(제목 '🤖 [자동 리뷰]' 접두 + 본문 식별 줄(in_pr_body)) —
+# in_ensure_pr <branch> <title> <spec> — open PR 재사용 또는 신규 생성. PR 번호 echo.
+#   신규 생성 PR 에만 자동 리뷰 표시를 단다(제목 '🤖 [자동 리뷰]' 접두) —
 #   open PR 재사용(조기 반환) 경로는 기존 PR 제목·본문을 건드리지 않는다(수정 호출 없음).
 #   본문은 임시 파일 + --body-file 로 전달해 셸 인용·줄바꿈 손상 없이 멀티라인을 보존한다.
 in_ensure_pr() {
-  local branch="$1" title="$2" spec="$3" rid="$4" n
+  local branch="$1" title="$2" spec="$3" n
   n="$(in_existing_open_pr "$branch")"
   if [[ -n "$n" ]]; then printf '%s\n' "$n"; return 0; fi
   local bodyf; bodyf="$(mktemp)" || { in_die "PR 본문 임시 파일 생성 실패"; return 1; }
-  in_pr_body "$spec" "$rid" > "$bodyf"
+  in_pr_body "$spec" > "$bodyf"
   # shellcheck disable=SC2086
   $FORGE_CMD pr create --head "$branch" --base "$DEFAULT_BRANCH" \
     --title "🤖 [자동 리뷰] $title" --body-file "$bodyf" \
@@ -560,7 +550,7 @@ in_integrate() {
       [[ "${INT_BASESYNC_PUSHED:-}" == "1" ]] || in_push_branch "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       local title pr
       title="$(in_spec_title "$spec")"
-      pr="$(in_ensure_pr "$branch" "$title" "$spec" "$rid")" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      pr="$(in_ensure_pr "$branch" "$title" "$spec")" || { int_set_phase "$rd" "$key" blocked; return 4; }
       [[ -n "$pr" ]] && int_set_pr "$rd" "$key" "$pr"
       int_set_phase "$rd" "$key" review
       int_log "$rd" "$key" "PR=$pr 인계 — review 대기"
@@ -814,11 +804,11 @@ in_selftest() {
   grep -q 'feat/20260604T000000-abc1234-x' "$PUSHLOG" && ok "AC2 작업 브랜치 push" || bad "AC2 작업 브랜치 push"
   grep -q 'pr create' "$PRLOG" && ok "AC2 PR 생성" || bad "AC2 PR 생성"
   grep -q 'rebase' "$GITLOG" && ok "AC2 base sync rebase" || bad "AC2 base sync rebase"
-  # ---- AC: 신규 생성 PR 의 자동 리뷰 표시(제목 접두 태그 + 본문 식별 줄) ----
+  # ---- AC: 신규 생성 PR 제목 접두 태그 유지 + 본문 자동생성 식별 줄 부재(#554) ----
   grep -Fq -- '--title 🤖 [자동 리뷰] ' "$PRLOG" \
     && ok "AC 신규 PR 제목 자동 리뷰 접두 태그" || bad "AC 신규 PR 제목 자동 리뷰 접두 태그"
   grep -Fq '자동 적대 리뷰' "$PRBODY" \
-    && ok "AC 신규 PR 본문 자동 리뷰 식별 줄" || bad "AC 신규 PR 본문 자동 리뷰 식별 줄"
+    && bad "AC 신규 PR 본문 자동생성 식별 줄 부재" || ok "AC 신규 PR 본문 자동생성 식별 줄 부재"
 
   # ---- AC: open PR 존재 → 재사용(새 PR 미생성) + 기존 브랜치 rebase 재작성 안 함 ----
   #   (Codex blocking 회귀 가드: base 전진+원격 브랜치 존재 시 rebase 는 non-ff push 를 부른다.)
@@ -956,7 +946,7 @@ in_selftest() {
   in_cleanup_worktree_if_preserved "$spec" "$wbF"
   [[ ! -s "$CLEANUPLOG" ]] && ok "U2 헬퍼: 미보존 → 보존" || bad "U2 헬퍼: 미보존 → 보존"
 
-  # ---- PR 본문 구조화(in_pr_body): SPEC 경로·run-id 포함, 요약 섹션 본문(주석 제거),
+  # ---- PR 본문 구조화(in_pr_body): 자동생성 안내·run 추적 줄 부재(#554), 요약 섹션 본문(주석 제거),
   #   이슈 식별 정보 조건부 cross-reference, 정적 한 줄 부재. ----
   local specB="$TMP/SPECB.md" body
   cat > "$specB" <<'SPECEOF'
@@ -974,44 +964,44 @@ slug: pr-body-test
 ## 목적 (왜)
 이유.
 SPECEOF
-  body="$(in_pr_body "$specB" "20260604T000000-abc1234")"
-  case "$body" in *"$specB"*) ok "본문 SPEC 경로 포함";; *) bad "본문 SPEC 경로 포함";; esac
-  case "$body" in *20260604T000000-abc1234*) ok "본문 run-id 포함";; *) bad "본문 run-id 포함";; esac
+  body="$(in_pr_body "$specB")"
+  case "$body" in *"$specB"*) bad "본문 SPEC 경로 부재(#554)";; *) ok "본문 SPEC 경로 부재(#554)";; esac
+  case "$body" in '## 요약'*) ok "본문 선두 요약(선행 공백 줄 없음)";; *) bad "본문 선두 요약(선행 공백 줄 없음)";; esac
   case "$body" in *"요약 첫 줄이다."*"요약 둘째 줄이다."*) ok "본문 요약 섹션 전체 포함";; *) bad "본문 요약 섹션 전체 포함";; esac
   case "$body" in *"설명용 주석"*) bad "본문 요약 주석 제거";; *) ok "본문 요약 주석 제거";; esac
   case "$body" in *"목적 (왜)"*) bad "본문 다음 섹션 미포함(요약 경계)";; *) ok "본문 다음 섹션 미포함(요약 경계)";; esac
   case "$body" in *'Refs #'*) bad "이슈 없음 → cross-reference 미생성";; *) ok "이슈 없음 → cross-reference 미생성";; esac
   case "$body" in *'dispatch 통합:'*) bad "정적 한 줄 본문 부재";; *) ok "정적 한 줄 본문 부재";; esac
 
-  # ---- 요약 섹션 부재 → 요약 블록 생략, 나머지 본문 정상 생성 ----
-  body="$(in_pr_body "$spec" "rid7777")"   # $spec 에는 '무엇을 만들 것인가' 섹션이 없다.
-  case "$body" in *"$spec"*) ok "요약 부재: SPEC 경로 정상";; *) bad "요약 부재: SPEC 경로 정상";; esac
-  case "$body" in *rid7777*) ok "요약 부재: run-id 정상";; *) bad "요약 부재: run-id 정상";; esac
+  # ---- 요약 섹션 부재 → 요약 블록 생략 (식별 줄·run 줄도 없으므로 본문 전체 빈 출력, #554) ----
+  body="$(in_pr_body "$spec")"   # $spec 에는 '무엇을 만들 것인가' 섹션·이슈가 없다.
   case "$body" in *'## 요약'*) bad "요약 부재 시 요약 블록 생략";; *) ok "요약 부재 시 요약 블록 생략";; esac
+  [[ -z "$body" ]] && ok "요약·이슈 부재 → 본문 빈 출력(#554)" || bad "요약·이슈 부재 → 본문 빈 출력(#554)"
 
   # ---- 이슈 식별 정보(frontmatter issue:) 존재 → cross-reference 한 줄 ----
   local specI="$TMP/SPECI.md"
   printf -- '---\nissue: 42\n---\n\n# 이슈 기능 Z\n' > "$specI"
-  body="$(in_pr_body "$specI" "rid8888")"
+  body="$(in_pr_body "$specI")"
   case "$body" in *'Refs #42'*) ok "이슈 존재 → Refs #42 한 줄";; *) bad "이슈 존재 → Refs #42 한 줄";; esac
+  case "$body" in 'Refs #42'*) ok "본문 선두 Refs(선행 공백 줄 없음)";; *) bad "본문 선두 Refs(선행 공백 줄 없음)";; esac
   printf -- '---\nissue: "#43"\n---\n\n# 이슈 기능 W\n' > "$specI"
-  body="$(in_pr_body "$specI" "rid8888")"
+  body="$(in_pr_body "$specI")"
   case "$body" in *'Refs #43'*) ok "이슈 '#43' 표기 정규화";; *) bad "이슈 '#43' 표기 정규화";; esac
 
   # ---- originator=execute-task: 임시 materialize SPEC(.task-work/<id>/SPEC.md) 본문 ----
-  #   (a) .task-work/·절대 경로 누출 부재, (b) dispatch 오표기 부재·주체 라벨 정확,
-  #   (c) 태스크 참조(Refs #n)·리뷰 식별 줄 보존, (d) 태스크 run 추적성. ----
+  #   (a) .task-work/·절대 경로 누출 부재, (b) dispatch 오표기 부재,
+  #   (c) 자동생성 식별 줄·run 추적 줄 부재(#554), (d) 태스크 참조(Refs #n)·요약 보존. ----
   local specET="$TMP/.task-work/777/SPEC.md"
   mkdir -p "$TMP/.task-work/777"
   printf -- '---\nslug: et-body\nissue: 777\n---\n\n# ET 기능\n\n## 무엇을 만들 것인가\nET 요약 줄.\n' > "$specET"
-  body="$(in_pr_body "$specET" "777")"
+  body="$(in_pr_body "$specET")"
   case "$body" in *'.task-work/'*) bad "ET: .task-work 임시 경로 누출 부재";; *) ok "ET: .task-work 임시 경로 누출 부재";; esac
   case "$body" in *"$specET"*) bad "ET: 절대 SPEC 경로 부재";; *) ok "ET: 절대 SPEC 경로 부재";; esac
   case "$body" in *dispatch*) bad "ET: dispatch 오표기 부재";; *) ok "ET: dispatch 오표기 부재";; esac
-  case "$body" in *'execute-task 가 자동 생성'*) ok "ET: 주체 라벨 정확(execute-task)";; *) bad "ET: 주체 라벨 정확(execute-task)";; esac
-  case "$body" in *'자동 적대 리뷰'*) ok "ET: 리뷰 식별 줄 보존";; *) bad "ET: 리뷰 식별 줄 보존";; esac
+  case "$body" in *'자동 생성'*) bad "ET: 자동생성 식별 줄 부재(#554)";; *) ok "ET: 자동생성 식별 줄 부재(#554)";; esac
+  case "$body" in *'자동 적대 리뷰'*) bad "ET: 리뷰 식별 줄 부재(#554)";; *) ok "ET: 리뷰 식별 줄 부재(#554)";; esac
   case "$body" in *'Refs #777'*) ok "ET: 태스크 이슈 참조(Refs #777) 보존";; *) bad "ET: 태스크 이슈 참조(Refs #777) 보존";; esac
-  case "$body" in *'task-run: 777'*) ok "ET: 태스크 run 추적성";; *) bad "ET: 태스크 run 추적성";; esac
+  case "$body" in *'task-run:'*) bad "ET: task-run 줄 부재(#554)";; *) ok "ET: task-run 줄 부재(#554)";; esac
   case "$body" in *'ET 요약 줄.'*) ok "ET: 요약 섹션 보존";; *) bad "ET: 요약 섹션 보존";; esac
 
   # ---- AC(#539): execute-task DONE 작업 내용 — loop 공개 logs(signals/DONE 섹션)에서 워커
@@ -1019,30 +1009,38 @@ SPECEOF
   #   $LOOP_CMD logs 경유). specET 의 basename 이 "SPEC.md" 라 mock_loop 의 logs 는
   #   $LP/SPEC.md.logs 를 읽는다(mock 의 basename-키 컨벤션). ----
   printf '\n===== signals/DONE =====\n무엇을: X 함수 수정\n왜: 버그 수정\n' > "$LP/SPEC.md.logs"
-  body="$(in_pr_body "$specET" "777")"
+  body="$(in_pr_body "$specET")"
   case "$body" in *'## 작업 내용'*) ok "ET: DONE 요약 있음 → 작업 내용 섹션 포함";; *) bad "ET: DONE 요약 있음 → 작업 내용 섹션 포함";; esac
   case "$body" in *'무엇을: X 함수 수정'*'왜: 버그 수정'*) ok "ET: 작업 내용 섹션에 DONE 요약 본문 보존";; *) bad "ET: 작업 내용 섹션에 DONE 요약 본문 보존";; esac
 
+  # ---- 작업 내용이 첫 요소(이슈·요약 부재)인 경우도 선행 공백 줄 없이 시작(#554) ----
+  #   (basename 이 SPEC.md 라 위에서 채운 $LP/SPEC.md.logs 의 DONE 요약을 공유 — 의도적 재사용)
+  local specET2="$TMP/.task-work/778/SPEC.md"
+  mkdir -p "$TMP/.task-work/778"
+  printf -- '# ET 기능 2\n' > "$specET2"
+  body="$(in_pr_body "$specET2")"
+  case "$body" in '## 작업 내용'*) ok "본문 선두 작업 내용(선행 공백 줄 없음)";; *) bad "본문 선두 작업 내용(선행 공백 줄 없음)";; esac
+
   # ---- AC(#539): DONE 신호는 있으나 본문이 비어있음 → 작업 내용 섹션 생략 ----
   printf '\n===== signals/DONE =====\n' > "$LP/SPEC.md.logs"
-  body="$(in_pr_body "$specET" "777")"
+  body="$(in_pr_body "$specET")"
   case "$body" in *'## 작업 내용'*) bad "ET: DONE 요약 비어있음 → 작업 내용 섹션 생략";; *) ok "ET: DONE 요약 비어있음 → 작업 내용 섹션 생략";; esac
 
   # ---- AC(#539): DONE 신호 자체가 없음 → 작업 내용 섹션 생략 ----
   : > "$LP/SPEC.md.logs"
-  body="$(in_pr_body "$specET" "777")"
+  body="$(in_pr_body "$specET")"
   case "$body" in *'## 작업 내용'*) bad "ET: DONE 신호 부재 → 작업 내용 섹션 생략";; *) ok "ET: DONE 신호 부재 → 작업 내용 섹션 생략";; esac
 
-  # ---- originator=dispatch 회귀 가드: 기존 본문 표현(라벨·SPEC 경로·dispatch-run) 유지 ----
-  body="$(in_pr_body "$specB" "ridDG")"
-  case "$body" in *'dispatch 가 자동 생성'*) ok "회귀: dispatch 라벨 유지";; *) bad "회귀: dispatch 라벨 유지";; esac
-  case "$body" in *'dispatch-run: ridDG'*) ok "회귀: dispatch-run 유지";; *) bad "회귀: dispatch-run 유지";; esac
-  case "$body" in *"SPEC: $specB"*) ok "회귀: dispatch SPEC 경로 유지";; *) bad "회귀: dispatch SPEC 경로 유지";; esac
+  # ---- originator=dispatch(#554): 자동생성 식별 줄·SPEC 경로 줄·dispatch-run 줄 부재 ----
+  body="$(in_pr_body "$specB")"
+  case "$body" in *'자동 생성'*) bad "dispatch: 자동생성 식별 줄 부재(#554)";; *) ok "dispatch: 자동생성 식별 줄 부재(#554)";; esac
+  case "$body" in *'dispatch-run:'*) bad "dispatch: dispatch-run 줄 부재(#554)";; *) ok "dispatch: dispatch-run 줄 부재(#554)";; esac
+  case "$body" in *'SPEC: '*) bad "dispatch: SPEC 경로 줄 부재(#554)";; *) ok "dispatch: SPEC 경로 줄 부재(#554)";; esac
 
   # ---- 회귀(#539): dispatch 경로는 DONE 요약이 있어도 '## 작업 내용' 섹션을 추가하지 않는다
   #   ($spec 의 basename 도 "SPEC.md" 라 같은 mock 로그 파일을 공유 — 의도적 재사용). ----
   printf '\n===== signals/DONE =====\n무엇을: Y\n' > "$LP/SPEC.md.logs"
-  body="$(in_pr_body "$spec" "ridDG2")"
+  body="$(in_pr_body "$spec")"
   case "$body" in *'## 작업 내용'*) bad "회귀: dispatch 경로 작업 내용 섹션 미추가(DONE 요약 있어도)";; *) ok "회귀: dispatch 경로 작업 내용 섹션 미추가(DONE 요약 있어도)";; esac
   : > "$LP/SPEC.md.logs"
 
@@ -1053,8 +1051,8 @@ SPECEOF
   chk "본문 통합 rc=0" "$rc" "0"
   grep -q -- '--body-file' "$PRLOG" && ok "PR 생성에 --body-file 사용" || bad "PR 생성에 --body-file 사용"
   [[ "$(wc -l < "$PRBODY")" -gt 1 ]] && ok "forge 전달 본문 멀티라인(줄바꿈 보존)" || bad "forge 전달 본문 멀티라인(줄바꿈 보존)"
-  grep -Fq "$specB" "$PRBODY" && ok "forge 전달 본문에 SPEC 경로" || bad "forge 전달 본문에 SPEC 경로"
-  grep -q '20260604T000000-abc1234' "$PRBODY" && ok "forge 전달 본문에 run-id" || bad "forge 전달 본문에 run-id"
+  grep -Fq "$specB" "$PRBODY" && bad "forge 전달 본문 SPEC 경로 부재(#554)" || ok "forge 전달 본문 SPEC 경로 부재(#554)"
+  grep -q '20260604T000000-abc1234' "$PRBODY" && bad "forge 전달 본문 run-id 부재(#554)" || ok "forge 전달 본문 run-id 부재(#554)"
   # 요약 두 줄이 각각 독립 줄로 존재 = 요약 내부 줄바꿈이 원형 그대로 보존됨(개수 단언 보강).
   grep -Fxq '요약 첫 줄이다.' "$PRBODY" && grep -Fxq '요약 둘째 줄이다.' "$PRBODY" \
     && ok "forge 전달 본문에 요약(각 줄 원형 보존)" || bad "forge 전달 본문에 요약(각 줄 원형 보존)"

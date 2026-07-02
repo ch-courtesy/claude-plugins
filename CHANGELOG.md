@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.61.7
+
+### 변경(호환)
+- **forge PR 본문 자동생성 안내 문구·run 추적 줄 제거 (#554)** — forge가 자동 생성하는 PR 본문에서 리뷰어에게 정보 가치가 없는 자동생성 안내 문구와 run 추적 줄을 제거했다: execute-task 발신("🤖 이 PR 은 execute-task 가 자동 생성했으며 자동 적대 리뷰를 거칩니다." + `task-run:` 줄)과 dispatch 발신("🤖 이 PR 은 dispatch 가 자동 생성했으며 자동 적대 리뷰를 거칩니다." + `SPEC:` 경로 줄 + `dispatch-run:` 줄) 두 갈래 모두. 본문은 사람이 읽는 실질 내용(이슈 참조 `Refs #n`·요약·작업 내용)만 담고, 남는 첫 요소가 선행 공백 줄 없이 시작한다. PR 제목의 "🤖 [자동 리뷰]" 접두 태그와 PR 소유 판정(봇 login + *-formal-review 마커)·리뷰 흐름은 변경 없음. 기존 PR 본문 소급 수정 없음.
+
 ## autopilot 0.61.6
 
 ### 버그 수정
