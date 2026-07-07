@@ -33,10 +33,8 @@ printf '%s\n' "이전 세션이 자동 컴팩션 경계에서 남긴 작업 핸�
 cat "$OUT" 2>/dev/null || true
 printf '\n%s\n' "</session-handoff>"
 
-# 복원 후 보관: 다음 세션이 stale 핸드오프를 다시 주입하지 않도록 archive 로 이동.
-ARCHIVE="$(handoff_dir "$PROJ")/restored"
-if mkdir -p "$ARCHIVE" 2>/dev/null; then
-  mv "$OUT" "$ARCHIVE/HANDOFF.last.md" 2>/dev/null || true
-fi
+# 복원 후 제거: 다음 세션이 stale 핸드오프를 다시 주입하지 않도록 활성 파일을 지운다.
+# 복원본을 별도 위치에 보관하지 않는다(무잔여). 제거 실패는 조용히 통과(비차단).
+rm -f "$OUT" 2>/dev/null || true
 
 exit 0
