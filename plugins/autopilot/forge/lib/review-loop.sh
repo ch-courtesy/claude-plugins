@@ -23,7 +23,7 @@
 #
 # 불변식:
 #   - force(강제) push 금지. 새 PR 미생성(같은 head 브랜치 갱신만).
-#   - per-SPEC 상태·델타·defer 는 run 디렉토리(.dispatch/runs/<run-id>/) 안에만 둔다.
+#   - per-SPEC 상태·델타·defer 는 run 디렉토리(.autopilot/runs/<id>/) 안에만 둔다.
 #   - 키는 호출자(스케줄러)가 주입한다(재계산 안 함).
 #
 # 모든 외부 인터페이스(리뷰 생산자·포지 리뷰 메타·자율 실행기·git·forge)는 주입 가능한
@@ -503,7 +503,7 @@ rl_review_loop_direct() {
 # =====================================================================
 rl_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
-  local rd="$TMP/.dispatch/runs/run1"; mkdir -p "$rd"
+  local rd="$TMP/.autopilot/runs/run1"; mkdir -p "$rd"
 
   # mock git: force 보면 exit99. push 기록.
   local PUSHLOG="$TMP/pushlog"; : > "$PUSHLOG"

@@ -6,7 +6,7 @@
 #   - 동사(integrate/review/merge) 를 호스트 구현(fg_<verb>)으로 위임. 계약: contract.md.
 #
 # 하지 않는 일:
-#   - rules/ 지침·다른 스킬 doc 참조. (런타임으로 dispatch 헬퍼는 감싸 재사용.)
+#   - rules/ 지침·다른 스킬 doc 참조. (런타임 헬퍼는 형제 lib/ 를 감싸 재사용.)
 set -euo pipefail
 
 FG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
