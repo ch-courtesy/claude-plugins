@@ -3,7 +3,7 @@
 #
 # 책임 ("loop DONE" 과 "리뷰 승인 요청(PR)" 사이의 다리):
 #   - 종료 신호 판정: loop 의 공개 구조화 상태(`status --json`)로만 child 종료 의도를
-#     읽어 통합 분기로 매핑한다(dispatch.sh 의 child_terminal_state 와 동일 산식).
+#     읽어 통합 분기로 매핑한다.
 #       DONE(차단 없음)            → base sync → push(feat/<run-id>-<slug>) → PR 생성/재사용,
 #                                     int-phase=review.
 #       BLOCKED category=spec-gap  → push·PR 없이 스펙 보강 재개 안내, int-phase=blocked-spec-gap.
@@ -19,8 +19,8 @@
 #   - 브랜치명·slug 는 rules/engineering/branch-and-slug.md 단일 출처(feat/<id>-<slug>).
 #   - per-SPEC 상태는 lib-integration.sh(run-dir + 불투명 key)로만 보관한다.
 #
-# 키 계약: 통합 모듈은 per-SPEC 키를 **재계산하지 않고** 호출자(스케줄러)에게서 받는다
-#   (dispatch.sh 가 spec_slug+hash7 로 한 번 계산해 모든 통합 모듈 호출에 같은 키를 넘긴다).
+# 키 계약: 통합 모듈은 per-SPEC 키를 **재계산하지 않고** 호출자(execute-task)에게서 받는다
+#   (호출자가 spec_slug+hash7 로 한 번 계산해 모든 통합 모듈 호출에 같은 키를 넘긴다).
 #   → spec_slug/hash7 의 모듈 간 중복·표류를 만들지 않는다.
 #
 # 모든 외부 인터페이스(loop·git·forge CLI)는 주입 가능한 명령 변수로 두어 mock 으로
@@ -55,7 +55,7 @@ in_die() { echo "integration: $*" >&2; return 1; }
 
 # =====================================================================
 # 1) 종료 신호 판정 — loop 공개 구조화 상태(status --json)만 사용.
-#    dispatch.sh child_terminal_state 와 동일 의미(done/failed/running/pending/unknown).
+#    child 종료 상태: done/failed/running/pending/unknown.
 # =====================================================================
 
 in_loop_status_json() {
@@ -125,7 +125,7 @@ in_work_branch() {
 
 # =====================================================================
 # 2b) loop 결과 → 작업 브랜치 이식 다리 (forge·direct 공통 헬퍼).
-#   loop 은 결과를 자기 워크트리에만 커밋하고 dispatch run-id 브랜치를 만들지 않는다.
+#   loop 은 결과를 자기 워크트리에만 커밋하고 run-id 작업 브랜치를 만들지 않는다.
 #   통합이 push·머지 대상으로 쓰기 전에, 작업 브랜치가 없으면 loop 결과 커밋에서 만든다.
 #   결과 위치는 loop 의 공개 인터페이스(`loop paths`)로만 얻는다 — 내부 신호·메타 파일을
 #   직접 열지 않는다(공개 경로에서 결과 커밋을 읽는 것까지가 소비 경계). force 금지·멱등.
@@ -180,7 +180,7 @@ in_ensure_work_branch() {
 INT_AUTORESOLVE_FLAG=""
 
 # in_autoresolve_rebase <branch> — 진행 중(충돌 정지) rebase 를 자율 해결.
-#   파일별: DISPATCH_CONFLICT_STRATEGY (기본 incoming=재적용 중 작업 커밋 쪽 --theirs,
+#   파일별: FORGE_CONFLICT_STRATEGY (기본 incoming=재적용 중 작업 커밋 쪽 --theirs,
 #   base=새 베이스 쪽 --ours) + 비결정 표시. plugin.json 버전 충돌도 일반 충돌로 처리한다
 #   (버전 범프 정책은 컨슈밍 프로젝트 소유 — 통합 엔진은 버전-전용 해소를 집행하지 않음).
 #   닫으면 rebase --continue 후 0, 닫지 못하면 abort 후 1. force 미사용.
@@ -192,7 +192,7 @@ in_autoresolve_rebase() {
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
     # shellcheck disable=SC2086
-    case "${DISPATCH_CONFLICT_STRATEGY:-incoming}" in
+    case "${FORGE_CONFLICT_STRATEGY:-incoming}" in
       base) $GIT_CMD checkout --ours   -- "$f" 2>/dev/null || true ;;
       *)    $GIT_CMD checkout --theirs -- "$f" 2>/dev/null || true ;;
     esac
@@ -247,7 +247,7 @@ in_base_sync() {
 
 _in_base_sync_core() {
   local branch="$1"
-  local tries="${DISPATCH_BASESYNC_RETRIES:-3}" i=0 pre post
+  local tries="${FORGE_BASESYNC_RETRIES:-3}" i=0 pre post
   INT_AUTORESOLVE_FLAG=""
   # shellcheck disable=SC2086
   $GIT_CMD fetch origin "$DEFAULT_BRANCH" || { in_die "fetch 실패: origin/$DEFAULT_BRANCH"; return 1; }
@@ -407,8 +407,8 @@ in_cleanup_worktree_if_preserved() {
 
 # in_cleanup_failed_worktree <spec> <run_dir> — 실패-경로 진입점(브랜치명을 결정적으로 도출).
 #   작업 브랜치명은 rid(run_dir basename)+SPEC slug 로 결정적(in_work_branch). slug 도출 실패 시
-#   브랜치 미상 → 보존(보수적). in_handle_blocked(워커 자기 escalation)와 dispatch reap/timeout
-#   오케스트레이션(CLI: cleanup-on-fail)이 공유하는 단일 진입.
+#   브랜치 미상 → 보존(보수적). in_handle_blocked(워커 자기 escalation)와 호출 레이어의
+#   child 종료 정리(CLI: cleanup-on-fail)가 공유하는 단일 진입.
 in_cleanup_failed_worktree() {
   local spec="$1" rd="$2" branch
   local rid; rid="$(basename "$rd")"
@@ -471,18 +471,13 @@ in_done_summary() {
   '
 }
 
-# in_pr_body <spec_path> — 구조화 PR 본문(결정적) stdout. dispatch·execute-task 공용.
-#   사람이 읽는 실질 내용만 담는다(#554 — 자동생성 안내 문구·run 추적 줄 없음):
-#   조건부 이슈 cross-reference(Refs #n, rules/context.md 형식) + 요약(SPEC 의도 섹션, 없으면 생략)
-#   + execute-task 한정 작업 내용(loop DONE 완료 요약, 없으면 생략; #539).
-#   originator 판정은 spec 경로의 임시 materialize 마커(execute-task 의 .task-work/<id>/SPEC.md
-#   컨벤션)로 한다 — '## 작업 내용' 섹션은 execute-task 발신 PR 한정.
+# in_pr_body <spec_path> — 구조화 PR 본문(결정적) stdout. 단일 경로(#556) — 발신 주체 구분
+#   없음(라이브 호출자는 execute-task 뿐). 사람이 읽는 실질 내용만 담는다(#554 — 자동생성 안내
+#   문구·run 추적 줄 없음): 조건부 이슈 cross-reference(Refs #n, rules/context.md 형식)
+#   + 요약(SPEC 의도 섹션, 없으면 생략) + 작업 내용(loop DONE 완료 요약, 없으면 생략; #539).
 #   첫 요소(Refs 또는 요약)가 선행 공백 줄 없이 시작하도록 블록 사이에만 빈 줄을 넣는다.
 in_pr_body() {
-  local spec="$1" is_execute_task=0 first=1
-  case "$spec" in
-    *"/.task-work/"*|".task-work/"*) is_execute_task=1 ;;
-  esac
+  local spec="$1" first=1
   local issue; issue="$(in_spec_issue "$spec")"
   if [[ -n "$issue" ]]; then printf 'Refs #%s\n' "$issue"; first=0; fi
   local summary; summary="$(in_pr_summary "$spec")"
@@ -491,12 +486,10 @@ in_pr_body() {
     printf '## 요약\n\n%s\n' "$summary"
     first=0
   fi
-  if [[ "$is_execute_task" == "1" ]]; then
-    local done_summary; done_summary="$(in_done_summary "$spec")"
-    if [[ -n "${done_summary//[$' \t\n']/}" ]]; then
-      [[ "$first" == 1 ]] || printf '\n'
-      printf '## 작업 내용\n\n%s\n' "$done_summary"
-    fi
+  local done_summary; done_summary="$(in_done_summary "$spec")"
+  if [[ -n "${done_summary//[$' \t\n']/}" ]]; then
+    [[ "$first" == 1 ]] || printf '\n'
+    printf '## 작업 내용\n\n%s\n' "$done_summary"
   fi
 }
 
@@ -591,7 +584,7 @@ in_handle_blocked() {
     echo "key:      $key"
     echo "phase:    blocked-spec-gap"
     echo "category: spec-gap"
-    echo "resume:   스펙 강화 후 dispatch --resume 로 재개하세요(push·PR 미수행)."
+    echo "resume:   스펙(태스크 본문) 강화 후 execute-task start 로 재개하세요(push·PR 미수행)."
     return 3
   fi
   int_set_phase "$rd" "$key" blocked
@@ -663,8 +656,8 @@ Commands:
   terminal  <spec>                   child 종료 상태(done|failed|running|pending|unknown).
   category  <spec>                   BLOCKED 범주(spec-gap|...|other).
   cleanup-on-fail <spec> <run_dir>   실패/터미널 경로 조건부 워크트리 정리(보존되면 정리, 아니면
-                                        보존). dispatch reap/timeout 으로 child 를 종료할 때
-                                        오케스트레이션이 호출하는 진입(워커 escalation 과 동일 정책).
+                                        보존). 호출 레이어가 child 를 종료 정리할 때 호출하는
+                                        진입(워커 escalation 과 동일 정책).
 
 환경 변수: LOOP_CMD, GIT_CMD, FORGE_CMD, DEFAULT_BRANCH
 EOF
@@ -676,7 +669,7 @@ EOF
 # =====================================================================
 in_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
-  local rd="$TMP/.dispatch/runs/20260604T000000-abc1234"; mkdir -p "$rd"
+  local rd="$TMP/.autopilot/runs/20260604T000000-abc1234"; mkdir -p "$rd"
 
   # mock loop: status --json / logs / paths 를 spec 별 파일로 흉내.
   #   paths: loop 공개 인터페이스 — 작업 트리(WT) 경로를 알려준다(브랜치 이식 다리 입력).
@@ -936,8 +929,8 @@ in_selftest() {
   chk "U2 cleanup 실패해도 rc=4(판정 유지)" "$rc" "4"
   case "$err" in *WARN*) ok "U2 cleanup 실패 경고 표면화(조용한 실패 금지)";; *) bad "U2 cleanup 실패 경고 표면화(조용한 실패 금지)";; esac
 
-  # ---- U2: cleanup-on-fail CLI 헬퍼(dispatch reap/timeout 경로 공유 진입) ----
-  #   dispatch 가 child 를 reap/stop 할 때 오케스트레이션이 호출하는 동일 정책 진입점.
+  # ---- U2: cleanup-on-fail CLI 헬퍼(호출 레이어 child 종료 정리 공유 진입) ----
+  #   호출 레이어가 child 를 종료 정리할 때 호출하는 동일 정책 진입점.
   local kCLI="x-cli2222"; : > "$CLEANUPLOG"
   printf '%s\n' "$wbF" > "$REMOTE_BRANCHES"
   in_cleanup_worktree_if_preserved "$spec" "$wbF"
@@ -971,7 +964,6 @@ SPECEOF
   case "$body" in *"설명용 주석"*) bad "본문 요약 주석 제거";; *) ok "본문 요약 주석 제거";; esac
   case "$body" in *"목적 (왜)"*) bad "본문 다음 섹션 미포함(요약 경계)";; *) ok "본문 다음 섹션 미포함(요약 경계)";; esac
   case "$body" in *'Refs #'*) bad "이슈 없음 → cross-reference 미생성";; *) ok "이슈 없음 → cross-reference 미생성";; esac
-  case "$body" in *'dispatch 통합:'*) bad "정적 한 줄 본문 부재";; *) ok "정적 한 줄 본문 부재";; esac
 
   # ---- 요약 섹션 부재 → 요약 블록 생략 (식별 줄·run 줄도 없으므로 본문 전체 빈 출력, #554) ----
   body="$(in_pr_body "$spec")"   # $spec 에는 '무엇을 만들 것인가' 섹션·이슈가 없다.
@@ -988,16 +980,15 @@ SPECEOF
   body="$(in_pr_body "$specI")"
   case "$body" in *'Refs #43'*) ok "이슈 '#43' 표기 정규화";; *) bad "이슈 '#43' 표기 정규화";; esac
 
-  # ---- originator=execute-task: 임시 materialize SPEC(.task-work/<id>/SPEC.md) 본문 ----
-  #   (a) .task-work/·절대 경로 누출 부재, (b) dispatch 오표기 부재,
-  #   (c) 자동생성 식별 줄·run 추적 줄 부재(#554), (d) 태스크 참조(Refs #n)·요약 보존. ----
+  # ---- execute-task materialize 경로: 임시 materialize SPEC(.task-work/<id>/SPEC.md) 본문 ----
+  #   (a) .task-work/·절대 경로 누출 부재,
+  #   (b) 자동생성 식별 줄·run 추적 줄 부재(#554), (c) 태스크 참조(Refs #n)·요약 보존. ----
   local specET="$TMP/.task-work/777/SPEC.md"
   mkdir -p "$TMP/.task-work/777"
   printf -- '---\nslug: et-body\nissue: 777\n---\n\n# ET 기능\n\n## 무엇을 만들 것인가\nET 요약 줄.\n' > "$specET"
   body="$(in_pr_body "$specET")"
   case "$body" in *'.task-work/'*) bad "ET: .task-work 임시 경로 누출 부재";; *) ok "ET: .task-work 임시 경로 누출 부재";; esac
   case "$body" in *"$specET"*) bad "ET: 절대 SPEC 경로 부재";; *) ok "ET: 절대 SPEC 경로 부재";; esac
-  case "$body" in *dispatch*) bad "ET: dispatch 오표기 부재";; *) ok "ET: dispatch 오표기 부재";; esac
   case "$body" in *'자동 생성'*) bad "ET: 자동생성 식별 줄 부재(#554)";; *) ok "ET: 자동생성 식별 줄 부재(#554)";; esac
   case "$body" in *'자동 적대 리뷰'*) bad "ET: 리뷰 식별 줄 부재(#554)";; *) ok "ET: 리뷰 식별 줄 부재(#554)";; esac
   case "$body" in *'Refs #777'*) ok "ET: 태스크 이슈 참조(Refs #777) 보존";; *) bad "ET: 태스크 이슈 참조(Refs #777) 보존";; esac
@@ -1031,17 +1022,12 @@ SPECEOF
   body="$(in_pr_body "$specET")"
   case "$body" in *'## 작업 내용'*) bad "ET: DONE 신호 부재 → 작업 내용 섹션 생략";; *) ok "ET: DONE 신호 부재 → 작업 내용 섹션 생략";; esac
 
-  # ---- originator=dispatch(#554): 자동생성 식별 줄·SPEC 경로 줄·dispatch-run 줄 부재 ----
-  body="$(in_pr_body "$specB")"
-  case "$body" in *'자동 생성'*) bad "dispatch: 자동생성 식별 줄 부재(#554)";; *) ok "dispatch: 자동생성 식별 줄 부재(#554)";; esac
-  case "$body" in *'dispatch-run:'*) bad "dispatch: dispatch-run 줄 부재(#554)";; *) ok "dispatch: dispatch-run 줄 부재(#554)";; esac
-  case "$body" in *'SPEC: '*) bad "dispatch: SPEC 경로 줄 부재(#554)";; *) ok "dispatch: SPEC 경로 줄 부재(#554)";; esac
-
-  # ---- 회귀(#539): dispatch 경로는 DONE 요약이 있어도 '## 작업 내용' 섹션을 추가하지 않는다
+  # ---- 단일 경로(#556): 발신 주체 구분 없음 — materialize 마커(.task-work) 없는 spec 경로도
+  #   DONE 요약이 있으면 '## 작업 내용' 섹션을 포함한다(#539 동작을 단일 경로로 유지).
   #   ($spec 의 basename 도 "SPEC.md" 라 같은 mock 로그 파일을 공유 — 의도적 재사용). ----
   printf '\n===== signals/DONE =====\n무엇을: Y\n' > "$LP/SPEC.md.logs"
   body="$(in_pr_body "$spec")"
-  case "$body" in *'## 작업 내용'*) bad "회귀: dispatch 경로 작업 내용 섹션 미추가(DONE 요약 있어도)";; *) ok "회귀: dispatch 경로 작업 내용 섹션 미추가(DONE 요약 있어도)";; esac
+  case "$body" in *'## 작업 내용'*) ok "#556 단일 경로: 비-task-work spec 도 DONE 요약 → 작업 내용 포함";; *) bad "#556 단일 경로: 비-task-work spec 도 DONE 요약 → 작업 내용 포함";; esac
   : > "$LP/SPEC.md.logs"
 
   # ---- PR 생성이 --body-file 로 멀티라인 본문을 forge 에 전달(줄바꿈 보존) ----
@@ -1082,7 +1068,7 @@ SPECEOF
     return 0
   }
   INT_AUTORESOLVE_FLAG=""
-  GIT_CMD=mock_git_ar DISPATCH_CONFLICT_STRATEGY=incoming in_autoresolve_rebase "feat/x" >/dev/null 2>&1; rc=$?
+  GIT_CMD=mock_git_ar FORGE_CONFLICT_STRATEGY=incoming in_autoresolve_rebase "feat/x" >/dev/null 2>&1; rc=$?
   GIT_CMD=mock_git
   chk "AC autoresolve 일반 충돌 rc=0" "$rc" "0"
   chk "AC autoresolve 비결정→needs-verify" "$INT_AUTORESOLVE_FLAG" "needs-verify"
@@ -1092,6 +1078,17 @@ SPECEOF
     || bad "AC#482 plugin.json 버전 충돌 일반 전략 처리(--theirs)"
   grep -q 'rebase --continue' "$U2LOG" && ok "AC autoresolve rebase --continue 로 진행" || bad "AC autoresolve rebase --continue"
   if grep -qiE 'force' "$U2LOG"; then bad "AC autoresolve force 미사용"; else ok "AC autoresolve force 미사용"; fi
+  INT_AUTORESOLVE_FLAG=""
+
+  # ---- env 개명(#556): FORGE_CONFLICT_STRATEGY=base → --ours(새 베이스 쪽) 전략 적용 ----
+  : > "$U2LOG"; rm -f "$TMP/ar_done"
+  INT_AUTORESOLVE_FLAG=""
+  GIT_CMD=mock_git_ar FORGE_CONFLICT_STRATEGY=base in_autoresolve_rebase "feat/x" >/dev/null 2>&1; rc=$?
+  GIT_CMD=mock_git
+  chk "#556 autoresolve base 전략 rc=0" "$rc" "0"
+  grep -q 'checkout --ours' "$U2LOG" \
+    && ok "#556 FORGE_CONFLICT_STRATEGY=base → --ours(새 베이스 쪽)" \
+    || bad "#556 FORGE_CONFLICT_STRATEGY=base → --ours(새 베이스 쪽)"
   INT_AUTORESOLVE_FLAG=""
 
   # ---- 회귀 가드(#482): 버전-전용 충돌 해소·동일-버전 자동 재범프 경로가 제거됐다(정책-불간섭) ----

@@ -3,7 +3,7 @@
 # origin 이 gitlab 이면 forge.sh 가 이 파일을 source 해 fg_<verb> 를 호출하지만,
 # v1 에서는 glab 기반 MR 생성·리뷰·머지가 미구현이라 명확히 안내 후 비-0 exit 한다(조용한 실패 금지).
 #
-# 기여 지점(구현 시 dispatch 헬퍼의 forge 추상화를 glab 으로 확장):
+# 기여 지점(구현 시 forge 추상화를 glab 으로 확장):
 #   fg_integrate → glab mr create / push
 #   fg_review    → glab mr 리뷰 fetch + 승인 게이트
 #   fg_merge     → glab mr merge (ff-only)
