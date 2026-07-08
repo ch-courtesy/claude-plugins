@@ -11,7 +11,7 @@
 #   bd dep list <id> --json                     → 의존 목록
 #   bd ready --json                             → 차단 없는(모든 dep done) 이슈 목록
 #   bd note add <id> "[marker] text"            → 진행 로그
-# bd 미설치 시 hard-abort (조용한 폴백 없음 — dispatch 의 python3 정책과 동일).
+# bd 미설치 시 hard-abort (조용한 폴백 없음).
 #
 # NOTE: 이 저장소 환경엔 bd 가 미설치라 런타임 검증 불가. 동사 형태가 실제 bd 와
 #       다르면 이 파일만 수정한다(어댑터 계약/타 백엔드 불변).

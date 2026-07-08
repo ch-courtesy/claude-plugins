@@ -128,6 +128,17 @@ echo "$OUT" | grep -q "pre-compact.sh" || fail "restore 출력에 만진 파일 
 pass "AC2 restore 주입"
 
 echo ""
+echo "=== 복원 후 활성 핸드오프 제거 + 영구 잔여물 부재 ==="
+[ ! -f "$HANDOFF" ] || fail "복원 후 활성 핸드오프 파일이 남음: $HANDOFF"
+[ ! -e "$PROJ/.autopilot/handoff/restored" ] || fail "복원본 archive 잔여물이 남음(무잔여 위반)"
+# 재주입 방지: 소비 후 두 번째 restore 는 빈 출력이어야 한다.
+OUT_2=$(jq -nc --arg c "$PROJ" \
+  '{session_id:"s4b",source:"compact",cwd:$c,hook_event_name:"SessionStart"}' \
+  | env CLAUDE_PROJECT_DIR="$PROJ" sh "$RESTORE_SH")
+[ -z "$OUT_2" ] || fail "복원 후 재주입됨(핸드오프가 소비되지 않음)"
+pass "복원 후 제거 + 무잔여 + 재주입 없음"
+
+echo ""
 echo "=== AC2: 핸드오프 부재 시 restore 무해(빈 출력, exit 0) ==="
 PROJ5="$TMP/proj5"; mkdir -p "$PROJ5"
 set +e

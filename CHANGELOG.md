@@ -7,6 +7,11 @@
 ### 변경(호환)
 - **create-skill: description 작성 원칙을 WHEN(트리거) 중심으로 조정** — `description 완결성 원칙`과 `2. description 설계` 단계, `skill-template.md`를 갱신해 description의 무게중심을 "언제 호출되는가(WHEN·트리거·증상·오류 신호·동의어 키워드)"에 두도록 했다. WHAT은 동사-목적어 한 구절로 간결하게만 남긴다(생략은 rubric T-WHATWHEN 위반이라 유지). description은 호출 판단의 단일 출처이므로 트리거 매칭 정보를 우선한다는 취지.
 
+## autopilot 0.62.0
+
+### 변경(깨짐)
+- **구 dispatch 스킬 잔재 전부 제거 (#556)** — 삭제된 구 dispatch 스킬(#474)의 잔재를 forge 런타임·설정·현행 문서에서 제거했다. ⑴ env 개명(폴백 없음): `DISPATCH_MERGE_RETRIES`→`FORGE_MERGE_RETRIES`, `DISPATCH_BASESYNC_RETRIES`→`FORGE_BASESYNC_RETRIES`, `DISPATCH_CONFLICT_STRATEGY`→`FORGE_CONFLICT_STRATEGY` — 구명은 더 이상 읽지 않는다. ⑵ merge.sh `sweep` 서브커맨드·dispatch 시그니처 브랜치 일괄 정리 코드(`mg_sweep_*`·`SWEEP_BRANCH_SIGNATURE_RE`) 제거 — 대상 원격 브랜치는 사전 정리로 0개, `finish`·`selftest` 등 나머지 동사는 동일 동작. ⑶ PR 본문 생성 단일 경로화 — `in_pr_body` 의 발신 주체 구분(dispatch 갈래)을 제거해 유일한 라이브 호출자(execute-task) 기준 단일 경로로 하고, '## 작업 내용' 섹션 동작(#539·#554)은 유지. ⑷ 주석·오류 메시지·mock 경로(`.dispatch/runs`→`.autopilot/runs`)·`.gitignore` 패턴(`milestones/*/dispatch/DISPATCH_LOG.md`·`.dispatch/`)·PRD 문서(loop·review·using-autopilot)의 dispatch 서술을 현행 호출자(execute-task·workflow-task)로 갱신. 일반 영어 용례(dispatch a subagent 등)·역사 기록(docs/specs·milestones·CHANGELOG 기존 항목)·GitHub 고유 용어(workflow_dispatch)는 보존.
+
 ## autopilot 0.61.7
 
 ### 변경(호환)

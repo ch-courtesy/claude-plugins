@@ -2,16 +2,16 @@
 # lib-integration.sh — forge per-SPEC 통합 상태 헬퍼 (M1)
 #
 # 책임:
-#   - 한 SPEC 의 통합(push→PR)·리뷰·머지 라이프사이클 상태를 dispatch 의 기존 run
-#     디렉토리(<project_root>/.dispatch/runs/<run-id>/) 하위에 per-SPEC 키로 보관·조회.
+#   - 한 SPEC 의 통합(push→PR)·리뷰·머지 라이프사이클 상태를 호출자(execute-task)의 run
+#     디렉토리(<project_root>/.autopilot/runs/<id>/) 하위에 per-SPEC 키로 보관·조회.
 #     보관 필드(파일): branch / pr / head / review-round / review-verdict /
 #                      review-blocking-hash / int-phase.
-#   - 키는 호출자가 계산해 넘긴다(dispatch.sh 의 spec_slug+hash7 산식과 일치하는
+#   - 키는 호출자가 계산해 넘긴다(호출자의 spec_slug+hash7 산식과 일치하는
 #     `<slug>-<hash7>`). 이 헬퍼는 키를 불투명 문자열로만 다뤄 독립 검증 가능하다.
 #
 # **하지 않는 일**:
 #   - slug/hash 산식 정의(호출자 책임), forge·git·loop 연동, 상태 전이 정책.
-#   - dispatch.sh 의 per-SPEC 실행 상태 파일(state.<key>)은 건드리지 않는다 —
+#   - run 디렉토리의 다른 상태 파일(state.<key> 등)은 건드리지 않는다 —
 #     통합 필드는 별도 네임스페이스(int.<key>.<field>)에 둬 회귀를 막는다.
 #
 # 이 헬퍼는 sourcing 으로 쓴다. run 디렉토리 밖 경로는 만들지 않는다.
@@ -83,7 +83,7 @@ int_log() {
 # =====================================================================
 li_selftest() {
   local TMP; TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' RETURN
-  local rd="$TMP/.dispatch/runs/run1"
+  local rd="$TMP/.autopilot/runs/run1"
   local k="feat-x-abc1234"
   local fail=0
   ok()  { echo "PASS  $1"; }
@@ -121,7 +121,7 @@ li_selftest() {
   chk "키 격리 k"             "$(int_get_branch "$rd" "$k")" "feat/run1-x"
   chk "키 격리 k2"            "$(int_get_branch "$rd" "$k2")" "feat/run1-y"
 
-  # dispatch 실행 상태(state.<key>)와 네임스페이스 분리 — int.* 만 만든다.
+  # run 디렉토리의 다른 상태 파일(state.<key>)과 네임스페이스 분리 — int.* 만 만든다.
   [[ -z "$(ls "$rd"/state.* 2>/dev/null)" ]] && ok "state.* 미생성(네임스페이스 분리)" \
     || bad "state.* 미생성(네임스페이스 분리)"
 

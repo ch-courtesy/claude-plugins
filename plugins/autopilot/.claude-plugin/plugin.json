@@ -1,6 +1,6 @@
 {
   "name": "autopilot",
-  "version": "0.61.7",
+  "version": "0.62.1",
   "description": "자율 수행 루프(랄프 루프) 운영 인터페이스. 태스크 중심 파이프라인 — feature가 기능 의도를 명확화 인터뷰로 태스크 본문(=SPEC)으로 작성하고 fix가 버그·증상·실패 신호를 정적 분석으로 진단해 본문(진단 섹션 포함)을 무인 작성(feature의 정적분석 짝), 등록 프리미티브 create-task가 그 본문을 태스크 백엔드(filesystem/github-project/beads)에 등록(본문=SPEC, 등록-후 상태 전이 소유), execute-task로 단일 태스크 전체 생애(구현→리뷰→머지→done, origin 호스트별 PR/MR/로컬), workflow-task로 준비된 태스크를 무인 자동 실행하는 DAG 없는 1회 드레인(드레인자가 버그·실패 신호를 감지하면 중앙에서 fix 호출→다음 틱 흡수). 재사용 엔진 — loop으로 스펙 파일 기반 로컬 자율 실행, review로 변경을 다관점 리뷰해 머신리더블 판정·재작업 브리프 생산, forge로 origin 호스트(GitHub/GitLab/로컬)별 통합·리뷰·머지 추상화(가용이면 PR 적대 리뷰→서버사이드 머지, 미가용이면 로컬 적대 리뷰→ff-only 직접 머지), flow로 내장 dynamic Workflow 미가용 시 Python 표준 라이브러리만으로 임의 depends_on DAG를 스트리밍 fan-out·동시성 상한·실패 이행 격리·저널 resume으로 구동. 플러그인 자기완결(프로젝트 rules 비의존), 검증된 엔진(loop/forge/flow)은 런타임 재사용.",
   "author": {
     "name": "예의상",
