@@ -10,7 +10,7 @@
 ```
 ---
 name: <skill-name>        # kebab-case, ≤64자, 폴더명과 동일
-description: <설명>        # WHAT + WHEN + 트리거 키워드, 1–1024자
+description: <설명>        # WHEN(트리거) 중심 + 간결한 WHAT + 키워드, 1–1024자
 allowed-tools:             # 필요한 도구만 열거 (파괴적 도구 금지)
   - AskUserQuestion
   - Read
@@ -65,8 +65,9 @@ references 섹션은 파일이 있을 때만 작성한다. 없으면 생략한�
 
 ### description 완결성
 
-description은 에이전트가 호출 여부를 판단하는 단일 출처다.
-WHAT + WHEN + 트리거 키워드(동의어·유사 표현)를 모두 담는다.
+description은 에이전트가 호출 여부를 판단하는 단일 출처다. 무게중심은 **WHEN(언제 호출되는가·
+트리거)**에 둔다 — 활성화 조건·증상·오류 신호·사용자 표현을 동의어와 함께 구체적으로 담는다.
+WHAT(무엇을 하는가)은 동사-목적어 한 구절로 간결하게만 남긴다(생략은 T-WHATWHEN 위반).
 예외 케이스도 description 안에 포함해 별도 예외처리 지침이 없어도 완결되게 한다.
 
 ### 본문 분리 기준

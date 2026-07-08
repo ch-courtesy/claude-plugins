@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## project-init 0.24.1
+
+### 변경(호환)
+- **create-skill: description 작성 원칙을 WHEN(트리거) 중심으로 조정** — `description 완결성 원칙`과 `2. description 설계` 단계, `skill-template.md`를 갱신해 description의 무게중심을 "언제 호출되는가(WHEN·트리거·증상·오류 신호·동의어 키워드)"에 두도록 했다. WHAT은 동사-목적어 한 구절로 간결하게만 남긴다(생략은 rubric T-WHATWHEN 위반이라 유지). description은 호출 판단의 단일 출처이므로 트리거 매칭 정보를 우선한다는 취지.
+
 ## autopilot 0.61.7
 
 ### 변경(호환)
