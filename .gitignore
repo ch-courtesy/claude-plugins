@@ -15,6 +15,8 @@ milestones/**/loops/**/.lock
 # .autopilot/task-backend.json(백엔드 선택 SoT)은 추적; 런타임만 무시
 .task-work/
 .autopilot/runs/
+# review 스킬 런타임 상태 (태스크별 렌즈 산출물; done 시 execute-task 가 정리, #528)
+.review/
 
 # 임시·스크래치 파일 (rules/workspace/temp-files.md)
 .tmp/

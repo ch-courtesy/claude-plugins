@@ -44,22 +44,29 @@ status_of(){ bash "$ADAPTER" get_task --task-id "$1" | jq -r .status; }
 
 # 1) --stop-at review: DONE → review 에서 정지
 id="$(bash "$ADAPTER" create_task --title "T1" --body '## 목표'$'\n'x | jq -r .task_id)"
+mkdir -p "$TMP/.review/tasks/$id"
 MOCK_RESULT=DONE run start "$id" --stop-at review >/dev/null
 chk "stop-at review → review" "$(status_of "$id")" "review"
 [[ -d "$TMP/.task-work/$id" ]] && ok "1) stop-at: task-work 잔존" || bad "1) stop-at: task-work 잔존"
+[[ -d "$TMP/.review/tasks/$id" ]] && ok "1) stop-at: review 상태 잔존" || bad "1) stop-at: review 상태 잔존"
 
 # 2) 전체 경로: DONE + forge 승인/머지 → done
 id2="$(bash "$ADAPTER" create_task --title "T2" --body '## 목표'$'\n'y | jq -r .task_id)"
+mkdir -p "$TMP/.review/tasks/$id2" "$TMP/.review/tasks/other-keep"
 MOCK_RESULT=DONE run start "$id2" >/dev/null
 chk "전체 경로 → done" "$(status_of "$id2")" "done"
 [[ ! -d "$TMP/.task-work/$id2" ]] && ok "2) done: task-work 삭제" || bad "2) done: task-work 삭제"
 [[ ! -d "$TMP/.autopilot/runs/$id2" ]] && ok "2) done: run-dir 삭제" || bad "2) done: run-dir 삭제"
+[[ ! -d "$TMP/.review/tasks/$id2" ]] && ok "2) done: review 상태 삭제" || bad "2) done: review 상태 삭제"
+[[ -d "$TMP/.review/tasks/other-keep" ]] && ok "2) done: 다른 태스크 review 상태 보존" || bad "2) done: 다른 태스크 review 상태 보존"
 
 # 3) BLOCKED 신호 → blocked
 id3="$(bash "$ADAPTER" create_task --title "T3" --body '## 목표'$'\n'z | jq -r .task_id)"
+mkdir -p "$TMP/.review/tasks/$id3"
 MOCK_RESULT=BLOCKED run start "$id3" >/dev/null 2>&1 || true
 chk "BLOCKED → blocked" "$(status_of "$id3")" "blocked"
 [[ -d "$TMP/.task-work/$id3" ]] && ok "3) blocked: task-work 잔존" || bad "3) blocked: task-work 잔존"
+[[ -d "$TMP/.review/tasks/$id3" ]] && ok "3) blocked: review 상태 잔존" || bad "3) blocked: review 상태 잔존"
 
 # 4) ROOT_DIR 회귀: 링크드 워크트리 안에서 호출해도 run_dir 이 메인 리포 루트에 생성됨
 T2="$(mktemp -d)"
@@ -95,12 +102,13 @@ touch "$T2/dummy.md"
 # 5) status=done 선제 가드: 잔존 .task-work/.autopilot 디렉토리 정리 + 파이프라인(loop) 미재실행(#541)
 id5="$(bash "$ADAPTER" create_task --title "T5" --body '## 목표'$'\n'w | jq -r .task_id)"
 bash "$ADAPTER" set_status --task-id "$id5" --status done >/dev/null
-mkdir -p "$TMP/.task-work/$id5" "$TMP/.autopilot/runs/$id5"
+mkdir -p "$TMP/.task-work/$id5" "$TMP/.autopilot/runs/$id5" "$TMP/.review/tasks/$id5"
 touch "$TMP/.task-work/$id5/SPEC.md" "$TMP/.autopilot/runs/$id5/LOG.md"
 rm -f "$TMP/loop.start.called"
 run start "$id5" >/dev/null
 [[ ! -d "$TMP/.task-work/$id5" ]] && ok "5) done 선제: task-work 정리" || bad "5) done 선제: task-work 정리"
 [[ ! -d "$TMP/.autopilot/runs/$id5" ]] && ok "5) done 선제: run-dir 정리" || bad "5) done 선제: run-dir 정리"
+[[ ! -d "$TMP/.review/tasks/$id5" ]] && ok "5) done 선제: review 상태 정리" || bad "5) done 선제: review 상태 정리"
 chk "5) done 선제: status 유지" "$(status_of "$id5")" "done"
 [[ ! -f "$TMP/loop.start.called" ]] && ok "5) done 선제: 파이프라인 미재실행(loop 미호출)" || bad "5) done 선제: 파이프라인 미재실행(loop 미호출)"
 

@@ -38,11 +38,13 @@ REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtes
 
 die() { echo "execute-task: $*" >&2; exit 1; }
 
-# et_cleanup_dirs <task-work-dir> <run-dir> — 정리(멱등, 부재여도 무해).
+# et_cleanup_dirs <task-work-dir> <run-dir> [<review-state-dir>] — 정리(멱등, 부재여도 무해).
 #   merge 성공 직후 정리와 done 선제 가드 정리(#541)가 공유하는 단일 출처.
+#   3번째 인자(리뷰 상태 <git-root>/.review/tasks/<id>, #528)는 주어질 때만 정리한다.
 et_cleanup_dirs() {
   rm -rf "$1" 2>/dev/null || true
   rm -rf "$2" 2>/dev/null || true
+  [[ -n "${3:-}" ]] && rm -rf "$3" 2>/dev/null || true
 }
 
 # et_approval_gh <pr> — PR 호스팅 리뷰가 승인 상태면 0, 아니면 1.
@@ -134,7 +136,7 @@ et_start() {
   local pre_status
   pre_status="$($ADAPTER_CMD get_task --task-id "$id" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)" || pre_status=""
   if [[ "$pre_status" == "done" ]]; then
-    et_cleanup_dirs "$ROOT_DIR/.task-work/$id" "$ROOT_DIR/.autopilot/runs/$id"
+    et_cleanup_dirs "$ROOT_DIR/.task-work/$id" "$ROOT_DIR/.autopilot/runs/$id" "$ROOT_DIR/.review/tasks/$id"
     echo "execute-task: 이미 done — 정리 후 skip ($id)"
     return 0
   fi
@@ -288,7 +290,7 @@ et_start() {
   if $FORGE_CMD merge "$sp" "$run_dir" "$key" "$pr"; then
     $ADAPTER_CMD set_status --task-id "$id" --status done >/dev/null
     $ADAPTER_CMD append_log --task-id "$id" --marker handoff --text "merged ${branch:+($branch)}" >/dev/null
-    et_cleanup_dirs "$(dirname "$sp")" "$run_dir"   # .task-work/<id>/·.autopilot/runs/<id>/ 정리
+    et_cleanup_dirs "$(dirname "$sp")" "$run_dir" "$ROOT_DIR/.review/tasks/$id"   # .task-work/<id>/·.autopilot/runs/<id>/·.review/tasks/<id>/ 정리
     echo "execute-task: done ($id)"
   else
     $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "merge 실패" >/dev/null
