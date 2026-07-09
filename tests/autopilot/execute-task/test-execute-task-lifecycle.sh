@@ -17,7 +17,7 @@ cat > bin/loop <<'EOF'
 #!/usr/bin/env bash
 case "$1" in
   start) touch loop.start.called 2>/dev/null; exit 0;;
-  cleanup) exit 0;;
+  cleanup) touch loop.cleanup.called 2>/dev/null; exit 0;;
   status) printf '{"state":"terminal","signals":["%s"]}\n' "${MOCK_RESULT:-DONE}";;
   *) exit 0;;
 esac
@@ -116,5 +116,21 @@ chk "5) done 선제: status 유지" "$(status_of "$id5")" "done"
 run start "$id5" >/dev/null
 [[ ! -d "$TMP/.task-work/$id5" && ! -d "$TMP/.autopilot/runs/$id5" ]] \
   && ok "6) 멱등 재호출: 디렉토리 미생성" || bad "6) 멱등 재호출: 디렉토리 미생성"
+
+# 7) forge-단계 재진입 보존: review_entered 표지가 있으면 loop cleanup 을 건너뛴다(완료된 .worktree 보존)
+#    → loop 미재실행 + integrate 부터 재개 → done. cleanup 이 호출되면 .worktree 가 삭제돼 integrate 가 깨진다.
+id7="$(bash "$ADAPTER" create_task --title "T7" --body '## 목표'$'\n'r | jq -r .task_id)"
+mkdir -p "$TMP/.autopilot/runs/$id7"; touch "$TMP/.autopilot/runs/$id7/review_entered"  # forge-단계 재진입 표지
+rm -f "$TMP/loop.cleanup.called" "$TMP/loop.start.called"
+run start "$id7" >/dev/null
+[[ ! -f "$TMP/loop.cleanup.called" ]] && ok "7) forge 재진입: loop cleanup 미호출(.worktree 보존)" || bad "7) forge 재진입: loop cleanup 미호출(.worktree 보존)"
+[[ ! -f "$TMP/loop.start.called" ]] && ok "7) forge 재진입: loop 미재실행(integrate 부터 재개)" || bad "7) forge 재진입: loop 미재실행(integrate 부터 재개)"
+chk "7) forge 재진입 → done" "$(status_of "$id7")" "done"
+
+# 8) loop-단계 재진입/최초 실행: review_entered 표지가 없으면 loop cleanup 을 정상 호출(회귀 방지)
+id8="$(bash "$ADAPTER" create_task --title "T8" --body '## 목표'$'\n's | jq -r .task_id)"
+rm -f "$TMP/loop.cleanup.called"
+MOCK_RESULT=DONE run start "$id8" >/dev/null
+[[ -f "$TMP/loop.cleanup.called" ]] && ok "8) loop-단계: loop cleanup 정상 호출" || bad "8) loop-단계: loop cleanup 정상 호출"
 
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail
