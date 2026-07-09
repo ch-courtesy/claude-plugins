@@ -49,6 +49,17 @@ bash "$EXEC" status|stop|logs <task-id>
 > ```
 > status가 `blocked`이면 태스크 백엔드의 차단 사유·category를 확인하고 자가개선 절차를 밟는다.
 
+## blocked 재진입
+
+`blocked`로 끝난 태스크는 차단 원인을 해결한 뒤 **`start <task-id>`로 다시 실행하면 정상 파이프라인에
+재진입**한다(blocked 전이 시 claim 락이 풀려 재-claim이 성공한다). 재진입은 **막힌 지점부터 재개**한다 —
+loop 단계에서 막혔으면 loop을 재실행하고, forge 단계에서 막혔으면(`review_entered` 표지 존재) loop을 건너뛰고
+integrate부터 재개한다. 재진입이 merge까지 성공하면 `.task-work/<id>/`·`.autopilot/runs/<id>/` 잔재가
+정리된다(성공 시에만 — blocked로 남아 있는 동안은 사후검시용으로 보존된다).
+
+재진입은 **사람의 명시적 재실행으로만** 일어난다. 자동 드레인(`workflow-task`/`list_ready`)은 blocked를
+재실행 대상으로 잡지 않는다(무한 재시도 방지).
+
 ## 재사용 엔진 (런타임 호출, 그대로 둠)
 
 - **loop 엔진**(랄프 루프) — 격리 워크트리에서 RED→GREEN→검증 이터레이션.

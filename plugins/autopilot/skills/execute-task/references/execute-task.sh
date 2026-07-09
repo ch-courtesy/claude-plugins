@@ -153,8 +153,10 @@ et_start() {
   local reentry=0
   [[ -f "$run_dir/review_entered" ]] && reentry=1
 
-  # reclaim: 죽은 워커 잔재 정리(있으면) — loop 가 notes/worktree 로 이어받음
-  $LOOP_CMD cleanup "$sp" --force >/dev/null 2>&1 || true
+  # reclaim: 죽은 워커 잔재 정리(최초 실행/loop-단계 재진입). forge-단계 재진입(reentry=1)은 loop 가
+  #   이미 DONE 이라 회수할 워커가 없고, 완료된 .worktree 를 forge integrate 가 loop 결과(HEAD)로 읽으므로
+  #   cleanup(=git worktree remove)으로 지우면 integrate 가 재실패한다 → reentry 일 때는 건너뛴다.
+  (( reentry )) || $LOOP_CMD cleanup "$sp" --force >/dev/null 2>&1 || true
 
   # 백그라운드 heartbeat (lease 갱신). 연속 실패 시 lease 를 잃어 이중 실행 위험 → fail-fast 로 메인 중단.
   # SIGKILL orphan 방지: 부모 PID 와 시작 시간을 미리 캡처해 subshell 에서 생존 확인 후 자가종료.
