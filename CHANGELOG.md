@@ -7,10 +7,15 @@
 ### 변경(호환)
 - **create-skill: description 작성 원칙을 WHEN(트리거) 중심으로 조정** — `description 완결성 원칙`과 `2. description 설계` 단계, `skill-template.md`를 갱신해 description의 무게중심을 "언제 호출되는가(WHEN·트리거·증상·오류 신호·동의어 키워드)"에 두도록 했다. WHAT은 동사-목적어 한 구절로 간결하게만 남긴다(생략은 rubric T-WHATWHEN 위반이라 유지). description은 호출 판단의 단일 출처이므로 트리거 매칭 정보를 우선한다는 취지.
 
+## autopilot 0.62.3
+
+### 버그 수정
+- **forge-단계 blocked 태스크 재진입 시 완료된 워크트리 보존** — `execute-task`가 재실행마다 무조건 호출하던 `loop cleanup --force`(내부적으로 `git worktree remove`)를 `review_entered` 표지가 없을 때(최초 실행·loop-단계 재진입)만 호출하도록 가드했다. forge(리뷰/머지) 단계에서 blocked로 끝난 태스크를 사람이 원인을 해결한 뒤 재실행하면, 이전엔 integrate 직전에 완료된 구현이 담긴 `.worktree`가 삭제돼 로컬 브랜치가 없는 케이스에서 `integrate 실패`로 다시 blocked에 떨어질 수 있었다. 이제 forge-단계 재진입은 워크트리를 보존한 채 integrate부터 정상 재개해 done·잔재 정리까지 도달한다. loop-단계 재진입/최초 실행의 죽은-워커 회수 정리는 그대로 유지. (자동 드레인·unblock 명령·잔재 GC는 도입하지 않음 — 재진입은 사람의 명시적 재실행으로만.) (#562)
+
 ## autopilot 0.62.2
 
 ### 버그 수정
-- **forge-단계 blocked 태스크 재진입 시 완료된 워크트리 보존** — `execute-task`가 재실행마다 무조건 호출하던 `loop cleanup --force`(내부적으로 `git worktree remove`)를 `review_entered` 표지가 없을 때(최초 실행·loop-단계 재진입)만 호출하도록 가드했다. forge(리뷰/머지) 단계에서 blocked로 끝난 태스크를 사람이 원인을 해결한 뒤 재실행하면, 이전엔 integrate 직전에 완료된 구현이 담긴 `.worktree`가 삭제돼 로컬 브랜치가 없는 케이스에서 `integrate 실패`로 다시 blocked에 떨어질 수 있었다. 이제 forge-단계 재진입은 워크트리를 보존한 채 integrate부터 정상 재개해 done·잔재 정리까지 도달한다. loop-단계 재진입/최초 실행의 죽은-워커 회수 정리는 그대로 유지. (자동 드레인·unblock 명령·잔재 GC는 도입하지 않음 — 재진입은 사람의 명시적 재실행으로만.)
+- **execute-task done 시 리뷰 상태(`.review/tasks/<id>`) 정리 + `.review` gitignore화** — `.review/`를 git 추적에서 제외(gitignore)하고 우발적으로 커밋된 산출물을 추적 해제했다. 아울러 정리 단일 출처 `et_cleanup_dirs`에 리뷰 상태 경로(3번째 인자)를 추가해, 머지 성공 후 정리(`execute-task.sh:295`)와 done 선제 가드(`execute-task.sh:139`) 두 호출부가 `.review/tasks/<id>`까지 함께 치우도록 했다. done→삭제 / blocked·`--stop-at review`→잔존 / 다른 태스크 보존을 lifecycle 테스트로 가드한다. (#528, #563)
 
 ## autopilot 0.62.0
 
