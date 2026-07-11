@@ -36,9 +36,20 @@ esac
 EOF
 chmod +x bin/forge
 
+# renew_lease 만 no-op 하고 나머지는 실제 fs adapter 로 패스스루하는 래퍼.
+# 백그라운드 heartbeat 의 renew_lease(fs_fm_set)가 메인 흐름 set_status 와 같은 태스크 파일에
+# 동시 기록하면 공유 $f.tmp 클로버로 status 소실·파일 truncation 플레이크가 난다(케이스 7에서 관측).
+# 이 테스트의 단정은 lease 를 검증하지 않으므로(heartbeat 는 전용 테스트 별도) 동시 기록자만 제거한다.
+cat > bin/adapter_norenew << EOF
+#!/usr/bin/env bash
+[[ "\$1" == renew_lease ]] && { echo '{"task_id":"noop"}'; exit 0; }
+exec bash "$ADAPTER" "\$@"
+EOF
+chmod +x bin/adapter_norenew
+
 # 승인 게이트는 실제 PR 승인 상태로 판정한다(review rc 아님). 해피패스 = 즉시 승인(true) +
 # 미해결 [blocking] 인라인 없음(BLOCKING_CHECK_CMD=true=clear). blocking 가산 차단은 별도 테스트.
-run() { ADAPTER_CMD="bash $ADAPTER" LOOP_CMD="bash $TMP/bin/loop" FORGE_CMD="bash $TMP/bin/forge" \
+run() { ADAPTER_CMD="bash $TMP/bin/adapter_norenew" LOOP_CMD="bash $TMP/bin/loop" FORGE_CMD="bash $TMP/bin/forge" \
         HEARTBEAT_INTERVAL=1 APPROVAL_CHECK_CMD=true BLOCKING_CHECK_CMD=true SLEEP_CMD=: bash "$ET" "$@"; }
 status_of(){ bash "$ADAPTER" get_task --task-id "$1" | jq -r .status; }
 
