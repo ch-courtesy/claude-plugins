@@ -1,6 +1,6 @@
 ---
 name: repair-skill
-description: 기존 SKILL.md를 `shared/rubric` 30항목(규칙 17 + 모델 13) 기준으로 평가하고 사용자 승인을 받은 항목만 직접 수정한 뒤 재평가까지 끝낸다. 사용자가 기존 스킬의 수정·보수·고치기·리페어를 요청하거나 BLOCKER·MAJOR 해소가 필요할 때 활성화된다. 수정 없이 평가·등급 산출만 원하는 품질 점검 요청에는 쓰지 않는다. 호출 `Skill(skill="repair-skill", args="<SKILL.md 경로 | all>")`.
+description: 기존 SKILL.md를 `shared/rubric` 30항목(규칙 17 + 모델 13) 기준으로 평가하고 사용자 승인을 받은 항목만 직접 수정한 뒤 재평가까지 끝낸다. 사용자가 기존 스킬의 수정·보수·고치기·리페어를 요청하거나 BLOCKER·MAJOR 해소가 필요할 때는 물론, 수정 없이 스킬 품질 점검·루브릭 평가·등급 확인만 원할 때도 활성화된다 — 평가-전용 요청이면 평가·등급 보고까지만 수행하고 수정 승인 단계로 넘어가지 않는다. 호출 `Skill(skill="repair-skill", args="<SKILL.md 경로 | all>")`.
 allowed-tools:
   - Read
   - Edit
@@ -58,6 +58,8 @@ SKILL.md(필요하면 `references/`까지)를 직접 읽어 13개 모델 항목�
 
 - **BLOCKER 0건, MAJOR 0건**이면 수정 작업 없이 통과 사실(등급·MINOR 목록)만
   보고하고 종료한다.
+- 사용자가 평가·등급 산출만 요청했으면(평가-전용) BLOCKER·MAJOR가 있어도
+  6단계로 넘어가지 않고 등급과 지적 목록만 보고하고 종료한다.
 - BLOCKER 또는 MAJOR가 하나라도 있으면 6단계로 진행한다.
 
 ### 6. 수정안 도출과 승인
