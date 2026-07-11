@@ -1,11 +1,9 @@
 ---
 name: using-autopilot
-description: Use at the start of any session in an autopilot-installed project — routes every new code-change signal to a mandatory authoring/registration entry point before any other response. Feature intent (기능 추가·지침 작성·새로 만들기) routes to the authoring skill feature, which interviews the intent into a task body (=SPEC) and registers it via the create-task registration primitive; bug·symptom·failing-test signals (버그·증상·실패 테스트 고치기) route to the fix authoring skill, which reads code·logs·failure signals and narrows to a root-cause hypothesis to author a bug task body (=SPEC) and registers it via create-task (unresolvable ambiguity leaves [NEEDS CLARIFICATION] markers; a feature resume path completes it interactively). This overrides generic brainstorming-first guidance for such work. Also routes self-improvement signals — anomalous behavior of autopilot's own task skills (create-task/execute-task/workflow-task) observed during use (wrong blocked, pointless waiting, contradictory state, unexpected failure) — to a step-gated self-improvement procedure: diagnose first (category + root-cause hypothesis as step 1 output), then act by category (spec-gap→SPEC scope fix, tool-defect→fix spec authoring, ops→operational cleanup), rather than just working around it.
+description: Use at the start of any session in an autopilot-installed project and on every new code-change signal — feature intent (기능 추가·동작 변경·지침 작성·문서 편집·새로 만들기) or bug signals (버그·증상·실패 테스트 고치기) — forcing the route to the correct entry point (feature/fix) before any other response. This overrides generic brainstorming-first guidance for such work. Also routes self-improvement signals — anomalous behavior of autopilot's own task skills (wrong blocked·무의미 대기·모순 상태·예기치 못한 실패) — to a step-gated self-improvement procedure.
 ---
 
 # using-autopilot
-**REQUIRED RUNTIME CONTRACT:** `../../references/runtime-capabilities.md`를 읽고 스킬 호출과 사용자 질문을 현재 런타임 기능에 맞춘다.
-
 
 autopilot이 설치된 프로젝트의 네이티브 워크플로 진입점이다. 새 코드 변경은 **의도를 먼저 자기완결적 태스크로 등록하는 것**에서 출발한다. 작성(authoring)과 등록(registration)이 분리되어 있다 — **기능 의도는 작성자 `feature`**, **버그·증상·실패는 작성자 `fix`** 가 첫 단계다. `feature`는 명확화 인터뷰로 기능 의도를 탐색해 태스크 본문(=SPEC)을 떠서 **등록 프리미티브 `create-task`** 로 넘겨 백엔드에 등록한다. `fix`는 코드·로그·실패 신호를 정적 분석으로 진단해 버그 태스크 본문(=SPEC)을 떠서 같은 `create-task`로 등록한다(정적 분석으로 해소 불가한 모호성은 `[NEEDS CLARIFICATION]` 마커를 남기며, 이 경우 `feature` 인터뷰 재개로 완성한다). 등록 이후 실행 단계(`execute-task` 단일 실행 / `workflow-task` 무인 드레인) 선택·안내는 `create-task`가 책임진다. 이 스킬은 **올바른 진입점(`feature`/`fix`)으로의 라우팅까지만** 강제한다.
 

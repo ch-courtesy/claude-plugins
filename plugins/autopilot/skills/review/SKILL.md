@@ -15,7 +15,7 @@ allowed-tools:
 
 `review` 는 **원샷 리뷰 생산자**다. 한 작업의 변경(diff)을 받아 여러 독립 관점으로 리뷰하고, 단 하나의 머신리더블 판정(verdict)과 근거 있는 지적 목록(findings), 그리고 차단성 지적이 있을 때는 분류된 재작업 브리프를 산출한다.
 
-이 스킬은 리뷰를 **생산**하기만 한다 — 재구현·재푸시·승인까지의 반복(iterate-until-approved)·review-round 증가·forge 로의 자동 approve/merge 는 **소유하지 않는다**(오케스트레이터·머지 규칙 책임). 판정은 머신리더블 산출물일 뿐, 머지 게이트 결정은 호출 레이어가 한다.
+이 스킬은 리뷰를 **생산**하기만 한다 — 반복(iterate-until-approved)·승인·머지는 소유하지 않는다(완결 서술은 「불변식 / 규칙」).
 
 ## 호출
 
@@ -38,7 +38,7 @@ allowed-tools:
 3. **회귀·역사적 맥락** (`history`) — 변경이 기존 의도·이전 결정을 깨는지.
 4. **저장소 가이드라인 준수** (`guideline`) — `CLAUDE.md`·`rules/`·워크플로 문서와의 충돌.
 
-각 lens dispatch 양식은 `references/agent-prompts.md` 에 있다. 규모 임계가 충족될 때만 가산 발동하는 적대 렌즈 정의가 필요하면 `plugins/autopilot/references/personas.md`(단일 출처)에 있다 — 여기서 복제하지 않는다.
+각 lens dispatch 양식은 `references/agent-prompts.md` 에 있다.
 
 ## 중재 게이트 (결정적)
 
@@ -92,7 +92,7 @@ allowed-tools:
 - 반복(iterate-until-approved)·재구현 위임·review-round 증가·수렴 가드를 소유하지 않는다(오케스트레이터 책임).
 - forge 로의 자동 approve/merge·머지 차단을 하지 않는다 — 판정은 머신리더블 산출물.
 - 리뷰 9원칙(`rules/review.md`)·채택 분류 프레임(`rules/change-adoption.md`)을 재정의하지 않고 실행자로서 따른다.
-- 적대 렌즈 정의(`personas.md`)를 복제하지 않고 참조한다.
+- 적대 렌즈 정의는 `plugins/autopilot/references/personas.md`(단일 출처, 규모 임계 충족 시에만 가산 발동)를 복제하지 않고 참조한다.
 - 공유 PR 리뷰 계약(`.github/prompts/codex-pr-review.schema.json`: 4증거·신뢰도≥80·fingerprint)을 새로 지어내지 않고 단일 출처로 재사용하며 파이프라인 필드만 가산한다.
 - 라우터·하니스는 bash 3.2+ 호환(연관 배열 미사용)으로 작성한다.
 - 결정적 동작은 외부 인터페이스를 주입 mock 으로 치환한 `review.sh selftest`·`tests/` 로 실제 PR·브랜치 아티팩트 없이 검증한다.
