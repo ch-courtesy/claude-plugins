@@ -1,6 +1,6 @@
 ---
 name: feature
-description: 새 기능·변경·지침 의도를 명확화 인터뷰로 탐색해 자기완결적 태스크 본문(frontmatter-first 스펙 — scope frontmatter·무엇을 만들 것인가·완료 조건(EARS)·범위·검증)을 작성하려 할 때 사용 — 인터뷰로 본문을 떠서 등록 프리미티브 create-task에 넘겨 태스크 백엔드에 등록한다. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 작성만 책임지고 등록·상태 전이는 create-task가 소유한다. 신규 작성은 'Skill(skill="feature", args="<자연어 기능 설명>")', 미완성 in_design 태스크를 인터뷰로 이어 완성하는 재개는 'Skill(skill="feature", args="resume <task-id>")'.
+description: 새 기능·변경·지침 의도를 명확화 인터뷰로 탐색해 자기완결적 태스크 본문(frontmatter-first 스펙)을 작성하려 할 때 사용 — 인터뷰로 본문을 떠서 등록 프리미티브 create-task에 넘겨 태스크 백엔드에 등록한다. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 작성만 책임지고 등록·상태 전이는 create-task가 소유한다. 신규 작성은 'Skill(skill="feature", args="<자연어 기능 설명>")', 미완성 in_design 태스크를 인터뷰로 이어 완성하는 재개는 'Skill(skill="feature", args="resume <task-id>")'.
 allowed-tools:
   - AskUserQuestion
   - Read
@@ -18,11 +18,8 @@ allowed-tools:
 본문**으로 뜨는 **작성자(authoring) 스킬**이다. 작성이 끝나면 본문을 **등록 프리미티브 `create-task`** 에
 넘겨 백엔드에 등록한다. 태스크 본문이 곧 설계(SPEC)의 단일 출처이며 별도 SPEC 파일을 만들지 않는다.
 
-이 스킬은 **작성만** 책임진다 — 등록, 백엔드 준비, 등록-후 상태 전이는 `create-task`가 소유한다. 작성과
-등록을 분리해, 작성 방법론을 한 곳(이 스킬의 `references/`)에 모은다.
-
-이 스킬은 플러그인 자기완결이다 — 컨슈밍 프로젝트의 `rules/` 지침이나 다른 스킬의 풍부 참조에
-의존하지 않는다. 인터뷰 방법론은 이 스킬의 `references/`가 소유한다.
+작성과 등록을 분리해 작성·인터뷰 방법론을 한 곳(이 스킬의 `references/`)에 모은다 — 작성만·플러그인
+자기완결 경계의 완결 서술은 「규칙」이 소유한다.
 
 ## 워크플로
 
