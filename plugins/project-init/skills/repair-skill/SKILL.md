@@ -1,6 +1,6 @@
 ---
 name: repair-skill
-description: 기존 SKILL.md를 `shared/rubric` 30항목(규칙 17 + 모델 13) 기준으로 직접 평가해 등급과 BLOCKER·MAJOR 지적을 산출하고, 사용자 승인을 받은 항목만 직접 수정한 뒤 재평가까지 끝낸다. 사용자가 기존 스킬의 품질 점검·진단·수정·보수·고치기·리페어를 요청하거나 BLOCKER·MAJOR 해소가 필요할 때 활성화된다. 호출 `Skill(skill="repair-skill", args="<SKILL.md 경로 | all>")`.
+description: 기존 SKILL.md를 `shared/rubric` 30항목(규칙 17 + 모델 13) 기준으로 평가하고 사용자 승인을 받은 항목만 직접 수정한 뒤 재평가까지 끝낸다. 사용자가 기존 스킬의 수정·보수·고치기·리페어를 요청하거나 BLOCKER·MAJOR 해소가 필요할 때 활성화된다. 수정 없이 평가·등급 산출만 원하는 품질 점검 요청에는 쓰지 않는다. 호출 `Skill(skill="repair-skill", args="<SKILL.md 경로 | all>")`.
 allowed-tools:
   - Read
   - Edit
