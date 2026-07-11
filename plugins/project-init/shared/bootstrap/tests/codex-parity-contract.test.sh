@@ -31,8 +31,8 @@ check "Codex marketplace has required policy and category" bash -c \
 check "Codex marketplace omits plugin version" bash -c \
   "[ \"\$(jq -r '.plugins[0] | has(\"version\")' '$CODEX_MARKETPLACE')\" = false ]"
 
-check "project-init release surfaces are version 0.24.0" bash -c \
-  "[ \"\$(jq -r .version '$CODEX_MANIFEST')\" = 0.24.0 ] && [ \"\$(jq -r .version '$CLAUDE_MANIFEST')\" = 0.24.0 ] && [ \"\$(jq -r '.plugins[] | select(.name == \"project-init\") | .version' '$CLAUDE_MARKETPLACE')\" = 0.24.0 ]"
+check "project-init release surfaces are version 0.24.2" bash -c \
+  "[ \"\$(jq -r .version '$CODEX_MANIFEST')\" = 0.24.2 ] && [ \"\$(jq -r .version '$CLAUDE_MANIFEST')\" = 0.24.2 ] && [ \"\$(jq -r '.plugins[] | select(.name == \"project-init\") | .version' '$CLAUDE_MARKETPLACE')\" = 0.24.2 ]"
 check "Codex manifest uses default plugin hook discovery without override" bash -c \
   "[ \"\$(jq -r 'has(\"hooks\")' '$CODEX_MANIFEST')\" = false ]"
 
@@ -52,8 +52,9 @@ check "skill procedure bodies avoid direct runtime tool names" bash -c '
   done < <(find "'"$PLUGIN"'/skills" -name SKILL.md -type f | sort)
   [ "$fail" -eq 0 ]
 '
-check "skills define direct-question fallback without automatic recommendation" bash -c \
-  "grep -qF '구조화된 사용자 질문 기능을 사용할 수 없으면' '$PLUGIN/skills/bootstrap/SKILL.md' && grep -qF '기능 부재 자체를 이유로 추천값을 임의로 적용하거나' '$PLUGIN/skills/bootstrap/SKILL.md' && grep -qF '명시적 누락 응답 계약은 그대로 따릅니다' '$PLUGIN/skills/bootstrap/SKILL.md'"
+INTERACTION_ASSET="$PLUGIN/shared/bootstrap/assets/interaction-rules.ko.md"
+check "interaction asset defines direct-question fallback without automatic recommendation" bash -c \
+  "grep -qF '기능이 없는 환경에서만 간결한 직접 질문으로 대체' '$INTERACTION_ASSET' && grep -qF '기능 부재나 무응답을 동의로 간주해 추천값을 임의 적용하지 않습니다' '$INTERACTION_ASSET' && grep -qF '명시적 누락 응답 계약은 그대로 따릅니다' '$INTERACTION_ASSET'"
 
 if [ "$fail" -eq 0 ]; then
   echo "PASS"; exit 0
