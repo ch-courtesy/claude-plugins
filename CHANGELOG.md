@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.62.4
+
+### 버그 수정
+- **forge 리뷰 루프: approve 기록 후 같은 head에 도착한 blocking 인라인 스레드의 영구 교착 해소 (#571)** — 리뷰 봇들의 게시 순서 레이스(승인 마커 → 몇 초 뒤 같은 head에 신뢰봇 blocking 인라인 스레드)에서, `rl_round`의 head 멱등 게이트가 verdict 재평가보다 먼저 no-op(rc=20) 처리해 rework만이 만들 수 있는 새 커밋을 영원히 기다리는 교착이 있었다(수동 rework 커밋 전까지 승인 폴링 상한 초과 blocked). 이제 기록 verdict가 approve인데 현재 fetch 판정이 changes(현재 head 공식 재리뷰 실재 증거 동반 — #549 가드 경유)면 같은 head라도 게이트를 통과시켜 재작업 라운드로 진전한다. 재작업 진입이 verdict 기록을 request_changes로 바꿔 같은 head 재평가는 1회로 수렴하고, 무한 라운드는 기존 세 가드(라운드 상한·무진전·핑퐁)에 귀속된다. pending(#549 재매핑 추정)·resolved 스레드·outdated·비신뢰 로그인 판정과 merge 게이트(mg_blocking_inline_gate)는 변경 없음. 인라인 조회 실패의 default-deny 합성 changes는 `fetchfail` 마커로 구분해 재평가하지 않고 대기한다(일시적 API 오류가 재작업 라운드를 소모하지 않음). 회귀 가드는 review-loop selftest에 추가하고 `tests/forge/test-forge-routing.sh`가 그 selftest를 스윕에 포함한다.
+
 ## project-init 0.24.1
 
 ### 변경(호환)

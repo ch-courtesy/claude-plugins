@@ -137,7 +137,10 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
     echo "verdict: approve"
   elif [[ "$blocking" == "FETCH_FAILED" ]]; then
     # 인라인 조회 실패 → 거짓 승인 금지. changes 로 표면화(무진전 가드가 에스컬레이션 유도).
+    #   fetchfail 마커: 이 changes 는 실재 증거(미해결 스레드+공식 재리뷰 마커)가 아닌 합성 판정임을
+    #   구분한다 — #571 같은 head 재평가 게이트가 일시적 조회 실패로 재작업 라운드를 소모하지 않게.
     echo "verdict: changes"
+    echo "fetchfail: 1"
     echo "finding: 미해결 리뷰 스레드 조회 실패 — default-deny(보수적 차단), 확인 필요"
   elif [[ -n "$findings" && -n "$reviewed" ]]; then
     echo "verdict: changes"
@@ -296,8 +299,20 @@ rl_round() {
   fi
   last="$(int_get_head "$rd" "$key")"
   if [[ -n "$head" && "$head" == "$last" ]]; then
-    int_log "$rd" "$key" "head 동일($head) — 새 커밋 없음, 라운드 미시작"
-    return 20
+    # #571: approve 기록 후 같은 head 에 뒤늦게 도착한 신뢰봇 미해결 스레드(봇 게시 순서 레이스)는
+    #   fetch 판정이 changes(현재 head 공식 재리뷰 실재 증거 동반 — #549 가드 경유)로 나타난다.
+    #   이때 no-op(rc=20) 하면 새 커밋은 rework 만이 만들 수 있어 영구 교착 — 게이트를 통과시켜
+    #   아래 verdict 분기가 재작업 라운드를 시작하게 한다. 재작업 진입이 verdict 기록을
+    #   request_changes 로 바꾸므로 같은 head 재평가는 1회로 수렴하고, 무한 라운드는 기존 세 가드
+    #   (라운드 상한·무진전·핑퐁)에 귀속된다. pending(#549 재매핑 추정)과 조회 실패 합성 changes
+    #   (fetchfail — 실재 증거 아님)는 그대로 대기.
+    if [[ "$(int_get_verdict "$rd" "$key")" == "approve" && "$(rl_review_verdict "$pr")" == "changes" \
+          && -z "$(rl_review_field "$pr" fetchfail)" ]]; then
+      int_log "$rd" "$key" "head 동일($head)이나 approve 기록 후 미해결 신뢰봇 스레드 도착 — 재평가(재작업 진입)"
+    else
+      int_log "$rd" "$key" "head 동일($head) — 새 커밋 없음, 라운드 미시작"
+      return 20
+    fi
   fi
 
   # --- PR 리뷰 판정(로컬 review 스킬 미호출) — verdict 는 PR 승인 상태/마커, 지적은 PR 인라인 코멘트 ---
@@ -609,6 +624,34 @@ rl_selftest() {
   chk "추가 라운드 미시작" "$(int_review_round "$rd" "$kB")" "0"
   [[ ! -s "$IMPLLOG" ]] && ok "approve 시 구현 미위임" || bad "approve 시 구현 미위임"
   rl_round "$rd" "$kB" "$base" 107 "feat/run1-b"; chk "approve 멱등(rc=20)" "$?" "20"
+
+  # ---- #571: approve 기록 후 같은 head 에 뒤늦게 도착한 blocking 스레드 → 재작업(영구 교착 아님) ----
+  #   봇 게시 순서 레이스: 승인 마커 먼저 기록(rc=30, head 처리됨) → 같은 head 에 신뢰봇 미해결
+  #   인라인 스레드 도착(공식 재리뷰 실재 증거 동반 → fetch 판정 changes). head 멱등 게이트가
+  #   verdict 재평가보다 먼저 no-op(rc=20) 처리하면 새 커밋을 만들 주체가 없어 영구 교착한다.
+  local kL="l-lll5"; : > "$IMPLLOG"
+  forge_review sha-L approve > "$RV/108.review"
+  rl_round "$rd" "$kL" "$base" 108 "feat/run1-l"; chk "#571 선행 approve(rc=30)" "$?" "30"
+  forge_review sha-L changes '늦게 도착한 차단 지적' > "$RV/108.review"
+  rl_round "$rd" "$kL" "$base" 108 "feat/run1-l"; rc=$?
+  chk "#571 같은 head approve 기록 후 changes → 재작업 라운드(rc=0)" "$rc" "0"
+  [[ -s "$IMPLLOG" ]] && ok "#571 재작업 구현 실행됨" || bad "#571 재작업 구현 실행됨"
+  # 재작업 진입이 verdict 기록을 request_changes 로 바꿔 같은 head 재평가는 1회 수렴 — 재호출 no-op.
+  rl_round "$rd" "$kL" "$base" 108 "feat/run1-l"; chk "#571 재작업 후 같은 head 재호출 no-op(rc=20)" "$?" "20"
+  # approve 기록 + 현재 판정 pending(#549 재매핑 추정·증거 없음) → 재평가 아닌 대기 유지(가드 보존).
+  local kL2="l2-lll6"
+  forge_review sha-L2 approve > "$RV/109.review"
+  rl_round "$rd" "$kL2" "$base" 109 "feat/run1-l2" >/dev/null
+  forge_review sha-L2 pending > "$RV/109.review"
+  rl_round "$rd" "$kL2" "$base" 109 "feat/run1-l2"; chk "#571 approve 기록+pending → 대기(rc=20, #549 보존)" "$?" "20"
+  # approve 기록 + 인라인 조회 실패(default-deny 합성 changes, fetchfail 마커) → 실재 증거가 아니므로
+  #   재평가하지 않고 대기 — 일시적 API 오류가 처리 불가능한 합성 finding 재작업 라운드를 소모하지 않는다.
+  local kL3="l3-lll7"; : > "$IMPLLOG"
+  forge_review sha-L3 approve > "$RV/111.review"
+  rl_round "$rd" "$kL3" "$base" 111 "feat/run1-l3" >/dev/null
+  printf 'state: NONE\nauthor: \nhead: sha-L3\nverdict: changes\nfetchfail: 1\nfinding: 미해결 리뷰 스레드 조회 실패 — default-deny(보수적 차단), 확인 필요\n' > "$RV/111.review"
+  rl_round "$rd" "$kL3" "$base" 111 "feat/run1-l3"; chk "#571 approve 기록+조회 실패 changes → 대기(rc=20, 합성 finding 재작업 금지)" "$?" "20"
+  [[ ! -s "$IMPLLOG" ]] && ok "#571 조회 실패 시 재작업 미실행" || bad "#571 조회 실패 시 재작업 미실행"
 
   # ---- pending(승인X·지적X) → 대기(rc=20), 로컬 review 미호출 ----
   local kPd="pd-ppp0"
