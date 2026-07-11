@@ -1,11 +1,13 @@
 ---
 name: create-skill
-description: 새 스킬(SKILL.md)을 인터뷰 기반으로 설계·작성하는 가이드. 루브릭 30항목 품질 기준을 작성 단계에 내장해 BLOCKER·MAJOR 0 목표로 스킬을 완성한다. 사용자가 새 스킬 작성·설계·제작·초안 생성을 요청하거나 SKILL.md 품질 개선이 필요할 때 활성화된다.
+description: 새 스킬(SKILL.md)을 인터뷰 기반으로 설계·작성하는 가이드. 루브릭 30항목 품질 기준을 작성 단계에 내장해 BLOCKER·MAJOR 0 목표로 스킬을 완성한다. 사용자가 새 스킬 작성·설계·제작·초안 생성을 요청할 때 활성화된다.
 allowed-tools:
   - AskUserQuestion
   - Read
   - Write
   - Bash(mkdir -p:*)
+  - Bash(python3 *rule_checker.py*:*)
+  - Bash(git rev-parse:*)
 ---
 
 # create-skill
@@ -70,10 +72,11 @@ description 초안을 사용자에게 보여주고 수정 여부를 확인한다
 - 본문 → references 1단계로 참조 깊이를 제한한다.
 - 본문 500줄 이하를 목표로 한다.
 
-### 5. 품질 자가점검
+### 5. 품질 자가점검 (모델 13항목)
 
-`../../shared/rubric/criteria.md`를 읽고 설계 내용을 30항목 기준으로 점검한다.
-BLOCKER 항목은 반드시 해소하고, MAJOR 항목은 0을 목표로 한다.
+`../../shared/rubric/criteria.md`를 읽고 설계 내용을 "2. 모델 항목" 13개(의미 판정)
+기준으로 점검한다. BLOCKER 항목은 반드시 해소하고, MAJOR 항목은 0을 목표로 한다.
+규칙 17항목(결정적 판정)은 손으로 대조하지 않는다 — 7단계에서 검사기로 확인한다.
 
 ### 6. 파일 작성
 
@@ -85,7 +88,23 @@ BLOCKER 항목은 반드시 해소하고, MAJOR 항목은 0을 목표로 한다.
 - `README.md` — 목적·호출 예시 요약 (SKILL.md 내용 복제 금지)
 기존 파일은 diff를 보여준 뒤 명시적 승인이 있을 때만 덮어쓴다.
 
-### 7. 완료 요약
+### 7. 규칙 검사 실행 (결정적 17항목)
+
+6단계에서 생성·덮어쓴 SKILL.md가 없으면(승인 거절 등) 이 단계를 건너뛴다.
+`git rev-parse --show-toplevel`로 저장소 루트의 절대경로를 구하고, 생성된
+SKILL.md 경로도 그 루트 기준 절대경로로 조합해 검사기를 실행한다 — Bash
+실행 인자에 상대경로를 쓰지 않는다.
+
+```
+python3 <repo_root>/plugins/project-init/shared/rubric/rule_checker.py <repo_root>/<생성된 SKILL.md 경로>
+```
+
+종료 코드가 0이 아니면(경로 오류 등) 오류를 알리고 중단한다. stdout JSON의
+규칙 17항목 결과에서 BLOCKER·MAJOR 0을 확인한다. BLOCKER·MAJOR가 발견되면
+해당 파일을 수정한 뒤 **1회만 재검**한다 — 재검에서도 남으면 반복하지 않고
+잔존 지적으로 8단계에 넘긴다(무한 루프 방지).
+
+### 8. 완료 요약
 
 생성·보존·승인 거절로 생략된 파일을 구분해 요약한다.
 BLOCKER·MAJOR 잔여가 있으면 수정을 권고한다.
@@ -103,3 +122,4 @@ BLOCKER·MAJOR 잔여가 있으면 수정을 권고한다.
 |------|------|-----------|
 | `../../shared/rubric/criteria.md` | 루브릭 30항목 자가점검 체크리스트 (단일 출처) | 5단계 — 품질 자가점검 |
 | `references/skill-template.md` | SKILL.md 구조 틀 | 6단계 — 파일 작성 |
+| `../../shared/rubric/rule_checker.py` | 규칙 17항목 결정적 검사기 | 7단계 — 규칙 검사 실행 |
