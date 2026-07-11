@@ -8,6 +8,11 @@ fail=0; ok(){ echo "PASS  $1"; }; bad(){ echo "FAIL  $1"; fail=1; }
 # 라우팅 셀프테스트 위임
 if bash "$F" selftest; then ok "forge selftest"; else bad "forge selftest"; fi
 
+# review-loop 셀프테스트 위임 — 판정 분기·세 가드·#549 재매핑 대기·#571 같은 head 재평가 회귀 가드.
+RL_OUT="$(bash "$HERE/../../plugins/autopilot/forge/lib/review-loop.sh" selftest 2>&1)" \
+  && [[ "$RL_OUT" == *"ALL PASS"* ]] && ok "review-loop selftest" \
+  || { bad "review-loop selftest"; echo "$RL_OUT"; }
+
 # gitlab 구현은 호출 시 비-0 (조용한 실패 금지 — 확장점)
 ( source "$HERE/../../plugins/autopilot/forge/gitlab.sh"; fg_integrate x y z ) >/dev/null 2>&1 && bad "gitlab integrate abort" || ok "gitlab integrate abort(비-0)"
 
