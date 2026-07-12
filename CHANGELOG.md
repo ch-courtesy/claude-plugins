@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## project-init 0.24.5
+
+### 변경(호환)
+- **shared/rubric 테스트 회귀 커버리지 이식 (#572)** — #568(skill-rubric 플러그인 제거)에서 삭제된 구 `tests/skill-rubric/test-rubric-checker.sh` 스위트에만 있던 회귀 커버리지를 `shared/rubric/tests/`로 이식했다. BLOCKER 픽스처 2종(`blocker-no-yaml`: S-YAML FAIL→F, `blocker-secret`: SEC-SECRET FAIL→F)과 런타임 생성 케이스 5종(`long-body`: C-LENGTH FAIL, `attr-xml`: 속성 있는 XML 태그 S-NO-XML FAIL→F, `bad-quote`: 닫히지 않은 따옴표 S-YAML FAIL, `inline-comment`: 인라인 주석 S-YAML PASS, `trailing-garbage`: 트레일링 가비지 S-YAML FAIL)을 현 스위트 관례로 재작성 통합. `rule_checker.py` 판정 로직은 변경 없음(이식 케이스 전부 현 검사기에서 PASS — 실제 회귀 없음 확인).
+
 ## autopilot 0.62.4
 
 ### 버그 수정
