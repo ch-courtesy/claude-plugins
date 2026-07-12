@@ -58,7 +58,7 @@ id="$(bash "$ADAPTER" create_task --title "T1" --body '## 목표'$'\n'x | jq -r 
 mkdir -p "$TMP/.review/tasks/$id"
 MOCK_RESULT=DONE run start "$id" --stop-at review >/dev/null
 chk "stop-at review → review" "$(status_of "$id")" "review"
-[[ -d "$TMP/.task-work/$id" ]] && ok "1) stop-at: task-work 잔존" || bad "1) stop-at: task-work 잔존"
+[[ -f "$TMP/.autopilot/runs/$id/SPEC.md" ]] && ok "1) stop-at: run-dir(SPEC) 잔존" || bad "1) stop-at: run-dir(SPEC) 잔존"
 [[ -d "$TMP/.review/tasks/$id" ]] && ok "1) stop-at: review 상태 잔존" || bad "1) stop-at: review 상태 잔존"
 
 # 2) 전체 경로: DONE + forge 승인/머지 → done
@@ -66,7 +66,6 @@ id2="$(bash "$ADAPTER" create_task --title "T2" --body '## 목표'$'\n'y | jq -r
 mkdir -p "$TMP/.review/tasks/$id2" "$TMP/.review/tasks/other-keep"
 MOCK_RESULT=DONE run start "$id2" >/dev/null
 chk "전체 경로 → done" "$(status_of "$id2")" "done"
-[[ ! -d "$TMP/.task-work/$id2" ]] && ok "2) done: task-work 삭제" || bad "2) done: task-work 삭제"
 [[ ! -d "$TMP/.autopilot/runs/$id2" ]] && ok "2) done: run-dir 삭제" || bad "2) done: run-dir 삭제"
 [[ ! -d "$TMP/.review/tasks/$id2" ]] && ok "2) done: review 상태 삭제" || bad "2) done: review 상태 삭제"
 [[ -d "$TMP/.review/tasks/other-keep" ]] && ok "2) done: 다른 태스크 review 상태 보존" || bad "2) done: 다른 태스크 review 상태 보존"
@@ -76,56 +75,70 @@ id3="$(bash "$ADAPTER" create_task --title "T3" --body '## 목표'$'\n'z | jq -r
 mkdir -p "$TMP/.review/tasks/$id3"
 MOCK_RESULT=BLOCKED run start "$id3" >/dev/null 2>&1 || true
 chk "BLOCKED → blocked" "$(status_of "$id3")" "blocked"
-[[ -d "$TMP/.task-work/$id3" ]] && ok "3) blocked: task-work 잔존" || bad "3) blocked: task-work 잔존"
+[[ -f "$TMP/.autopilot/runs/$id3/SPEC.md" ]] && ok "3) blocked: run-dir(SPEC) 잔존" || bad "3) blocked: run-dir(SPEC) 잔존"
 [[ -d "$TMP/.review/tasks/$id3" ]] && ok "3) blocked: review 상태 잔존" || bad "3) blocked: review 상태 잔존"
 
-# 4) ROOT_DIR 회귀: 링크드 워크트리 안에서 호출해도 run_dir 이 메인 리포 루트에 생성됨
+# 4) ROOT_DIR 회귀: 링크드 워크트리(.autopilot/runs/<id>/.worktree — materialize 파생 실전 위치)
+#    안에서 호출해도 run_dir 이 메인 리포 루트에 생성되고 워크트리 내부에 중첩 생성이 없음.
+#    merge 실패 mock 으로 done-정리를 억제해 증거(review_entered·중첩 디렉토리)를 보존한 채 단정한다.
 T2="$(mktemp -d)"
 trap 'rm -rf "$TMP" "$T2"' EXIT
 git init -q "$T2"
 git -C "$T2" config user.email t@t
 git -C "$T2" config user.name t
 git -C "$T2" commit -q --allow-empty -m "init"
-git -C "$T2" worktree add -q "$T2/.task-work/wt" --detach
+git -C "$T2" worktree add -q "$T2/.autopilot/runs/wt_task/.worktree" --detach
 # 완전 목 어댑터 (git root 비의존 — adapter.sh 는 --show-toplevel 기반이어서 worktree 내에서 오동작)
 mkdir -p "$T2/bin"
 cat > "$T2/bin/adapter_wt" << AMOCK
 #!/usr/bin/env bash
 case "\$1" in
-  materialize) echo '{"spec_path":"$T2/.task-work/wt_task/SPEC.md"}';;
+  materialize) echo '{"spec_path":"$T2/.autopilot/runs/wt_task/SPEC.md"}';;
   claim)        echo '{"claimed":true}';;
   renew_lease|set_status|append_log) exit 0;;
   *) exit 0;;
 esac
 AMOCK
 chmod +x "$T2/bin/adapter_wt"
+# merge 실패 mock forge: blocked 로 끝나 정리가 없다 → run_dir 위치 증거 보존
+cat > "$T2/bin/forge_wt" <<'FMOCK'
+#!/usr/bin/env bash
+case "$1" in
+  integrate) echo "branch: feat/x"; echo "pr: 7"; exit 0;;
+  review) exit 20;;
+  merge) exit 1;;
+  *) exit 0;;
+esac
+FMOCK
+chmod +x "$T2/bin/forge_wt"
 touch "$T2/dummy.md"
 # 링크드 워크트리 안에서 execute-task.sh 실행 (run_dir 생성 지점까지 도달: --stop-at review 없음)
-(cd "$T2/.task-work/wt"
- ADAPTER_CMD="bash $T2/bin/adapter_wt" LOOP_CMD="bash $TMP/bin/loop" FORGE_CMD="bash $TMP/bin/forge" \
+(cd "$T2/.autopilot/runs/wt_task/.worktree"
+ ADAPTER_CMD="bash $T2/bin/adapter_wt" LOOP_CMD="bash $TMP/bin/loop" FORGE_CMD="bash $T2/bin/forge_wt" \
  MOCK_RESULT=DONE HEARTBEAT_INTERVAL=1 APPROVAL_CHECK_CMD=true BLOCKING_CHECK_CMD=true SLEEP_CMD=: \
  bash "$ET" start wt_task >/dev/null 2>&1 || true)
-# done 후 run_dir(leaf) 삭제됐지만 parent 가 $T2 에 있으면 ROOT_DIR 이 올바르게 결정된 것
-[[ -d "$T2/.autopilot/runs" ]] \
+[[ -f "$T2/.autopilot/runs/wt_task/review_entered" ]] \
   && ok "4) worktree-내-호출 → run_dir 메인 루트 생성" \
   || bad "4) worktree-내-호출 → run_dir 메인 루트 생성"
+[[ ! -d "$T2/.autopilot/runs/wt_task/.worktree/.autopilot" ]] \
+  && ok "4) worktree-내-호출 → 워크트리 내부 중첩 미생성" \
+  || bad "4) worktree-내-호출 → 워크트리 내부 중첩 미생성"
 
-# 5) status=done 선제 가드: 잔존 .task-work/.autopilot 디렉토리 정리 + 파이프라인(loop) 미재실행(#541)
+# 5) status=done 선제 가드: 잔존 .autopilot/runs/<id> 디렉토리 정리 + 파이프라인(loop) 미재실행(#541)
 id5="$(bash "$ADAPTER" create_task --title "T5" --body '## 목표'$'\n'w | jq -r .task_id)"
 bash "$ADAPTER" set_status --task-id "$id5" --status done >/dev/null
-mkdir -p "$TMP/.task-work/$id5" "$TMP/.autopilot/runs/$id5" "$TMP/.review/tasks/$id5"
-touch "$TMP/.task-work/$id5/SPEC.md" "$TMP/.autopilot/runs/$id5/LOG.md"
+mkdir -p "$TMP/.autopilot/runs/$id5" "$TMP/.review/tasks/$id5"
+touch "$TMP/.autopilot/runs/$id5/SPEC.md" "$TMP/.autopilot/runs/$id5/LOG.md"
 rm -f "$TMP/loop.start.called"
 run start "$id5" >/dev/null
-[[ ! -d "$TMP/.task-work/$id5" ]] && ok "5) done 선제: task-work 정리" || bad "5) done 선제: task-work 정리"
 [[ ! -d "$TMP/.autopilot/runs/$id5" ]] && ok "5) done 선제: run-dir 정리" || bad "5) done 선제: run-dir 정리"
 [[ ! -d "$TMP/.review/tasks/$id5" ]] && ok "5) done 선제: review 상태 정리" || bad "5) done 선제: review 상태 정리"
 chk "5) done 선제: status 유지" "$(status_of "$id5")" "done"
 [[ ! -f "$TMP/loop.start.called" ]] && ok "5) done 선제: 파이프라인 미재실행(loop 미호출)" || bad "5) done 선제: 파이프라인 미재실행(loop 미호출)"
 
-# 6) 멱등: 두 디렉토리 모두 이미 없는 상태에서 재호출해도 에러·디렉토리 생성 없이 안전 종료
+# 6) 멱등: 디렉토리가 이미 없는 상태에서 재호출해도 에러·디렉토리 생성 없이 안전 종료
 run start "$id5" >/dev/null
-[[ ! -d "$TMP/.task-work/$id5" && ! -d "$TMP/.autopilot/runs/$id5" ]] \
+[[ ! -d "$TMP/.autopilot/runs/$id5" ]] \
   && ok "6) 멱등 재호출: 디렉토리 미생성" || bad "6) 멱등 재호출: 디렉토리 미생성"
 
 # 7) forge-단계 재진입 보존: review_entered 표지가 있으면 loop cleanup 을 건너뛴다(완료된 .worktree 보존)
@@ -143,5 +156,12 @@ id8="$(bash "$ADAPTER" create_task --title "T8" --body '## 목표'$'\n's | jq -r
 rm -f "$TMP/loop.cleanup.called"
 MOCK_RESULT=DONE run start "$id8" >/dev/null
 [[ -f "$TMP/loop.cleanup.called" ]] && ok "8) loop-단계: loop cleanup 정상 호출" || bad "8) loop-단계: loop cleanup 정상 호출"
+
+# 9) 레거시 경로 부재(#580): 플러그인 런타임 코드·계약 문서·스킬 문서에 .task-work 참조 없음
+if grep -rq '\.task-work' "$HERE/../../../plugins/autopilot"; then
+  bad "9) 플러그인 내 .task-work 참조 부재"; grep -rn '\.task-work' "$HERE/../../../plugins/autopilot" | head -5
+else
+  ok "9) 플러그인 내 .task-work 참조 부재"
+fi
 
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail

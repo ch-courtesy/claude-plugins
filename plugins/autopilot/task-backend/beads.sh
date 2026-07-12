@@ -109,7 +109,7 @@ be_append_log() {
 
 be_materialize() {
   local id; id="$(_argval --task-id "$@")"
-  local dir="$TB_ROOT/.task-work/$id"; mkdir -p "$dir"; local sp="$dir/SPEC.md"
+  local dir="$TB_ROOT/.autopilot/runs/$id"; mkdir -p "$dir"; local sp="$dir/SPEC.md"
   local j; j="$(bd show "$id" --json 2>/dev/null)" || tb_die "bd show 실패: $id"
   { printf '# %s\n\n' "$(printf '%s' "$j" | jq -r .title)"; printf '%s\n' "$(printf '%s' "$j" | jq -r '.description//""')"; } > "$sp"
   jq -nc --arg id "$id" --arg p "$sp" '{task_id:$id, spec_path:$p}'

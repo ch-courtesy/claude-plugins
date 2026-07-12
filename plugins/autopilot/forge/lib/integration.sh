@@ -980,14 +980,14 @@ SPECEOF
   body="$(in_pr_body "$specI")"
   case "$body" in *'Refs #43'*) ok "이슈 '#43' 표기 정규화";; *) bad "이슈 '#43' 표기 정규화";; esac
 
-  # ---- execute-task materialize 경로: 임시 materialize SPEC(.task-work/<id>/SPEC.md) 본문 ----
-  #   (a) .task-work/·절대 경로 누출 부재,
+  # ---- execute-task materialize 경로: 임시 materialize SPEC(.autopilot/runs/<id>/SPEC.md) 본문 ----
+  #   (a) .autopilot/runs/·절대 경로 누출 부재,
   #   (b) 자동생성 식별 줄·run 추적 줄 부재(#554), (c) 태스크 참조(Refs #n)·요약 보존. ----
-  local specET="$TMP/.task-work/777/SPEC.md"
-  mkdir -p "$TMP/.task-work/777"
+  local specET="$TMP/.autopilot/runs/777/SPEC.md"
+  mkdir -p "$TMP/.autopilot/runs/777"
   printf -- '---\nslug: et-body\nissue: 777\n---\n\n# ET 기능\n\n## 무엇을 만들 것인가\nET 요약 줄.\n' > "$specET"
   body="$(in_pr_body "$specET")"
-  case "$body" in *'.task-work/'*) bad "ET: .task-work 임시 경로 누출 부재";; *) ok "ET: .task-work 임시 경로 누출 부재";; esac
+  case "$body" in *'.autopilot/runs/'*) bad "ET: .autopilot/runs 임시 경로 누출 부재";; *) ok "ET: .autopilot/runs 임시 경로 누출 부재";; esac
   case "$body" in *"$specET"*) bad "ET: 절대 SPEC 경로 부재";; *) ok "ET: 절대 SPEC 경로 부재";; esac
   case "$body" in *'자동 생성'*) bad "ET: 자동생성 식별 줄 부재(#554)";; *) ok "ET: 자동생성 식별 줄 부재(#554)";; esac
   case "$body" in *'자동 적대 리뷰'*) bad "ET: 리뷰 식별 줄 부재(#554)";; *) ok "ET: 리뷰 식별 줄 부재(#554)";; esac
@@ -1006,8 +1006,8 @@ SPECEOF
 
   # ---- 작업 내용이 첫 요소(이슈·요약 부재)인 경우도 선행 공백 줄 없이 시작(#554) ----
   #   (basename 이 SPEC.md 라 위에서 채운 $LP/SPEC.md.logs 의 DONE 요약을 공유 — 의도적 재사용)
-  local specET2="$TMP/.task-work/778/SPEC.md"
-  mkdir -p "$TMP/.task-work/778"
+  local specET2="$TMP/.autopilot/runs/778/SPEC.md"
+  mkdir -p "$TMP/.autopilot/runs/778"
   printf -- '# ET 기능 2\n' > "$specET2"
   body="$(in_pr_body "$specET2")"
   case "$body" in '## 작업 내용'*) ok "본문 선두 작업 내용(선행 공백 줄 없음)";; *) bad "본문 선두 작업 내용(선행 공백 줄 없음)";; esac
@@ -1022,12 +1022,12 @@ SPECEOF
   body="$(in_pr_body "$specET")"
   case "$body" in *'## 작업 내용'*) bad "ET: DONE 신호 부재 → 작업 내용 섹션 생략";; *) ok "ET: DONE 신호 부재 → 작업 내용 섹션 생략";; esac
 
-  # ---- 단일 경로(#556): 발신 주체 구분 없음 — materialize 마커(.task-work) 없는 spec 경로도
+  # ---- 단일 경로(#556): 발신 주체 구분 없음 — materialize 마커(.autopilot/runs) 없는 spec 경로도
   #   DONE 요약이 있으면 '## 작업 내용' 섹션을 포함한다(#539 동작을 단일 경로로 유지).
   #   ($spec 의 basename 도 "SPEC.md" 라 같은 mock 로그 파일을 공유 — 의도적 재사용). ----
   printf '\n===== signals/DONE =====\n무엇을: Y\n' > "$LP/SPEC.md.logs"
   body="$(in_pr_body "$spec")"
-  case "$body" in *'## 작업 내용'*) ok "#556 단일 경로: 비-task-work spec 도 DONE 요약 → 작업 내용 포함";; *) bad "#556 단일 경로: 비-task-work spec 도 DONE 요약 → 작업 내용 포함";; esac
+  case "$body" in *'## 작업 내용'*) ok "#556 단일 경로: 비-materialize spec 도 DONE 요약 → 작업 내용 포함";; *) bad "#556 단일 경로: 비-materialize spec 도 DONE 요약 → 작업 내용 포함";; esac
   : > "$LP/SPEC.md.logs"
 
   # ---- PR 생성이 --body-file 로 멀티라인 본문을 forge 에 전달(줄바꿈 보존) ----

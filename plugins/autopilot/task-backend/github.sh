@@ -167,7 +167,7 @@ be_append_log() {
 
 be_materialize() {
   local id; id="$(_argval --task-id "$@")"
-  local dir="$TB_ROOT/.task-work/$id"; mkdir -p "$dir"; local sp="$dir/SPEC.md"
+  local dir="$TB_ROOT/.autopilot/runs/$id"; mkdir -p "$dir"; local sp="$dir/SPEC.md"
   local title; title="$(gh issue view "$id" $(gh_repo_args) --json title -q .title)"
   # 내부 depends_on 마커는 spec 본문에서 제외(lease 는 본문이 아닌 전용 코멘트라 본문에 없음). 제목은
   # prepend 하지 않고 tb_emit_spec(adapter 공통)이 본문 frontmatter 뒤에 주입 → frontmatter-first.

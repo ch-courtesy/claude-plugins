@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.63.0
+
+### 변경(호환)
+- **런타임 산출물 `.task-work/` 를 `.autopilot/runs/` 로 통합 (#580)** — 태스크 실행 런타임 산출물 디렉토리 `.task-work/` 를 폐지하고 기존 `.autopilot/runs/<태스크 id>/` 로 완전 통합했다. materialize 임시 SPEC(+파생 워크트리)은 `.autopilot/runs/<id>/SPEC.md` 에 생성되고(filesystem·github·beads 세 백엔드 동일), filesystem 백엔드의 claim 락은 `.autopilot/runs/.claims/<id>` 로 이동했다(`.claims` 는 `runs/` 아래 유일한 비-태스크-id 항목 — contract.md 명시). 태스크 하나의 런타임 상태가 디렉토리 하나에 모이고 최상위 런타임 dotdir 는 `.autopilot/` 하나가 된다. done 전이 시 `.autopilot/runs/<id>/`·`.review/tasks/<id>/` 정리, blocked·stop-at review 보존, done 선제 가드(잔존 정리 후 skip), PR 본문 임시 경로 비누출 동작은 새 경로 기준으로 유지된다(회귀 가드 갱신: test-filesystem·test-execute-task-lifecycle·forge integration selftest). 어댑터 공개 인터페이스(동사·JSON 스키마)는 불변(MINOR). 옛 `.task-work/` 잔재는 마이그레이션하지 않고 방치하며 `.gitignore` 에 레거시 잔재-보호 항목으로 유지한다.
+
 ## thinktank 1.0.0
 
 ### 변경(깨짐)
