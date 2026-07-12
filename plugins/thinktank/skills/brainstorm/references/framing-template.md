@@ -12,10 +12,11 @@
 6. 기존 시도, 이미 기각한 접근, 활용 가능한 자산은 무엇인가?
 7. 지금 가장 불확실하지만 영향이 큰 가정은 무엇인가?
 
-## `brief.md` 규격
+## 브리프 섹션 규격
+
+세션 파일(`.brainstorm/<session-id>.md`)의 브리프 섹션에 다음 필드를 기록한다.
 
 ```markdown
-# Brainstorm Brief
 - session-id:
 - requester:
 - problem-or-opportunity:
