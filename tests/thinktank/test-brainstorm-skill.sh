@@ -155,10 +155,10 @@ ok "구 다중 파일 계약 부재"
 
 echo ""
 echo "=== TEST 10: 플러그인 버전 ==="
-grep -q '"version": "0.4.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" \
-  || fail "thinktank 플러그인 버전이 0.4.0이 아님"
-awk '/"name": "thinktank"/{found=1} found && /"version": "0.4.0"/{ok=1; exit} END{exit !ok}' "$MARKETPLACE" \
-  || fail "마켓플레이스 thinktank 버전이 0.4.0이 아님"
+grep -q '"version": "1.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" \
+  || fail "thinktank 플러그인 버전이 1.0.0이 아님"
+awk '/"name": "thinktank"/{found=1} found && /"version": "1.0.0"/{ok=1; exit} END{exit !ok}' "$MARKETPLACE" \
+  || fail "마켓플레이스 thinktank 버전이 1.0.0이 아님"
 ok "플러그인과 마켓플레이스 버전"
 
 echo ""
