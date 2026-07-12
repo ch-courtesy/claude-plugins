@@ -18,14 +18,12 @@ project-init 초기화 흐름에서 엔지니어링 카테고리 지침을 만�
 ## 어떻게 호출 (How)
 
 Claude 스킬로 활성화된다 — 자연어 트리거가 `description` 과 매칭되면 실행된다.
-절차·입력 파싱·치환 규칙의 단일 출처는 `SKILL.md` 본문이며, 결정적 작업은
-`references/` 스크립트로 고정되어 있다.
+절차·입력 파싱·치환 규칙의 단일 출처는 공유 프로토콜
+`../../shared/rule-creator/protocol.md`이며, 결정적 작업은 같은 디렉터리의
+스크립트로 고정되어 있다. `SKILL.md`에는 이 스킬 고유 사항만 남는다.
 
 ## 포인터
 
-- 절차·옵션·입력·사후 작업 규칙: [`SKILL.md`](./SKILL.md)
-- 결정적 작업 스크립트: [`references/`](./references/)
-  - `scan_templates.py` — 템플릿 frontmatter 파싱 → 정규화 후보 JSON.
-  - `list_target_dirs.py` — target depth1 디렉토리 후보 산출.
-  - `render_rule.py` — frontmatter 제거 + placeholder 치환 + bullet 렌더.
+- 고유 사항(대상 디렉터리·빈 목록 문구): [`SKILL.md`](./SKILL.md)
+- 공유 절차·결정적 스크립트: [`../../shared/rule-creator/`](../../shared/rule-creator/)
 - sub-룰 템플릿: [`templates/`](./templates/)

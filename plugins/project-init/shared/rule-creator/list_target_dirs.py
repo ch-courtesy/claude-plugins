@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """명령열: target 루트 depth=1 디렉토리 후보 산출(candidate_source: depth1_dirs_filtered).
 
-SKILL.md '생성 절차' 4-bis 의 결정적 명령열을 고정한다.
+rule-creator 공유 프로토콜(protocol.md) 4-bis 의 결정적 명령열을 고정한다.
 
 사용법:
     python3 list_target_dirs.py <target_root>

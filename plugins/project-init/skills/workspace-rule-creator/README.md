@@ -18,14 +18,14 @@ project-init 초기화 흐름에서 작업공간 위생 카테고리 지침을 �
 ## 어떻게 호출 (How)
 
 Claude 스킬로 활성화된다 — 자연어 트리거가 `description` 과 매칭되면 실행된다.
-절차·입력 파싱·치환 규칙의 단일 출처는 `SKILL.md` 본문이며, 결정적 작업은
-`references/` 스크립트로 고정되어 있다.
+절차·입력 파싱·치환 규칙의 단일 출처는 공유 프로토콜
+`../../shared/rule-creator/protocol.md`이고, `SKILL.md`에는 이 스킬 고유
+사항(메뉴-우선 정적 입력 계약·temp_path 기본값 등)만 남는다.
 
 ## 포인터
 
-- 절차·옵션·입력·사후 작업 규칙: [`SKILL.md`](./SKILL.md)
-- 결정적 작업 스크립트: [`references/`](./references/)
-  - `scan_templates.py` — 템플릿 frontmatter 파싱 → 정규화 후보 JSON.
+- 고유 사항(대상 디렉터리·메뉴-우선 계약·temp_path): [`SKILL.md`](./SKILL.md)
+- 공유 절차·결정적 스크립트: [`../../shared/rule-creator/`](../../shared/rule-creator/)
+- 스킬 고유 스크립트: [`references/`](./references/)
   - `normalize_path.py` — temp_path 입력값 후행 `/` 정규화 + 빈 값 기본값 적용.
-  - `render_rule.py` — frontmatter 제거 + placeholder 치환 + temp_path 기본값 처리.
 - sub-룰 템플릿: [`templates/`](./templates/)
