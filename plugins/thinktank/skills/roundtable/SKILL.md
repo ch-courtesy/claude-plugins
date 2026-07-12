@@ -25,27 +25,27 @@ allowed-tools:
 ## 호출
 
 - `roundtable start <회의 설명>`: 새 회의 시작
-- `roundtable resume <meeting-id>`: `state.md`의 다음 행동부터 재개
+- `roundtable resume <meeting-id>`: 회의 파일 상태 블록의 다음 행동부터 재개
 - `roundtable status [meeting-id]`: 상태·산출물·다음 행동 보고
 
-인자가 없으면 `start`로 간주한다. 산출물 루트는 `.roundtable/<meeting-id>/`이며, ID는 로컬 날짜와 안건 slug를 조합한 `YYYYMMDD-<slug>`다. 같은 ID가 있으면 새 suffix를 임의 생성하지 말고 `resume` 또는 다른 제목을 `AskUserQuestion`으로 선택받는다.
+인자가 없으면 `start`로 간주한다. 회의 산출물은 `.roundtable/<meeting-id>.md` **단일 파일 1개**이며, ID는 로컬 날짜와 안건 slug를 조합한 `YYYYMMDD-<slug>`다. 같은 ID가 있으면 새 suffix를 임의 생성하지 말고 `resume` 또는 다른 제목을 `AskUserQuestion`으로 선택받는다.
 
 ## 상태
 
 `interviewing → agenda_approval → researching → research_review → roster_approval → discussing → documenting → completed | no_consensus`
 
-모든 단계 전환 시 `references/document-templates.md`의 `state.md`를 먼저 갱신한다. `resume`은 파일에 기록된 상태와 다음 행동만 신뢰한다. `status`는 파일을 변경하지 않는다.
+모든 단계 전환 시 회의 파일 최상단의 상태 블록을 먼저 갱신한다(`references/document-templates.md`). 회의 파일은 섹션 단위로만 추가·갱신하고 다른 섹션은 건드리지 않는다. `resume`은 단일 회의 파일 하나만 읽고 기록된 상태와 다음 행동만 신뢰한다. `status`는 파일을 변경하지 않는다.
 
 ## resume 라우팅
 
 | 현재 상태 | 재개 행동 |
 |---|---|
-| `interviewing` | 기존 `agenda.md` 초안을 읽고 아직 비어 있는 충분 조건부터 인터뷰 |
+| `interviewing` | 아젠다 섹션 초안을 읽고 아직 비어 있는 충분 조건부터 인터뷰 |
 | `agenda_approval` | 아젠다를 다시 제시하고 승인 또는 수정만 요청 |
-| `researching` | `research-plan.md`와 기존 증거를 읽고 미완료 조사만 중앙 리서처에게 위임 |
+| `researching` | 리서치 계획 섹션과 기존 증거를 읽고 미완료 조사만 중앙 리서처에게 위임 |
 | `research_review` | 증거 팩의 상충·미확인·고위험 항목 검토부터 재개 |
 | `roster_approval` | roster와 예산을 다시 제시하고 승인 또는 수정만 요청 |
-| `discussing` | `discussion.md`의 마지막 완료 라운드 다음부터 재개하며 초기 입장을 다시 생성하지 않음 |
+| `discussing` | 논의 기록 섹션의 마지막 완료 라운드 다음부터 재개하며 초기 입장을 다시 생성하지 않음 |
 | `documenting` | 진행자의 최종 판정에 맞는 합의서 또는 불합의 보고서 작성부터 재개 |
 | `completed` 또는 `no_consensus` | 읽기 전용 최종 보고만 수행하고 회의를 재실행하지 않음 |
 
@@ -53,19 +53,19 @@ allowed-tools:
 
 ## status 보고
 
-`status`는 회의 ID, 현재 상태, 완료된 산출물, 마지막 완료 라운드, 사용한 연구·Agent 호출 수, 남은 정보 공백, 다음 행동을 읽기 전용으로 보고한다. 파일을 생성·수정하거나 Agent를 호출하지 않는다.
+`status`는 단일 회의 파일 하나만 읽어 회의 ID, 현재 상태, 완료 섹션, 마지막 완료 라운드, 사용한 연구·Agent 호출 수, 남은 정보 공백, 다음 행동을 읽기 전용으로 보고한다. 파일을 생성·수정하거나 Agent를 호출하지 않는다.
 
 ## 시작 워크플로
 
 1. **복잡도 게이트.** 단순 사실 조회, 단일 저위험 선택, 관점 충돌이 없는 안건이면 원탁회의 대신 단일 에이전트 자기검토를 권고하고 승인 없이 회의를 시작하지 않는다.
 2. **인터뷰.** `references/agenda-template.md`를 읽고 `AskUserQuestion`으로 한 주제씩 목적, 결정 권한, 핵심 질문, 범위, 이해관계자, 제약, 성공 조건을 수집한다.
-3. **아젠다 승인.** 아젠다 성격에 맞춰 자문·동의·합의·의결 중 방식을 선택하고 근거를 적는다. `agenda.md`를 보여주고 의뢰자의 명시적 승인 전에는 리서치나 회의를 시작하지 않는다.
-4. **중앙 리서치.** `references/research-protocol.md`에 따라 회의 책임자가 `research-plan.md`를 작성하고 중앙 리서처를 한 번 호출해 공통 증거 팩 `evidence-pack.md`를 만든다. 참여자별 중복 리서치를 금지한다.
+3. **아젠다 승인.** 아젠다 성격에 맞춰 자문·동의·합의·의결 중 방식을 선택하고 근거를 적는다. 아젠다 섹션을 보여주고 의뢰자의 명시적 승인 전에는 리서치나 회의를 시작하지 않는다.
+4. **중앙 리서치.** `references/research-protocol.md`에 따라 회의 책임자가 리서치 계획 섹션을 작성하고 중앙 리서처를 한 번 호출해 증거 팩 섹션에 공통 증거 팩을 만든다. 참여자별 중복 리서치를 금지한다.
 5. **리서치 검토.** 고위험, 상충 출처, 최신성 의존, 외부 사실 의존이 크면 리서치 검증자를 호출한다. 미확인 정보가 결론을 좌우하면 의뢰자에게 보고하고 강행하지 않는다.
-6. **참여자 구성.** `references/participant-personas.md`에서 필요한 관점만 선택·결합한다. 중복 논리를 가진 역할은 제거하고, 예상 참여자 수·라운드·추가 조사 예산을 `roster.md`에 기록한다.
+6. **참여자 구성.** `references/participant-personas.md`에서 필요한 관점만 선택·결합한다. 중복 논리를 가진 역할은 제거하고, 예상 참여자 수·라운드·추가 조사 예산을 로스터 섹션에 기록한다.
 7. **구성 승인.** 의뢰자에게 아젠다, 증거 공백, roster, 합의 기준, 예상 비용을 제시한다. 명시적 승인 전에는 회의를 시작하지 않는다.
 8. **회의 실행.** `references/meeting-protocol.md`와 `references/role-prompts.md`를 따른다. 진행자가 라운드를 지휘·판정하고 메인 세션이 참여자를 호출·디스패치한다.
-9. **문서화.** 합의 기준 충족 시 기록자가 `agreement.md`, 미충족 시 `no-consensus.md`를 작성한다.
+9. **문서화.** 기록자가 최종 문서 섹션을 작성한다 — 합의 기준 충족 시 합의·실행서, 미충족 시 불합의 보고서 형식.
 10. **최종 검토.** 회의 책임자는 최종 문서가 아젠다, 증거 팩, 결정 지도, 반대 의견을 정확히 반영하는지 검토한다. 내용을 임의 변경하지 말고 불일치는 기록자에게 수정시킨 뒤 의뢰자에게 보고한다.
 
 ## 디스패치 규칙
@@ -76,7 +76,7 @@ allowed-tools:
 - 참여자의 추가 조사 요청은 진행자가 통합·중복 제거하고 중앙 리서처에게 한 번 위임한다.
 - 진행자는 다음 발언자, 질문, 추가 조사 필요, 합의 판정, 조기 종료를 결정한다. 메인 세션은 해당 지시에 따라 Agent를 호출한다.
 - 기록자는 전체 발화를 재작성하지 않고 주장, 근거, 반론, 입장 변화, 결정만 구조화한다.
-- 합의 기준을 충족하지 못하면 거짓 합의를 만들지 않는다. `no-consensus.md`는 정상 산출물이다.
+- 합의 기준을 충족하지 못하면 거짓 합의를 만들지 않는다. 불합의 보고서는 정상 산출물이다.
 
 ## 합의 방식 선택
 

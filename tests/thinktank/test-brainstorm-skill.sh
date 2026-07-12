@@ -35,8 +35,8 @@ for state in framing frame_approval minimal_research diverging transforming clus
   grep -q "$state" "$SKILL_MD" \
     || fail "상태 누락: $state"
 done
-grep -qF '.brainstorm/<session-id>/' "$SKILL_MD" \
-  || fail "브레인스토밍 산출물 루트 계약 누락"
+grep -qF '.brainstorm/<session-id>.md' "$SKILL_MD" \
+  || fail "단일 세션 파일 계약 누락"
 grep -qE 'resume 라우팅|재개 라우팅' "$SKILL_MD" \
   || fail "상태별 resume 라우팅 누락"
 grep -qE 'status 보고|상태 보고' "$SKILL_MD" \
@@ -115,18 +115,50 @@ grep -qE '코드베이스|조직 정책|외부 시스템' "$SKILL_MD" \
   || fail "검증 실험 금지 경계 누락"
 grep -qE '후보군|복수 후보|candidate set' "$SKILL_MD" \
   || fail "단일 강제 결론 대신 후보군 출력 계약 누락"
-for artifact in state.md brief.md research-context.md roster.md idea-pool.md clusters.md shortlist.md validation-plan.md experiments.md report.md; do
-  grep -q "$artifact" "$REFS/document-templates.md" "$SKILL_MD" \
-    || fail "산출물 계약 누락: $artifact"
-done
 ok "검증 경계와 산출물 계약"
 
 echo ""
-echo "=== TEST 8: 플러그인 버전 ==="
-grep -q '"version": "0.3.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" \
-  || fail "thinktank 플러그인 버전이 0.3.0이 아님"
-awk '/"name": "thinktank"/{found=1} found && /"version": "0.3.0"/{ok=1; exit} END{exit !ok}' "$MARKETPLACE" \
-  || fail "마켓플레이스 thinktank 버전이 0.3.0이 아님"
+echo "=== TEST 8: 단일 세션 파일 계약 ==="
+grep -qF '.brainstorm/<session-id>.md' "$REFS/document-templates.md" \
+  || fail "단일 세션 파일 템플릿 누락"
+grep -q '## 상태' "$REFS/document-templates.md" \
+  || fail "상태 블록 섹션 누락"
+for field in 'state' 'next-action'; do
+  grep -q "$field" "$REFS/document-templates.md" \
+    || fail "상태 블록 필드 누락: $field"
+done
+for section in '브리프' '연구 컨텍스트' '로스터' '아이디어 풀' '군집' '숏리스트' '검증 계획' '실험' '최종 보고'; do
+  grep -q "## ${section}" "$REFS/document-templates.md" \
+    || fail "세션 파일 섹션 누락: $section"
+done
+grep -qE '상태 블록.*먼저 갱신' "$SKILL_MD" \
+  || fail "상태 블록 우선 갱신 계약 누락"
+grep -qE '섹션 단위로만.*(추가|갱신)' "$REFS/document-templates.md" \
+  || fail "섹션 단위 추가·갱신 계약 누락"
+grep -qE '전체 파일 재작성.*(금지|않는다)' "$REFS/document-templates.md" \
+  || fail "전체 파일 재작성 금지 계약 누락"
+grep -qE '(resume|재개).*단일 세션 파일|단일 세션 파일.*(resume|재개)' "$SKILL_MD" \
+  || fail "resume 단일 파일 읽기 계약 누락"
+ok "단일 세션 파일 계약"
+
+echo ""
+echo "=== TEST 9: 구 다중 파일 계약 부재 ==="
+if grep -rqF '.brainstorm/<session-id>/' "$SKILL_DIR"; then
+  fail "구 디렉터리 계약 잔존: .brainstorm/<session-id>/"
+fi
+for artifact in state.md brief.md research-context.md roster.md idea-pool.md clusters.md shortlist.md validation-plan.md experiments.md report.md; do
+  if grep -rqF "$artifact" "$SKILL_DIR"; then
+    fail "구 산출물 파일명 잔존: $artifact"
+  fi
+done
+ok "구 다중 파일 계약 부재"
+
+echo ""
+echo "=== TEST 10: 플러그인 버전 ==="
+grep -q '"version": "1.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" \
+  || fail "thinktank 플러그인 버전이 1.0.0이 아님"
+awk '/"name": "thinktank"/{found=1} found && /"version": "1.0.0"/{ok=1; exit} END{exit !ok}' "$MARKETPLACE" \
+  || fail "마켓플레이스 thinktank 버전이 1.0.0이 아님"
 ok "플러그인과 마켓플레이스 버전"
 
 echo ""

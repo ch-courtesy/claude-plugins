@@ -37,8 +37,8 @@ for state in interviewing agenda_approval researching research_review roster_app
   grep -q "$state" "$SKILL_MD" \
     || fail "상태 누락: $state"
 done
-grep -qF '.roundtable/<meeting-id>/' "$SKILL_MD" \
-  || fail "회의 산출물 루트 계약 누락"
+grep -qF '.roundtable/<meeting-id>.md' "$SKILL_MD" \
+  || fail "단일 회의 파일 계약 누락"
 grep -qE 'resume 라우팅|재개 라우팅' "$SKILL_MD" \
   || fail "상태별 resume 라우팅 누락"
 grep -qE 'status 보고|상태 보고' "$SKILL_MD" \
@@ -67,11 +67,11 @@ ok "책임 분리와 승인 게이트"
 
 echo ""
 echo "=== TEST 4: 중앙 리서치와 토큰 중복 방지 ==="
-for token in '공통 증거 팩' '중앙 리서처' 'research-plan.md' 'evidence-pack.md'; do
+for token in '공통 증거 팩' '중앙 리서처' '리서치 계획' '증거 팩' ; do
   grep -q "$token" "$REFS/research-protocol.md" \
     || fail "리서치 프로토콜 토큰 누락: $token"
 done
-grep -qE '회의 책임자.*research-plan.md|research-plan.md.*회의 책임자' "$REFS/research-protocol.md" \
+grep -qE '회의 책임자.*리서치 계획|리서치 계획.*회의 책임자' "$REFS/research-protocol.md" \
   || fail "회의 책임자의 리서치 계획 책임 누락"
 grep -qE '전체 증거 팩.*반복.*(전달|주입).*않|관련.*증거.*배포' "$REFS/research-protocol.md" \
   || fail "관련 증거만 배포하는 중복 방지 계약 누락"
@@ -91,7 +91,7 @@ grep -qE '수용.*조건부 수용.*중대한 반대.*판단 불가' "$REFS/meet
   || fail "합의 후보 평가 상태 누락"
 grep -qE '거짓 합의|합의되지 않은.*합의' "$REFS/meeting-protocol.md" \
   || fail "거짓 합의 금지 계약 누락"
-grep -q 'no-consensus.md' "$REFS/meeting-protocol.md" \
+grep -qE '불합의 보고서.*정상|정상.*불합의 보고서' "$REFS/meeting-protocol.md" \
   || fail "불합의 정상 종료 계약 누락"
 ok "숙의와 종료 계약"
 
@@ -112,17 +112,49 @@ done
 ok "운영 역할과 참여자 페르소나"
 
 echo ""
-echo "=== TEST 7: 문서 산출물 계약 ==="
-for artifact in state.md agenda.md research-plan.md evidence-pack.md roster.md initial-positions.md decision-map.md discussion.md agreement.md no-consensus.md; do
-  grep -q "$artifact" "$REFS/document-templates.md" "$SKILL_MD" \
-    || fail "산출물 계약 누락: $artifact"
+echo "=== TEST 7: 단일 회의 파일 계약 ==="
+grep -qF '.roundtable/<meeting-id>.md' "$REFS/document-templates.md" \
+  || fail "단일 회의 파일 템플릿 누락"
+grep -q '## 상태' "$REFS/document-templates.md" \
+  || fail "상태 블록 섹션 누락"
+for field in 'status' 'next_action'; do
+  grep -q "$field" "$REFS/document-templates.md" \
+    || fail "상태 블록 필드 누락: $field"
 done
+for section in '아젠다' '리서치 계획' '증거 팩' '로스터' '초기 입장' '결정 지도' '논의 기록' '최종 문서'; do
+  grep -q "## ${section}" "$REFS/document-templates.md" \
+    || fail "회의 파일 섹션 누락: $section"
+done
+grep -qE '합의·실행서.*불합의 보고서|불합의 보고서.*합의·실행서' "$REFS/document-templates.md" \
+  || fail "최종 문서 이분 계약(합의·실행서/불합의 보고서) 누락"
+grep -qE '상태 블록.*먼저 갱신' "$SKILL_MD" \
+  || fail "상태 블록 우선 갱신 계약 누락"
+grep -qE '섹션 단위로만.*(추가|갱신)' "$REFS/document-templates.md" \
+  || fail "섹션 단위 추가·갱신 계약 누락"
+grep -qE '전체 파일 재작성.*(금지|않는다)' "$REFS/document-templates.md" \
+  || fail "전체 파일 재작성 금지 계약 누락"
+grep -qE '(resume|재개).*단일 회의 파일|단일 회의 파일.*(resume|재개)' "$SKILL_MD" \
+  || fail "resume 단일 파일 읽기 계약 누락"
+grep -qE '초기 입장.*다시 생성하지 않|초기 입장.*재생성.*않' "$SKILL_MD" \
+  || fail "초기 입장 재생성 금지 계약 누락"
 grep -qE '실제.*실행.*(범위 밖|수행하지 않)|합의 내용.*실행하지 않' "$SKILL_MD" \
   || fail "합의 이후 자동 실행 금지 누락"
-ok "문서 산출물과 실행 경계"
+ok "단일 회의 파일 계약과 실행 경계"
 
 echo ""
-echo "=== TEST 8: 마켓플레이스 등록 ==="
+echo "=== TEST 8: 구 다중 파일 계약 부재 ==="
+if grep -rqF '.roundtable/<meeting-id>/' "$SKILL_DIR"; then
+  fail "구 디렉터리 계약 잔존: .roundtable/<meeting-id>/"
+fi
+for artifact in state.md agenda.md research-plan.md evidence-pack.md roster.md initial-positions.md decision-map.md discussion.md agreement.md no-consensus.md; do
+  if grep -rqF "$artifact" "$SKILL_DIR"; then
+    fail "구 산출물 파일명 잔존: $artifact"
+  fi
+done
+ok "구 다중 파일 계약 부재"
+
+echo ""
+echo "=== TEST 9: 마켓플레이스 등록 ==="
 grep -q '"name": "thinktank"' "$MARKETPLACE" \
   || fail "마켓플레이스에 thinktank 미등록"
 ok "마켓플레이스 등록"

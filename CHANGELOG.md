@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## thinktank 1.0.0
+
+### 변경(깨짐)
+- **brainstorm·roundtable 세션 산출물을 세션당 단일 파일로 취합 (#581)** — 산출물 계약을 "세션당 디렉터리 + 다중 파일"에서 단일 파일 1개로 교체했다. brainstorm은 `.brainstorm/<session-id>/` 아래 10개 파일(state·brief·research-context·roster·idea-pool·clusters·shortlist·validation-plan·experiments·report) 대신 `.brainstorm/<session-id>.md` 하나에, roundtable은 `.roundtable/<meeting-id>/` 아래 다수 파일 대신 `.roundtable/<meeting-id>.md` 하나에 상태 블록(최상단, 현재 상태·다음 행동)과 기존 산출물별 대응 섹션을 둔다. 상태 전환은 상태 블록 먼저 갱신, 갱신은 섹션 단위만(전체 파일 재작성 금지·다른 섹션 비접촉), resume/status는 단일 세션 파일 하나만 읽는다. roundtable 최종 문서 섹션은 진행자 판정에 따라 합의·실행서 또는 불합의 보고서 중 하나로 기록한다(불합의는 정상 산출물). 워크플로 상태 머신·승인 게이트·안전 경계·산출물 루트·allowed-tools 스코프는 변경 없음. 구 형식(디렉터리) 세션·회의는 자동 마이그레이션하지 않으며 resume 시 불일치로 보고된다.
+
 ## project-init 0.24.5
 
 ### 변경(호환)

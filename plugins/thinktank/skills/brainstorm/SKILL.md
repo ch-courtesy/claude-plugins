@@ -25,29 +25,29 @@ allowed-tools:
 ## 호출
 
 - `brainstorm start <주제>`: 새 브레인스토밍 시작
-- `brainstorm resume <session-id>`: `state.md`의 다음 행동부터 재개
+- `brainstorm resume <session-id>`: 세션 파일 상태 블록의 다음 행동부터 재개
 - `brainstorm status [session-id]`: 상태·산출물·다음 행동 보고
 
-인자가 없으면 `start`로 간주한다. 산출물 루트는 `.brainstorm/<session-id>/`이며 ID는 로컬 날짜와 주제 slug를 조합한 `YYYYMMDD-<slug>`다. 같은 ID가 있으면 임의 suffix를 만들지 말고 `resume` 또는 다른 제목을 선택받는다.
+인자가 없으면 `start`로 간주한다. 세션 산출물은 `.brainstorm/<session-id>.md` **단일 파일 1개**이며 ID는 로컬 날짜와 주제 slug를 조합한 `YYYYMMDD-<slug>`다. 같은 ID가 있으면 임의 suffix를 만들지 말고 `resume` 또는 다른 제목을 선택받는다.
 
 ## 상태
 
 `framing → frame_approval → minimal_research → diverging → transforming → clustering → converging → validation_approval → validating → completed`
 
-모든 단계 전환 시 `references/document-templates.md`의 `state.md`를 먼저 갱신한다. `resume`은 기록된 상태와 다음 행동만 신뢰한다. `status`는 파일을 변경하거나 Agent를 호출하지 않는다.
+모든 단계 전환 시 세션 파일 최상단의 상태 블록을 먼저 갱신한다(`references/document-templates.md`). 세션 파일은 섹션 단위로만 추가·갱신하고 다른 섹션은 건드리지 않는다. `resume`은 단일 세션 파일 하나만 읽고 기록된 상태와 다음 행동만 신뢰한다. `status`는 파일을 변경하거나 Agent를 호출하지 않는다.
 
 ## resume 라우팅
 
 | 현재 상태 | 재개 행동 |
 |---|---|
-| `framing` | `brief.md`의 미확정 프레이밍 질문부터 인터뷰 |
+| `framing` | 브리프 섹션의 미확정 프레이밍 질문부터 인터뷰 |
 | `frame_approval` | 프레임을 다시 제시하고 승인 또는 수정만 요청 |
-| `minimal_research` | `research-context.md`의 미완료 최소 조사만 수행 |
+| `minimal_research` | 연구 컨텍스트 섹션의 미완료 최소 조사만 수행 |
 | `diverging` | 완료된 독립 Brainwriting 라운드 다음부터 재개 |
 | `transforming` | 다양성 정체 여부에 따라 미완료 SCAMPER 변환만 수행 |
 | `clustering` | 원본을 유지하며 미분류 아이디어부터 군집화 |
 | `converging` | 의뢰자 가치 기준의 미완료 NGT 평가부터 재개 |
-| `validation_approval` | `validation-plan.md`를 다시 제시하고 승인 또는 수정만 요청 |
+| `validation_approval` | 검증 계획 섹션을 다시 제시하고 승인 또는 수정만 요청 |
 | `validating` | 승인된 실험 중 미완료 항목만 수행 |
 | `completed` | 읽기 전용 최종 보고만 수행 |
 
@@ -55,20 +55,20 @@ allowed-tools:
 
 ## status 보고
 
-`status`는 세션 ID, 현재 상태, 완료 산출물, 아이디어·군집·후보 수, 사용한 연구·Agent 호출 수, 남은 정보 공백, 승인 대기 항목, 다음 행동을 읽기 전용으로 보고한다.
+`status`는 단일 세션 파일 하나만 읽어 세션 ID, 현재 상태, 완료 섹션, 아이디어·군집·후보 수, 사용한 연구·Agent 호출 수, 남은 정보 공백, 승인 대기 항목, 다음 행동을 읽기 전용으로 보고한다.
 
 ## 시작 워크플로
 
 1. **적합성 확인.** 이미 정해진 대안을 판정하거나 이해관계 합의가 목표면 `roundtable`을 권고한다. 새로운 가능성 탐색이 목표일 때 진행한다.
-2. **프레이밍 인터뷰.** `references/framing-template.md`에 따라 문제, 의뢰자 가치, 대상, 범위, 제약, 기존 시도, 금지 영역, 성공 신호를 한 주제씩 묻고 `brief.md`를 작성한다.
+2. **프레이밍 인터뷰.** `references/framing-template.md`에 따라 문제, 의뢰자 가치, 대상, 범위, 제약, 기존 시도, 금지 영역, 성공 신호를 한 주제씩 묻고 브리프 섹션을 작성한다.
 3. **프레임 승인.** 문제 프레임, 탐색 질문, 가치 기준, 예상 아이디어 생성자 3–6명과 비용을 보여준다. 의뢰자의 **프레임 명시적 승인** 전에는 리서치나 Agent 호출을 시작하지 않는다.
-4. **최소 중앙 리서치.** `references/research-protocol.md`에 따라 발산에 필요한 공통 사실·제약·용어만 `research-context.md`에 수집한다.
-5. **적응형 구성.** `references/role-prompts.md`에서 서로 다른 탐색 렌즈를 가진 아이디어 생성자 3–6명을 선택해 `roster.md`에 기록한다.
+4. **최소 중앙 리서치.** `references/research-protocol.md`에 따라 발산에 필요한 공통 사실·제약·용어만 연구 컨텍스트 섹션에 수집한다.
+5. **적응형 구성.** `references/role-prompts.md`에서 서로 다른 탐색 렌즈를 가진 아이디어 생성자 3–6명을 선택해 로스터 섹션에 기록한다.
 6. **발산과 변환.** `references/strategy-protocols.md`에 따라 Brainwriting을 항상 수행한다. 다양성이 정체되거나 개선형 주제이면 SCAMPER를 적용한다.
-7. **군집과 수렴.** 원본 아이디어를 보존한 채 군집화하고, NGT로 의뢰자 가치 기준에 맞는 후보군을 `shortlist.md`에 만든다.
-8. **검증 계획 승인.** 후보별 핵심 가정, 비용, 중단 기준을 `validation-plan.md`에 작성한다. 의뢰자의 **검증 계획 명시적 승인** 전에는 실험을 실행하지 않는다.
-9. **검증.** 승인된 상세 리서치, 에이전트 비판, 단순 문서, 목업, 프로토타입만 `.brainstorm/**` 안에서 수행하고 `experiments.md`에 결과를 기록한다.
-10. **보고.** 후보군, 계보, 비교, 불확실성, 승인된 검증 결과, 다음 의사결정 질문을 `report.md`에 정리한다.
+7. **군집과 수렴.** 원본 아이디어를 보존한 채 군집화하고, NGT로 의뢰자 가치 기준에 맞는 후보군을 숏리스트 섹션에 만든다.
+8. **검증 계획 승인.** 후보별 핵심 가정, 비용, 중단 기준을 검증 계획 섹션에 작성한다. 의뢰자의 **검증 계획 명시적 승인** 전에는 실험을 실행하지 않는다.
+9. **검증.** 승인된 상세 리서치, 에이전트 비판, 단순 문서, 목업, 프로토타입만 `.brainstorm/**` 안에서 수행하고 실험 섹션에 결과를 기록한다.
+10. **보고.** 후보군, 계보, 비교, 불확실성, 승인된 검증 결과, 다음 의사결정 질문을 최종 보고 섹션에 정리한다.
 
 ## 디스패치 규칙
 

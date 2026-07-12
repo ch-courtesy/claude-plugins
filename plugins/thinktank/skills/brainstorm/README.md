@@ -18,7 +18,7 @@ roundtable 플러그인의 브레인스토밍 스킬. 사람이 이 폴더를 �
 - `resume <session-id>` — 기록된 다음 행동부터 재개
 - `status [session-id]` — 상태·산출물·다음 행동 보고 (읽기 전용)
 
-산출물은 `.brainstorm/<session-id>/` 아래에 누적된다.
+세션 산출물은 `.brainstorm/<session-id>.md` 단일 파일 1개에 섹션 단위로 누적된다.
 
 ## 더 보기
 
