@@ -136,6 +136,20 @@ check "SKILL.md does not gate git into the single-select sub-rule menu (old phra
 detstep="$(lineno_re "$SKILL" '^[0-9]+\. \*\*백엔드 판별')"
 check "SKILL.md still describes backend determination step" bash -c "[ -n '$detstep' ]"
 
+# ===========================================================================
+# 10) references split: detail delegated out of SKILL.md to reference files
+# ===========================================================================
+REF="$DIR/references"
+check "references/backend-detection.md exists" test -f "$REF/backend-detection.md"
+check "references/input-substitution.md exists" test -f "$REF/input-substitution.md"
+check "references/template_tools.py exists (deterministic script)" test -f "$REF/template_tools.py"
+# SKILL.md delegates the git-family classification to the deterministic script
+# (single source of truth), not to inline prose duplication.
+check "SKILL.md delegates git-family to references/template_tools.py" \
+  grep -qF 'references/template_tools.py git-family' "$SKILL"
+check "SKILL.md points backend-detection detail to references/backend-detection.md" \
+  grep -qF 'references/backend-detection.md' "$SKILL"
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS"; exit 0
 else

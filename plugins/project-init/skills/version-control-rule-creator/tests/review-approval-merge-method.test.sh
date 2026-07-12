@@ -105,6 +105,18 @@ check "SKILL.md still documents value-over-label" grep -qF 'value' "$SKILL"
 check "SKILL.md still documents default-on-missing" grep -qF 'default' "$SKILL"
 check "SKILL.md mentions merge_method consumer" grep -qF 'merge_method' "$SKILL"
 
+# ===========================================================================
+# 6) references split: input-substitution detail delegated out of SKILL.md
+# ===========================================================================
+REF="$DIR/references"
+check "references/input-substitution.md exists" test -f "$REF/input-substitution.md"
+check "references/template_tools.py exists (deterministic script)" test -f "$REF/template_tools.py"
+# SKILL.md keeps only the contract/summary and points substitution detail out.
+check "SKILL.md points input-substitution detail to references/input-substitution.md" \
+  grep -qF 'references/input-substitution.md' "$SKILL"
+check "SKILL.md delegates aggregate concat to references/template_tools.py" \
+  grep -qF 'references/template_tools.py aggregate' "$SKILL"
+
 if [ "$fail" -eq 0 ]; then
   echo "PASS"; exit 0
 else
