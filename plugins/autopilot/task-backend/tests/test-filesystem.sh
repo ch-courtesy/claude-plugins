@@ -29,8 +29,9 @@ chk "ready=a" "$(bash "$A" list_ready | jq -r '.[].task_id' | tr '\n' ' ')" "$a 
 bash "$A" set_status --task-id "$a" --status done >/dev/null
 chk "a done 후 ready=b" "$(bash "$A" list_ready | jq -r '.[].task_id' | tr '\n' ' ')" "$b "
 
-# materialize 본문 + H1 title
+# materialize 본문 + H1 title (경로: .autopilot/runs/<id>/SPEC.md — #580 통합)
 sp="$(bash "$A" materialize --task-id "$b" | jq -r .spec_path)"
+chk "materialize 경로 .autopilot/runs" "$sp" "$TMP/.autopilot/runs/$b/SPEC.md"
 chk "materialize H1" "$(head -1 "$sp")" "# B"
 grep -q '## 목표' "$sp" && ok "materialize 본문 포함" || bad "materialize 본문 포함"
 
@@ -53,13 +54,14 @@ chk "set_body status 보존" "$(bash "$A" get_task --task-id "$e" | jq -r .statu
 chk "set_body depends_on 보존" "$(bash "$A" get_task --task-id "$e" | jq -r '.depends_on[0]')" "$a"
 chk "set_body title 보존" "$(bash "$A" get_body --task-id "$e" | jq -r .title)" "E"
 
-# 원자적 claim: 첫 획득 true, 신선 점유 중 재획득 false
+# 원자적 claim: 첫 획득 true, 신선 점유 중 재획득 false (락: .autopilot/runs/.claims/<id> — #580 통합)
 d="$(bash "$A" create_task --title D --body '## 목표'$'\n'디 | jq -r .task_id)"
 chk "claim 1회 true" "$(bash "$A" claim --task-id "$d" --owner w1 | jq -r .claimed)" "true"
+[[ -d "$TMP/.autopilot/runs/.claims/$d" ]] && ok "claim 락 .autopilot/runs/.claims" || bad "claim 락 .autopilot/runs/.claims"
 chk "claim 신선 점유 false" "$(bash "$A" claim --task-id "$d" --owner w2 | jq -r .claimed)" "false"
 chk "claim 후 in_progress" "$(bash "$A" get_task --task-id "$d" | jq -r .status)" "in_progress"
 bash "$A" set_status --task-id "$d" --status done >/dev/null
-[[ -d "$TMP/.task-work/.claims/$d" ]] && bad "done 시 claim 해제" || ok "done 시 claim 해제"
+[[ -d "$TMP/.autopilot/runs/.claims/$d" ]] && bad "done 시 claim 해제" || ok "done 시 claim 해제"
 
 # --- #471: 본문 frontmatter(scope) 보존 + frontmatter-first materialize ---
 fmbody=$'---\nscope:\n  include:\n    - src/**\n  exclude:\n    - rules/**\n---\n\n## 무엇을 만들 것인가\n바디 본문\n'

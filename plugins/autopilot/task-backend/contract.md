@@ -112,7 +112,7 @@ scope:
 | `link_dependency` | `--task-id <id> --depends-on-id <id>` | `{"task_id","depends_on":[...]}` |
 | `list_ready` | (없음) | `[{"task_id","title"},...]` (depends_on 충족 + stale-lease in_progress) |
 | `append_log` | `--task-id <id> --marker decision|handoff|blocked --text <s>` | `{"task_id","logged":true}` |
-| `materialize` | `--task-id <id>` | `{"task_id","spec_path"}` (`.task-work/<id>/SPEC.md`) |
+| `materialize` | `--task-id <id>` | `{"task_id","spec_path"}` (`.autopilot/runs/<id>/SPEC.md`) |
 | `renew_lease` | `--task-id <id> [--owner <s>]` | `{"task_id","lease_renewed_at"}` |
 | `claim` | `--task-id <id> --owner <s>` | `{"task_id","claimed":true|false}` (stale 판정의 단일 진입점 — stale lease 탈취 + 신규 점유 원자적 게이트) |
 
@@ -126,8 +126,9 @@ scope:
 시 `claimed:true`(+ status를 in_progress로 전이, lease 초기화), 이미 신선한 lease로 점유 중이면
 `claimed:false`(실행자는 조용히 skip).
 
-- **filesystem**: `.task-work/.claims/<id>` 디렉토리 `mkdir`(원자적 CAS)로 게이트. 종단 상태(done/blocked/
-  cancelled) 전이 시 자동 해제.
+- **filesystem**: `.autopilot/runs/.claims/<id>` 디렉토리 `mkdir`(원자적 CAS)로 게이트. 종단 상태(done/blocked/
+  cancelled) 전이 시 자동 해제. `.claims` 는 `.autopilot/runs/` 아래 유일한 **비-태스크-id 항목**이다 —
+  `runs/` 를 태스크 id 로 순회하는 코드는 `.claims` 를 제외해야 한다.
 - **github-project/beads**: 공유 store 전반의 진정한 원자성은 원격 CAS가 필요하며 v1은 **단일 호스트 범위**의
   best-effort(현재 상태+lease 확인 후 전이). github의 stale 회수는 **로컬 lease 미러가 존재하고 stale일 때만**
   수행한다(미러 부재 시 회수하지 않음 — 타 체크아웃의 실행 중 태스크 오회수 방지).

@@ -110,7 +110,7 @@ be_set_body() {
   jq -nc --arg id "$id" '{task_id:$id}'
 }
 
-fs_claim_dir() { printf '%s/.task-work/.claims' "$TB_ROOT"; }
+fs_claim_dir() { printf '%s/.autopilot/runs/.claims' "$TB_ROOT"; }
 fs_release_claim() { rm -rf "$(fs_claim_dir)/$1" 2>/dev/null || true; }
 
 be_set_status() {
@@ -195,7 +195,7 @@ be_append_log() {
 be_materialize() {
   local id; id="$(_argval --task-id "$@")"; fs_exists "$id" || tb_die "materialize: 없음 $id"
   local f; f="$(fs_file "$id")"
-  local dir="$TB_ROOT/.task-work/$id"; mkdir -p "$dir"
+  local dir="$TB_ROOT/.autopilot/runs/$id"; mkdir -p "$dir"
   local sp="$dir/SPEC.md"
   # 본문이 scope frontmatter 로 시작하면 그 블록 뒤에 제목을 주입(frontmatter-first + 제목, loop scope
   # 게이트 동작). 없으면 폴백으로 제목을 앞에 붙인다. (tb_emit_spec = adapter.sh 공통)

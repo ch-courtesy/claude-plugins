@@ -18,7 +18,7 @@ allowed-tools:
 등록된 **단일 태스크의 전체 생애**(구현→리뷰→머지→done)를 소유하는 실행기다. 결정적 드라이버
 `references/execute-task.sh`가 다음을 수행한다:
 
-1. `adapter materialize` — 태스크 본문을 임시 spec(`.task-work/<id>/SPEC.md`)으로 뜬다(본문=SPEC).
+1. `adapter materialize` — 태스크 본문을 임시 spec(`.autopilot/runs/<id>/SPEC.md`)으로 뜬다(본문=SPEC).
 2. `adapter set_status in_progress` + **백그라운드 heartbeat lease 갱신**(크래시·행 워커는 lease가 stale해져
    `list_ready`가 회수). 잔여 워커 자취(워크트리·lock)는 시작 전 정리(reclaim)한다.
 3. **loop 엔진**(랄프 루프)으로 포그라운드 구현. 반환 후 `status --json`으로 DONE/BLOCKED 분류.
@@ -54,7 +54,7 @@ bash "$EXEC" status|stop|logs <task-id>
 `blocked`로 끝난 태스크는 차단 원인을 해결한 뒤 **`start <task-id>`로 다시 실행하면 정상 파이프라인에
 재진입**한다(blocked 전이 시 claim 락이 풀려 재-claim이 성공한다). 재진입은 **막힌 지점부터 재개**한다 —
 loop 단계에서 막혔으면 loop을 재실행하고, forge 단계에서 막혔으면(`review_entered` 표지 존재) loop을 건너뛰고
-integrate부터 재개한다. 재진입이 merge까지 성공하면 `.task-work/<id>/`·`.autopilot/runs/<id>/` 잔재가
+integrate부터 재개한다. 재진입이 merge까지 성공하면 `.autopilot/runs/<id>/` 잔재가
 정리된다(성공 시에만 — blocked로 남아 있는 동안은 사후검시용으로 보존된다).
 
 재진입은 **사람의 명시적 재실행으로만** 일어난다. 자동 드레인(`workflow-task`/`list_ready`)은 blocked를

@@ -38,13 +38,13 @@ REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtes
 
 die() { echo "execute-task: $*" >&2; exit 1; }
 
-# et_cleanup_dirs <task-work-dir> <run-dir> [<review-state-dir>] — 정리(멱등, 부재여도 무해).
+# et_cleanup_dirs <dir>... — 주어진 디렉토리들을 정리(멱등, 부재·중복이어도 무해).
 #   merge 성공 직후 정리와 done 선제 가드 정리(#541)가 공유하는 단일 출처.
-#   3번째 인자(리뷰 상태 <git-root>/.review/tasks/<id>, #528)는 주어질 때만 정리한다.
+#   대상: run-dir(.autopilot/runs/<id> — materialize SPEC·.worktree·run 상태, #580 통합),
+#   리뷰 상태(<git-root>/.review/tasks/<id>, #528).
 et_cleanup_dirs() {
-  rm -rf "$1" 2>/dev/null || true
-  rm -rf "$2" 2>/dev/null || true
-  [[ -n "${3:-}" ]] && rm -rf "$3" 2>/dev/null || true
+  local d
+  for d in "$@"; do rm -rf "$d" 2>/dev/null || true; done
 }
 
 # et_approval_gh <pr> — PR 호스팅 리뷰가 승인 상태면 0, 아니면 1.
@@ -130,13 +130,13 @@ et_start() {
   [[ -n "$id" ]] || die "start <task-id> [--stop-at review]"
 
   # done 선제 가드(#541): 백엔드 status 가 이미 done 이면 파이프라인을 재실행하지 않고 잔존
-  #   .task-work/<id>/·.autopilot/runs/<id>/ 만 멱등 정리 후 즉시 종료한다. materialize 는 디렉토리를
+  #   .autopilot/runs/<id>/ 만 멱등 정리 후 즉시 종료한다. materialize 는 디렉토리를
   #   재생성하므로 이 가드는 materialize/claim 호출 전에 와야 한다. 조회 실패(네트워크/백엔드 오류 등)는
   #   보수적으로 무시하고 기존 파이프라인 진행으로 폴백한다(오탐으로 정상 진행 중인 태스크를 막지 않음).
   local pre_status
   pre_status="$($ADAPTER_CMD get_task --task-id "$id" 2>/dev/null | jq -r '.status // empty' 2>/dev/null)" || pre_status=""
   if [[ "$pre_status" == "done" ]]; then
-    et_cleanup_dirs "$ROOT_DIR/.task-work/$id" "$ROOT_DIR/.autopilot/runs/$id" "$ROOT_DIR/.review/tasks/$id"
+    et_cleanup_dirs "$ROOT_DIR/.autopilot/runs/$id" "$ROOT_DIR/.review/tasks/$id"
     echo "execute-task: 이미 done — 정리 후 skip ($id)"
     return 0
   fi
@@ -292,7 +292,9 @@ et_start() {
   if $FORGE_CMD merge "$sp" "$run_dir" "$key" "$pr"; then
     $ADAPTER_CMD set_status --task-id "$id" --status done >/dev/null
     $ADAPTER_CMD append_log --task-id "$id" --marker handoff --text "merged ${branch:+($branch)}" >/dev/null
-    et_cleanup_dirs "$(dirname "$sp")" "$run_dir" "$ROOT_DIR/.review/tasks/$id"   # .task-work/<id>/·.autopilot/runs/<id>/·.review/tasks/<id>/ 정리
+    # .autopilot/runs/<id>/(materialize SPEC 포함)·.review/tasks/<id>/ 정리 — dirname sp 는 통상
+    # run_dir 와 동일(#580 통합)하나 TB_ROOT≠ROOT_DIR 환경 대비로 둘 다 전달(멱등이라 무해).
+    et_cleanup_dirs "$(dirname "$sp")" "$run_dir" "$ROOT_DIR/.review/tasks/$id"
     echo "execute-task: done ($id)"
   else
     $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "merge 실패" >/dev/null
