@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """파싱: templates/*.md frontmatter -> 정규화된 후보 JSON.
 
-SKILL.md '생성 절차' 2~3단계의 결정적 파싱을 고정한다. frontmatter YAML 은
-프로젝트 표준 파서인 yq(mikefarah)로 읽는다.
+rule-creator 공유 프로토콜(protocol.md) 2~3단계의 결정적 파싱을 고정한다. frontmatter YAML 은
+프로젝트 표준 파서인 yq(mikefarah)로 읽는다(rule_checker 와 동일, 새 의존성 아님).
 
 사용법:
     python3 scan_templates.py <skill_dir>

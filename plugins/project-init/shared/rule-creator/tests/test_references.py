@@ -1,10 +1,11 @@
-"""Tests for engineering-rule-creator deterministic reference scripts.
+"""Tests for shared rule-creator deterministic scripts (single source).
 
 stdlib only (subprocess + unittest). Each script encodes one error-prone
-deterministic operation the SKILL.md body must NOT improvise:
+deterministic operation the rule-creator SKILL.md bodies must NOT improvise:
   - scan_templates.py  (파싱)  template frontmatter -> normalized candidate JSON
   - list_target_dirs.py (명령열) target depth1 dirs minus exclude set
-  - render_rule.py     (치환)  strip frontmatter + substitute {{field}} + render bullets
+  - render_rule.py     (치환)  strip frontmatter + substitute placeholders
+                               + render bullets + temp_path default/normalize
 """
 import json
 import os
@@ -14,7 +15,7 @@ import tempfile
 import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REF = os.path.normpath(os.path.join(HERE, "..", "references"))
+REF = os.path.normpath(os.path.join(HERE, ".."))
 
 
 def run(script, *args, stdin=None):
@@ -111,9 +112,9 @@ class RenderRule(unittest.TestCase):
             f.write(content)
         return path
 
-    def _render(self, content, answers):
+    def _render(self, content, answers, *extra_args):
         tpl = self._template(content)
-        proc = run("render_rule.py", tpl, stdin=json.dumps(answers))
+        proc = run("render_rule.py", tpl, *extra_args, stdin=json.dumps(answers))
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc.stdout
 
@@ -148,12 +149,40 @@ class RenderRule(unittest.TestCase):
         self.assertIn("- `src`", out)
         self.assertIn("- `lib`", out)
 
-    def test_bullet_list_empty_sentinel(self):
+    def test_bullet_list_empty_sentinel_default(self):
         out = self._render(
             "---\nlabel: X\n---\n목록:\n{{watch_directories}}\n끝\n",
             {"watch_directories": []},
         )
+        self.assertIn("(대상 없음 — 검토 필요)", out)
+
+    def test_bullet_list_empty_sentinel_arg(self):
+        # 빈 목록 대체 문구는 스킬 고유 — 두 번째 인자로 전달한다.
+        out = self._render(
+            "---\nlabel: X\n---\n목록:\n{{watch_directories}}\n끝\n",
+            {"watch_directories": []},
+            "(워치 대상 없음 — 검토 필요)",
+        )
         self.assertIn("(워치 대상 없음 — 검토 필요)", out)
+
+    def test_temp_path_default_on_missing(self):
+        # temp_path 는 미응답이어도 placeholder 보존이 아니라 기본값 .tmp/ 로 치환.
+        out = self._render(
+            "---\nlabel: X\n---\n경로 {{temp_path}} 끝\n", {})
+        self.assertIn("경로 .tmp/ 끝", out)
+        self.assertNotIn("{{temp_path}}", out)
+
+    def test_temp_path_default_on_empty(self):
+        out = self._render(
+            "---\nlabel: X\n---\n경로 {{temp_path}} 끝\n", {"temp_path": ""})
+        self.assertIn("경로 .tmp/ 끝", out)
+
+    def test_temp_path_trailing_slash_normalized(self):
+        out = self._render(
+            "---\nlabel: X\n---\n경로 {{temp_path}}sub/ 끝\n",
+            {"temp_path": ".scratch"},
+        )
+        self.assertIn("경로 .scratch/sub/ 끝", out)
 
 
 if __name__ == "__main__":
