@@ -34,6 +34,12 @@ check "no destructive tools in allowed-tools" bash -c "! grep -qE 'rm -rf|push -
 # 구분: 코드펜스 안의 'python3 ...rule_checker.py' 줄에 상대경로가 남아있으면 실패.
 check "rule_checker.py invocation uses repo-root-based absolute path, not a bare relative path" \
   bash -c "! grep -E '^python3 \.\./\.\./shared/rubric/rule_checker\.py' '$SKILL'"
-check "resolves repo root before invoking the checker" grep -qF 'git rev-parse --show-toplevel' "$SKILL"
+# repo-root 확정 계약은 shared/rubric/checker-invocation.md 로 단일 출처화됨 — SKILL.md 가
+# 그 계약을 참조하고, 계약 문서가 실제로 repo root 확정(git rev-parse)을 요구하는지 체인으로 검증.
+CONTRACT="$DIR/../../shared/rubric/checker-invocation.md"
+check "checker step references the shared invocation contract" \
+  grep -qF '../../shared/rubric/checker-invocation.md' "$SKILL"
+check "invocation contract resolves repo root before invoking the checker" \
+  grep -qF 'git rev-parse --show-toplevel' "$CONTRACT"
 
 if [ "$fail" -eq 0 ]; then echo "PASS"; exit 0; else echo "FAILED"; exit 1; fi

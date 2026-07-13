@@ -20,11 +20,7 @@ allowed-tools:
 
 # version-control-rule-creator
 
-`templates/*.md` 중 하나를 `rules/version-control/<sub>.md`로 기록합니다. `<sub>`는 sub-룰 ID이며, 백엔드 변형을 가진 sub-룰은 git origin remote에서 자동 판별한 백엔드의 변형 본문을 씁니다.
-
-본 스킬은 **버전 관리(VCS) 카테고리의 sub-룰 디스패처**입니다. 백엔드 변형을 가진 sub-룰(예: `review-approval`)은 사용자 메뉴 선택이 아니라 git origin remote URL 파싱으로 백엔드를 자동 판별해 그 변형 본문을 씁니다. 백엔드가 **git 계열**로 판별되면 git 계열 공통 지침(`git`)을 그 백엔드 룰셋의 **동반 출력**으로 함께 산출합니다 — git을 review-approval과 "둘 중 하나"로 고르게 하지 않습니다.
-
-이 카테고리의 첫 sub-룰은 변경 제안 심사·승인(`review-approval`)이며, 브랜치 전략·커밋 컨벤션 등 다른 git sub-룰로 확장할 수 있습니다. 새 백엔드나 새 sub-룰을 추가하려면 `templates/` 아래에 새 마크다운 파일을 두면 되고, **이 SKILL.md는 변경하지 않습니다**.
+**버전 관리(VCS) 카테고리의 sub-룰 디스패처**입니다 — `templates/*.md`를 `rules/version-control/<sub>.md`(`<sub>` = sub-룰 ID)로 기록합니다. 백엔드 변형을 가진 sub-룰(예: `review-approval`)은 사용자 메뉴 선택이 아니라 git origin remote URL 파싱으로 백엔드를 자동 판별해 그 변형 본문을 쓰고, 백엔드가 **git 계열**로 판별되면 git 계열 공통 지침(`git`)을 그 백엔드 룰셋의 **동반 출력**으로 함께 산출합니다. 첫 sub-룰은 변경 제안 심사·승인(`review-approval`)이며 브랜치 전략·커밋 컨벤션 등 다른 git sub-룰로 확장할 수 있습니다.
 
 ## 참조 (단일 출처)
 
@@ -47,7 +43,7 @@ allowed-tools:
 
 1. **템플릿 열거.** `templates/*.md`만 읽습니다. 각 파일을 `parse-name`으로 sub-룰 ID와 (있으면) 백엔드 변형으로 식별하고, 같은 sub-룰 ID의 변형 집합을 묶습니다.
 
-2. **백엔드 판별 (후보 확정 전 1회, 결과 재사용).** 백엔드 변형 sub-룰이나 git 계열 동반 산출(`git`)이 후보에 있으면, sub-룰 선택 **전에** 백엔드를 1회 판별합니다. 이 결과는 3단계의 git 계열 동반 산출 판정과 4단계의 변형 본문 선택에서 **재사용**하고 재판별하지 않습니다. 판별은 **공식 도메인 호스트명 정밀 매칭(네트워크 없음) + self-hosted read-only API probe**로 하며, 정밀 매칭·probe 어느 쪽으로도 확정하지 못하면(inconclusive 포함) 추측 없이 중단·안내합니다. origin 미설정도 중단입니다. 판별 절차의 상세(정밀 매칭 라벨 경계·probe 처리·중단 조건)는 `references/backend-detection.md`가 단일 출처이고, git 계열 분류(정적 매핑 멤버십 `github`·`gitlab`과 판정)는 `references/template_tools.py git-family <backend>`가 단일 출처입니다.
+2. **백엔드 판별 (후보 확정 전 1회, 결과 재사용).** 백엔드 변형 sub-룰이나 git 계열 동반 산출(`git`)이 후보에 있으면, sub-룰 선택 **전에** 백엔드를 1회 판별하고 그 결과를 3단계의 git 계열 동반 산출 판정과 4단계의 변형 본문 선택에서 **재사용**합니다 — 재판별하지 않습니다. 판별 절차(공식 도메인 호스트명 정밀 매칭·self-hosted read-only API probe·substring 매칭 금지·inconclusive/origin 미설정 시 추측 없는 중단·안내)는 `references/backend-detection.md`를 읽고 그대로 따르고, git 계열 분류(정적 매핑 멤버십과 판정)는 `references/template_tools.py git-family <backend>`가 단일 출처입니다.
 
 3. **sub-룰 선택과 git 공통 동반 산출.**
    - **백엔드 변형 sub-룰과 그 밖의 sub-룰(`review-approval`·`branch-naming` 등).** 어느 것을 쓸지 묻는 선택 질문 **없이** 적용 가능한 모든 sub-룰을 고정 순서(`review-approval` → `branch-naming`)로 각각 기록합니다. 백엔드 변형 sub-룰은 2단계에서 판별된 백엔드의 변형 본문을 씁니다. 단순 재실행으로 이 집합을 바꾸지 않습니다.
@@ -63,12 +59,6 @@ allowed-tools:
 
 ## 규칙
 
-- 본 스킬은 `rules/version-control/` 아래 sub-룰 파일만 생성·갱신합니다. 한 실행에서 적용 가능한 sub-룰을 고정 순서로 모두 기록하며, 백엔드가 git 계열이면 git 공통 지침(`git.md`)도 **동반 출력**으로 함께 기록합니다. 카테고리 밖 파일이나 다른 카테고리의 기존 지침(범용 리뷰 원칙 `rules/review.md`·릴리스 버전 지침 `rules/engineering/versioning.md` 포함)은 변경하지 않습니다.
-- sub-룰은 선택 질문 없이 적용 가능한 것을 고정 순서로 모두 기록합니다(백엔드 변형 sub-룰은 판별된 백엔드의 변형 본문을 씁니다). git 계열일 때는 git 공통 지침(`git.md`)도 동반 산출됩니다. 템플릿 본문을 서로 합치지는 않습니다.
-- 템플릿 본문은 그대로 복사합니다. SKILL.md에 본문별 로직을 추가하지 않습니다. 새 백엔드·새 sub-룰은 `templates/` 파일 추가만으로 확장하며 이 SKILL.md를 수정하지 않습니다.
-- 백엔드 판별은 공식 도메인 호스트명 정밀 매칭(네트워크 없음) + self-hosted read-only API probe로 수행합니다. 호스트명 substring 매칭은 쓰지 않으며, 정밀 매칭에도 probe에도 걸리지 않으면(inconclusive 포함) 추측 없이 중단하고 안내합니다.
+- 본 스킬은 `rules/version-control/` 아래 sub-룰 파일만 생성·갱신합니다(생성 절차 3단계의 고정 순서·동반 출력 집합대로). 카테고리 밖 파일이나 다른 카테고리의 기존 지침(범용 리뷰 원칙 `rules/review.md`·릴리스 버전 지침 `rules/engineering/versioning.md` 포함)은 변경하지 않습니다.
+- 템플릿 본문은 그대로 복사하고 서로 합치지 않습니다. SKILL.md에 본문별 로직을 추가하지 않습니다. 새 백엔드·새 sub-룰은 `templates/` 파일 추가만으로 확장하며 이 SKILL.md를 수정하지 않습니다.
 - 기존 sub-룰 파일은 사용자 명시 동의 없이는 절대 덮어쓰지 않습니다. 단순 재실행으로 sub-룰·백엔드를 바꾸지 않습니다.
-
-## plugins 변경 시 버전 동반 (필수)
-
-`plugins/` 하위는 워치 디렉터리이므로, 본 스킬·템플릿을 추가·변경하는 머지에는 **같은 변경 안에서** Claude/Codex manifest(`plugins/project-init/.claude-plugin/plugin.json`, `plugins/project-init/.codex-plugin/plugin.json`)와 Claude marketplace(`.claude-plugin/marketplace.json`의 project-init 항목)를 함께 올립니다. 세 곳의 버전 값은 일치해야 합니다(`rules/engineering/versioning.md` 참조).

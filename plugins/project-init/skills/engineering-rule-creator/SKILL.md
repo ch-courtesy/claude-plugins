@@ -15,13 +15,11 @@ allowed-tools:
 
 # engineering-rule-creator
 
-`templates/*.md` 중 하나를 `rules/engineering/<sub>.md`로 기록합니다. `<sub>`는 템플릿 파일명에서 확장자를 뺀 값입니다. 선택지, 입력값, 사후 작업은 템플릿 frontmatter에서 도출합니다.
-
-본 스킬은 **엔지니어링 카테고리의 sub-룰 디스패처**입니다. **1 호출 = 1 sub-룰**로, 한 번의 호출마다 같은 엔지니어링 카테고리 아래 sub-룰 하나(versioning·testing·linting 등 — 후속 task에서 확장)를 디렉터리 구조로 누적하며, 새 sub-룰 확장은 `templates/` 아래 파일 추가만으로 이뤄집니다(이 SKILL.md 무변경).
+**엔지니어링 카테고리의 sub-룰 디스패처**입니다 — `templates/*.md` 중 하나를 `rules/engineering/<sub>.md`로 기록해 sub-룰(versioning 등 — 후속 task에서 확장)을 호출마다 하나씩 누적합니다.
 
 ## 생성 절차
 
-생성 절차(열거·파싱·선택·입력·기록)와 공통 규칙의 단일 출처는 공유 프로토콜 문서 `../../shared/rule-creator/protocol.md`입니다. 절차를 시작하기 직전에 그 문서를 읽고 그대로 따릅니다 — 그 문서 하나로 절차가 완결되며, 고정된 결정적 스크립트(`scan_templates.py`·`list_target_dirs.py`·`render_rule.py`)도 그 문서 옆 `../../shared/rule-creator/`에 있습니다.
+생성 절차(열거·파싱·선택·입력·기록)와 공통 규칙(1 호출 = 1 sub-룰, `templates/` 파일 추가만으로 확장 등)의 단일 출처는 공유 프로토콜 문서 `../../shared/rule-creator/protocol.md`입니다. 절차를 시작하기 직전에 그 문서를 읽고 그대로 따릅니다 — 그 문서 하나로 절차가 완결되며, 고정된 결정적 스크립트(`scan_templates.py`·`list_target_dirs.py`·`render_rule.py`)도 그 문서 옆 `../../shared/rule-creator/`에 있습니다.
 
 프로토콜에 대입할 본 스킬의 고유 사항:
 
