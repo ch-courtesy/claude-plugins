@@ -61,6 +61,20 @@ driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `CLAUDE
 
 driver 인터페이스의 self-emit 단일 출처: `loop.sh env`(환경 변수) · `loop.sh gates`(객관 게이트) · `loop.sh paths <spec>`(계산된 경로) · `loop.sh deps`(의존성 + 설치 상태). 지침은 본문에 중복 열거하지 않고 이 subcommand 를 가리킨다.
 
+## Scope 경로 표기 (표기 관례 단일 출처)
+
+SPEC frontmatter 의 경로 필드(`scope.include`·`scope.exclude`·`test_sweep_paths`)가 수용하는 표기와 매칭 의미론의 단일 출처다. driver(`loop.sh`)의 scope 게이트가 이 관례로 변경 파일을 판정한다.
+
+| 표기 | 예 | 매칭 |
+|---|---|---|
+| 글롭 | `app/**`, `**/*.py` | bash 패턴 매칭(`*` 는 `/` 포함 임의 문자열) |
+| 정확 경로 | `lib/beta.py` | 그 파일 하나 |
+| 디렉토리(후행 `/`) | `pkg/tests/` | 그 디렉토리 하위 전체(깊이 무관) prefix 매칭 |
+
+- 세 필드 모두 위 표기를 동일하게 해석한다 — 디렉토리 표기는 하위 파일을 재귀 포함한다(`test_sweep_paths` 는 git pathspec 로 동일 결과).
+- `scope.include`·`scope.exclude` 의 디렉토리 표기는 **후행 `/` 가 붙은 항목에만** prefix 의미론을 적용한다. 후행 `/` 가 없으면 글롭·정확 경로로 해석해 기존 표기 동작을 바꾸지 않는다.
+- create-task 의 scope-coverage 검사가 누락 경고에 제시하는 디렉토리 경로(후행 `/`)를 그대로 `scope.include` 에 넣으면 이 게이트가 수용한다.
+
 ## references
 
 | 파일 | 역할 |

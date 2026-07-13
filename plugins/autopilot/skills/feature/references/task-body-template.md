@@ -48,7 +48,7 @@ scope:
 
 - **frontmatter-first** — 본문 첫 줄은 `---`(여는 frontmatter). `scope.include` 는 step 1 인터뷰에서 식별한
   변경 대상 glob 으로 채운다. 불명확하면 보수적으로 넓게 잡고 **위험**에 명시한다.
-- **DoD-요구 테스트 경로 포함** — 완료 조건이 회귀 가드 테스트 추가/수정을 요구하면, 그 테스트 파일·디렉터리 경로를 `scope.include` 에 포함한다.
+- **DoD-요구 테스트 경로 포함** — 완료 조건이 회귀 가드 테스트 추가/수정을 요구하면, 그 테스트 파일·디렉터리 경로를 `scope.include` 에 포함한다(디렉터리는 후행 `/` 표기 — 예 `tests/autopilot/<S>/` — 로 하위 전체를 넣는다; loop scope 게이트가 그 표기를 prefix 로 수용하므로 scope-coverage 가 제시하는 형식을 그대로 써도 된다).
   loop 은 scope 밖 파일을 쓰면 halt 하므로, 완료 조건이 요구하는 산출물(특히 회귀 테스트)은 모두 scope 에 반영해야 RED 테스트를 작성할 수 있다.
   - **#483 (작성자 명시)**: 완료 조건이 요구하는 **새** 회귀 테스트 경로 — 작성자가 scope.include에 명시.
   - **scope-coverage (#498, 시스템 검증)**: scope 내 소스를 덮는 **기존** 테스트 경로 누락 — 등록 시 create-task가 자동 플래그.

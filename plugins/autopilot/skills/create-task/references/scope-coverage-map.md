@@ -18,6 +18,10 @@
 `scope.include`의 항목 중 기대 테스트 경로를 **prefix-포함**하거나 **정확히 일치**하면 커버드로 본다.
 예: scope에 `tests/autopilot/` 이나 `tests/autopilot/test-create-task*.sh` 가 있으면 create-task 커버.
 
+이 검사가 누락 경고에 제시하는 디렉토리 경로(후행 `/`, 예 `tests/autopilot/<S>/`)는 loop scope 게이트가
+그대로 수용하는 형식이다 — 제시된 경로를 `scope.include` 에 그대로 넣으면 그 아래 파일 수정이 scope 밖으로
+오탐되지 않는다. 경로 표기 관례(수용 형식·매칭 의미론)의 단일 출처는 `skills/loop/SKILL.md` "Scope 경로 표기".
+
 ## 오탐 방지 조건
 
 - **기존 테스트 없는 신규 소스**: 매핑된 테스트 경로가 파일시스템에 존재하지 않으면 검사하지 않는다. 존재 확인이 전제다.
