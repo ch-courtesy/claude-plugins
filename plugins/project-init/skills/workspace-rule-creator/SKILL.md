@@ -15,13 +15,11 @@ allowed-tools:
 
 # workspace-rule-creator
 
-`templates/*.md` 중 하나를 `rules/workspace/<sub>.md`로 기록하는 **작업공간 위생 카테고리의 sub-룰 디스패처**입니다. 형제 스킬(`engineering-rule-creator`)과 동형으로, 같은 작업공간 카테고리 아래 여러 sub-룰(임시 파일·빌드 산출물·스크래치 데이터 등 — 후속 task에서 확장)을 호출마다 하나씩 디렉터리 구조로 누적하고, 확장은 `templates/` 아래 파일 추가만으로 합니다(이 SKILL.md 무변경).
-
-본 스킬이 만드는 것은 작업공간 위생 sub-룰뿐입니다. 빌드 시스템·릴리스 산출물 위치(engineering)나 태스크 기록(context)의 기존 지침은 건드리지 않습니다.
+`templates/*.md` 중 하나를 `rules/workspace/<sub>.md`로 기록하는 **작업공간 위생 카테고리의 sub-룰 디스패처**입니다(형제 `engineering-rule-creator`와 동형 — 임시 파일·빌드 산출물·스크래치 데이터 등 sub-룰을 호출마다 하나씩 누적). 만드는 것은 작업공간 위생 sub-룰뿐이며, 빌드 시스템·릴리스 산출물 위치(engineering)나 태스크 기록(context)의 기존 지침은 건드리지 않습니다.
 
 ## 생성 절차
 
-절차(열거·파싱·선택·입력·기록)와 공통 규칙은 공유 프로토콜 문서 `../../shared/rule-creator/protocol.md`가 단일 출처입니다. 절차 시작 직전에 그 문서를 읽고 따르되, 아래 고유 사항을 대입합니다. 고정 스크립트(`scan_templates.py`·`list_target_dirs.py`·`render_rule.py`)는 그 문서 옆 `../../shared/rule-creator/`에 있습니다.
+절차(열거·파싱·선택·입력·기록)와 공통 규칙(1 호출 = 1 sub-룰, `templates/` 파일 추가만으로 확장 등)은 공유 프로토콜 문서 `../../shared/rule-creator/protocol.md`가 단일 출처입니다. 절차 시작 직전에 그 문서를 읽고 따르되, 아래 고유 사항을 대입합니다. 고정 스크립트(`scan_templates.py`·`list_target_dirs.py`·`render_rule.py`)는 그 문서 옆 `../../shared/rule-creator/`에 있습니다.
 
 - **대상 디렉터리**: `rules/workspace/` — 산출 파일은 `rules/workspace/<sub>.md`.
 - **빈 목록 문구**: `render: bullet_list` 항목 0개의 대체 문구는 `(대상 없음 — 검토 필요)`이며, 프로토콜 5단계에서 `render_rule.py`의 두 번째 인자로 전달합니다.

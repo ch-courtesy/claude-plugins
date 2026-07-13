@@ -17,29 +17,18 @@ allowed-tools:
 
 ## 절차
 
-### 1. 입력 해석과 절대경로 확정
+### 1. 입력 해석
 
-`args`로 평가 대상을 받는다. `git rev-parse --show-toplevel`로 저장소 루트의
-절대경로를 먼저 구하고, `<repo_root>/plugins/project-init/shared/rubric/`를
-검사기·기준 문서의 절대경로로 고정한다 — Bash 실행 시 현재 작업 디렉터리가
-이 스킬 폴더라는 가정을 하지 않는다(상대경로 `../../`는 Read로 단일 문서를
-읽을 때만 쓰고, Bash 실행 인자에는 쓰지 않는다).
+`args`로 평가 대상을 받는다.
+
 - 단일 경로가 오면 그 SKILL.md 하나만 평가한다.
 - `all`이면 저장소 전체 SKILL.md를 대상으로 한다.
 
 ### 2. 규칙 검사 실행 (결정적 17항목)
 
-1단계에서 구한 저장소 루트 절대경로를 사용해 다음을 실행하고 stdout의 JSON을
-수집한다.
-
-```
-python3 <repo_root>/plugins/project-init/shared/rubric/rule_checker.py <SKILL.md 경로 | all [repo_root]>
-```
-
-`results[].checks`에 규칙 17항목이 `check_type: "rule"`로 담긴다. 평가 자체가
-성공하면 종료 코드 0과 함께 JSON을 낸다 — 발견된 결함은 종료 코드가 아니라
-JSON의 `grade`·`*_count`에 담기므로, 결함이 있는 스킬을 평가해도 0으로 끝나며
-다음 단계로 진행한다. 종료 코드가 0이 아니면(경로 오류 등) 오류를 알리고 중단한다.
+`../../shared/rubric/checker-invocation.md`의 호출 계약(절대경로 고정·실행
+형식·결과 해석)대로 검사기를 실행하고 stdout의 JSON을 수집한다. 결함이 발견된
+스킬도 평가 자체가 성공하면 종료 코드 0이므로 다음 단계로 진행한다.
 
 ### 3. 모델 검사 (의미적 13항목)
 
@@ -98,4 +87,5 @@ BLOCKER·MAJOR, 그리고 MINOR 전체)을 보고한다. 잔존 지적은 보고
 | 파일 | 용도 | 읽는 시점 |
 |------|------|-----------|
 | `../../shared/rubric/criteria.md` | 루브릭 30항목 기준 (단일 출처) | 3·4단계 — 모델 검사·등급 |
+| `../../shared/rubric/checker-invocation.md` | 검사기 호출 계약 (단일 출처) | 2단계 — 규칙 검사 실행 |
 | `../../shared/rubric/rule_checker.py` | 규칙 17항목 결정적 검사기 | 2단계 — 규칙 검사 실행 |

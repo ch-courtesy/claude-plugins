@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## project-init 0.24.7
+
+### 변경(호환)
+- **스킬 문서군 중복 제거·간소화 (#591)** — 플러그인 문서군(7개 스킬 SKILL.md·references·README + shared/)의 규범 중복을 단일 출처화하고 토큰량을 줄였다(동작·트리거 계약·산출물 형식 불변). rule_checker 호출 계약(절대경로 고정·실행 형식·결과 해석)을 `shared/rubric/checker-invocation.md`로 단일화해 create-skill 7단계·repair-skill 1–2단계가 참조하고, create-skill의 description 완결성 원칙 3중 사본(본문 원칙 절·2단계·skill-template.md)을 2단계 하나로, skill-template.md의 루브릭 항목 사본(피해야 할 패턴·허용 키 판정)을 criteria.md 참조로 정리했다. engineering/workspace-rule-creator 도입부의 protocol.md 공통 규칙 사본, version-control-rule-creator의 백엔드 판별 3중 서술과 규칙 절 내부 중복, review-rule-creator의 페어 동반 기록 3중 서술을 각각 압축했다. version-control-rule-creator의 "plugins 변경 시 버전 동반" 절은 컨슈밍 프로젝트 정책(`rules/engineering/versioning.md` doc-link)이라 플러그인 자기완결 원칙에 따라 제거했다(#482 선례). README 5개(bootstrap·create-skill·engineering·repair·workspace)는 형제(review·version-control)의 컴팩트 진입점 컨벤션으로 통일했다. codex-parity 테스트의 stale 버전 핀(0.24.5 — 0.24.6 릴리스에서 미갱신으로 BASE에서도 FAIL)을 현 릴리스로 정정했고(동기화 계약 의도 유지), repair-skill 계약 테스트의 repo-root 확정 단언은 단일 출처화된 새 구조에 맞춰 체인 검증(SKILL.md→checker-invocation.md 참조 + 계약 문서의 `git rev-parse` 요구)으로 재표현했다(검증 의도 보존·비약화). 문서군 총량 1515→1360줄(rubric tests 제외), 전 스킬 루브릭 S등급(규칙 17 PASS·BLOCKER/MAJOR 0) 유지.
+
 ## autopilot 0.63.1
 
 ### 버그 수정
