@@ -2,10 +2,10 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
-## project-init 0.24.6
+## autopilot 0.63.1
 
-### 변경(호환)
-- **version-control-rule-creator: SKILL.md 슬림화 — references 분리·결정적 스크립트화 (#586)** — 백엔드 판별·입력 치환의 상세 산문을 SKILL.md 인라인에서 걷어내 `references/backend-detection.md`·`references/input-substitution.md`로 위임하고, 파일명 파싱·git 계열 분류·옵션 값 집계를 결정적 스크립트 `references/template_tools.py`(`parse-name`·`git-family`·`aggregate`) 단일 출처로 일원화했다. git 계열 멤버십(`github`·`gitlab`)은 이제 스크립트의 `GIT_FAMILY` 집합이 유일한 정의처이며 SKILL.md 산문과 이중 기술하지 않는다. 사람 대상 `README.md`를 추가하고 동작 명세 단일 출처로 SKILL.md를 가리킨다. 스킬 외부 동작(트리거·호출 인터페이스·생성 파일 경로·내용 계약)은 불변(문서·구조 리팩터, PATCH). 스킬 내부 구조 테스트 2종(git-common-force-push·review-approval-merge-method)에 references 구조·위임 계약 단정을 더하고, 스크립트 회귀 테스트 `template_tools.test.sh`를 추가했다. (codex-plugin.json 버전 동기는 본 변경 scope 밖이라 후속으로 처리 — versioning.md parity 예외.)
+### 버그 수정
+- **loop scope 게이트가 후행 `/` 디렉토리 표기를 수용 (#584)** — SPEC frontmatter 경로 필드의 표기 의미론을 정합화했다. `diff_vs_scope` 의 include/exclude 판정이 bash 글롭(`[[ $file == $inc ]]`)이라 후행 `/` 디렉토리 표기(`dir/`)가 `dir/file` 과 매치되지 않아, create-task 의 scope-coverage 검사가 제안한 디렉토리 경로를 그대로 `scope.include` 에 넣으면 그 아래 파일 수정이 false scope-violation HALT 를 일으켰다(#580 실행에서 관찰). 이제 include/exclude 판정에서 후행 `/` 항목만 prefix(디렉토리 하위 전체) 매칭하고 그 외 표기(글롭 `**`·정확 경로)는 기존 동작을 유지한다 — `test_sweep_paths`(git pathspec)·scope-coverage(prefix)와 표기 의미론이 일치한다. 경로 표기 관례(수용 형식·매칭 의미론)의 단일 출처는 `skills/loop/SKILL.md` "Scope 경로 표기" 이고, scope-coverage-map·feature/fix 본문 템플릿이 이를 가리킨다. 회귀 가드는 `tests/autopilot/loop/test-loop-scope-dir-notation.sh`.
 
 ## autopilot 0.63.0
 

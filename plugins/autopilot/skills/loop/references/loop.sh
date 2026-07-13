@@ -424,6 +424,20 @@ resolve_base_ref() {
   git -C "$repo" rev-parse HEAD
 }
 
+# scope 경로 표기 매칭. 표기 관례 SoT: skills/loop/SKILL.md "Scope 경로 표기".
+#   - 후행 '/' 항목: prefix(디렉토리 하위 전체) 매칭 — `dir/` 가 `dir/a/b` 를 매치.
+#   - 그 외: bash 글롭 매칭(기존 동작 유지) — `**`·`*`·정확 경로.
+# 반환: 매치 0, 비매치 1.
+path_matches_pattern() {
+  local file="$1" pat="$2"
+  if [[ "$pat" == */ ]]; then
+    [[ "$file" == "$pat"* ]]
+  else
+    # shellcheck disable=SC2053
+    [[ "$file" == $pat ]]
+  fi
+}
+
 # 변경 파일이 scope.include 안인지 검사. 위반 파일 목록 출력(있으면).
 diff_vs_scope() {
   local base_sha="$1"
@@ -442,8 +456,7 @@ diff_vs_scope() {
     local excluded=0
     while IFS= read -r exc; do
       [[ -z "$exc" ]] && continue
-      # shellcheck disable=SC2053
-      if [[ "$file" == $exc ]]; then
+      if path_matches_pattern "$file" "$exc"; then
         out_of_scope+="$file (excluded by $exc)\n"; excluded=1; break
       fi
     done <<< "$exclude_patterns"
@@ -452,8 +465,7 @@ diff_vs_scope() {
     local matched=0
     while IFS= read -r inc; do
       [[ -z "$inc" ]] && continue
-      # shellcheck disable=SC2053
-      if [[ "$file" == $inc ]]; then matched=1; break; fi
+      if path_matches_pattern "$file" "$inc"; then matched=1; break; fi
     done <<< "$include_patterns"
     [[ $matched -eq 0 ]] && out_of_scope+="$file (not in include)\n"
   done <<< "$changed"
