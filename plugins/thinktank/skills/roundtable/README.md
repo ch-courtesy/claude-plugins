@@ -4,6 +4,6 @@
 
 - **무엇** — 다중 관점 숙의를 구조화해 회의당 단일 파일 `.roundtable/<meeting-id>.md`를 만들고, 최종 문서 섹션에 합의·실행서(합의) 또는 불합의 보고서(불합의)를 기록한다. 합의 내용의 실제 실행은 범위 밖이다.
 - **언제** — 사용자가 원탁회의, 다중 관점 검토, 숙의, 합의 형성, 의사결정 회의, 또는 회의 재개·상태 확인을 요청할 때 활성화된다.
-- **호출** — `Skill(skill="thinktank:roundtable", args="<subcommand> [<args>]")`. 서브커맨드는 `start`(새 회의)·`resume`(재개)·`status`(읽기 전용 보고)이며, 인자가 없으면 `start`로 간주한다.
+- **호출** — `Skill(skill="thinktank:roundtable", args="<subcommand> [<args>]")`. 서브커맨드는 `start`(새 회의)·`resume`(재개)·`status`(읽기 전용 보고).
 
 워크플로 단계·상태 전환·디스패치 규칙·참조 파일·안전 경계 등 동작 명세는 단일 출처인 [`SKILL.md`](./SKILL.md)를 참조한다.

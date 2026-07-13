@@ -22,19 +22,17 @@ allowed-tools:
 
 메인 세션을 **세션 책임자**로 유지하여 프레이밍 인터뷰, 중앙 리서치, 아이디어 생성자 구성, 전략 전환, 수렴, 검증 승인을 관리한다. 목표는 성급한 단일 결론이 아니라 추적 가능한 **복수 후보군**과 검증 계획을 만드는 것이다.
 
+호출 규약, 세션 파일 규율, 디스패치·중앙 리서치 공통 규범, 공통 안전 경계의 단일 출처는 `../shared/session-conventions.md`다. 스킬 시작 시 이 문서와 함께 읽고 예외 없이 따른다.
+
 ## 호출
 
-- `brainstorm start <주제>`: 새 브레인스토밍 시작
-- `brainstorm resume <session-id>`: 세션 파일 상태 블록의 다음 행동부터 재개
-- `brainstorm status [session-id]`: 상태·산출물·다음 행동 보고
-
-인자가 없으면 `start`로 간주한다. 세션 산출물은 `.brainstorm/<session-id>.md` **단일 파일 1개**이며 ID는 로컬 날짜와 주제 slug를 조합한 `YYYYMMDD-<slug>`다. 같은 ID가 있으면 임의 suffix를 만들지 말고 `resume` 또는 다른 제목을 선택받는다.
+`brainstorm start <주제>` / `brainstorm resume <session-id>` / `brainstorm status [session-id]` — 의미·기본값·ID 규칙은 공통 세션 규약을 따른다. 세션 산출물은 `.brainstorm/<session-id>.md` **단일 파일 1개**다.
 
 ## 상태
 
 `framing → frame_approval → minimal_research → diverging → transforming → clustering → converging → validation_approval → validating → completed`
 
-모든 단계 전환 시 세션 파일 최상단의 상태 블록을 먼저 갱신한다(`references/document-templates.md`). 세션 파일은 섹션 단위로만 추가·갱신하고 다른 섹션은 건드리지 않는다. `resume`은 단일 세션 파일 하나만 읽고 기록된 상태와 다음 행동만 신뢰한다. `status`는 파일을 변경하거나 Agent를 호출하지 않는다.
+상태 블록·섹션 갱신·`resume`·`status` 규율은 공통 세션 규약을 따르고, 세션 파일 템플릿은 `references/document-templates.md`를 따른다.
 
 ## resume 라우팅
 
@@ -51,11 +49,9 @@ allowed-tools:
 | `validating` | 승인된 실험 중 미완료 항목만 수행 |
 | `completed` | 읽기 전용 최종 보고만 수행 |
 
-필수 산출물이 없거나 상태와 모순되면 추측해 복구하지 말고 불일치를 보고한다.
-
 ## status 보고
 
-`status`는 단일 세션 파일 하나만 읽어 세션 ID, 현재 상태, 완료 섹션, 아이디어·군집·후보 수, 사용한 연구·Agent 호출 수, 남은 정보 공백, 승인 대기 항목, 다음 행동을 읽기 전용으로 보고한다.
+`status`는 세션 ID, 현재 상태, 완료 섹션, 아이디어·군집·후보 수, 사용한 연구·Agent 호출 수, 남은 정보 공백, 승인 대기 항목, 다음 행동을 보고한다.
 
 ## 시작 워크플로
 
@@ -70,19 +66,11 @@ allowed-tools:
 9. **검증.** 승인된 상세 리서치, 에이전트 비판, 단순 문서, 목업, 프로토타입만 `.brainstorm/**` 안에서 수행하고 실험 섹션에 결과를 기록한다.
 10. **보고.** 후보군, 계보, 비교, 불확실성, 승인된 검증 결과, 다음 의사결정 질문을 최종 보고 섹션에 정리한다.
 
-## 디스패치 규칙
-
-- Agent brief는 자기완결적이어야 하며 전체 컨텍스트 대신 관련 정보만 전달한다.
-- 1차 발산에서 생성자는 서로의 아이디어를 보지 않고 독립적으로 생성한다.
-- 세션 책임자가 전략 선택과 Agent 호출을 수행한다. 생성자에게 세션 운영이나 최종 결정을 위임하지 않는다.
-- 모든 아이디어에는 `idea-id`, 생성 전략, 작성 렌즈를 기록한다. 변환 아이디어에는 `parent-id`를 추가한다.
-- 발산 중 비판·평가·순위·합의를 금지한다. 평가는 수렴 단계에서만 수행한다.
-- 상세 검증 리서치와 실험은 shortlist 이후, 승인된 검증 계획 범위에서만 수행한다.
-
 ## 참조 파일
 
 | 파일 | 읽는 시점 |
 |---|---|
+| `../shared/session-conventions.md` | 스킬 시작 시 (공통 규약 단일 출처) |
 | `references/framing-template.md` | 인터뷰와 프레임 승인 |
 | `references/research-protocol.md` | 최소 조사와 후보 검증 조사 |
 | `references/role-prompts.md` | 아이디어 생성자·검증자 구성과 호출 |
@@ -93,6 +81,3 @@ allowed-tools:
 
 - 승인된 검증 실험은 리서치, 에이전트 비판, 단순 문서, 목업, 프로토타입으로 제한하며 모두 `.brainstorm/**`에 기록한다.
 - 코드베이스, 조직 정책, 외부 시스템, 외부 상태를 변경하거나 실제 사용자에게 실험을 배포하지 않는다.
-- 민감 정보는 공개 범위 밖 Agent brief에 넣지 않는다.
-- 외부 사실은 출처와 확인일을 기록하고 사실·해석·가정·미확인을 구분한다.
-- 원본 아이디어와 반대 근거를 삭제하거나 성공처럼 재작성하지 않는다.

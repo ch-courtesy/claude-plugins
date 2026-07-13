@@ -8,6 +8,7 @@ PLUGIN_DIR="$REPO_ROOT/plugins/thinktank"
 SKILL_DIR="$PLUGIN_DIR/skills/brainstorm"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REFS="$SKILL_DIR/references"
+SHARED="$PLUGIN_DIR/skills/shared/session-conventions.md"
 MARKETPLACE="$REPO_ROOT/.claude-plugin/marketplace.json"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -20,7 +21,8 @@ for file in \
   "$REFS/strategy-protocols.md" \
   "$REFS/role-prompts.md" \
   "$REFS/research-protocol.md" \
-  "$REFS/document-templates.md"; do
+  "$REFS/document-templates.md" \
+  "$SHARED"; do
   [[ -f "$file" ]] || fail "필수 파일 부재: $file"
 done
 ok "필수 파일 존재"
@@ -41,6 +43,8 @@ grep -qE 'resume 라우팅|재개 라우팅' "$SKILL_MD" \
   || fail "상태별 resume 라우팅 누락"
 grep -qE 'status 보고|상태 보고' "$SKILL_MD" \
   || fail "읽기 전용 status 보고 형식 누락"
+grep -qF '../shared/session-conventions.md' "$SKILL_MD" \
+  || fail "공통 세션 규약 단일 출처 참조 누락"
 ok "인터페이스와 상태 계약"
 
 echo ""
@@ -85,9 +89,9 @@ grep -qE '발산 전.*최소 리서치|최소 리서치.*발산 전' "$REFS/rese
   || fail "발산 전 최소 리서치 계약 누락"
 grep -qE 'shortlist|후보 목록' "$REFS/research-protocol.md" \
   || fail "후보 선정 후 상세 검증 리서치 계약 누락"
-grep -qE '관련.*정보만.*(전달|배포)|전체.*반복.*(전달|주입).*않' "$REFS/research-protocol.md" \
+grep -qE '관련.*정보만.*(전달|배포)|전체.*반복.*(전달|주입).*않' "$SHARED" \
   || fail "관련 정보만 배포하는 중복 방지 계약 누락"
-grep -qE '중앙.*리서치|공통.*리서치' "$REFS/research-protocol.md" \
+grep -qE '중앙.*리서치|공통.*리서치' "$REFS/research-protocol.md" "$SHARED" \
   || fail "중앙 리서치 계약 누락"
 ok "단계별 중앙 리서치 계약"
 
@@ -131,23 +135,23 @@ for section in '브리프' '연구 컨텍스트' '로스터' '아이디어 풀' 
   grep -q "## ${section}" "$REFS/document-templates.md" \
     || fail "세션 파일 섹션 누락: $section"
 done
-grep -qE '상태 블록.*먼저 갱신' "$SKILL_MD" \
+grep -qE '상태 블록.*먼저 갱신' "$SHARED" \
   || fail "상태 블록 우선 갱신 계약 누락"
-grep -qE '섹션 단위로만.*(추가|갱신)' "$REFS/document-templates.md" \
+grep -qE '섹션 단위로만.*(추가|갱신)' "$SHARED" \
   || fail "섹션 단위 추가·갱신 계약 누락"
-grep -qE '전체 파일 재작성.*(금지|않는다)' "$REFS/document-templates.md" \
+grep -qE '전체 파일 재작성.*(금지|않는다)' "$SHARED" \
   || fail "전체 파일 재작성 금지 계약 누락"
-grep -qE '(resume|재개).*단일 세션 파일|단일 세션 파일.*(resume|재개)' "$SKILL_MD" \
+grep -qE '(resume|재개).*단일 세션 파일|단일 세션 파일.*(resume|재개)' "$SHARED" \
   || fail "resume 단일 파일 읽기 계약 누락"
 ok "단일 세션 파일 계약"
 
 echo ""
 echo "=== TEST 9: 구 다중 파일 계약 부재 ==="
-if grep -rqF '.brainstorm/<session-id>/' "$SKILL_DIR"; then
+if grep -rqF '.brainstorm/<session-id>/' "$SKILL_DIR" "$SHARED"; then
   fail "구 디렉터리 계약 잔존: .brainstorm/<session-id>/"
 fi
 for artifact in state.md brief.md research-context.md roster.md idea-pool.md clusters.md shortlist.md validation-plan.md experiments.md report.md; do
-  if grep -rqF "$artifact" "$SKILL_DIR"; then
+  if grep -rqF "$artifact" "$SKILL_DIR" "$SHARED"; then
     fail "구 산출물 파일명 잔존: $artifact"
   fi
 done
@@ -155,11 +159,11 @@ ok "구 다중 파일 계약 부재"
 
 echo ""
 echo "=== TEST 10: 플러그인 버전 ==="
-grep -q '"version": "1.0.0"' "$PLUGIN_DIR/.claude-plugin/plugin.json" \
-  || fail "thinktank 플러그인 버전이 1.0.0이 아님"
-awk '/"name": "thinktank"/{found=1} found && /"version": "1.0.0"/{ok=1; exit} END{exit !ok}' "$MARKETPLACE" \
-  || fail "마켓플레이스 thinktank 버전이 1.0.0이 아님"
-ok "플러그인과 마켓플레이스 버전"
+PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN_DIR/.claude-plugin/plugin.json")"
+MARKET_VERSION="$(python3 -c 'import json,sys; print(next(p["version"] for p in json.load(open(sys.argv[1]))["plugins"] if p["name"]=="thinktank"))' "$MARKETPLACE")"
+[[ -n "$PLUGIN_VERSION" && "$PLUGIN_VERSION" == "$MARKET_VERSION" ]] \
+  || fail "플러그인/마켓플레이스 버전 불일치: plugin.json=$PLUGIN_VERSION marketplace=$MARKET_VERSION"
+ok "플러그인과 마켓플레이스 버전 동기 ($PLUGIN_VERSION)"
 
 echo ""
 echo "=== 모든 brainstorm 스킬 테스트 통과 ==="
