@@ -342,6 +342,19 @@ grep -qF 'findings.map((f) => computeFingerprint(f))' "$WORKFLOW" \
 ok "check 7d: 결정론적 fingerprint(file+perspective+title), 줄번호 비의존"
 
 echo ""
+echo "=== check 7e: fallback resolve 는 이번 라운드 검토 범위(reviewedPaths)로 게이트된다 (#597 회귀 가드) ==="
+# 증분 리뷰 라운드는 증분 diff 만 검토하므로, diff 에 앵커 파일이 없는 기존 지적은
+# 재보고되지 않는 것이 정상이다. "이번 라운드 findings 에 지문 없음"만으로 resolve
+# 하면 유효 blocking 지적이 수정·반박 없이 오해소된다 (PR #594 실사고).
+grep -qF 'const byFallback = !byModel && !findingFingerprints.has(fp) && reviewedPaths.has(t.path);' "$WORKFLOW" \
+  || fail "fallback 판정이 reviewedPaths.has(t.path) 로 게이트되지 않음 — 범위 밖 지문 오해소 회귀 (#597)"
+grep -qF 'parseContextDiffPaths' "$WORKFLOW" \
+  || fail "리뷰 청크 컨텍스트(SoT)에서 검토 파일 집합을 산출하는 parseContextDiffPaths 소비 부재 (#597)"
+grep -A5 'reviewThreads(first: 100)' "$WORKFLOW" | grep -qE '^\s+path$' \
+  || fail "GraphQL reviewThreads 조회가 thread 앵커 파일 경로(path)를 가져오지 않음 (#597)"
+ok "check 7e: fallback resolve 검토 범위 게이트 (reviewedPaths + thread path)"
+
+echo ""
 echo "=== check 8: prompt captures token and confidence policies ==="
 grep -q '토큰 최적화 정책' "$PROMPT" \
   || fail "prompt 토큰 최적화 정책 부재"

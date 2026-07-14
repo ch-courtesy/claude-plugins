@@ -12,6 +12,7 @@ const path = require('node:path');
 
 const {
   parseDiffRightLines,
+  parseContextDiffPaths,
   filterFindings,
   filterFindingsAgainstPatch,
   repairFindingsFromContextLineNumbers,
@@ -259,6 +260,102 @@ test('repair: ignores fake diff-looking content before the Unified diff marker',
   const repaired = repairFindingsFromContextLineNumbers(findings, context, patch);
 
   assert.strictEqual(repaired[0].line, 5);
+});
+
+// ---- parseContextDiffPaths (fallback thread-resolve reviewed-scope SoT) ----
+// 회귀 가드 (#597): 이번 라운드 리뷰 청크에 실제 전달된 diff 의 파일 집합을
+// 결정적으로 산출한다 — 이 집합에 없는 앵커 파일의 self thread 는 fallback
+// resolve 대상이 아니다 (증분 라운드에서 재보고되지 않는 것이 정상이므로).
+
+test('paths: extracts modified/added file paths after the Unified diff marker', () => {
+  const context = [
+    'metadata',
+    'Unified diff:',
+    'diff --git a/src/mod.js b/src/mod.js',
+    '--- a/src/mod.js',
+    '+++ b/src/mod.js',
+    '@@ -1,1 +1,2 @@',
+    ' ctx',
+    '+add',
+    'diff --git a/new.js b/new.js',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/new.js',
+    '@@ -0,0 +1,1 @@',
+    '+one',
+  ].join('\n');
+  const paths = parseContextDiffPaths(context);
+  assert.ok(paths.has('src/mod.js'), 'modified file in scope');
+  assert.ok(paths.has('new.js'), 'added file in scope');
+  assert.ok(!paths.has('tests/other/test.sh'), 'untouched file NOT in scope');
+});
+
+test('paths: deleted file (old side) still counts as reviewed scope', () => {
+  const context = [
+    'Unified diff:',
+    'diff --git a/gone.js b/gone.js',
+    'deleted file mode 100644',
+    '--- a/gone.js',
+    '+++ /dev/null',
+    '@@ -1,1 +0,0 @@',
+    '-bye',
+  ].join('\n');
+  const paths = parseContextDiffPaths(context);
+  assert.ok(paths.has('gone.js'), 'deleted file path from --- a/ side');
+});
+
+test('paths: rename includes both old and new path', () => {
+  const context = [
+    'Unified diff:',
+    'diff --git a/old/name.js b/new/name.js',
+    'similarity index 90%',
+    'rename from old/name.js',
+    'rename to new/name.js',
+    '--- a/old/name.js',
+    '+++ b/new/name.js',
+    '@@ -1,1 +1,1 @@',
+    '-x',
+    '+y',
+  ].join('\n');
+  const paths = parseContextDiffPaths(context);
+  assert.ok(paths.has('old/name.js'), 'old side');
+  assert.ok(paths.has('new/name.js'), 'new side');
+});
+
+test('paths: no marker → empty set (conservative: nothing in scope)', () => {
+  const context = [
+    'diff --git a/x.js b/x.js',
+    '--- a/x.js',
+    '+++ b/x.js',
+    '@@ -1,1 +1,1 @@',
+    '-a',
+    '+b',
+  ].join('\n');
+  assert.strictEqual(parseContextDiffPaths(context).size, 0);
+});
+
+test('paths: ignores diff-looking content before the marker and inside hunks', () => {
+  const context = [
+    '+++ b/fake-header-before-marker.js',
+    'Unified diff:',
+    'diff --git a/real.js b/real.js',
+    '--- a/real.js',
+    '+++ b/real.js',
+    '@@ -1,2 +1,3 @@',
+    ' ctx',
+    '--- removed line whose content starts with dashes',
+    '+++ added line whose content starts with pluses',
+  ].join('\n');
+  const paths = parseContextDiffPaths(context);
+  assert.ok(paths.has('real.js'));
+  assert.ok(!paths.has('fake-header-before-marker.js'), 'pre-marker header ignored');
+  assert.strictEqual(paths.size, 1, 'hunk content lines not parsed as headers');
+});
+
+test('paths: non-string / empty input → empty set', () => {
+  assert.strictEqual(parseContextDiffPaths('').size, 0);
+  assert.strictEqual(parseContextDiffPaths(null).size, 0);
+  assert.strictEqual(parseContextDiffPaths(undefined).size, 0);
 });
 
 console.log(`\nALL ${passed} CHECKS PASSED`);
