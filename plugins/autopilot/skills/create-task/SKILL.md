@@ -38,21 +38,20 @@ bash "$ADAPTER" <verb> [args]
 
 ### 백엔드 선택 SoT 영속화
 
-`adapter init` 이 만드는 `.autopilot/task-backend.json` 은 백엔드 선택의 단일 출처(SoT)다(`.gitignore`가
-추적 대상으로 명시). init 직후 이 SoT를 **메인 브랜치까지 영속화**해 새 체크아웃·CI·다른 세션에서도 동일
-백엔드가 설정되게 한다. 전용 헬퍼가 멱등적으로 처리한다(이미 메인에 동일 내용이 추적되면 중복 PR/커밋 없이
-건너뜀):
+`adapter init` 이 만드는 `.autopilot/task-backend.json` 은 백엔드 선택의 단일 출처(SoT)다. init 직후 전용
+헬퍼를 실행해 이 SoT를 **메인 브랜치까지 영속화**한다(새 체크아웃·CI·다른 세션에서 동일 백엔드 보장):
 
 ```
 bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/persist-backend-config.sh"
 ```
 
-헬퍼는 config 파일 **단독** 변경만 커밋한다(태스크 본문·다른 변경 미동반). origin 이 있으면 config-only
-브랜치 push → PR 생성 → 저장소 auto-merge 경로로 메인 머지까지 진행하고, origin 이 없으면 로컬 메인에 merge
-한다. `.autopilot/` 는 워치 디렉토리(=`plugins/`)가 아니므로 이 config PR 엔 plugin.json 범프를 넣지 않는다.
-머지 진행 상황은 사용자에게 보고하되, 자율 오케스트레이터 맥락에선 별도 사용자 프롬프트 없이 진행한다.
+헬퍼는 멱등이며 config 파일 **단독** 변경만 커밋한다 — origin 있으면 config-only 브랜치 push → PR →
+auto-merge, 없으면 로컬 메인 merge. `.autopilot/` 는 워치 디렉토리가 아니므로 plugin.json 범프를 넣지 않는다.
+자율 오케스트레이터 맥락에선 별도 사용자 프롬프트 없이 진행한다.
 
-헬퍼는 한 줄 JSON `{status}`를 반환한다 — `persisted`(메인 머지/auto-merge 예약 확인) 또는 `skip`(이미 추적, 멱등)이면 성공이다. `pending`(gh 미가용 — 브랜치만 push) · `pr_created`(PR 은 생성됐으나 auto-merge 예약 실패)는 **메인 영속화 미완**(exit 3)이므로, 그 사실과 수동 완료가 필요함을 사용자에게 보고한다(메인 영속화가 확인되지 않았는데 완료로 보고하지 않는다).
+헬퍼의 한 줄 JSON `{status}` 판정: `persisted`·`skip`(이미 추적)이면 성공, `pending`(gh 미가용)·
+`pr_created`(auto-merge 예약 실패)는 **메인 영속화 미완**(exit 3)이므로 수동 완료 필요를 사용자에게
+보고한다(영속화 미확인 상태를 완료로 보고하지 않는다).
 
 ## 워크플로
 
@@ -113,13 +112,11 @@ bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/pers
 **이미 등록된 `in_design` 태스크의 본문을 갱신**하고 상태를 재평가한다(작성자 `feature` 재개 모드가 인터뷰로
 이어 완성한 본문이 들어온다). 신규 등록의 2단계(백엔드 준비)는 이미 등록된 태스크이므로 생략한다.
 
-0. **재개 대상 검증 (get_task — in_design 가드)** — 본문을 교체하기 **전에** 대상 태스크의 status를 확인한다.
-   1단계의 재개 신호 검증에서 이미 호출한 `get_task` 결과(또는 여기서 `bash "$ADAPTER" get_task --task-id
-   <task-id>`)의 `status`가 **`in_design`이 아니면**(`done`·`in_progress`·`review`·`backlog`·`blocked`·
-   `cancelled`) — 즉 **비-in_design 태스크면** 재개를 **거부**하고 즉시 **중단**한다 — `set_body`·상태
-   전이를 하지 않는다. 재개는 "미해결
-   항목이 남은 `in_design` 태스크 이어 완성"만을 위한 경로이므로, 종단·진행 중 태스크에 본문 덮어쓰기 +
-   `backlog` 회귀를 적용하면 완료·진행 작업을 훼손한다. `in_design`이면 아래로 진행한다.
+0. **재개 대상 검증 (get_task — in_design 가드)** — 본문 교체 **전에** 대상 태스크의 status를 확인한다
+   (1단계에서 이미 호출한 `get_task` 결과 재사용 가능). status가 `in_design`이 아니면(비-in_design) 재개를 **거부**하고
+   즉시 **중단**한다 — `set_body`·상태 전이를 하지 않는다. 재개는 "미해결 항목이 남은 `in_design` 태스크 이어
+   완성" 전용 경로라, 종단·진행 중 태스크에 본문 덮어쓰기 + `backlog` 회귀를 적용하면 완료·진행 작업을
+   훼손하기 때문이다. `in_design`이면 아래로 진행한다.
 1. **본문 교체 (set_body)** — 기존 `task-id`의 본문을 받은 갱신 본문으로 교체한다. 직접 구현하지 않고 위 5단계와
    동일하게 백엔드 `set_body` 동사에 위임한다(본문만 교체, status·`depends_on`·메타 보존):
    ```
