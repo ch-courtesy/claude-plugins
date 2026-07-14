@@ -8,6 +8,7 @@ PLUGIN_DIR="$REPO_ROOT/plugins/thinktank"
 SKILL_DIR="$PLUGIN_DIR/skills/roundtable"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REFS="$SKILL_DIR/references"
+SHARED="$PLUGIN_DIR/skills/shared/session-conventions.md"
 MARKETPLACE="$REPO_ROOT/.claude-plugin/marketplace.json"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -22,7 +23,8 @@ for file in \
   "$REFS/meeting-protocol.md" \
   "$REFS/role-prompts.md" \
   "$REFS/participant-personas.md" \
-  "$REFS/document-templates.md"; do
+  "$REFS/document-templates.md" \
+  "$SHARED"; do
   [[ -f "$file" ]] || fail "필수 파일 부재: $file"
 done
 ok "필수 파일 존재"
@@ -43,6 +45,8 @@ grep -qE 'resume 라우팅|재개 라우팅' "$SKILL_MD" \
   || fail "상태별 resume 라우팅 누락"
 grep -qE 'status 보고|상태 보고' "$SKILL_MD" \
   || fail "읽기 전용 status 보고 형식 누락"
+grep -qF '../shared/session-conventions.md' "$SKILL_MD" \
+  || fail "공통 세션 규약 단일 출처 참조 누락"
 ok "인터페이스와 상태 계약"
 
 echo ""
@@ -127,13 +131,13 @@ for section in '아젠다' '리서치 계획' '증거 팩' '로스터' '초기 �
 done
 grep -qE '합의·실행서.*불합의 보고서|불합의 보고서.*합의·실행서' "$REFS/document-templates.md" \
   || fail "최종 문서 이분 계약(합의·실행서/불합의 보고서) 누락"
-grep -qE '상태 블록.*먼저 갱신' "$SKILL_MD" \
+grep -qE '상태 블록.*먼저 갱신' "$SHARED" \
   || fail "상태 블록 우선 갱신 계약 누락"
-grep -qE '섹션 단위로만.*(추가|갱신)' "$REFS/document-templates.md" \
+grep -qE '섹션 단위로만.*(추가|갱신)' "$SHARED" \
   || fail "섹션 단위 추가·갱신 계약 누락"
-grep -qE '전체 파일 재작성.*(금지|않는다)' "$REFS/document-templates.md" \
+grep -qE '전체 파일 재작성.*(금지|않는다)' "$SHARED" \
   || fail "전체 파일 재작성 금지 계약 누락"
-grep -qE '(resume|재개).*단일 회의 파일|단일 회의 파일.*(resume|재개)' "$SKILL_MD" \
+grep -qE '(resume|재개).*단일 (세션|회의) 파일|단일 (세션|회의) 파일.*(resume|재개)' "$SHARED" \
   || fail "resume 단일 파일 읽기 계약 누락"
 grep -qE '초기 입장.*다시 생성하지 않|초기 입장.*재생성.*않' "$SKILL_MD" \
   || fail "초기 입장 재생성 금지 계약 누락"
@@ -143,11 +147,11 @@ ok "단일 회의 파일 계약과 실행 경계"
 
 echo ""
 echo "=== TEST 8: 구 다중 파일 계약 부재 ==="
-if grep -rqF '.roundtable/<meeting-id>/' "$SKILL_DIR"; then
+if grep -rqF '.roundtable/<meeting-id>/' "$SKILL_DIR" "$SHARED"; then
   fail "구 디렉터리 계약 잔존: .roundtable/<meeting-id>/"
 fi
 for artifact in state.md agenda.md research-plan.md evidence-pack.md roster.md initial-positions.md decision-map.md discussion.md agreement.md no-consensus.md; do
-  if grep -rqF "$artifact" "$SKILL_DIR"; then
+  if grep -rqF "$artifact" "$SKILL_DIR" "$SHARED"; then
     fail "구 산출물 파일명 잔존: $artifact"
   fi
 done

@@ -23,7 +23,7 @@
 - 표현은 다르지만 작동 원리가 반복된다.
 - 렌즈별 결과가 같은 해결책 유형으로 수렴한다.
 
-정체 시 Substitute, Combine, Adapt, Modify, Put to another use, Eliminate, Reverse 렌즈를 필요한 만큼 적용한다. 변환 아이디어는 새 `idea-id`, `strategy: SCAMPER`, 원본의 `parent-id`를 기록한다. 원본 아이디어는 보존하며 삭제하지 않는다.
+정체 시 Substitute, Combine, Adapt, Modify, Put to another use, Eliminate, Reverse 렌즈를 필요한 만큼 적용한다. 변환 아이디어는 새 `idea-id`, `strategy: SCAMPER`, 원본의 `parent-id`를 기록한다.
 
 ## 군집화
 

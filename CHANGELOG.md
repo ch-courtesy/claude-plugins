@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## thinktank 1.0.1
+
+### 변경(호환)
+- **brainstorm·roundtable 스킬 문서 단일 출처화·간소화 (#592)** — 두 스킬이 사본으로 갖던 공유 규범(호출 규약·세션 파일 규율·디스패치·중앙 리서치·공통 안전 경계)을 `skills/shared/session-conventions.md` 단일 출처로 모으고, 각 SKILL.md·references의 중복 문장을 제거해 스킬 문서군 총 줄 수를 줄였다. 런타임 계약(frontmatter 키·allowed-tools 스코프·상태 머신·산출물 단일 파일 구조·호출 시그니처)과 description 트리거 계약은 변경 없음. 테스트는 이동한 규범의 단언 위치를 shared로 재지정하고, 버전 검사를 고정값(1.0.0) 대신 plugin.json↔marketplace 동등성 검사로 재작성했다.
+
 ## autopilot 0.63.2
 
 ### 변경(호환)
