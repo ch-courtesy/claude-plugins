@@ -163,7 +163,11 @@ PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])
 MARKET_VERSION="$(python3 -c 'import json,sys; print(next(p["version"] for p in json.load(open(sys.argv[1]))["plugins"] if p["name"]=="thinktank"))' "$MARKETPLACE")"
 [[ -n "$PLUGIN_VERSION" && "$PLUGIN_VERSION" == "$MARKET_VERSION" ]] \
   || fail "플러그인/마켓플레이스 버전 불일치: plugin.json=$PLUGIN_VERSION marketplace=$MARKET_VERSION"
-ok "플러그인과 마켓플레이스 버전 동기 ($PLUGIN_VERSION)"
+# 버전 범프 회귀 가드: 릴리스 시 이 핀도 함께 올린다 (parity만으로는 미범프를 못 잡는다)
+EXPECTED_VERSION="1.0.1"
+[[ "$PLUGIN_VERSION" == "$EXPECTED_VERSION" ]] \
+  || fail "플러그인 버전이 현재 릴리스 핀과 다름: plugin.json=$PLUGIN_VERSION expected=$EXPECTED_VERSION (릴리스 시 핀 갱신)"
+ok "플러그인과 마켓플레이스 버전 동기 + 릴리스 핀 일치 ($PLUGIN_VERSION)"
 
 echo ""
 echo "=== 모든 brainstorm 스킬 테스트 통과 ==="
