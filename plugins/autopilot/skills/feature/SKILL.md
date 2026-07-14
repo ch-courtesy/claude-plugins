@@ -38,7 +38,8 @@ allowed-tools:
    `plugins/autopilot/references/ears-patterns.md` 5문장 패턴으로. 본문이 SPEC이다. 미해결 항목은
    `[NEEDS CLARIFICATION: <질문>]` 마커로 남긴다.
 6. **자체 검토** — 공용 `plugins/autopilot/references/self-review.md` 점검 축(placeholder·모순·범위·모호성·
-   검증 가능성·scope.include)을 점검·수정.
+   검증 가능성·scope.include)을 점검·수정. 규모 임계 시 적대 렌즈 가산의 정의 단일 출처는 공용
+   `plugins/autopilot/references/personas.md`.
 7. **등록 위임** — 완성 본문 전체를 한 번 제시해 `AskUserQuestion`으로 단일 승인을 받은 뒤, **`create-task`를
    호출해 등록**한다:
    ```

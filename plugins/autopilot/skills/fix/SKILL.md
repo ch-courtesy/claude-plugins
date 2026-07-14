@@ -60,7 +60,8 @@ allowed-tools:
    인코딩한다(구현 방법·진입 명령은 강제하지 않는다). 버그 수정은 대개 단일 단위이므로 보통 본문 하나를
    작성한다 — 둘 이상 독립 수정 지점이 분명하면 본문을 나눠 의존 순서로 등록한다.
 4. **자체 검토** — 공용 `plugins/autopilot/references/self-review.md`의 점검 축(placeholder·모순·범위·
-   모호성·검증 가능성·scope.include) + 진단 섹션 전용 점검(fix 전용)을 1회 수행한다. 발견은 수정하거나 `[NEEDS CLARIFICATION]` 마커로 남긴다(새 Q&A 라운드를 열지 않는다).
+   모호성·검증 가능성·scope.include) + 진단 섹션 전용 점검(fix 전용)을 1회 수행한다. 규모 임계 시 적대 렌즈
+   가산의 정의 단일 출처는 공용 `plugins/autopilot/references/personas.md`. 발견은 수정하거나 `[NEEDS CLARIFICATION]` 마커로 남긴다(새 Q&A 라운드를 열지 않는다).
 5. **등록 위임** — 완성 본문을 한 번 제시해(직접 호출 맥락) 단일 승인을 받은 뒤 **`create-task`를 호출해
    등록**한다(자율 맥락은 승인 생략):
    ```
