@@ -34,14 +34,15 @@ grep -qF '도구가 표시하는 컨텍스트 파일 줄 번호는 소스 파일
 [[ -f "$SCHEMA" ]] || fail "$SCHEMA 부재"
 
 echo "=== check 1: 모델 호출은 공식 openai/codex-action 으로 이뤄진다 (AC1) ==="
-# 1차/2차(needs_context follow-up) 모두 동일한 SHA 고정 action 으로 실행.
+# 1차/2차(needs_context follow-up) 리뷰 + auth-refresh 워밍업(회전 토큰 write-back용
+# 트리비얼 호출) 3곳 모두 동일한 SHA 고정 action 으로 실행.
 codex_action_count="$(grep -cE 'uses: openai/codex-action@[0-9a-f]{40}' "$WORKFLOW")"
-[[ "$codex_action_count" == "2" ]] \
-  || fail "openai/codex-action SHA 고정 호출이 1차/2차 2곳에 없음 (현재 $codex_action_count)"
+[[ "$codex_action_count" == "3" ]] \
+  || fail "openai/codex-action SHA 고정 호출이 1차/2차/auth-refresh 3곳에 없음 (현재 $codex_action_count)"
 if grep -qE 'uses: openai/codex-action@v[0-9.]+' "$WORKFLOW"; then
   fail "openai/codex-action 이 mutable version tag 로 참조됨 — SHA 고정 필요"
 fi
-ok "check 1: openai/codex-action SHA 고정 호출 2곳"
+ok "check 1: openai/codex-action SHA 고정 호출 3곳 (1차/2차/auth-refresh)"
 
 echo ""
 echo "=== check 2: 셸 직접 codex CLI 호출·설치 스텝이 존재하지 않는다 (AC1) ==="
@@ -59,15 +60,18 @@ ok "check 2: codex CLI 직접 호출·설치 스텝 부재"
 echo ""
 echo "=== check 3: codex CLI 버전이 action 버전 입력으로 고정된다 (제약) ==="
 codex_version_count="$(count "codex-version: '0.132.0'" "$WORKFLOW")"
-[[ "$codex_version_count" == "2" ]] \
-  || fail "codex-version 입력이 1차/2차 action 호출 양쪽에 0.132.0 으로 고정되지 않음 (현재 $codex_version_count)"
+[[ "$codex_version_count" == "3" ]] \
+  || fail "codex-version 입력이 1차/2차/auth-refresh action 호출 3곳에 0.132.0 으로 고정되지 않음 (현재 $codex_version_count)"
 ok "check 3: codex-version 입력으로 codex CLI 0.132.0 고정"
 
 echo ""
 echo "=== check 4: ChatGPT auth.json codex-home 부트스트랩 (AC2/제약) ==="
+# 정확히 3곳: review 매트릭스 부트스트랩 env + auth-refresh 부트스트랩 env +
+# write-back 비교용 OLD_AUTH env. 전부 전용 부트스트랩/write-back 스텝의 env 이며
+# 모델 호출 스텝에는 노출되지 않는다.
 secret_count="$(count 'secrets.CODEX_AUTH_JSON' "$WORKFLOW")"
-[[ "$secret_count" == "1" ]] \
-  || fail "secrets.CODEX_AUTH_JSON 참조가 정확히 1곳(부트스트랩 env)이어야 함 — 모델 호출 스텝 노출 금지 (현재 $secret_count) (제약)"
+[[ "$secret_count" == "3" ]] \
+  || fail "secrets.CODEX_AUTH_JSON 참조가 정확히 3곳(부트스트랩 env×2 + write-back OLD_AUTH)이어야 함 — 모델 호출 스텝 노출 금지 (현재 $secret_count) (제약)"
 grep -q 'CODEX_AUTH_JSON:.*secrets\.CODEX_AUTH_JSON' "$WORKFLOW" \
   || fail "CODEX_AUTH_JSON secret env 매핑 부재 (AC2)"
 grep -q 'printf .*> "\$codex_home/auth\.json"' "$WORKFLOW" \
@@ -77,8 +81,8 @@ grep -q 'chmod 600 "\$codex_home/auth\.json"' "$WORKFLOW" \
 grep -q 'codex-home: ${{ env\.CODEX_HOME_DIR }}' "$WORKFLOW" \
   || fail "codex-home 디렉터리를 action 의 codex-home 입력으로 전달하지 않음 (AC2/제약)"
 codex_home_input_count="$(count 'codex-home: ${{ env.CODEX_HOME_DIR }}' "$WORKFLOW")"
-[[ "$codex_home_input_count" == "2" ]] \
-  || fail "codex-home 입력이 1차/2차 action 호출 양쪽에 전달되지 않음 (현재 $codex_home_input_count)"
+[[ "$codex_home_input_count" == "3" ]] \
+  || fail "codex-home 입력이 1차/2차/auth-refresh action 호출 3곳에 전달되지 않음 (현재 $codex_home_input_count)"
 # Placeholder server-info seed: the action's "Read server info" step fires on
 # prompt presence but the proxy that writes that file only runs with an API
 # key. Without the seed the job dies on "Failed to read server info". The seed
