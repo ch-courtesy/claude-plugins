@@ -296,8 +296,24 @@ _in_base_sync_core() {
 }
 
 in_push_branch() {
+  # 원격-앞섬 정합(run 592): 로컬 ref 가 원격 tip 의 조상이면(리뷰 수정 푸시 등 정당한 전진으로
+  # 원격이 앞섬) 원격이 이미 모든 로컬 커밋을 보유 — push 는 불필요하고 non-ff 로 거부만 되므로
+  # 건너뛴다. fetch 시점 레이스 완화를 위해 판정 직전에 원격 ref 를 fetch 한다. force 금지 유지.
+  local branch="$1" tip local_commit
+  tip="$(in_remote_tip "$branch")"
+  if [[ -n "$tip" ]]; then
+    # shellcheck disable=SC2086
+    $GIT_CMD fetch origin "$branch" >/dev/null 2>&1 || true
+    # shellcheck disable=SC2086
+    local_commit="$($GIT_CMD rev-parse "refs/heads/$branch" 2>/dev/null)"
+    # shellcheck disable=SC2086
+    if [[ -n "$local_commit" ]] && $GIT_CMD merge-base --is-ancestor "$local_commit" "$tip" 2>/dev/null; then
+      echo "integration: push 생략 — 원격 브랜치가 로컬 ref 를 이미 포함(원격-앞섬): $branch" >&2
+      return 0
+    fi
+  fi
   # shellcheck disable=SC2086
-  $GIT_CMD push origin "$1" || { in_die "push 실패(force 금지): $1"; return 1; }
+  $GIT_CMD push origin "$branch" || { in_die "push 실패(force 금지): $branch"; return 1; }
 }
 
 # =====================================================================
@@ -327,6 +343,11 @@ in_remote_ff_incompatible() {
   $GIT_CMD fetch origin "$branch" >/dev/null 2>&1 || true
   # shellcheck disable=SC2086
   $GIT_CMD merge-base --is-ancestor "$tip" "$local_commit" 2>/dev/null && return 1
+  # 원격-앞섬(로컬이 원격 tip 의 조상): 원격이 이미 로컬 커밋을 모두 보유(리뷰 수정 푸시 등
+  # 정당한 전진) — stale 잔여가 아니라 건강한 상태이므로 보존한다(push 는 in_push_branch 가
+  # 원격-앞섬을 감지해 생략 → non-ff 문제 없음). run 592 회귀: 오판 시 리뷰 커밋 파괴.
+  # shellcheck disable=SC2086
+  $GIT_CMD merge-base --is-ancestor "$local_commit" "$tip" 2>/dev/null && return 1
   return 0
 }
 

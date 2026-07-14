@@ -38,6 +38,10 @@ REVIEW_BOT_LOGINS_RE="${REVIEW_BOT_LOGINS_RE:-(\[bot\]$|^github-actions$|courtes
 
 die() { echo "execute-task: $*" >&2; exit 1; }
 
+# et_reason_excerpt <text> — 실패 출력에서 백엔드 로그용 사유 발췌(마지막 20줄, 한 줄 평탄화).
+#   integrate/merge 실패 사유가 stderr 로만 흘러 유실되는 무로그 blocked 방지(run 592).
+et_reason_excerpt() { printf '%s\n' "$1" | tail -n 20 | tr '\n' ' '; }
+
 # et_cleanup_dirs <dir>... — 주어진 디렉토리들을 정리(멱등, 부재·중복이어도 무해).
 #   merge 성공 직후 정리와 done 선제 가드 정리(#541)가 공유하는 단일 출처.
 #   대상: run-dir(.autopilot/runs/<id> — materialize SPEC·.worktree·run 상태, #580 통합),
@@ -231,7 +235,9 @@ et_start() {
   local key="$id"
   local iout branch pr=""
   iout="$($FORGE_CMD integrate "$sp" "$run_dir" "$key" 2>&1)" || {
-    $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "integrate 실패" >/dev/null; echo "$iout" >&2; return 1; }
+    $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "integrate 실패" >/dev/null
+    $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "integrate 실패: $(et_reason_excerpt "$iout")" >/dev/null
+    echo "$iout" >&2; return 1; }
   branch="$(printf '%s' "$iout" | sed -n 's/^branch:[[:space:]]*//p' | head -1)"
   pr="$(printf '%s' "$iout" | sed -n 's/^pr:[[:space:]]*//p' | head -1)"
 
@@ -289,7 +295,10 @@ et_start() {
     fi
   fi
 
-  if $FORGE_CMD merge "$sp" "$run_dir" "$key" "$pr"; then
+  # merge 출력을 캡처해 실패 시 사유를 백엔드 로그에 남긴다(무로그 blocked 방지, run 592).
+  local mout
+  if mout="$($FORGE_CMD merge "$sp" "$run_dir" "$key" "$pr" 2>&1)"; then
+    if [[ -n "$mout" ]]; then printf '%s\n' "$mout"; fi
     $ADAPTER_CMD set_status --task-id "$id" --status done >/dev/null
     $ADAPTER_CMD append_log --task-id "$id" --marker handoff --text "merged ${branch:+($branch)}" >/dev/null
     # .autopilot/runs/<id>/(materialize SPEC 포함)·.review/tasks/<id>/ 정리 — dirname sp 는 통상
@@ -298,6 +307,8 @@ et_start() {
     echo "execute-task: done ($id)"
   else
     $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "merge 실패" >/dev/null
+    $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "merge 실패: $(et_reason_excerpt "$mout")" >/dev/null
+    echo "$mout" >&2
     return 1
   fi
 }
