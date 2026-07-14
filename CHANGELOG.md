@@ -7,6 +7,12 @@
 ### 변경(호환)
 - **brainstorm·roundtable 스킬 문서 단일 출처화·간소화 (#592)** — 두 스킬이 사본으로 갖던 공유 규범(호출 규약·세션 파일 규율·디스패치·중앙 리서치·공통 안전 경계)을 `skills/shared/session-conventions.md` 단일 출처로 모으고, 각 SKILL.md·references의 중복 문장을 제거해 스킬 문서군 총 줄 수를 줄였다. 런타임 계약(frontmatter 키·allowed-tools 스코프·상태 머신·산출물 단일 파일 구조·호출 시그니처)과 description 트리거 계약은 변경 없음. 테스트는 이동한 규범의 단언 위치를 shared로 재지정하고, 버전 검사를 고정값(1.0.0) 대신 plugin.json↔marketplace 동등성 검사로 재작성했다.
 
+## autopilot 0.63.2
+
+### 변경(호환)
+
+- 스킬 문서군 중복 제거·간소화 — feature·fix가 각자 사본으로 갖던 작성자 참조 3종(task-body-template·self-review·ears-patterns)을 플러그인 공용 `plugins/autopilot/references/` 단일 출처로 통합하고, workflow-task·execute-task의 자가개선 카테고리 매핑 재서술을 단일 소유자(`using-autopilot`) 참조로 축약. 스킬 동작·트리거 계약·엔진 파싱 형식은 무변경. 스킬 내부 중복 테스트 2종은 `tests/autopilot/test-task-body-template.sh` 1개로 통합.
+
 ## project-init 0.24.7
 
 ### 변경(호환)

@@ -86,10 +86,10 @@ ok "create-task: 재개 진입 in_design 검증 + 비-in_design 거부"
 # === R9: feature 참조 — test_sweep_paths 동시 선언 규칙(#509) ===
 # 재개 경로도 동일 참조를 사용하므로 test_sweep_paths 규칙 존재를 확인한다.
 echo "=== R9: feature 참조 — test_sweep_paths 동시 선언 규칙 ==="
-FEATURE_DIR="$SKILLS/feature"
-grep -q 'test_sweep_paths' "$FEATURE_DIR/references/task-body-template.md" \
+SHARED_REFS="$REPO_ROOT/plugins/autopilot/references"
+grep -q 'test_sweep_paths' "$SHARED_REFS/task-body-template.md" \
   || fail "R9: feature task-body-template에 test_sweep_paths 동시 선언 규칙 없음"
-grep -q 'test_sweep_paths' "$FEATURE_DIR/references/self-review.md" \
+grep -q 'test_sweep_paths' "$SHARED_REFS/self-review.md" \
   || fail "R9: feature self-review에 test_sweep_paths 점검 항목 없음"
 ok "feature 참조: test_sweep_paths 동시 선언 규칙 존재"
 

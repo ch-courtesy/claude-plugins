@@ -16,21 +16,24 @@ SKILLS="$REPO_ROOT/plugins/autopilot/skills"
 FIX="$SKILLS/fix"
 CREATE="$SKILLS/create-task"
 WT="$SKILLS/workflow-task"
+SHARED="$REPO_ROOT/plugins/autopilot/references"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
 
-# === S1: fix 스킬 패키지 구조 (자체 소유 참조) ===
-echo "=== S1: fix 스킬 구조 + 자체 소유 참조 ==="
+# === S1: fix 스킬 패키지 구조 (자체 소유 2종 + 작성자 공용 3종 단일 출처) ===
+echo "=== S1: fix 스킬 구조 + 작성 참조 존재 ==="
 for f in SKILL.md \
          README.md \
          references/diagnosis.md \
-         references/task-body-template.md \
-         references/self-review.md \
          references/agent-prompts.md; do
   [[ -f "$FIX/$f" ]] || fail "S1: fix/$f 부재"
 done
-ok "fix SKILL.md + README + 4 참조 존재"
+for f in task-body-template.md self-review.md ears-patterns.md; do
+  [[ -f "$SHARED/$f" ]] || fail "S1: 작성자 공용 참조 $f 부재(plugins/autopilot/references/)"
+  [[ -f "$FIX/references/$f" ]] && fail "S1: fix가 공용 참조 $f 사본을 보유(단일 출처 위반)"
+done
+ok "fix 자체 참조 2종 + 공용 작성 참조 3종(사본 없음)"
 
 # === S2: fix frontmatter name ===
 echo "=== S2: fix frontmatter name: fix ==="
@@ -70,9 +73,9 @@ ok "fix 참조: 타 스킬 소유 표기 부재"
 
 # === S7: fix task-body-template 에 진단 섹션 + 완료 조건 ===
 echo "=== S7: fix 본문 템플릿 진단 섹션 + 완료 조건 ==="
-grep -qE '^##[[:space:]]*진단' "$FIX/references/task-body-template.md" \
+grep -qE '^##[[:space:]]*진단' "$SHARED/task-body-template.md" \
   || fail "S7: fix task-body-template에 '## 진단' 섹션 없음"
-grep -qE '^##[[:space:]]*완료 조건' "$FIX/references/task-body-template.md" \
+grep -qE '^##[[:space:]]*완료 조건' "$SHARED/task-body-template.md" \
   || fail "S7: fix task-body-template에 '## 완료 조건' 섹션 없음"
 ok "fix 본문 템플릿: 진단 섹션 + 완료 조건"
 
@@ -94,15 +97,15 @@ ok "fix: backlog/in_design 전이 명시"
 # loop scope 게이트(diff_vs_scope)는 scope 밖 파일 작성을 halt 하므로, 완료 조건이
 # 회귀 가드 테스트를 요구하면 그 테스트 경로가 scope.include 안에 있어야 RED 테스트를 쓸 수 있다.
 echo "=== S10: fix 본문 템플릿 — DoD-요구 테스트 경로 scope.include 포함 규칙 ==="
-grep -q '회귀 가드' "$FIX/references/task-body-template.md" \
+grep -q '회귀 가드' "$SHARED/task-body-template.md" \
   || fail "S10: fix task-body-template에 '회귀 가드' 테스트 경로 규칙 없음"
-grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FIX/references/task-body-template.md" \
+grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$SHARED/task-body-template.md" \
   || fail "S10: fix task-body-template에 테스트 경로의 scope.include 포함 규칙(한 줄) 없음"
 ok "fix task-body-template: DoD-요구 테스트 경로 scope.include 포함 규칙"
 
 # === S10b: self-review 축6 — DoD-요구 테스트 경로 점검 항목(#483) ===
 echo "=== S10b: fix self-review 축6 — DoD-요구 테스트 경로 점검 ==="
-grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FIX/references/self-review.md" \
+grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$SHARED/self-review.md" \
   || fail "S10b: fix self-review 축6에 테스트 경로 scope.include 점검 항목(한 줄) 없음"
 ok "fix self-review: DoD-요구 테스트 경로 점검 항목"
 
@@ -110,13 +113,13 @@ ok "fix self-review: DoD-요구 테스트 경로 점검 항목"
 # scope.include에 기존 테스트 파일이 있으면 test_sweep_paths에도 선언해야 loop의
 # 테스트 약화 게이트(HALT)를 통과할 수 있다.
 echo "=== S10c: fix 본문 템플릿 — test_sweep_paths 동시 선언 규칙 ==="
-grep -q 'test_sweep_paths' "$FIX/references/task-body-template.md" \
+grep -q 'test_sweep_paths' "$SHARED/task-body-template.md" \
   || fail "S10c: fix task-body-template에 test_sweep_paths 동시 선언 규칙 없음"
 ok "fix task-body-template: test_sweep_paths 동시 선언 규칙"
 
 # === S10d: fix self-review 축6 — test_sweep_paths 점검 항목(#509) ===
 echo "=== S10d: fix self-review 축6 — test_sweep_paths 점검 항목 ==="
-grep -q 'test_sweep_paths' "$FIX/references/self-review.md" \
+grep -q 'test_sweep_paths' "$SHARED/self-review.md" \
   || fail "S10d: fix self-review 축6에 test_sweep_paths 점검 항목 없음"
 ok "fix self-review: test_sweep_paths 점검 항목"
 

@@ -11,8 +11,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 RULE_SKILL="$REPO_ROOT/plugins/project-init/skills/engineering-rule-creator/SKILL.md"
 RULE_README="$REPO_ROOT/plugins/project-init/skills/engineering-rule-creator/README.md"
-FEATURE_TPL="$REPO_ROOT/plugins/autopilot/skills/feature/references/task-body-template.md"
-FIX_TPL="$REPO_ROOT/plugins/autopilot/skills/fix/references/task-body-template.md"
+SHARED_TPL="$REPO_ROOT/plugins/autopilot/references/task-body-template.md"  # feature·fix 작성자 공용 단일 출처
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -27,14 +26,14 @@ grep -qi 'changelog' "$RULE_README" \
   && fail "T2: README.md가 여전히 changelog 언급을 포함" \
   || ok "README.md: changelog 언급 없음"
 
-echo "=== T3: feature task-body-template이 CHANGELOG.md를 scope 권장하지 않음 ==="
-grep -q 'CHANGELOG.md' "$FEATURE_TPL" \
-  && fail "T3: feature task-body-template이 여전히 CHANGELOG.md를 scope 권장" \
-  || ok "feature task-body-template: CHANGELOG.md 권장 없음"
+echo "=== T3: 공용 task-body-template이 CHANGELOG.md를 scope 권장하지 않음 ==="
+grep -q 'CHANGELOG.md' "$SHARED_TPL" \
+  && fail "T3: 공용 task-body-template이 여전히 CHANGELOG.md를 scope 권장" \
+  || ok "공용 task-body-template: CHANGELOG.md 권장 없음"
 
-echo "=== T4: fix task-body-template이 CHANGELOG.md를 scope 권장하지 않음 ==="
-grep -q 'CHANGELOG.md' "$FIX_TPL" \
-  && fail "T4: fix task-body-template이 여전히 CHANGELOG.md를 scope 권장" \
-  || ok "fix task-body-template: CHANGELOG.md 권장 없음"
+echo "=== T4: 공용 task-body-template(fix 진단 포함 형판)이 CHANGELOG.md를 scope 권장하지 않음 ==="
+grep -q 'CHANGELOG.md' "$SHARED_TPL" \
+  && fail "T4: 공용 task-body-template(fix 진단 포함 형판)이 여전히 CHANGELOG.md를 scope 권장" \
+  || ok "공용 task-body-template(재확인): CHANGELOG.md 권장 없음"
 
 echo "ALL PASS"
