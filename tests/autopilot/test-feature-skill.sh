@@ -2,8 +2,10 @@
 # 작성/등록 분리(#445) 정적 계약 검증.
 #
 # 계약: 스킬 계층을 작성(feature)과 등록(create-task)으로 분리한다.
-#  - feature = 인터뷰 작성자. create-task의 경량 참조 4종을 포팅(이동)해 소유하고,
-#    인터뷰로 본문을 생성한 뒤 create-task로 등록을 위임한다.
+#  - feature = 인터뷰 작성자. 인터뷰 방법론(clarification·decomposition-gate)을 자체 소유하고,
+#    작성자 공용 참조(task-body-template·self-review·ears-patterns — feature·fix 공유)는
+#    플러그인 공용 references/ 단일 출처를 사용한다. 인터뷰로 본문을 생성한 뒤
+#    create-task로 등록을 위임한다.
 #  - create-task = 등록 프리미티브. 외부 작성 본문을 받아 등록 + #442 상태 전이를
 #    소유하고, 본문 갱신은 #447 set_body에 위임한다. 인터뷰/작성 로직을 보유하지 않는다.
 #  - using-autopilot = 기능 의도를 feature로 라우팅(버그 경로는 create-task 현행 유지).
@@ -16,20 +18,23 @@ SKILLS="$REPO_ROOT/plugins/autopilot/skills"
 FEATURE="$SKILLS/feature"
 CREATE="$SKILLS/create-task"
 USING="$SKILLS/using-autopilot/SKILL.md"
+SHARED="$REPO_ROOT/plugins/autopilot/references"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
 
-# === S1: feature 스킬 패키지 구조 (참조 4종 포팅) ===
-echo "=== S1: feature 스킬 구조 + 경량 참조 포팅 ==="
+# === S1: feature 스킬 패키지 구조 (자체 소유 2종 + 작성자 공용 3종 단일 출처) ===
+echo "=== S1: feature 스킬 구조 + 작성 참조 존재 ==="
 for f in SKILL.md \
          references/clarification.md \
-         references/decomposition-gate.md \
-         references/self-review.md \
-         references/task-body-template.md; do
+         references/decomposition-gate.md; do
   [[ -f "$FEATURE/$f" ]] || fail "S1: feature/$f 부재"
 done
-ok "feature SKILL.md + 4 참조 존재"
+for f in self-review.md task-body-template.md ears-patterns.md; do
+  [[ -f "$SHARED/$f" ]] || fail "S1: 작성자 공용 참조 $f 부재(plugins/autopilot/references/)"
+  [[ -f "$FEATURE/references/$f" ]] && fail "S1: feature가 공용 참조 $f 사본을 보유(단일 출처 위반)"
+done
+ok "feature 자체 참조 2종 + 공용 작성 참조 3종(사본 없음)"
 
 # === S2: feature frontmatter name + 작성자 역할 ===
 echo "=== S2: feature frontmatter name: feature ==="
@@ -88,15 +93,15 @@ ok "feature 참조: 소유 표기 갱신"
 # loop scope 게이트(diff_vs_scope)는 scope 밖 파일 작성을 halt 하므로, 완료 조건이
 # 회귀 테스트를 요구하면 그 테스트 경로가 scope.include 안에 있어야 RED 테스트를 쓸 수 있다.
 echo "=== S10: feature 본문 템플릿 — DoD-요구 테스트 경로 scope.include 포함 규칙 ==="
-grep -q '회귀 가드' "$FEATURE/references/task-body-template.md" \
+grep -q '회귀 가드' "$SHARED/task-body-template.md" \
   || fail "S10: feature task-body-template에 '회귀 가드' 테스트 경로 규칙 없음"
-grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FEATURE/references/task-body-template.md" \
+grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$SHARED/task-body-template.md" \
   || fail "S10: feature task-body-template에 테스트 경로의 scope.include 포함 규칙(한 줄) 없음"
 ok "feature task-body-template: DoD-요구 테스트 경로 scope.include 포함 규칙"
 
 # === S11: self-review 축6 — DoD-요구 테스트 경로 점검 항목(#483) ===
 echo "=== S11: feature self-review 축6 — DoD-요구 테스트 경로 점검 ==="
-grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$FEATURE/references/self-review.md" \
+grep -qE '테스트.*scope\.include|scope\.include.*테스트' "$SHARED/self-review.md" \
   || fail "S11: feature self-review 축6에 테스트 경로 scope.include 점검 항목(한 줄) 없음"
 ok "feature self-review: DoD-요구 테스트 경로 점검 항목"
 
@@ -104,13 +109,13 @@ ok "feature self-review: DoD-요구 테스트 경로 점검 항목"
 # scope.include에 기존 테스트 파일이 있으면 test_sweep_paths에도 선언해야 loop의
 # 테스트 약화 게이트(HALT)를 통과할 수 있다.
 echo "=== S12: feature 본문 템플릿 — test_sweep_paths 동시 선언 규칙 ==="
-grep -q 'test_sweep_paths' "$FEATURE/references/task-body-template.md" \
+grep -q 'test_sweep_paths' "$SHARED/task-body-template.md" \
   || fail "S12: feature task-body-template에 test_sweep_paths 동시 선언 규칙 없음"
 ok "feature task-body-template: test_sweep_paths 동시 선언 규칙"
 
 # === S13: feature self-review 축6 — test_sweep_paths 점검 항목(#509) ===
 echo "=== S13: feature self-review 축6 — test_sweep_paths 점검 항목 ==="
-grep -q 'test_sweep_paths' "$FEATURE/references/self-review.md" \
+grep -q 'test_sweep_paths' "$SHARED/self-review.md" \
   || fail "S13: feature self-review 축6에 test_sweep_paths 점검 항목 없음"
 ok "feature self-review: test_sweep_paths 점검 항목"
 
