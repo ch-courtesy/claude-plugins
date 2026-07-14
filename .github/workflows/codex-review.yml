@@ -679,8 +679,9 @@ jobs:
               try { fs.accessSync('.codex-review/result.json'); resultFiles = ['.codex-review/result.json']; } catch {}
             }
             let repairFindingsFromContextLineNumbers = null;
+            let parseContextDiffPaths = null;
             try {
-              ({ repairFindingsFromContextLineNumbers } =
+              ({ repairFindingsFromContextLineNumbers, parseContextDiffPaths } =
                 require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/diff-anchor-filter.js`));
             } catch (e) {
               core.warning(`Shared context-line anchor repair unavailable in trusted-base checkout (${e.message}); findings will use model-provided anchors.`);
@@ -704,6 +705,9 @@ jobs:
                 // it — not a never-generated context.chunk file — is what the anchor
                 // repair must read. Restored into .codex-review/ via codex-review-prep.
                 const contextPath = `.codex-review/prompt.chunk-${chunk}.md`;
+                // Remembered so the thread-resolve fallback tier can derive the
+                // reviewed-scope file set from the exact context this chunk saw.
+                result.__contextPath = contextPath;
                 if (repairFindingsFromContextLineNumbers && anchorPatch && Array.isArray(result.findings)) {
                   let contextText = '';
                   try { contextText = fs.readFileSync(contextPath, 'utf8'); }
@@ -1010,7 +1014,9 @@ jobs:
             // duplicate. Two tiers:
             //   (1) primary  — fingerprints the model listed in resolved_threads;
             //   (2) fallback — self threads whose fingerprint is absent from this
-            //                   round's MERGED findings set (no longer reported).
+            //                   round's MERGED findings set (no longer reported)
+            //                   AND whose anchor file was part of this round's
+            //                   reviewed scope (see reviewedPaths below).
             // A self thread whose fingerprint is still in the findings set (and not
             // in resolved_threads) is left untouched. Only self-owned threads are
             // touched; threads whose marker has no extractable fingerprint are left
@@ -1025,6 +1031,32 @@ jobs:
             // (workflow-computed, not model-supplied) — the fallback tier resolves
             // any self thread whose fingerprint is absent from this set.
             const findingFingerprints = new Set(findings.map((f) => computeFingerprint(f)));
+            // Reviewed-scope gate for the fallback tier (#597). An incremental
+            // review round only reviews the incremental diff, so a finding whose
+            // anchor file was NOT part of this round's reviewed chunks is simply
+            // not re-reportable this round — its absence from the findings set
+            // means "not looked at", not "resolved". The scope SoT is the file
+            // list actually handed to the review chunks (each reviewed chunk's
+            // context file). If the scope cannot be derived (older trusted-base
+            // module, unreadable context), the set stays empty and the fallback
+            // tier is conservatively disabled for this run — the resolved_threads
+            // and supersede tiers are unaffected.
+            const reviewedPaths = new Set();
+            if (typeof parseContextDiffPaths === 'function') {
+              for (const r of reviewedResults) {
+                if (!r.__contextPath) continue;
+                try {
+                  for (const p of parseContextDiffPaths(fs.readFileSync(r.__contextPath, 'utf8'))) reviewedPaths.add(p);
+                } catch (e) {
+                  core.warning(`Could not read ${r.__contextPath} for the fallback resolve scope (${e.message}).`);
+                }
+              }
+            } else {
+              core.warning('parseContextDiffPaths unavailable in trusted-base checkout; expected on the PR that introduces or modifies it.');
+            }
+            if (reviewedPaths.size === 0) {
+              core.warning('No reviewed-scope paths derived; fallback thread resolve disabled this run (resolved_threads tier unaffected).');
+            }
             // Supersede tier — fingerprints we ACTUALLY posted as inline comments
             // this round. Only populated when a submission really happened
             // (submitOk): if the submit was skipped as a duplicate or failed, no
@@ -1054,6 +1086,7 @@ jobs:
                         nodes {
                           id
                           isResolved
+                          path
                           comments(first: 1) {
                             nodes { databaseId author { login } body }
                           }
@@ -1104,7 +1137,7 @@ jobs:
                 const fp = m && m[1];
                 if (!fp) continue; // legacy/markerless thread — leave untouched
                 const byModel = resolvedFingerprints.has(fp);
-                const byFallback = !byModel && !findingFingerprints.has(fp);
+                const byFallback = !byModel && !findingFingerprints.has(fp) && reviewedPaths.has(t.path);
                 // Supersede: this is an OLDER duplicate of a fingerprint we just
                 // re-posted (a newer open thread for it survives). Resolve it so
                 // stale [blocking] threads don't accumulate. The finding itself

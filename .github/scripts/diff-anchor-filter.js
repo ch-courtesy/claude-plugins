@@ -78,10 +78,11 @@ function parseDiffRightLines(patch) {
   return map;
 }
 
-// Resolve the RIGHT-side file path from a `+++ ` header value (the part after
-// "+++ "). Returns null for /dev/null (deleted file). Strips the conventional
-// `b/` prefix and unwraps git's C-quoted paths for names with special chars.
-function parseNewPath(raw) {
+// Resolve the file path from a `+++ `/`--- ` header value (the part after the
+// four-char prefix). Returns null for /dev/null (added/deleted side). Strips
+// the conventional side prefix (`b/` or `a/`) and unwraps git's C-quoted
+// paths for names with special chars.
+function parseDiffSidePath(raw, sidePrefix) {
   let p = raw;
   // git may append a trailing tab + timestamp in some diff variants; cut it.
   const tab = p.indexOf('\t');
@@ -92,8 +93,12 @@ function parseNewPath(raw) {
     // Minimal C-style unquote for git's quoted paths.
     try { p = JSON.parse(p); } catch { p = p.slice(1, -1); }
   }
-  if (p.startsWith('b/')) p = p.slice(2);
+  if (p.startsWith(sidePrefix)) p = p.slice(sidePrefix.length);
   return p;
+}
+
+function parseNewPath(raw) {
+  return parseDiffSidePath(raw, 'b/');
 }
 
 // Compute the anchor line(s) the workflow will submit for a finding, mirroring
@@ -216,6 +221,46 @@ function parseContextRightLineMap(contextText) {
   return map;
 }
 
+// Collect the file paths that appear in a model-facing context's unified diff
+// (after the first `Unified diff:` marker line) — the set of files actually
+// handed to this review chunk. Both diff sides are included: the new
+// (`+++ b/`) path and the old (`--- a/`) path, so renamed and deleted files
+// still count as part of the reviewed scope. Header lines inside hunk bodies
+// (e.g. a removed line whose content starts with `-- `) are not parsed as
+// paths. Returns a Set of paths; no marker → empty set (conservative).
+//
+// Used by the review workflows' self thread-resolve FALLBACK tier: a finding
+// whose anchor file is NOT in this round's reviewed scope is simply not
+// re-reportable this round — its absence from the findings set means nothing,
+// so its thread must not be fallback-resolved.
+function parseContextDiffPaths(contextText) {
+  const paths = new Set();
+  if (typeof contextText !== 'string' || contextText.length === 0) return paths;
+
+  const lines = contextText.split('\n');
+  const markerIndex = lines.findIndex((line) => line === 'Unified diff:');
+  if (markerIndex === -1) return paths;
+
+  const hunkRe = /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/;
+  let inHunk = false;
+  for (let i = markerIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.startsWith('diff --git ')) { inHunk = false; continue; }
+    if (hunkRe.test(line)) { inHunk = true; continue; }
+    if (!inHunk) {
+      let p = null;
+      if (line.startsWith('+++ ')) p = parseDiffSidePath(line.slice(4), 'b/');
+      else if (line.startsWith('--- ')) p = parseDiffSidePath(line.slice(4), 'a/');
+      if (p !== null) paths.add(p);
+      continue;
+    }
+    // Hunk body: content lines start with '+', '-', ' ' or '\'. Anything else
+    // ends the hunk (mirrors parseDiffRightLines / parseContextRightLineMap).
+    if (!/^[+\- \\]/.test(line)) inHunk = false;
+  }
+  return paths;
+}
+
 function isFindingValidForLineMap(finding, lineMap) {
   return filterFindings([finding], lineMap).valid.length === 1;
 }
@@ -251,6 +296,7 @@ function repairFindingsFromContextLineNumbers(findings, contextText, patch) {
 module.exports = {
   parseDiffRightLines,
   parseContextRightLineMap,
+  parseContextDiffPaths,
   findingAnchorEnds,
   filterFindings,
   filterFindingsAgainstPatch,
