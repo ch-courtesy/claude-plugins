@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.63.3
+
+### 버그 수정
+- **forge integrate 원격-앞섬 브랜치 non-ff 실패 + execute-task 무로그 blocked (run 592)** — 원격 작업 브랜치가 로컬 브랜치 ref보다 앞선 상태(리뷰 수정 푸시 등 정당한 전진)에서 integrate가 stale 로컬 ref를 push해 non-ff 거부로 반복 실패하고, 원격-앞섬을 stale 잔여로 오판해 PR close·원격 브랜치 삭제(리뷰 커밋 파괴)까지 갈 수 있던 문제를 고쳤다. `in_push_branch`는 판정 직전 원격 ref를 fetch해 로컬 ref가 원격 tip의 조상이면 push를 생략하고(원격이 이미 모든 커밋 보유, force 없음), `in_remote_ff_incompatible`은 원격-앞섬을 비-stale(보존)로 판정한다. 또한 execute-task의 integrate/merge 실패 분기가 `set_status blocked`만 하고 백엔드 로그를 남기지 않아 실패 사유가 stderr로 유실되던 무로그 blocked를 고쳐, 두 분기 모두 `append_log`에 blocked 마커와 실패 사유 발췌(마지막 20줄 평탄화)를 남긴다. 회귀 가드: `plugins/autopilot/forge/lib/tests/test-integration-remote-ahead.sh`, `tests/autopilot/execute-task/test-execute-task-failure-log-markers.sh`.
+
 ## thinktank 1.0.1
 
 ### 변경(호환)
