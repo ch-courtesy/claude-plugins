@@ -32,11 +32,14 @@ allowed-tools:
 3. **명확화 인터뷰** — `references/clarification.md`의 깔때기형 단일 흐름으로 의도·제약·완료 조건을 짚는다.
    내부 커버리지 체크리스트(목적·성공기준·제약·위험)로 충분성만 점검한다.
 4. **접근법 비교** — 비자명한 결정이 있으면 2-3안·trade-off·추천을 제시(자명하면 생략).
-5. **태스크 본문 작성** — `references/task-body-template.md` frontmatter-first 구조(scope frontmatter +
-   무엇을 만들 것인가/목적/완료 조건(EARS)/범위/검증/제약/위험)로 본문을 작성한다. `scope.include` 는 step 1
-   에서 식별한 변경 대상으로 채운다(불명확하면 보수적으로 넓게). 완료 조건은 `references/ears-patterns.md`
-   5문장 패턴으로. 본문이 SPEC이다. 미해결 항목은 `[NEEDS CLARIFICATION: <질문>]` 마커로 남긴다.
-6. **자체 검토** — `references/self-review.md` 5축(placeholder·모순·범위·모호성·검증 가능성)을 점검·수정.
+5. **태스크 본문 작성** — 공용 `plugins/autopilot/references/task-body-template.md` frontmatter-first
+   구조(scope frontmatter + 무엇을 만들 것인가/목적/완료 조건(EARS)/범위/검증/제약/위험)로 본문을 작성한다.
+   `scope.include` 는 step 1 에서 식별한 변경 대상으로 채운다(불명확하면 보수적으로 넓게). 완료 조건은 공용
+   `plugins/autopilot/references/ears-patterns.md` 5문장 패턴으로. 본문이 SPEC이다. 미해결 항목은
+   `[NEEDS CLARIFICATION: <질문>]` 마커로 남긴다.
+6. **자체 검토** — 공용 `plugins/autopilot/references/self-review.md` 점검 축(placeholder·모순·범위·모호성·
+   검증 가능성·scope.include)을 점검·수정. 규모 임계 시 적대 렌즈 가산의 정의 단일 출처는 공용
+   `plugins/autopilot/references/personas.md`.
 7. **등록 위임** — 완성 본문 전체를 한 번 제시해 `AskUserQuestion`으로 단일 승인을 받은 뒤, **`create-task`를
    호출해 등록**한다:
    ```
@@ -67,7 +70,7 @@ allowed-tools:
    ```
 2. **부족분 인터뷰** — `references/clarification.md` 깔때기 흐름으로, 본문의 `[NEEDS CLARIFICATION: <질문>]`
    마커가 가리키는 **남은 항목만** 채운다(이미 잡힌 부분은 다시 묻지 않는다). 채워지면 해당 마커를 제거한다.
-3. **자체 검토** — `references/self-review.md` 5축으로 갱신 본문을 점검한다.
+3. **자체 검토** — 공용 `plugins/autopilot/references/self-review.md` 점검 축으로 갱신 본문을 점검한다.
 4. **재개 위임** — 완성 본문 전체를 한 번 제시해 `AskUserQuestion`으로 단일 승인을 받은 뒤, **기존 태스크의
    본문 갱신·상태 전이를 `create-task` 재개 경로로 위임**한다(신규 등록이 아니다):
    ```
@@ -90,8 +93,8 @@ allowed-tools:
 
 | 파일 | 역할 |
 |---|---|
-| `clarification.md` | 명확화 인터뷰 방법론(깔때기형 흐름·내부 커버리지·추천 답) |
-| `task-body-template.md` | 태스크 본문(=SPEC) frontmatter-first 구조 |
-| `ears-patterns.md` | 완료 조건 5문장 패턴·언어 모드(자체 소유) |
-| `decomposition-gate.md` | 다중 서브시스템 감지·발행 규칙 |
-| `self-review.md` | 자체 검토 5축(+scope.include) |
+| `references/clarification.md` | 명확화 인터뷰 방법론(깔때기형 흐름·내부 커버리지·추천 답) |
+| `references/decomposition-gate.md` | 다중 서브시스템 감지·발행 규칙 |
+| `plugins/autopilot/references/task-body-template.md` | 태스크 본문(=SPEC) 구조 — 작성자 공용 단일 출처 |
+| `plugins/autopilot/references/ears-patterns.md` | 완료 조건 5문장 패턴·언어 모드 — 작성자 공용 단일 출처 |
+| `plugins/autopilot/references/self-review.md` | 자체 검토 축(+scope.include) — 작성자 공용 단일 출처 |

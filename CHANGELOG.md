@@ -2,6 +2,12 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.63.2
+
+### 변경(호환)
+
+- 스킬 문서군 중복 제거·간소화 — feature·fix가 각자 사본으로 갖던 작성자 참조 3종(task-body-template·self-review·ears-patterns)을 플러그인 공용 `plugins/autopilot/references/` 단일 출처로 통합하고, workflow-task·execute-task의 자가개선 카테고리 매핑 재서술을 단일 소유자(`using-autopilot`) 참조로 축약. 스킬 동작·트리거 계약·엔진 파싱 형식은 무변경. 스킬 내부 중복 테스트 2종은 `tests/autopilot/test-task-body-template.sh` 1개로 통합.
+
 ## project-init 0.24.7
 
 ### 변경(호환)

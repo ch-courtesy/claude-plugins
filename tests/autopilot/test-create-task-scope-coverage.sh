@@ -10,8 +10,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/create-task/SKILL.md"
 MAP_FILE="$REPO_ROOT/plugins/autopilot/skills/create-task/references/scope-coverage-map.md"
 CHECKER="$REPO_ROOT/plugins/autopilot/skills/create-task/scope-coverage-check.sh"
-FEATURE_TPL="$REPO_ROOT/plugins/autopilot/skills/feature/references/task-body-template.md"
-FIX_TPL="$REPO_ROOT/plugins/autopilot/skills/fix/references/task-body-template.md"
+SHARED_TPL="$REPO_ROOT/plugins/autopilot/references/task-body-template.md"  # feature·fix 작성자 공용 단일 출처
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -105,13 +104,13 @@ ok "scope-coverage-check.sh 항상 0 exit"
 
 # === T9: feature task-body-template에 scope-coverage 보완 언급 ===
 echo "=== T9: feature 본문 템플릿 scope-coverage 보완 언급 ==="
-grep -qE 'scope-coverage|기존 테스트.*등록|등록.*기존 테스트' "$FEATURE_TPL" \
+grep -qE 'scope-coverage|기존 테스트.*등록|등록.*기존 테스트' "$SHARED_TPL" \
   || fail "T9: feature task-body-template에 scope-coverage(#498) 보완 언급 없음"
 ok "feature task-body-template: scope-coverage 보완 언급"
 
 # === T10: fix task-body-template에 scope-coverage 보완 언급 ===
 echo "=== T10: fix 본문 템플릿 scope-coverage 보완 언급 ==="
-grep -qE 'scope-coverage|기존 테스트.*등록|등록.*기존 테스트' "$FIX_TPL" \
+grep -qE 'scope-coverage|기존 테스트.*등록|등록.*기존 테스트' "$SHARED_TPL" \
   || fail "T10: fix task-body-template에 scope-coverage(#498) 보완 언급 없음"
 ok "fix task-body-template: scope-coverage 보완 언급"
 
