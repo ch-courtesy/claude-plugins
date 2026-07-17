@@ -26,7 +26,7 @@ allowed-tools:
 ## 호출
 
 ```
-WT="$(git rev-parse --show-toplevel)/plugins/autopilot/skills/workflow-task/references/workflow-task.sh"
+WT="${CLAUDE_PLUGIN_ROOT}/skills/workflow-task/references/workflow-task.sh"
 bash "$WT" start [--max-parallel N]
 ```
 
@@ -68,7 +68,7 @@ enum·카테고리→행동 매핑·재귀 상한)의 단일 소유자는 `using
 호출에 안전하다(다음 호출이 새로 ready된 것만 집어든다).
 
 ```
-*/10 * * * *  bash <plugin>/skills/workflow-task/references/workflow-task.sh start
+*/10 * * * *  bash ${CLAUDE_PLUGIN_ROOT}/skills/workflow-task/references/workflow-task.sh start
 ```
 
 ## 재사용 엔진 (런타임 호출)

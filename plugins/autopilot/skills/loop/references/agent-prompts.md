@@ -89,7 +89,7 @@ Minor=style/name/polish
 
 용도: 완료 직전 자체 검토에서 **비자명 변경**(diff 100줄 이상 또는 관여 수용기준 2개 이상)을 세 적대 렌즈로 점검. 렌즈는 **발견만 보고**하고 최종 완료·차단 결정은 내리지 않는다(결정은 메인). 권장 모델: sonnet.
 
-렌즈 정의의 단일 출처는 `plugins/autopilot/references/personas.md`(contrarian·minimalist·constraint-auditor)다. 정의를 복제하지 말고 그 카탈로그를 읽혀 적용한다.
+렌즈 정의의 단일 출처는 `plugins/autopilot/lib/references/personas.md`(contrarian·minimalist·constraint-auditor)다. 정의를 복제하지 말고 그 카탈로그를 읽혀 적용한다.
 
 Prompt:
 
@@ -97,7 +97,7 @@ Prompt:
 이번 이터 변경을 세 적대 렌즈로 점검하라. 렌즈 정의는 personas.md 카탈로그를 읽고 따른다.
 
 ## 렌즈 정의 (단일 출처)
-plugins/autopilot/references/personas.md 의 contrarian·minimalist·constraint-auditor 를 읽어 적용하라.
+plugins/autopilot/lib/references/personas.md 의 contrarian·minimalist·constraint-auditor 를 읽어 적용하라.
 
 ## 변경
 [git diff HEAD~1 HEAD 요약 + 의도 + 관여 수용기준]
@@ -129,7 +129,7 @@ Prompt:
 정체 상태의 근본 원인 가설을 적대 렌즈로 재구성하라. read-only 관찰을 우선한다.
 
 ## 렌즈 (재사용)
-plugins/autopilot/references/personas.md 의 세 렌즈로 현재 가설을 비판·재구성하라.
+plugins/autopilot/lib/references/personas.md 의 세 렌즈로 현재 가설을 비판·재구성하라.
 
 ## 정체 상황
 [같은 에러/정체/진동/반복 실패 요약 + 지금까지 시도]

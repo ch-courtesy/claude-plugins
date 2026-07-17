@@ -13,4 +13,4 @@
 
 **자기완결** — 컨슈밍 프로젝트 `rules/`나 다른 스킬(spec 등)의 참조에 의존하지 않는다. 인터뷰 방법론은
 `references/`가, 작성자 공용 참조(본문 템플릿·자체 검토·완료 조건 패턴)는 플러그인 공용
-`plugins/autopilot/references/`가 단일 출처. 상세는 `SKILL.md`를 따른다.
+`plugins/autopilot/lib/references/`가 단일 출처. 상세는 `SKILL.md`를 따른다.

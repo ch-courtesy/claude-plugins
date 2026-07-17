@@ -9,8 +9,8 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 SKILL_MD="$REPO_ROOT/plugins/autopilot/skills/create-task/SKILL.md"
 MAP_FILE="$REPO_ROOT/plugins/autopilot/skills/create-task/references/scope-coverage-map.md"
-CHECKER="$REPO_ROOT/plugins/autopilot/skills/create-task/scope-coverage-check.sh"
-SHARED_TPL="$REPO_ROOT/plugins/autopilot/references/task-body-template.md"  # feature·fix 작성자 공용 단일 출처
+CHECKER="$REPO_ROOT/plugins/autopilot/skills/create-task/references/scope-coverage-check.sh"
+SHARED_TPL="$REPO_ROOT/plugins/autopilot/lib/references/task-body-template.md"  # feature·fix 작성자 공용 단일 출처
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }

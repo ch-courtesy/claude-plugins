@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.63.4
+
+### 변경(호환)
+- **플러그인 디렉토리 구성 정리 — lib/ 통합·경로 관용구 통일 (run 600)** — 내부 재배치(동작·인터페이스 불변). ① SKILL.md 9종의 플러그인 내부 파일 참조를 단일 관용구 `${CLAUDE_PLUGIN_ROOT}` 치환 토큰으로 통일(기존 `git rev-parse --show-toplevel` 이어붙임·`$SKILL_DIR`·cwd-상대 표기 혼재 제거 — 리포 경로 하드코딩은 마켓플레이스 설치 캐시에서 깨진다). ② 비스킬 공용 디렉토리를 `lib/` 아래로 이동: `forge/`→`lib/forge/`, `task-backend/`→`lib/task-backend/`, 공용 `references/`→`lib/references/`. ③ create-task 보조 스크립트 2종(`persist-backend-config.sh`·`scope-coverage-check.sh`)을 `skills/create-task/references/`로 이동(관례 정합). ④ forge per-spec 상태 I/O 헬퍼 `forge/lib/lib-integration.sh`를 `lib/forge/lib/state-io.sh`로 리네임. `task-backend/contract.md`의 `<plugin>` 정의는 hooks와 같은 fallback 관용구(`${CLAUDE_PLUGIN_ROOT:-$CODEX_PLUGIN_ROOT}`)로 교체. 소비 프로젝트 상태(`.autopilot/*`) 경로·포맷 불변.
+
 ## autopilot 0.63.3
 
 ### 버그 수정

@@ -3,7 +3,7 @@
 #
 # 회귀 가드 (#584): loop scope 게이트가 후행 '/' 디렉토리 표기 include/exclude 항목을
 # prefix(디렉토리 하위 전체) 매칭으로 수용해야 한다. 그래야 scope-coverage 검사가 제안하는
-# 디렉토리 표기(`plugins/autopilot/task-backend/tests/` 등)를 그대로 scope.include 에 넣어도
+# 디렉토리 표기(`plugins/autopilot/lib/task-backend/tests/` 등)를 그대로 scope.include 에 넣어도
 # 그 아래 파일 수정이 false scope-violation HALT 를 내지 않는다.
 #
 # 동시에 기존 표기(글롭 `**`·정확 파일 경로)의 판정 동작은 회귀 없이 유지되어야 한다.
@@ -31,7 +31,7 @@ check() {
 }
 
 # 후행 '/' 디렉토리 표기: 직속·하위 깊이 파일 모두 매치.
-check "plugins/autopilot/task-backend/tests/test-filesystem.sh" "plugins/autopilot/task-backend/tests/" 0 "디렉토리 직속 파일"
+check "plugins/autopilot/lib/task-backend/tests/test-filesystem.sh" "plugins/autopilot/lib/task-backend/tests/" 0 "디렉토리 직속 파일"
 check "tests/autopilot/execute-task/sub/deep.sh"                "tests/autopilot/execute-task/"          0 "디렉토리 하위 깊이 파일"
 # 후행 '/' 디렉토리는 접두 문자열만 같은 형제 경로를 매치하지 않음.
 check "tests-foo/x.sh"                                          "tests/"                                 1 "형제 디렉토리 비매치"

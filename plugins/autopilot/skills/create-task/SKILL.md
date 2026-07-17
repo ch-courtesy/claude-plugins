@@ -29,7 +29,7 @@ allowed-tools:
 ## 백엔드 어댑터
 
 ```
-ADAPTER="$(git rev-parse --show-toplevel)/plugins/autopilot/task-backend/adapter.sh"
+ADAPTER="${CLAUDE_PLUGIN_ROOT}/lib/task-backend/adapter.sh"
 bash "$ADAPTER" <verb> [args]
 ```
 
@@ -42,7 +42,7 @@ bash "$ADAPTER" <verb> [args]
 헬퍼를 실행해 이 SoT를 **메인 브랜치까지 영속화**한다(새 체크아웃·CI·다른 세션에서 동일 백엔드 보장):
 
 ```
-bash "$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/persist-backend-config.sh"
+bash "${CLAUDE_PLUGIN_ROOT}/skills/create-task/references/persist-backend-config.sh"
 ```
 
 헬퍼는 멱등이며 config 파일 **단독** 변경만 커밋한다 — origin 있으면 config-only 브랜치 push → PR →
@@ -74,7 +74,7 @@ auto-merge, 없으면 로컬 메인 merge. `.autopilot/` 는 워치 디렉토리
    `scope.include`에서 소스 경로를 읽어, 그 소스를 덮는 **기존** 테스트 경로가 scope.include에 함께 있는지
    확인한다. 매핑 관례의 단일 출처는 `references/scope-coverage-map.md`다:
    ```
-   CHECKER="$(git rev-parse --show-toplevel)/plugins/autopilot/skills/create-task/scope-coverage-check.sh"
+   CHECKER="${CLAUDE_PLUGIN_ROOT}/skills/create-task/references/scope-coverage-check.sh"
    echo "<본문>" | bash "$CHECKER"
    ```
    누락이 있으면 `SCOPE_COVERAGE_WARNING` 과 누락 경로 목록을 출력한다. **등록을 막지 않는다** — 경고를

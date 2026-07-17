@@ -40,7 +40,7 @@ set -uo pipefail
 
 RL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 통합 모듈(M2) 로드 → lib-integration(M1)·in_push_branch·in_work_branch·in_spec_title 확보.
+# 통합 모듈(M2) 로드 → state-io(M1)·in_push_branch·in_work_branch·in_spec_title 확보.
 if ! declare -f in_push_branch >/dev/null 2>&1; then
   # shellcheck source=integration.sh
   . "$RL_SCRIPT_DIR/integration.sh"

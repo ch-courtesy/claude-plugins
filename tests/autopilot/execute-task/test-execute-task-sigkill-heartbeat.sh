@@ -11,7 +11,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ET="$HERE/../../../plugins/autopilot/skills/execute-task/references/execute-task.sh"
-ADAPTER="$HERE/../../../plugins/autopilot/task-backend/adapter.sh"
+ADAPTER="$HERE/../../../plugins/autopilot/lib/task-backend/adapter.sh"
 fail=0; ok(){ echo "PASS  $1"; }; bad(){ echo "FAIL  $1"; fail=1; }
 
 TMP="$(mktemp -d)"

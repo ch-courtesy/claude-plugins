@@ -20,8 +20,8 @@ PLUGIN="$ROOT_DIR/plugins/autopilot"
 # 플러그인 자신이 소비처가 아닐 때(설치형): 스크립트 위치 기준으로도 해석
 [[ -d "$PLUGIN" ]] || PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
-ADAPTER_CMD="${ADAPTER_CMD:-bash $PLUGIN/task-backend/adapter.sh}"
-FORGE_CMD="${FORGE_CMD:-bash $PLUGIN/forge/forge.sh}"
+ADAPTER_CMD="${ADAPTER_CMD:-bash $PLUGIN/lib/task-backend/adapter.sh}"
+FORGE_CMD="${FORGE_CMD:-bash $PLUGIN/lib/forge/forge.sh}"
 LOOP_CMD="${LOOP_CMD:-bash $PLUGIN/skills/loop/references/loop.sh}"
 HEARTBEAT_INTERVAL="${HEARTBEAT_INTERVAL:-60}"
 REVIEW_MAX="${REVIEW_MAX:-5}"

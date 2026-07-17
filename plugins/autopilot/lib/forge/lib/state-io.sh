@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lib-integration.sh — forge per-SPEC 통합 상태 헬퍼 (M1)
+# state-io.sh — forge per-SPEC 통합 상태 헬퍼 (M1)
 #
 # 책임:
 #   - 한 SPEC 의 통합(push→PR)·리뷰·머지 라이프사이클 상태를 호출자(execute-task)의 run
@@ -138,6 +138,6 @@ li_selftest() {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   case "${1:-}" in
     selftest) li_selftest ;;
-    *) echo "usage: lib-integration.sh selftest  (라이브러리는 sourcing 으로 사용)" >&2; exit 1 ;;
+    *) echo "usage: state-io.sh selftest  (라이브러리는 sourcing 으로 사용)" >&2; exit 1 ;;
   esac
 fi

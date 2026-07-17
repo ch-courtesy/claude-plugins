@@ -37,7 +37,7 @@ AGENT_PROMPTS="$REFS/agent-prompts.md"
 OPERATIONAL="$REFS/operational-guide.md"
 LOOP_SH="$REFS/loop.sh"
 # 페르소나 카탈로그 단일 출처 (선행 spec 스킬). loop는 이를 참조만 한다.
-PERSONAS="$SCRIPT_DIR/../../../plugins/autopilot/references/personas.md"
+PERSONAS="$SCRIPT_DIR/../../../plugins/autopilot/lib/references/personas.md"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }

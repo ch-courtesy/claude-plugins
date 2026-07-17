@@ -17,7 +17,7 @@
 #   - 종료 상태·BLOCKED 범주는 loop 의 공개 인터페이스(status --json / logs)로만 읽고
 #     child 워크트리·내부 신호 파일을 직접 열지 않는다.
 #   - 브랜치명·slug 는 rules/engineering/branch-and-slug.md 단일 출처(feat/<id>-<slug>).
-#   - per-SPEC 상태는 lib-integration.sh(run-dir + 불투명 key)로만 보관한다.
+#   - per-SPEC 상태는 state-io.sh(run-dir + 불투명 key)로만 보관한다.
 #
 # 키 계약: 통합 모듈은 per-SPEC 키를 **재계산하지 않고** 호출자(execute-task)에게서 받는다
 #   (호출자가 spec_slug+hash7 로 한 번 계산해 모든 통합 모듈 호출에 같은 키를 넘긴다).
@@ -38,8 +38,8 @@ IN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # per-SPEC 상태 헬퍼(M1) 로드.
 if ! declare -f int_set >/dev/null 2>&1; then
-  # shellcheck source=lib-integration.sh
-  . "$IN_SCRIPT_DIR/lib-integration.sh"
+  # shellcheck source=state-io.sh
+  . "$IN_SCRIPT_DIR/state-io.sh"
 fi
 
 LOOP_CMD_DEFAULT="bash $IN_SCRIPT_DIR/../../skills/loop/references/loop.sh"

@@ -11,7 +11,7 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 RULE_SKILL="$REPO_ROOT/plugins/project-init/skills/engineering-rule-creator/SKILL.md"
 RULE_README="$REPO_ROOT/plugins/project-init/skills/engineering-rule-creator/README.md"
-SHARED_TPL="$REPO_ROOT/plugins/autopilot/references/task-body-template.md"  # feature·fix 작성자 공용 단일 출처
+SHARED_TPL="$REPO_ROOT/plugins/autopilot/lib/references/task-body-template.md"  # feature·fix 작성자 공용 단일 출처
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }

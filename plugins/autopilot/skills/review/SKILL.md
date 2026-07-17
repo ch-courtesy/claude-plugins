@@ -21,7 +21,7 @@ allowed-tools:
 
 `Skill(skill="review", args="<subcommand> [<args>]")`
 
-또는 직접: `bash plugins/autopilot/skills/review/references/review.sh <subcommand> [<args>]`
+또는 직접: `bash ${CLAUDE_PLUGIN_ROOT}/skills/review/references/review.sh <subcommand> [<args>]`
 
 ## 모델
 
@@ -92,7 +92,7 @@ allowed-tools:
 - 반복(iterate-until-approved)·재구현 위임·review-round 증가·수렴 가드를 소유하지 않는다(오케스트레이터 책임).
 - forge 로의 자동 approve/merge·머지 차단을 하지 않는다 — 판정은 머신리더블 산출물.
 - 리뷰 9원칙(`rules/review.md`)·채택 분류 프레임(`rules/change-adoption.md`)을 재정의하지 않고 실행자로서 따른다.
-- 적대 렌즈 정의는 `plugins/autopilot/references/personas.md`(단일 출처, 규모 임계 충족 시에만 가산 발동)를 복제하지 않고 참조한다.
+- 적대 렌즈 정의는 `${CLAUDE_PLUGIN_ROOT}/lib/references/personas.md`(단일 출처, 규모 임계 충족 시에만 가산 발동)를 복제하지 않고 참조한다.
 - 공유 PR 리뷰 계약(`.github/prompts/codex-pr-review.schema.json`: 4증거·신뢰도≥80·fingerprint)을 새로 지어내지 않고 단일 출처로 재사용하며 파이프라인 필드만 가산한다.
 - 라우터·하니스는 bash 3.2+ 호환(연관 배열 미사용)으로 작성한다.
 - 결정적 동작은 외부 인터페이스를 주입 mock 으로 치환한 `review.sh selftest`·`tests/` 로 실제 PR·브랜치 아티팩트 없이 검증한다.
