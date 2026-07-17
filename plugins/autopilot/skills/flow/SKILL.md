@@ -16,7 +16,7 @@ allowed-tools:
 
 `Skill(skill: "flow", args: "<subcommand> [<args>]")`
 
-또는 직접: `bash plugins/autopilot/skills/flow/references/flow.sh <subcommand> [<args>]`
+또는 직접: `bash ${CLAUDE_PLUGIN_ROOT}/skills/flow/references/flow.sh <subcommand> [<args>]`
 
 ## Subcommands
 

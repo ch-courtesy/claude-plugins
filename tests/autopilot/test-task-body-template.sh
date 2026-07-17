@@ -4,7 +4,7 @@
 #   ears-patterns 공용 참조를 검증한다(#471 feature/fix 개별 테스트 통합).
 set -uo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-REF="$REPO_ROOT/plugins/autopilot/references"
+REF="$REPO_ROOT/plugins/autopilot/lib/references"
 TPL="$REF/task-body-template.md"
 fail=0; ok(){ echo "PASS  $1"; }; bad(){ echo "FAIL  $1"; fail=1; }
 

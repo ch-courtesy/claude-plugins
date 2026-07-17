@@ -124,10 +124,10 @@ try:
                 missing.append(f'[{skill}] {rep}')
             continue
 
-        # 매핑 규칙 2: plugins/autopilot/task-backend/...
-        if inc.startswith('plugins/autopilot/task-backend/') and 'task-backend' not in checked:
+        # 매핑 규칙 2: plugins/autopilot/lib/task-backend/...
+        if inc.startswith('plugins/autopilot/lib/task-backend/') and 'task-backend' not in checked:
             checked.add('task-backend')
-            tb_dir = 'plugins/autopilot/task-backend/tests/'
+            tb_dir = 'plugins/autopilot/lib/task-backend/tests/'
             if os.path.isdir(os.path.join(repo_root, tb_dir)):
                 if not is_covered(tb_dir, includes):
                     missing.append(f'[task-backend] {tb_dir}')

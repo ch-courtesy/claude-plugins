@@ -11,7 +11,7 @@ ROOT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 PLUGIN="$ROOT_DIR/plugins/autopilot"
 [[ -d "$PLUGIN" ]] || PLUGIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
-ADAPTER_CMD="${ADAPTER_CMD:-bash $PLUGIN/task-backend/adapter.sh}"
+ADAPTER_CMD="${ADAPTER_CMD:-bash $PLUGIN/lib/task-backend/adapter.sh}"
 FLOW_CMD="${FLOW_CMD:-bash $PLUGIN/skills/flow/references/flow.sh}"
 EXECUTE_CMD="${EXECUTE_CMD:-bash $PLUGIN/skills/execute-task/references/execute-task.sh}"
 

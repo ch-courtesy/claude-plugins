@@ -40,7 +40,7 @@ set -uo pipefail
 
 RL_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 통합 모듈(M2) 로드 → lib-integration(M1)·in_push_branch·in_work_branch·in_spec_title 확보.
+# 통합 모듈(M2) 로드 → state-io(M1)·in_push_branch·in_work_branch·in_spec_title 확보.
 if ! declare -f in_push_branch >/dev/null 2>&1; then
   # shellcheck source=integration.sh
   . "$RL_SCRIPT_DIR/integration.sh"
@@ -154,7 +154,7 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
 
 # 기본: autopilot:review 생산자를 per-SPEC 키(=--task)로 1회 호출.
 rl_produce_review_skill() {
-  bash "$RL_SCRIPT_DIR/../../skills/review/references/review.sh" run --task "$1"
+  bash "$RL_SCRIPT_DIR/../../../skills/review/references/review.sh" run --task "$1"
 }
 
 # 기본: 자율 실행기(loop)에 SPEC 델타 위임. loop 는 --branch 미지원이므로 같은 PR 브랜치 위

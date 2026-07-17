@@ -6,7 +6,7 @@
 # origin 없는 로컬(direct) repo 로 전 경로를 결정적으로 검증한다.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-H="$HERE/../persist-backend-config.sh"
+H="$HERE/../references/persist-backend-config.sh"
 fail=0; ok(){ echo "PASS  $1"; }; bad(){ echo "FAIL  $1"; fail=1; }
 chk(){ [[ "$2" == "$3" ]] && ok "$1" || bad "$1 (want '$3' got '$2')"; }
 

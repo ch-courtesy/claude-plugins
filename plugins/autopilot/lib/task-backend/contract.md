@@ -7,10 +7,10 @@ autopilot 태스크 중심 스킬(create-task·execute-task·workflow-task)이 �
 ## 호출
 
 ```
-bash <plugin>/task-backend/adapter.sh <verb> [args...]
+bash <plugin>/lib/task-backend/adapter.sh <verb> [args...]
 ```
 
-`<plugin>` = `$(git rev-parse --show-toplevel)/plugins/autopilot`. 모든 출력은 한 줄 JSON(또는 JSON array).
+`<plugin>` = `${CLAUDE_PLUGIN_ROOT:-$CODEX_PLUGIN_ROOT}` (플러그인 루트 — 호출 환경이 주입). 모든 출력은 한 줄 JSON(또는 JSON array).
 실패는 비-0 exit + stderr 메시지.
 
 ## 백엔드 선택

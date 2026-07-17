@@ -35,9 +35,9 @@ fix 워크플로에서 선택적으로 Agent에 위임할 수 있는 역할 2종
 
 언제: step 4 자체 검토 보강. 권장 신호: 본문 100줄 이상, `[NEEDS CLARIFICATION]` 2개 이상, 사용자 요청.
 
-임무: 작성된 버그 본문 초안을 공용 `plugins/autopilot/references/self-review.md`의 점검 축 + 진단 섹션 전용
+임무: 작성된 버그 본문 초안을 공용 `plugins/autopilot/lib/references/self-review.md`의 점검 축 + 진단 섹션 전용
 점검(fix 전용 절)으로 독립 검토하고, 세 적대 렌즈를 가산한다 — 렌즈 정의는
-`plugins/autopilot/references/personas.md`(단일 출처)를 읽어 적용한다(복제 금지). **발견만 보고**한다 —
+`plugins/autopilot/lib/references/personas.md`(단일 출처)를 읽어 적용한다(복제 금지). **발견만 보고**한다 —
 수정·마커 삽입은 메인이 한다. brief에 두 파일 경로를 함께 전달한다(subagent는 메인 컨텍스트를 못 본다).
 
 응답:

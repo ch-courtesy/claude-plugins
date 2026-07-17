@@ -18,7 +18,7 @@ SKILLS="$REPO_ROOT/plugins/autopilot/skills"
 FEATURE="$SKILLS/feature"
 CREATE="$SKILLS/create-task"
 USING="$SKILLS/using-autopilot/SKILL.md"
-SHARED="$REPO_ROOT/plugins/autopilot/references"
+SHARED="$REPO_ROOT/plugins/autopilot/lib/references"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -31,7 +31,7 @@ for f in SKILL.md \
   [[ -f "$FEATURE/$f" ]] || fail "S1: feature/$f 부재"
 done
 for f in self-review.md task-body-template.md ears-patterns.md; do
-  [[ -f "$SHARED/$f" ]] || fail "S1: 작성자 공용 참조 $f 부재(plugins/autopilot/references/)"
+  [[ -f "$SHARED/$f" ]] || fail "S1: 작성자 공용 참조 $f 부재(plugins/autopilot/lib/references/)"
   [[ -f "$FEATURE/references/$f" ]] && fail "S1: feature가 공용 참조 $f 사본을 보유(단일 출처 위반)"
 done
 ok "feature 자체 참조 2종 + 공용 작성 참조 3종(사본 없음)"

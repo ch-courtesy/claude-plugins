@@ -19,7 +19,7 @@
 # 불변식:
 #   - force(강제) 머지·push 금지. 머지는 git merge --ff-only 만.
 #   - 작업 공간은 직접 지우지 않고 loop 공개 cleanup 으로만 위임.
-#   - per-SPEC 상태는 lib-integration.sh(run-dir + 키)로만. 키는 호출자 주입.
+#   - per-SPEC 상태는 state-io.sh(run-dir + 키)로만. 키는 호출자 주입.
 #
 # 모든 외부 인터페이스(git·forge·loop CLI)는 주입 가능. mock 으로 독립 검증
 # (self-referential: 실제 머지·PR 미수행). bash 3.2+ 호환.
@@ -31,17 +31,17 @@ set -uo pipefail
 
 MG_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 통합 모듈(M2) → lib-integration(M1) 확보.
+# 통합 모듈(M2) → state-io(M1) 확보.
 if ! declare -f int_set >/dev/null 2>&1; then
-  # shellcheck source=lib-integration.sh
-  . "$MG_SCRIPT_DIR/lib-integration.sh"
+  # shellcheck source=state-io.sh
+  . "$MG_SCRIPT_DIR/state-io.sh"
 fi
 set +e
 set -uo pipefail
 
 GIT_CMD="${GIT_CMD:-git}"
 FORGE_CMD="${FORGE_CMD:-gh}"
-LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../skills/loop/references/loop.sh"
+LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../../skills/loop/references/loop.sh"
 LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 MERGE_APPROVAL_CMD="${MERGE_APPROVAL_CMD:-mg_approval_gh}"

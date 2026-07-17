@@ -47,6 +47,6 @@ fix step 2의 **단일 방법론 출처**. 증상에서 근본 원인 **가설**
 ## 산출
 
 이 절차의 결과(증상·재현 맥락·근본 원인 가설·증거·미해결 마커)는 공용
-`plugins/autopilot/references/task-body-template.md`의 **진단 섹션**에
+`plugins/autopilot/lib/references/task-body-template.md`의 **진단 섹션**에
 담긴다. 가설에서 도출되는 수정의 완료 기준은 "버그 미관찰 + 회귀 가드"로 본문 완료 기준에 인코딩한다(구현
 방법·진입 명령은 강제하지 않는다).

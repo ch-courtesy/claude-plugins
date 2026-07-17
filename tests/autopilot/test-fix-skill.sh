@@ -16,7 +16,7 @@ SKILLS="$REPO_ROOT/plugins/autopilot/skills"
 FIX="$SKILLS/fix"
 CREATE="$SKILLS/create-task"
 WT="$SKILLS/workflow-task"
-SHARED="$REPO_ROOT/plugins/autopilot/references"
+SHARED="$REPO_ROOT/plugins/autopilot/lib/references"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -30,7 +30,7 @@ for f in SKILL.md \
   [[ -f "$FIX/$f" ]] || fail "S1: fix/$f 부재"
 done
 for f in task-body-template.md self-review.md ears-patterns.md; do
-  [[ -f "$SHARED/$f" ]] || fail "S1: 작성자 공용 참조 $f 부재(plugins/autopilot/references/)"
+  [[ -f "$SHARED/$f" ]] || fail "S1: 작성자 공용 참조 $f 부재(plugins/autopilot/lib/references/)"
   [[ -f "$FIX/references/$f" ]] && fail "S1: fix가 공용 참조 $f 사본을 보유(단일 출처 위반)"
 done
 ok "fix 자체 참조 2종 + 공용 작성 참조 3종(사본 없음)"

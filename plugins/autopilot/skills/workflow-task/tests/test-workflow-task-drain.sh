@@ -4,7 +4,7 @@
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WT="$HERE/../references/workflow-task.sh"
-ADAPTER="$HERE/../../../task-backend/adapter.sh"
+ADAPTER="$HERE/../../../lib/task-backend/adapter.sh"
 FLOW="$HERE/../../flow/references/flow.sh"
 fail=0; ok(){ echo "PASS  $1"; }; bad(){ echo "FAIL  $1"; fail=1; }
 chk(){ [[ "$2" == "$3" ]] && ok "$1" || bad "$1 (want '$3' got '$2')"; }

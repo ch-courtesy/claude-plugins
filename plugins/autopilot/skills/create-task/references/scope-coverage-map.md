@@ -9,7 +9,7 @@
 |---|---|
 | `plugins/autopilot/skills/<S>/...` | `tests/autopilot/test-<S>*.sh` (파일 glob) |
 | `plugins/autopilot/skills/<S>/...` | `tests/autopilot/<S>/` (디렉터리, 있으면) |
-| `plugins/autopilot/task-backend/...` | `plugins/autopilot/task-backend/tests/` |
+| `plugins/autopilot/lib/task-backend/...` | `plugins/autopilot/lib/task-backend/tests/` |
 
 `<S>`는 스킬 이름(예: `create-task`, `loop`, `execute-task`, `feature`, `fix`).
 
