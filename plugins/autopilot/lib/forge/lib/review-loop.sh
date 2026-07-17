@@ -154,7 +154,7 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
 
 # 기본: autopilot:review 생산자를 per-SPEC 키(=--task)로 1회 호출.
 rl_produce_review_skill() {
-  bash "$RL_SCRIPT_DIR/../../skills/review/references/review.sh" run --task "$1"
+  bash "$RL_SCRIPT_DIR/../../../skills/review/references/review.sh" run --task "$1"
 }
 
 # 기본: 자율 실행기(loop)에 SPEC 델타 위임. loop 는 --branch 미지원이므로 같은 PR 브랜치 위

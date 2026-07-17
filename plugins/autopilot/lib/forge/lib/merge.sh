@@ -41,7 +41,7 @@ set -uo pipefail
 
 GIT_CMD="${GIT_CMD:-git}"
 FORGE_CMD="${FORGE_CMD:-gh}"
-LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../skills/loop/references/loop.sh"
+LOOP_CMD_DEFAULT="bash $MG_SCRIPT_DIR/../../../skills/loop/references/loop.sh"
 LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 MERGE_APPROVAL_CMD="${MERGE_APPROVAL_CMD:-mg_approval_gh}"

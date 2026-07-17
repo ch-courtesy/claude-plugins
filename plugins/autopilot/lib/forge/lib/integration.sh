@@ -42,7 +42,7 @@ if ! declare -f int_set >/dev/null 2>&1; then
   . "$IN_SCRIPT_DIR/state-io.sh"
 fi
 
-LOOP_CMD_DEFAULT="bash $IN_SCRIPT_DIR/../../skills/loop/references/loop.sh"
+LOOP_CMD_DEFAULT="bash $IN_SCRIPT_DIR/../../../skills/loop/references/loop.sh"
 LOOP_CMD="${LOOP_CMD:-$LOOP_CMD_DEFAULT}"
 GIT_CMD="${GIT_CMD:-git}"
 FORGE_CMD="${FORGE_CMD:-gh}"
