@@ -133,6 +133,9 @@ query($owner:String!,$name:String!,$pr:Int!,$endCursor:String){
   # 현재 head 미해결 스레드의 전체 인라인 지적(타당성 판단은 워커가 change-adoption 으로 — 원천만 평탄화).
   findings="$(printf '%s\n' "$comments" | awk -F'\t' -v h="$head" '$2==h{print $3}' \
        | sed -E 's/<!--[^>]*-->//g' | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+  # #600: 신뢰봇 미해결 스레드의 실재를 verdict 와 별도로 표면화 — rl_round 같은-head 게이트가
+  #   pending 교착(그곳 주석 참조)을 식별하는 신호.
+  [[ "$blocking" == "1" ]] && echo "blocked: 1"
   if [[ -n "$approve" && -z "$blocking" ]]; then
     echo "verdict: approve"
   elif [[ "$blocking" == "FETCH_FAILED" ]]; then
@@ -306,9 +309,20 @@ rl_round() {
     #   request_changes 로 바꾸므로 같은 head 재평가는 1회로 수렴하고, 무한 라운드는 기존 세 가드
     #   (라운드 상한·무진전·핑퐁)에 귀속된다. pending(#549 재매핑 추정)과 조회 실패 합성 changes
     #   (fetchfail — 실재 증거 아님)는 그대로 대기.
-    if [[ "$(int_get_verdict "$rd" "$key")" == "approve" && "$(rl_review_verdict "$pr")" == "changes" \
+    local rec_verdict gate_verdict=""
+    rec_verdict="$(int_get_verdict "$rd" "$key")"
+    [[ "$rec_verdict" == "approve" ]] && gate_verdict="$(rl_review_verdict "$pr")"
+    if [[ "$rec_verdict" == "approve" && "$gate_verdict" == "changes" \
           && -z "$(rl_review_field "$pr" fetchfail)" ]]; then
       int_log "$rd" "$key" "head 동일($head)이나 approve 기록 후 미해결 신뢰봇 스레드 도착 — 재평가(재작업 진입)"
+    # #600: approve 기록 후 같은 head 에 신뢰봇 미해결 스레드가 승인을 가리는데(blocked=1, #493) 현재
+    #   head 공식 재리뷰 증거가 없어 판정이 pending(#549 — 재작업 채택 금지)인 조합은, 승인·재작업·새
+    #   커밋 모두 막힌 3자 교착이다. 폴링 상한까지 무행동 대기(rc=20 반복) 대신 근거 있는 에스컬레이션
+    #   으로 유한 시간 내 종착한다 — #493(승인 가림)·#549(증거 없는 재작업 금지)는 그대로 보존.
+    elif [[ "$rec_verdict" == "approve" && "$gate_verdict" == "pending" \
+          && "$(rl_review_field "$pr" blocked)" == "1" ]]; then
+      rl_escalate "$rd" "$key" "approve 기록 후 같은 head($head)의 신뢰봇 미해결 스레드가 승인을 가리나 현재 head 재리뷰 증거 없음(#549) — 재작업·머지 모두 불가 교착, 스레드 해소·수동 개입 필요"
+      return 10
     else
       int_log "$rd" "$key" "head 동일($head) — 새 커밋 없음, 라운드 미시작"
       return 20
@@ -653,6 +667,17 @@ rl_selftest() {
   rl_round "$rd" "$kL3" "$base" 111 "feat/run1-l3"; chk "#571 approve 기록+조회 실패 changes → 대기(rc=20, 합성 finding 재작업 금지)" "$?" "20"
   [[ ! -s "$IMPLLOG" ]] && ok "#571 조회 실패 시 재작업 미실행" || bad "#571 조회 실패 시 재작업 미실행"
 
+  # ---- #600: approve 기록+pending+blocked(3자 교착 — rl_round 게이트 주석 참조) → 에스컬레이션 ----
+  local kL4="l4-lll8"; : > "$IMPLLOG"
+  forge_review sha-L4 approve > "$RV/112.review"
+  rl_round "$rd" "$kL4" "$base" 112 "feat/run1-l4" >/dev/null
+  printf 'state: NONE\nauthor: \nhead: sha-L4\nblocked: 1\nverdict: pending\n' > "$RV/112.review"
+  out="$(rl_round "$rd" "$kL4" "$base" 112 "feat/run1-l4")"; rc=$?
+  chk "#600 approve 기록+pending+blocked → 에스컬레이션(rc=10, 무행동 대기 아님)" "$rc" "10"
+  chk "#600 phase=escalated" "$(int_get_phase "$rd" "$kL4")" "escalated"
+  case "$out" in *교착*) ok "#600 교착 사유 표면화";; *) bad "#600 교착 사유 표면화 (out='$out')";; esac
+  [[ ! -s "$IMPLLOG" ]] && ok "#600 증거 없는 스레드 재작업 미실행(#549 보존)" || bad "#600 증거 없는 스레드 재작업 미실행(#549 보존)"
+
   # ---- pending(승인X·지적X) → 대기(rc=20), 로컬 review 미호출 ----
   local kPd="pd-ppp0"
   forge_review sha-PD pending > "$RV/110.review"
@@ -834,6 +859,11 @@ rl_selftest() {
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rvg)" "changes"
   out="$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_API_FAIL=1 rl_review_fetch_gh 205 2>/dev/null)"
   case "$out" in *조회\ 실패*|*default-deny*) ok "AC5 조회 실패 finding 표면화";; *) bad "AC5 조회 실패 finding 표면화";; esac
+  # #600: 승인 가림 pending 에 blocked=1 표면화(교착 식별 신호 — rl_round 게이트 주석 참조).
+  chk "#600 approve 가림+증거 없음 → pending 에 blocked=1 표면화" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GBLK" rl_review_fetch_gh 206 2>/dev/null | grep -c '^blocked: 1')" "1"
+  chk "#600 스레드 없는 pending 은 blocked 미표면화" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_OLD2" SC_THREADS="$GEMPTY" rl_review_fetch_gh 207 2>/dev/null | grep -c '^blocked: 1')" "0"
   unset -f gh
 
   # ---- force 미사용 (mock_git force 보면 exit99; 여기 도달했으면 미사용) ----
