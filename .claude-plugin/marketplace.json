@@ -38,7 +38,7 @@
       "name": "thinktank",
       "source": "./plugins/thinktank",
       "description": "중앙 리서치를 바탕으로 다중 관점 숙의와 추적 가능한 브레인스토밍을 진행",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "category": "productivity",
       "tags": [
         "roundtable",

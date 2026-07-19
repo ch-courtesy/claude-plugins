@@ -8,7 +8,6 @@ PLUGIN_DIR="$REPO_ROOT/plugins/thinktank"
 SKILL_DIR="$PLUGIN_DIR/skills/roundtable"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REFS="$SKILL_DIR/references"
-SHARED="$PLUGIN_DIR/skills/shared/session-conventions.md"
 MARKETPLACE="$REPO_ROOT/.claude-plugin/marketplace.json"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -23,11 +22,15 @@ for file in \
   "$REFS/meeting-protocol.md" \
   "$REFS/role-prompts.md" \
   "$REFS/participant-personas.md" \
-  "$REFS/document-templates.md" \
-  "$SHARED"; do
+  "$REFS/document-templates.md"; do
   [[ -f "$file" ]] || fail "필수 파일 부재: $file"
 done
-ok "필수 파일 존재"
+[[ ! -e "$PLUGIN_DIR/skills/shared" ]] \
+  || fail "구 공유 디렉터리 잔존: skills/shared/"
+if grep -rq 'shared/session-conventions' "$PLUGIN_DIR" || grep -rqF '../shared/' "$PLUGIN_DIR"; then
+  fail "구 공유 규약 참조 잔존"
+fi
+ok "필수 파일 존재 + 공유 디렉터리·참조 부재"
 
 echo ""
 echo "=== TEST 2: 공개 인터페이스와 상태 ==="
@@ -45,8 +48,10 @@ grep -qE 'resume 라우팅|재개 라우팅' "$SKILL_MD" \
   || fail "상태별 resume 라우팅 누락"
 grep -qE 'status 보고|상태 보고' "$SKILL_MD" \
   || fail "읽기 전용 status 보고 형식 누락"
-grep -qF '../shared/session-conventions.md' "$SKILL_MD" \
-  || fail "공통 세션 규약 단일 출처 참조 누락"
+grep -qF 'YYYYMMDD-<slug>' "$SKILL_MD" \
+  || fail "회의 ID 규칙 인라인 누락"
+grep -qE '인자가 없으면.*start' "$SKILL_MD" \
+  || fail "무인자 start 기본 규약 인라인 누락"
 ok "인터페이스와 상태 계약"
 
 echo ""
@@ -67,6 +72,12 @@ grep -qE '진행자.*지휘|진행자.*판정' "$SKILL_MD" \
   || fail "진행자 지휘 계약 누락"
 grep -qE '메인.*(호출|디스패치)|디스패치.*메인' "$SKILL_MD" \
   || fail "메인 디스패치 계약 누락"
+grep -qE '자기완결' "$SKILL_MD" \
+  || fail "자기완결 brief 규범 인라인 누락"
+grep -qE '중첩 Agent.*(않|금지)' "$SKILL_MD" \
+  || fail "중첩 Agent 금지 규범 인라인 누락"
+grep -qE '민감 정보.*(넣지 않|금지)' "$SKILL_MD" \
+  || fail "민감 정보 안전 경계 인라인 누락"
 ok "책임 분리와 승인 게이트"
 
 echo ""
@@ -131,13 +142,13 @@ for section in '아젠다' '리서치 계획' '증거 팩' '로스터' '초기 �
 done
 grep -qE '합의·실행서.*불합의 보고서|불합의 보고서.*합의·실행서' "$REFS/document-templates.md" \
   || fail "최종 문서 이분 계약(합의·실행서/불합의 보고서) 누락"
-grep -qE '상태 블록.*먼저 갱신' "$SHARED" \
+grep -qE '상태 블록.*먼저 갱신' "$SKILL_MD" \
   || fail "상태 블록 우선 갱신 계약 누락"
-grep -qE '섹션 단위로만.*(추가|갱신)' "$SHARED" \
+grep -qE '섹션 단위로만.*(추가|갱신)' "$SKILL_MD" \
   || fail "섹션 단위 추가·갱신 계약 누락"
-grep -qE '전체 파일 재작성.*(금지|않는다)' "$SHARED" \
+grep -qE '전체 파일 재작성.*(금지|않는다)' "$SKILL_MD" \
   || fail "전체 파일 재작성 금지 계약 누락"
-grep -qE '(resume|재개).*단일 (세션|회의) 파일|단일 (세션|회의) 파일.*(resume|재개)' "$SHARED" \
+grep -qE '(resume|재개).*단일 (세션|회의) 파일|단일 (세션|회의) 파일.*(resume|재개)' "$SKILL_MD" \
   || fail "resume 단일 파일 읽기 계약 누락"
 grep -qE '초기 입장.*다시 생성하지 않|초기 입장.*재생성.*않' "$SKILL_MD" \
   || fail "초기 입장 재생성 금지 계약 누락"
@@ -147,11 +158,11 @@ ok "단일 회의 파일 계약과 실행 경계"
 
 echo ""
 echo "=== TEST 8: 구 다중 파일 계약 부재 ==="
-if grep -rqF '.roundtable/<meeting-id>/' "$SKILL_DIR" "$SHARED"; then
+if grep -rqF '.roundtable/<meeting-id>/' "$SKILL_DIR"; then
   fail "구 디렉터리 계약 잔존: .roundtable/<meeting-id>/"
 fi
 for artifact in state.md agenda.md research-plan.md evidence-pack.md roster.md initial-positions.md decision-map.md discussion.md agreement.md no-consensus.md; do
-  if grep -rqF "$artifact" "$SKILL_DIR" "$SHARED"; then
+  if grep -rqF "$artifact" "$SKILL_DIR"; then
     fail "구 산출물 파일명 잔존: $artifact"
   fi
 done

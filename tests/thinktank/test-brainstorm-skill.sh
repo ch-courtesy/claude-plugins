@@ -8,7 +8,6 @@ PLUGIN_DIR="$REPO_ROOT/plugins/thinktank"
 SKILL_DIR="$PLUGIN_DIR/skills/brainstorm"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REFS="$SKILL_DIR/references"
-SHARED="$PLUGIN_DIR/skills/shared/session-conventions.md"
 MARKETPLACE="$REPO_ROOT/.claude-plugin/marketplace.json"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -21,11 +20,15 @@ for file in \
   "$REFS/strategy-protocols.md" \
   "$REFS/role-prompts.md" \
   "$REFS/research-protocol.md" \
-  "$REFS/document-templates.md" \
-  "$SHARED"; do
+  "$REFS/document-templates.md"; do
   [[ -f "$file" ]] || fail "필수 파일 부재: $file"
 done
-ok "필수 파일 존재"
+[[ ! -e "$PLUGIN_DIR/skills/shared" ]] \
+  || fail "구 공유 디렉터리 잔존: skills/shared/"
+if grep -rq 'shared/session-conventions' "$PLUGIN_DIR" || grep -rqF '../shared/' "$PLUGIN_DIR"; then
+  fail "구 공유 규약 참조 잔존"
+fi
+ok "필수 파일 존재 + 공유 디렉터리·참조 부재"
 
 echo ""
 echo "=== TEST 2: 공개 인터페이스와 상태 ==="
@@ -43,8 +46,10 @@ grep -qE 'resume 라우팅|재개 라우팅' "$SKILL_MD" \
   || fail "상태별 resume 라우팅 누락"
 grep -qE 'status 보고|상태 보고' "$SKILL_MD" \
   || fail "읽기 전용 status 보고 형식 누락"
-grep -qF '../shared/session-conventions.md' "$SKILL_MD" \
-  || fail "공통 세션 규약 단일 출처 참조 누락"
+grep -qF 'YYYYMMDD-<slug>' "$SKILL_MD" \
+  || fail "세션 ID 규칙 인라인 누락"
+grep -qE '인자가 없으면.*start' "$SKILL_MD" \
+  || fail "무인자 start 기본 규약 인라인 누락"
 ok "인터페이스와 상태 계약"
 
 echo ""
@@ -61,6 +66,12 @@ grep -qE '프레임.*명시적 승인|명시적 승인.*프레임' "$SKILL_MD" \
   || fail "프레이밍 승인 게이트 누락"
 grep -qE '검증 계획.*명시적 승인|명시적 승인.*검증 계획' "$SKILL_MD" \
   || fail "검증 실행 승인 게이트 누락"
+grep -qE '자기완결' "$SKILL_MD" \
+  || fail "자기완결 brief 규범 인라인 누락"
+grep -qE '중첩 Agent.*(않|금지)' "$SKILL_MD" \
+  || fail "중첩 Agent 금지 규범 인라인 누락"
+grep -qE '민감 정보.*(넣지 않|금지)' "$SKILL_MD" \
+  || fail "민감 정보 안전 경계 인라인 누락"
 ok "세션 책임과 승인 게이트"
 
 echo ""
@@ -89,9 +100,9 @@ grep -qE '발산 전.*최소 리서치|최소 리서치.*발산 전' "$REFS/rese
   || fail "발산 전 최소 리서치 계약 누락"
 grep -qE 'shortlist|후보 목록' "$REFS/research-protocol.md" \
   || fail "후보 선정 후 상세 검증 리서치 계약 누락"
-grep -qE '관련.*정보만.*(전달|배포)|전체.*반복.*(전달|주입).*않' "$SHARED" \
+grep -qE '관련.*정보만.*(전달|배포)|전체.*반복.*(전달|주입).*않' "$SKILL_MD" \
   || fail "관련 정보만 배포하는 중복 방지 계약 누락"
-grep -qE '중앙.*리서치|공통.*리서치' "$REFS/research-protocol.md" "$SHARED" \
+grep -qE '중앙.*리서치|공통.*리서치' "$REFS/research-protocol.md" "$SKILL_MD" \
   || fail "중앙 리서치 계약 누락"
 ok "단계별 중앙 리서치 계약"
 
@@ -135,23 +146,23 @@ for section in '브리프' '연구 컨텍스트' '로스터' '아이디어 풀' 
   grep -q "## ${section}" "$REFS/document-templates.md" \
     || fail "세션 파일 섹션 누락: $section"
 done
-grep -qE '상태 블록.*먼저 갱신' "$SHARED" \
+grep -qE '상태 블록.*먼저 갱신' "$SKILL_MD" \
   || fail "상태 블록 우선 갱신 계약 누락"
-grep -qE '섹션 단위로만.*(추가|갱신)' "$SHARED" \
+grep -qE '섹션 단위로만.*(추가|갱신)' "$SKILL_MD" \
   || fail "섹션 단위 추가·갱신 계약 누락"
-grep -qE '전체 파일 재작성.*(금지|않는다)' "$SHARED" \
+grep -qE '전체 파일 재작성.*(금지|않는다)' "$SKILL_MD" \
   || fail "전체 파일 재작성 금지 계약 누락"
-grep -qE '(resume|재개).*단일 세션 파일|단일 세션 파일.*(resume|재개)' "$SHARED" \
+grep -qE '(resume|재개).*단일 세션 파일|단일 세션 파일.*(resume|재개)' "$SKILL_MD" \
   || fail "resume 단일 파일 읽기 계약 누락"
 ok "단일 세션 파일 계약"
 
 echo ""
 echo "=== TEST 9: 구 다중 파일 계약 부재 ==="
-if grep -rqF '.brainstorm/<session-id>/' "$SKILL_DIR" "$SHARED"; then
+if grep -rqF '.brainstorm/<session-id>/' "$SKILL_DIR"; then
   fail "구 디렉터리 계약 잔존: .brainstorm/<session-id>/"
 fi
 for artifact in state.md brief.md research-context.md roster.md idea-pool.md clusters.md shortlist.md validation-plan.md experiments.md report.md; do
-  if grep -rqF "$artifact" "$SKILL_DIR" "$SHARED"; then
+  if grep -rqF "$artifact" "$SKILL_DIR"; then
     fail "구 산출물 파일명 잔존: $artifact"
   fi
 done
@@ -164,7 +175,7 @@ MARKET_VERSION="$(python3 -c 'import json,sys; print(next(p["version"] for p in 
 [[ -n "$PLUGIN_VERSION" && "$PLUGIN_VERSION" == "$MARKET_VERSION" ]] \
   || fail "플러그인/마켓플레이스 버전 불일치: plugin.json=$PLUGIN_VERSION marketplace=$MARKET_VERSION"
 # 버전 범프 회귀 가드: 릴리스 시 이 핀도 함께 올린다 (parity만으로는 미범프를 못 잡는다)
-EXPECTED_VERSION="1.0.1"
+EXPECTED_VERSION="1.0.2"
 [[ "$PLUGIN_VERSION" == "$EXPECTED_VERSION" ]] \
   || fail "플러그인 버전이 현재 릴리스 핀과 다름: plugin.json=$PLUGIN_VERSION expected=$EXPECTED_VERSION (릴리스 시 핀 갱신)"
 ok "플러그인과 마켓플레이스 버전 동기 + 릴리스 핀 일치 ($PLUGIN_VERSION)"
