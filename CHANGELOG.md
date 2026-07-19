@@ -2,6 +2,12 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.63.5
+
+### 버그 수정
+- **forge 리뷰 approve-후-blocking-스레드 교착 해소 (#600)** — approve 판정 기록 후 같은 head 에 신뢰봇 미해결 스레드가 승인을 가리는데(#493) 현재 head 공식 재리뷰 증거가 없어 판정이 pending(#549)인 조합에서, 리뷰 루프가 폴링 상한(~10분)까지 무행동 대기(rc=20 반복)만 하다 blocked 로 종착하던 3자 교착(승인 가림·재작업 금지·새 커밋 주체 없음)을 근거 있는 에스컬레이션(rc=10)으로 유한 시간 내 종착하도록 수정. `rl_review_fetch_gh` 가 승인 가림 상태를 `blocked: 1` 로 표면화하고 `rl_round` 같은-head 게이트가 이를 식별한다. 기존 가드(#493 승인 가림·#549 증거 없는 재작업 금지·#571 같은 head 1회 재평가)는 시맨틱 불변.
+- **execute-task forge 단계 blocked category 표면화 (#600)** — integrate/review/merge 실패 blocked 로그 텍스트 선두에 `category:` 를 싣는다(자가개선 seam 소비용). 기계적 매핑: 환경 차단(integrate/merge 실패)→`environment-gap`, 리뷰 수렴·판정 문제(진전 불가·미승인·폴링 상한)→`other`.
+
 ## autopilot 0.63.4
 
 ### 변경(호환)

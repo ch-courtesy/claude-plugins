@@ -42,6 +42,11 @@ die() { echo "execute-task: $*" >&2; exit 1; }
 #   integrate/merge 실패 사유가 stderr 로만 흘러 유실되는 무로그 blocked 방지(run 592).
 et_reason_excerpt() { printf '%s\n' "$1" | tail -n 20 | tr '\n' ' '; }
 
+# forge 단계 blocked 의 category 표면화(#600) — 자가개선 seam(using-autopilot 카테고리→행동 매핑)이
+#   소비할 값을 blocked 로그 선두에 싣는다. 사유별 기계적 규칙(사이트 고정, 임의 판단 없음):
+#     원격·브랜치·머지 게이트 등 환경 차단(integrate/merge 실패) → environment-gap
+#     리뷰 수렴·판정 문제(review 진전 불가/미승인·폴링 상한)     → other (진단 후 분류)
+
 # et_cleanup_dirs <dir>... — 주어진 디렉토리들을 정리(멱등, 부재·중복이어도 무해).
 #   merge 성공 직후 정리와 done 선제 가드 정리(#541)가 공유하는 단일 출처.
 #   대상: run-dir(.autopilot/runs/<id> — materialize SPEC·.worktree·run 상태, #580 통합),
@@ -236,7 +241,7 @@ et_start() {
   local iout branch pr=""
   iout="$($FORGE_CMD integrate "$sp" "$run_dir" "$key" 2>&1)" || {
     $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "integrate 실패" >/dev/null
-    $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "integrate 실패: $(et_reason_excerpt "$iout")" >/dev/null
+    $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "category: environment-gap — integrate 실패: $(et_reason_excerpt "$iout")" >/dev/null
     echo "$iout" >&2; return 1; }
   branch="$(printf '%s' "$iout" | sed -n 's/^branch:[[:space:]]*//p' | head -1)"
   pr="$(printf '%s' "$iout" | sed -n 's/^pr:[[:space:]]*//p' | head -1)"
@@ -271,13 +276,13 @@ et_start() {
           waited=$((waited + APPROVAL_POLL_INTERVAL)) ;;
         *)                         # 10(에스컬레이션/라운드상한/핑퐁) 등 진전 불가 → 빠른 실패
           $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 진전 불가(리워크로 해소 불가, rl_round rc=$rrc) — 폴링 상한 대기 생략" >/dev/null
-          $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 진전 불가(rc=$rrc) — 즉시 종료($rounds 라운드)" >/dev/null
+          $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "category: other — review 진전 불가(rc=$rrc) — 즉시 종료($rounds 라운드)" >/dev/null
           return 1 ;;
       esac
     done
     if (( ! approved )); then
       $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 미승인(승인 폴링 상한 ${APPROVAL_WAIT_MAX}s 초과)" >/dev/null
-      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 승인 미게시 — 폴링 상한 초과($rounds 라운드)" >/dev/null
+      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "category: other — review 승인 미게시 — 폴링 상한 초과($rounds 라운드)" >/dev/null
       return 1
     fi
   else
@@ -290,7 +295,7 @@ et_start() {
     done
     if (( ! approved )); then
       $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "리뷰 미승인(에스컬레이션/가드)" >/dev/null
-      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "review 미승인 ($n 라운드)" >/dev/null
+      $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "category: other — review 미승인 ($n 라운드)" >/dev/null
       return 1
     fi
   fi
@@ -307,7 +312,7 @@ et_start() {
     echo "execute-task: done ($id)"
   else
     $ADAPTER_CMD set_status --task-id "$id" --status blocked --reason "merge 실패" >/dev/null
-    $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "merge 실패: $(et_reason_excerpt "$mout")" >/dev/null
+    $ADAPTER_CMD append_log --task-id "$id" --marker blocked --text "category: environment-gap — merge 실패: $(et_reason_excerpt "$mout")" >/dev/null
     echo "$mout" >&2
     return 1
   fi
