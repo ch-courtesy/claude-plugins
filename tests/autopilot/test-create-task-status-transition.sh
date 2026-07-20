@@ -42,4 +42,33 @@ grep -qF '[NEEDS CLARIFICATION' "$SKILL_MD" \
 ok "[NEEDS CLARIFICATION 마커 기준 명시"
 
 echo ""
+echo "=== TEST 5: description이 WHEN(트리거 표현) 중심 (#560 컨벤션) ==="
+DESC="$(grep -m1 '^description:' "$SKILL_MD")"
+BODY="$(awk 'NR>1 && /^---$/{f=1;next} f' "$SKILL_MD")"
+echo "$DESC" | grep -qE '등록해줘|백로그에 올려|태스크 만들어줘' \
+  || fail "description에 사용자 직접 등록 요청 표현(트리거 동의어)이 없음"
+ok "description: 직접 등록 요청 트리거 표현 포함"
+
+echo ""
+echo "=== TEST 6: description에 소유권·경계 상세 서술 부재 (본문 소관) ==="
+if echo "$DESC" | grep -qE '작성 로직|set_body'; then
+  fail "description에 경계 상세 서술(작성 로직/set_body 위임)이 잔존 — 본문으로 이동해야 함"
+fi
+ok "description: 경계 상세 서술 부재"
+
+echo ""
+echo "=== TEST 7: 옮겨진 경계 서술이 본문에 보존됨 (정보 손실 없음) ==="
+echo "$BODY" | grep -q 'set_body' \
+  || fail "본문에 set_body 위임 서술이 없음"
+echo "$BODY" | grep -qE '작성.*(feature|fix).*소유|소유.*작성' \
+  || fail "본문에 작성 소유권(feature/fix) 서술이 없음"
+ok "본문: 경계 서술 보존"
+
+echo ""
+echo "=== TEST 8: description에 오발동 방지 배제 조항 존재 (작성 신호는 feature·fix) ==="
+echo "$DESC" | grep -qE '(feature.*fix).*(먼저|아니)' \
+  || fail "description에 작성 신호는 feature·fix가 먼저라는 배제 조항이 없음"
+ok "description: 배제 조항 존재"
+
+echo ""
 echo "=== 모든 create-task 등록-후 상태 전이 조건부화 테스트 통과 ==="

@@ -7,6 +7,11 @@
 ### 변경(호환)
 - **공유 session-conventions 해체 — 규범을 각 SKILL.md에 용어 특화 인라인 (run 604)** — `skills/shared/session-conventions.md`를 제거하고 규범 5영역(호출 규약·세션 파일 규율·디스패치 공통 규범·중앙 리서치 공통 규범·공통 안전 경계)을 brainstorm(세션 파일, `.brainstorm/<session-id>.md`)·roundtable(회의 파일, `.roundtable/<meeting-id>.md`) 각 SKILL.md 본문에 각 스킬 용어로 자체 정의. `../shared/` 참조·위임 문구 제거(스킬 자기완결). 규범 의미·강도 불변.
 
+## autopilot 0.63.6
+
+### 변경(호환)
+- **create-task description WHEN-중심 재작성 (#560 컨벤션 정렬)** — 소유권·아키텍처 경계 서술 위주였던 frontmatter description을 트리거(WHEN) 중심으로 재작성. "태스크로 등록해줘"·"백로그에 올려줘"·"태스크 만들어줘" 같은 실사용 표현과 `resume <task-id>` 재개 신호를 담고, WHAT은 "본문을 백엔드에 등록하고 등록-후 상태를 전이한다" 한 구절로 축약. 작성 로직 비소유·`set_body` 위임 등 경계 상세는 본문(「규칙」·워크플로)이 계속 소유한다(정보 손실 없음). 워크플로·동사 계약 불변.
+
 ## autopilot 0.63.5
 
 ### 버그 수정
