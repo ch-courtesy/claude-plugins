@@ -108,9 +108,10 @@ cmd_complete() {
   docker exec "$C" sh -c "test -s $CODEX_HOME_IN/auth.json" || die "auth.json 미생성(타임아웃)"
 
   # 토큰 값은 출력하지 않는다. umask 077 임시 파일로 추출 후 검증.
-  local tmp; tmp="$(mktemp)"; chmod 600 "$tmp"
+  local tmp; tmp="$(umask 077 && mktemp)"
+  # EXIT 트랩: die(exit) 로 빠지는 실패 경로에서도 반드시 shred 되게 한다(RETURN 트랩은 안 탐).
   # shellcheck disable=SC2064
-  trap "shred -u '$tmp' 2>/dev/null || rm -f '$tmp'" RETURN
+  trap "shred -u '$tmp' 2>/dev/null || rm -f '$tmp'" EXIT
   docker exec "$C" sh -c "cat $CODEX_HOME_IN/auth.json" > "$tmp"
 
   jq -e '(.tokens.access_token // .access_token) and (.tokens.refresh_token // .refresh_token)' "$tmp" >/dev/null \
