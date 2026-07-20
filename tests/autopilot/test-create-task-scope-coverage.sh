@@ -114,5 +114,12 @@ grep -qE 'scope-coverage|기존 테스트.*등록|등록.*기존 테스트' "$SH
   || fail "T10: fix task-body-template에 scope-coverage(#498) 보완 언급 없음"
 ok "fix task-body-template: scope-coverage 보완 언급"
 
+# === T11: scope-coverage-map.md가 다른 스킬 문서를 doc-link하지 않음 (자기완결) ===
+echo "=== T11: map 문서 타 스킬 doc-link 부재 ==="
+foreign="$(grep -oE 'skills/[a-z0-9._-]+/' "$MAP_FILE" | grep -v '^skills/create-task/$' || true)"
+[[ -z "$foreign" ]] \
+  || fail "T11: scope-coverage-map.md가 타 스킬 문서를 참조함 (실제: '$foreign')"
+ok "scope-coverage-map.md: 타 스킬 doc-link 없음"
+
 echo ""
 echo "=== 모든 #498 scope-coverage 검증 테스트 통과 ==="
