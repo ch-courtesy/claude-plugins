@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## codex-ops 0.1.0
+
+### 새 기능
+- **codex-auth-reseed 스킬 신규 플러그인으로 등록** — codex-review CI의 `CODEX_AUTH_JSON` 시크릿이 회전 리프레시 토큰 소진·desync로 깨질 때, host `~/.codex`를 건드리지 않는 격리 docker 컨테이너에서 `codex login --device-auth`로 새 토큰을 발급받아 대상 repo 시크릿을 갱신한다. 컨테이너는 `--network host`로 기동(bridge IPv6 egress 단절 시 codex 자체 리졸버 실패 회피)하고 `ca-certificates`를 설치(rustls TLS 검증에 시스템 CA 스토어 필수 — node slim 이미지엔 없음)하며, 실행 전 대상 repo에 `codex-review.yml` 존재를 검증한다.
+
 ## thinktank 1.0.2
 
 ### 변경(호환)
