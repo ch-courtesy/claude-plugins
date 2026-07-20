@@ -7,6 +7,11 @@
 ### 변경(호환)
 - **공유 session-conventions 해체 — 규범을 각 SKILL.md에 용어 특화 인라인 (run 604)** — `skills/shared/session-conventions.md`를 제거하고 규범 5영역(호출 규약·세션 파일 규율·디스패치 공통 규범·중앙 리서치 공통 규범·공통 안전 경계)을 brainstorm(세션 파일, `.brainstorm/<session-id>.md`)·roundtable(회의 파일, `.roundtable/<meeting-id>.md`) 각 SKILL.md 본문에 각 스킬 용어로 자체 정의. `../shared/` 참조·위임 문구 제거(스킬 자기완결). 규범 의미·강도 불변.
 
+## autopilot 0.63.6
+
+### 변경(호환)
+- **create-task scope-coverage-map 자기완결화 (#608)** — `references/scope-coverage-map.md`가 `skills/loop/SKILL.md`를 경로 표기 관례의 단일 출처로 지시하던 중첩 참조(SKILL.md→references→타 스킬 SKILL.md)를 제거하고, 경고가 제시하는 경로의 수용 형식(후행 `/` 디렉토리 표기·파일 글롭)과 매칭 의미론(prefix 재귀 매칭)을 map 문서에 계약 수준으로 인라인. create-task 의 "다른 스킬 doc-link 금지" 자기 규칙과의 자기모순 해소. 매핑 규칙·`scope-coverage-check.sh` 동작 불변.
+
 ## autopilot 0.63.5
 
 ### 버그 수정
