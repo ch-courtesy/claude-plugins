@@ -42,4 +42,19 @@ grep -qF '[NEEDS CLARIFICATION' "$SKILL_MD" \
 ok "[NEEDS CLARIFICATION 마커 기준 명시"
 
 echo ""
+echo "=== TEST 5: 상태 전이 이중 허용 문구 부재 (negative) ==="
+# 과거 §5: "전이를 생략하거나 명시적으로 set_status ... --status backlog 를 호출한다"
+# 두 갈래 허용은 세션마다 다른 동사 시퀀스를 만든다 — 단일 행동만 지시해야 한다.
+if grep -qE '생략하거나' "$SKILL_MD"; then
+  fail "SKILL.md에 전이 이중 허용 문구('…생략하거나…')가 잔존"
+fi
+# 등록-후 전이(5단계) 블록 한정 — resume 경로의 in_design → backlog 전이는 정당하므로 제외한다.
+STEP5=$(awk '/^5\. \*\*등록-후 상태 전이/{flag=1} /^6\. \*\*본문 갱신/{flag=0} flag' "$SKILL_MD")
+[[ -n "$STEP5" ]] || fail "SKILL.md에서 등록-후 상태 전이(5단계) 블록을 찾지 못함"
+if grep -qE 'set_status .*--status backlog' <<<"$STEP5"; then
+  fail "SKILL.md 5단계에 backlog 유지 분기의 중복 set_status 호출 지시가 잔존"
+fi
+ok "상태 전이 이중 허용 문구 부재"
+
+echo ""
 echo "=== 모든 create-task 등록-후 상태 전이 조건부화 테스트 통과 ==="
