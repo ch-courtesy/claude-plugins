@@ -114,5 +114,65 @@ grep -qE 'scope-coverage|기존 테스트.*등록|등록.*기존 테스트' "$SH
   || fail "T10: fix task-body-template에 scope-coverage(#498) 보완 언급 없음"
 ok "fix task-body-template: scope-coverage 보완 언급"
 
+# === T11: 비-autopilot 플러그인(thinktank) 소스 + 테스트 누락 → 경고 ===
+echo "=== T11: thinktank 소스 + 테스트 누락 → SCOPE_COVERAGE_WARNING ==="
+BODY_TT_MISSING="---
+scope:
+  include:
+    - plugins/thinktank/skills/brainstorm/**
+    - CHANGELOG.md
+---
+
+## 무엇을 만들 것인가
+thinktank 소스만 포함한 샘플 본문.
+"
+out5="$(echo "$BODY_TT_MISSING" | bash "$CHECKER")"
+echo "$out5" | grep -q 'SCOPE_COVERAGE_WARNING' \
+  || fail "T11: thinktank 소스 테스트 누락 시 SCOPE_COVERAGE_WARNING 없음 (실제: '$out5')"
+echo "$out5" | grep -q 'tests/thinktank/' \
+  || fail "T11: 누락 경로 목록에 tests/thinktank/ 없음 (실제: '$out5')"
+ok "thinktank 소스 테스트 누락 → SCOPE_COVERAGE_WARNING"
+
+# === T12: thinktank 소스 + 테스트 경로 모두 포함 → 경고 없음 ===
+echo "=== T12: thinktank 소스+테스트 모두 포함 → 경고 없음 ==="
+BODY_TT_COVERED="---
+scope:
+  include:
+    - plugins/thinktank/skills/brainstorm/**
+    - tests/thinktank/
+    - CHANGELOG.md
+---
+
+## 무엇을 만들 것인가
+thinktank 소스+테스트 모두 포함 샘플 본문.
+"
+out6="$(echo "$BODY_TT_COVERED" | bash "$CHECKER")"
+[[ -z "$out6" ]] \
+  || fail "T12: thinktank 소스+테스트 모두 포함 시 경고 발생 (실제: '$out6')"
+ok "thinktank 소스+테스트 모두 포함 → 경고 없음"
+
+# === T13: 기존 테스트 없는 플러그인 소스 → 검사 생략 (오탐 방지) ===
+echo "=== T13: 기존 테스트 없는 플러그인 소스 → 검사 생략 ==="
+BODY_NO_TESTS="---
+scope:
+  include:
+    - plugins/project-init/skills/bootstrap/**
+    - CHANGELOG.md
+---
+
+## 무엇을 만들 것인가
+매핑된 테스트 경로가 없는 플러그인 소스 샘플.
+"
+out7="$(echo "$BODY_NO_TESTS" | bash "$CHECKER")"
+[[ -z "$out7" ]] \
+  || fail "T13: 기존 테스트 없는 소스에서 오탐 발생 (실제: '$out7')"
+ok "기존 테스트 없는 플러그인 소스 → 검사 생략"
+
+# === T14: scope-coverage-map.md에 일반화 규칙 반영 ===
+echo "=== T14: map 문서 일반화 규칙 반영 ==="
+grep -qE 'plugins/<P>/skills/<S>|tests/<P>/' "$MAP_FILE" \
+  || fail "T14: scope-coverage-map.md에 일반화 매핑 규칙 없음"
+ok "scope-coverage-map.md: 일반화 매핑 규칙 반영"
+
 echo ""
 echo "=== 모든 #498 scope-coverage 검증 테스트 통과 ==="

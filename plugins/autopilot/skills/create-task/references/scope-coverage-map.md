@@ -7,11 +7,12 @@
 
 | 소스 패턴 | 기대 테스트 경로 |
 |---|---|
-| `plugins/autopilot/skills/<S>/...` | `tests/autopilot/test-<S>*.sh` (파일 glob) |
-| `plugins/autopilot/skills/<S>/...` | `tests/autopilot/<S>/` (디렉터리, 있으면) |
+| `plugins/<P>/skills/<S>/...` | `tests/<P>/test-<S>*.sh` (파일 glob) |
+| `plugins/<P>/skills/<S>/...` | `tests/<P>/<S>/` (디렉터리, 있으면) |
 | `plugins/autopilot/lib/task-backend/...` | `plugins/autopilot/lib/task-backend/tests/` |
 
-`<S>`는 스킬 이름(예: `create-task`, `loop`, `execute-task`, `feature`, `fix`).
+`<P>`는 플러그인 이름(예: `autopilot`, `thinktank`), `<S>`는 스킬 이름(예: `create-task`, `loop`, `brainstorm`).
+스킬 매핑은 플러그인-불문 관례(`plugins/<P>/skills/<S>/` → `tests/<P>/`)이며, `task-backend` 규칙만 autopilot 전용이다.
 
 ## 커버드(covered) 판정
 

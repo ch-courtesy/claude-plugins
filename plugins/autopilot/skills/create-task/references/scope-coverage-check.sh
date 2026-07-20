@@ -93,27 +93,28 @@ try:
     checked = set()
 
     for inc in includes:
-        # 매핑 규칙 1: plugins/autopilot/skills/<S>/...
-        m = re.match(r'^plugins/autopilot/skills/([^/]+)/', inc)
+        # 매핑 규칙 1: plugins/<P>/skills/<S>/...
+        m = re.match(r'^plugins/([^/]+)/skills/([^/]+)/', inc)
         if m:
-            skill = m.group(1)
-            if skill in checked:
+            plugin, skill = m.group(1), m.group(2)
+            key = (plugin, skill)
+            if key in checked:
                 continue
-            checked.add(skill)
+            checked.add(key)
 
             expected = []
 
-            # 1a) tests/autopilot/<S>/ 디렉터리
-            dir_test = f'tests/autopilot/{skill}/'
+            # 1a) tests/<P>/<S>/ 디렉터리
+            dir_test = f'tests/{plugin}/{skill}/'
             if os.path.isdir(os.path.join(repo_root, dir_test)):
                 expected.append(dir_test)
 
-            # 1b) tests/autopilot/test-<S>*.sh 파일
-            test_dir = os.path.join(repo_root, 'tests/autopilot')
+            # 1b) tests/<P>/test-<S>*.sh 파일
+            test_dir = os.path.join(repo_root, f'tests/{plugin}')
             if os.path.isdir(test_dir):
                 for f in sorted(os.listdir(test_dir)):
                     if f.startswith(f'test-{skill}') and f.endswith('.sh'):
-                        expected.append(f'tests/autopilot/{f}')
+                        expected.append(f'tests/{plugin}/{f}')
 
             # 기존 테스트 없는 신규 소스 → 오탐 방지, 통과
             if not expected:
