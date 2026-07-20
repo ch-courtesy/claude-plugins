@@ -114,41 +114,65 @@ grep -qE 'scope-coverage|기존 테스트.*등록|등록.*기존 테스트' "$SH
   || fail "T10: fix task-body-template에 scope-coverage(#498) 보완 언급 없음"
 ok "fix task-body-template: scope-coverage 보완 언급"
 
-# === T11: scope-coverage-map.md가 다른 스킬 문서를 doc-link하지 않음 (자기완결) ===
-echo "=== T11: map 문서 타 스킬 doc-link 부재 ==="
-foreign="$(grep -oE 'skills/[a-z0-9._-]+/' "$MAP_FILE" | grep -v '^skills/create-task/$' || true)"
-[[ -z "$foreign" ]] \
-  || fail "T11: scope-coverage-map.md가 타 스킬 문서를 참조함 (실제: '$foreign')"
-ok "scope-coverage-map.md: 타 스킬 doc-link 없음"
+# === T11: 비-autopilot 플러그인(thinktank) 소스 + 테스트 누락 → 경고 ===
+echo "=== T11: thinktank 소스 + 테스트 누락 → SCOPE_COVERAGE_WARNING ==="
+BODY_TT_MISSING="---
+scope:
+  include:
+    - plugins/thinktank/skills/brainstorm/**
+    - CHANGELOG.md
+---
 
-# === T12: 플러그인 파일에 repo-특정 매핑 리터럴 부재 (#609 회귀 가드) ===
-echo "=== T12: 플러그인 파일 repo-특정 매핑 리터럴 부재 ==="
-for f in "$CHECKER" "$MAP_FILE"; do
-  hit="$(grep -nE 'tests/autopilot|plugins/autopilot/skills/[a-z]|plugins/autopilot/lib/task-backend' "$f" || true)"
-  [[ -z "$hit" ]] \
-    || fail "T12: $(basename "$f") 에 repo-특정 매핑 리터럴 잔존 (실제: '$hit')"
-done
-ok "플러그인 파일: repo-특정 매핑 리터럴 없음"
+## 무엇을 만들 것인가
+thinktank 소스만 포함한 샘플 본문.
+"
+out5="$(echo "$BODY_TT_MISSING" | bash "$CHECKER")"
+echo "$out5" | grep -q 'SCOPE_COVERAGE_WARNING' \
+  || fail "T11: thinktank 소스 테스트 누락 시 SCOPE_COVERAGE_WARNING 없음 (실제: '$out5')"
+echo "$out5" | grep -q 'tests/thinktank/' \
+  || fail "T11: 누락 경로 목록에 tests/thinktank/ 없음 (실제: '$out5')"
+ok "thinktank 소스 테스트 누락 → SCOPE_COVERAGE_WARNING"
 
-# === T13: 프로젝트 설정 없으면 경고 없이 통과 ===
-echo "=== T13: 매핑 설정 없는 프로젝트 → 무경고 통과 ==="
-TMP_REPO="$(mktemp -d)"
-trap 'rm -rf "$TMP_REPO"' EXIT
-git -C "$TMP_REPO" init -q
-mkdir -p "$TMP_REPO/plugins/autopilot/skills/create-task" "$TMP_REPO/tests/autopilot"
-touch "$TMP_REPO/tests/autopilot/test-create-task-scope-coverage.sh"
-out5="$(cd "$TMP_REPO" && echo "$BODY_MISSING" | bash "$CHECKER")"
-[[ -z "$out5" ]] \
-  || fail "T13: 매핑 설정 없는 프로젝트에서 경고 발생 (실제: '$out5')"
-ok "매핑 설정 없음 → 무경고 통과"
+# === T12: thinktank 소스 + 테스트 경로 모두 포함 → 경고 없음 ===
+echo "=== T12: thinktank 소스+테스트 모두 포함 → 경고 없음 ==="
+BODY_TT_COVERED="---
+scope:
+  include:
+    - plugins/thinktank/skills/brainstorm/**
+    - tests/thinktank/
+    - CHANGELOG.md
+---
 
-# === T14: 이 저장소가 자체 매핑 설정을 제공 ===
-echo "=== T14: 저장소 매핑 설정 존재 ==="
-PROJECT_MAP="$REPO_ROOT/.autopilot/scope-coverage-map.json"
-[[ -f "$PROJECT_MAP" ]] || fail "T14: .autopilot/scope-coverage-map.json 부재"
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["rules"], "rules 비어 있음"' "$PROJECT_MAP" \
-  || fail "T14: scope-coverage-map.json 파싱 실패 또는 rules 비어 있음"
-ok "저장소 매핑 설정 존재"
+## 무엇을 만들 것인가
+thinktank 소스+테스트 모두 포함 샘플 본문.
+"
+out6="$(echo "$BODY_TT_COVERED" | bash "$CHECKER")"
+[[ -z "$out6" ]] \
+  || fail "T12: thinktank 소스+테스트 모두 포함 시 경고 발생 (실제: '$out6')"
+ok "thinktank 소스+테스트 모두 포함 → 경고 없음"
+
+# === T13: 기존 테스트 없는 플러그인 소스 → 검사 생략 (오탐 방지) ===
+echo "=== T13: 기존 테스트 없는 플러그인 소스 → 검사 생략 ==="
+BODY_NO_TESTS="---
+scope:
+  include:
+    - plugins/project-init/skills/bootstrap/**
+    - CHANGELOG.md
+---
+
+## 무엇을 만들 것인가
+매핑된 테스트 경로가 없는 플러그인 소스 샘플.
+"
+out7="$(echo "$BODY_NO_TESTS" | bash "$CHECKER")"
+[[ -z "$out7" ]] \
+  || fail "T13: 기존 테스트 없는 소스에서 오탐 발생 (실제: '$out7')"
+ok "기존 테스트 없는 플러그인 소스 → 검사 생략"
+
+# === T14: scope-coverage-map.md에 일반화 규칙 반영 ===
+echo "=== T14: map 문서 일반화 규칙 반영 ==="
+grep -qE 'plugins/<P>/skills/<S>|tests/<P>/' "$MAP_FILE" \
+  || fail "T14: scope-coverage-map.md에 일반화 매핑 규칙 없음"
+ok "scope-coverage-map.md: 일반화 매핑 규칙 반영"
 
 echo ""
 echo "=== 모든 #498 scope-coverage 검증 테스트 통과 ==="
