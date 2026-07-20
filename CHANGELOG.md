@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.63.6
+
+### 변경(호환)
+- **create-task scope-coverage 검증을 플러그인-불문으로 일반화 (run 605)** — 기존 테스트 경로 누락 플래그가 autopilot 소스만 매핑하던 것을 `plugins/<P>/skills/<S>/` → `tests/<P>/` 관례로 일반화. thinktank 등 비-autopilot 플러그인 SPEC도 등록 시 `SCOPE_COVERAGE_WARNING`을 받는다(태스크 604의 실행-단계 spec-gap BLOCKED를 등록 시점으로 앞당김). 기존 autopilot 매핑 의미론·오탐 방지 존재-확인 전제·경고-비차단(항상 0 exit) 계약 불변.
+
 ## thinktank 1.0.2
 
 ### 변경(호환)
