@@ -222,6 +222,75 @@ in_autoresolve_rebase() {
   return 0
 }
 
+# in_autoresolve_merge <branch> — 진행 중(충돌 정지) merge-in 을 자율 해결(open PR 재동기화 전용).
+#   in_autoresolve_rebase 와 같은 전략 축이나 방향이 반대: merge-in 에선 --ours=작업 브랜치 쪽,
+#   --theirs=새 베이스(origin/main) 쪽. incoming(기본)=작업 커밋 쪽 --ours, base=--theirs.
+#   비결정 표시(INT_AUTORESOLVE_FLAG)는 rebase 경로와 동일 계약. 커밋은 호출자 책임.
+#   닫지 못하면 merge --abort 후 1. force 미사용.
+in_autoresolve_merge() {
+  local branch="$1" f resolved_general=0 unmerged
+  # shellcheck disable=SC2086
+  unmerged="$($GIT_CMD diff --name-only --diff-filter=U 2>/dev/null)"
+  [[ -n "$unmerged" ]] || { $GIT_CMD merge --abort 2>/dev/null || true; return 1; }
+  while IFS= read -r f; do
+    [[ -n "$f" ]] || continue
+    # shellcheck disable=SC2086
+    case "${FORGE_CONFLICT_STRATEGY:-incoming}" in
+      base) $GIT_CMD checkout --theirs -- "$f" 2>/dev/null || true ;;
+      *)    $GIT_CMD checkout --ours   -- "$f" 2>/dev/null || true ;;
+    esac
+    resolved_general=1
+    # shellcheck disable=SC2086
+    $GIT_CMD add -- "$f" 2>/dev/null || true
+  done <<< "$unmerged"
+  # shellcheck disable=SC2086
+  if [[ -n "$($GIT_CMD diff --name-only --diff-filter=U 2>/dev/null)" ]]; then
+    $GIT_CMD merge --abort 2>/dev/null || true; return 1
+  fi
+  [[ "$resolved_general" == "1" ]] && INT_AUTORESOLVE_FLAG="needs-verify"
+  printf 'autoresolve: open-PR base 재동기화 merge-in 자율 해결 (branch=%s general=%s flag=%s)\n' \
+    "$branch" "$resolved_general" "${INT_AUTORESOLVE_FLAG:-deterministic}" >&2
+  return 0
+}
+
+# in_resync_open_pr <branch> — open PR 재실행 경로의 base 정합(#626). 분리 워크트리 안에서 호출됨.
+#   원격 tip(리뷰 수정 푸시로 로컬 ref 보다 앞설 수 있음) 기준으로 origin/main merge-in 을 시도:
+#     클린(충돌 없음) → 병합을 버리고 기존 동작 유지(재작성·push 없음 — 머지 단계 ff 게이트가 정합).
+#     충돌           → 전략 자율 해소로 머지 커밋 생성 후 원격 작업 브랜치로 직접 push(non-force,
+#                      merge-in 은 원격 tip 위에 커밋을 얹으므로 fast-forward push 성립).
+#     해소 불가       → 병합 중단 후 1 — integrate 가 즉시 차단(리뷰 폴링 진입 전, 상한 미소진).
+in_resync_open_pr() {
+  local branch="$1" tip
+  # shellcheck disable=SC2086
+  $GIT_CMD fetch origin "$branch" >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086
+  tip="$($GIT_CMD rev-parse --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null)" || tip=""
+  # shellcheck disable=SC2086
+  [[ -n "$tip" ]] || tip="$($GIT_CMD rev-parse "refs/heads/$branch" 2>/dev/null)"
+  [[ -n "$tip" ]] || { in_die "open PR 재동기화: 브랜치 tip 확인 실패: $branch"; return 1; }
+  # 분리 HEAD 를 원격 tip 으로 이동(워크트리는 이미 detached — reset 은 브랜치 ref 를 건드리지 않음).
+  # shellcheck disable=SC2086
+  $GIT_CMD reset --hard "$tip" >/dev/null 2>&1 \
+    || { in_die "open PR 재동기화: tip 이동 실패: $branch"; return 1; }
+  # shellcheck disable=SC2086
+  if $GIT_CMD merge --no-commit --no-ff "origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+    # 충돌 없음 — 기존 동작 보존: 재작성·push 없이 반환(정합은 머지 단계 ff-only 게이트가 강제).
+    $GIT_CMD merge --abort >/dev/null 2>&1 || true
+    return 0
+  fi
+  in_autoresolve_merge "$branch" \
+    || { in_die "open PR 재동기화 충돌 자율 해소 실패 — 사람 위임(force 금지): $branch ← origin/$DEFAULT_BRANCH"; return 1; }
+  # shellcheck disable=SC2086
+  $GIT_CMD commit -m "merge: origin/$DEFAULT_BRANCH into $branch — base 재동기화(충돌 자율 해소)" >/dev/null 2>&1 \
+    || { $GIT_CMD merge --abort >/dev/null 2>&1 || true
+         in_die "open PR 재동기화 머지 커밋 실패: $branch"; return 1; }
+  # shellcheck disable=SC2086
+  $GIT_CMD push origin "HEAD:refs/heads/$branch" >/dev/null 2>&1 \
+    || { in_die "open PR 재동기화 push 실패(force 금지): $branch"; return 1; }
+  INT_BASESYNC_PUSHED=1
+  return 0
+}
+
 # in_base_sync <branch> — 작업 브랜치를 origin/main 으로 정합(필요 시 rebase)한다.
 #   #452: rebase 를 공유 체크아웃에서 수행하면 (성공 시에도) 공유 체크아웃이 작업 브랜치로 남고,
 #   병렬 실행 시 서로의 브랜치를 덮어쓰는 경쟁이 생긴다. 그래서 **전용 분리(detached) 임시 워크트리**를
@@ -270,10 +339,13 @@ _in_base_sync_core() {
     return 0
   fi
   # base 가 전진했고 원격 브랜치(open PR)가 이미 있으면, rebase 재작성은 SHA 를 바꿔 force 없는
-  # push 를 non-fast-forward 로 실패시킨다. 재작성하지 않고 그대로 둔다 — base 정합은 머지 단계의
-  # ff-only 게이트(그쪽도 자율 재동기화)가 강제한다.
+  # push 를 non-fast-forward 로 실패시킨다. 충돌이 없으면 재작성하지 않고 그대로 둔다 — base 정합은
+  # 머지 단계의 ff-only 게이트(그쪽도 자율 재동기화)가 강제한다. 단, **충돌**이면 그대로 두면 리뷰가
+  # 영영 승인 불가(재실행 무한 루프, #626) — rebase 대신 origin/main 을 merge-in(history 미재작성
+  # → non-force push, rules/version-control/git.md)해 해소 후 직접 push 한다.
   if [[ -n "$(in_existing_open_pr "$branch")" ]]; then
-    return 0
+    in_resync_open_pr "$branch"
+    return $?
   fi
   # 최초 통합(원격 브랜치 미존재): rebase 후 push(ff-safe). 충돌은 자율 해결하고, 해결 도중
   # 타겟이 또 전진하면(레이스) 갱신된 origin/main 으로 유한 횟수 재rebase 한다(non-force).

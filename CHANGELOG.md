@@ -2,10 +2,15 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
-## autopilot 0.64.3
+## autopilot 0.64.4
 
 ### 버그 수정
 - **통합이 stale 로컬 브랜치를 재사용해 루프 결과 커밋을 유실 (task 605)** — `in_ensure_work_branch`가 동명의 로컬 작업 브랜치 존재만으로 멱등 판정해, 재실행 시 낡은 시도의 브랜치를 그대로 push하고 루프의 최신 결과 커밋을 조용히 버렸다(관측: 진부한 구현이 되살아나 `plugin.json` 버전 되감김). 이제 기존 브랜치가 loop 결과 커밋을 조상으로 포함할 때만 멱등 통과하고, 미포함(stale)이면 정리 안내(로컬 브랜치 삭제 후 재실행)와 함께 차단한다. force 재배치는 계속 금지. 결과 커밋 미판독(loop 워크트리 이상)도 조용히 통과하지 않고 차단한다(terminal=done 은 워크트리 존재를 전제 — 정리 후 재진입은 pending 으로 빠져 이 경로에 오지 않음). 회귀 가드 `test-integration-stale-branch.sh` 추가.
+
+## autopilot 0.64.3
+
+### 버그 수정
+- **재실행이 충돌 브랜치를 재통합하지 않아 blocked 무한 루프 (#626)** — blocked 태스크 재실행(open PR 존재) 시 base sync가 무조건 조기 반환해 충돌이 남은 채 리뷰 승인만 폴링하다 상한 초과로 다시 blocked되던 문제 수정. `forge/lib/integration.sh` base sync가 open PR 브랜치의 충돌을 감지하면 `origin/main`을 원격 tip에 merge-in(history 미재작성, non-force)으로 자율 해소해 갱신된 head를 직접 push하고, 무충돌이면 기존 동작(재작성·push 없음)을 유지한다. 재통합 실패 시 리뷰 폴링에 들어가지 않고 integrate 단계에서 즉시 차단된다. 회귀 가드: `tests/autopilot/execute-task/test-execute-task-reentry-conflict-resync.sh`.
 
 ## project-init 0.25.0
 
