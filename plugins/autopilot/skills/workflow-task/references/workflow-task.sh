@@ -25,15 +25,48 @@ wt_start() {
   mapfile -t ids < <(printf '%s' "$ready" | jq -r '.[].task_id')
   if [[ ${#ids[@]} -eq 0 ]]; then echo '{"drained":0,"ready":0,"note":"no ready tasks"}'; return 0; fi
 
-  local conc="${maxp:-${#ids[@]}}"
+  # 산출물(버전 표면) 겹침 직렬화(#628): 태스크 본문 frontmatter scope.include 항목이 이미
+  # 앞선 태스크에 선점됐으면 이번 패스에서 실행하지 않는다(공유 CHANGELOG·매니페스트를 동시에
+  # 만지면 첫 머지가 형제 브랜치를 연쇄 충돌시킨다). 유예분은 deferred_ids 로 보고(조용한 누락
+  # 금지)하고 다음 틱 list_ready 가 다시 집는다. 특정 경로 하드코딩 없음 — 일반 경로 겹침.
+  local run_ids=() deferred=() claimed=$'\n'
+  local id body entries e overlap
+  for id in "${ids[@]}"; do
+    body="$($ADAPTER_CMD get_body --task-id "$id" 2>/dev/null | jq -r '.body // empty' 2>/dev/null || true)"
+    entries="$(printf '%s\n' "$body" | awk '
+      NR==1 && /^---[[:space:]]*$/ { fm=1; next }
+      fm && /^---[[:space:]]*$/ { exit }
+      fm && /^[[:space:]]*include:[[:space:]]*$/ { inc=1; next }
+      fm && inc && /^[[:space:]]*-[[:space:]]/ { s=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", s); print s; next }
+      fm && inc { inc=0 }
+    ')"
+    overlap=0
+    if [[ -n "$entries" ]]; then
+      while IFS= read -r e; do
+        [[ -n "$e" ]] || continue
+        case "$claimed" in *$'\n'"$e"$'\n'*) overlap=1; break;; esac
+      done <<< "$entries"
+    fi
+    if [[ "$overlap" == "1" ]]; then deferred+=("$id"); continue; fi
+    if [[ -n "$entries" ]]; then
+      while IFS= read -r e; do [[ -n "$e" ]] && claimed+="$e"$'\n'; done <<< "$entries"
+    fi
+    run_ids+=("$id")
+  done
+  local deferred_ids='[]'
+  if [[ ${#deferred[@]} -gt 0 ]]; then
+    deferred_ids="$(printf '%s\n' "${deferred[@]}" | jq -R . | jq -sc .)"
+  fi
+
+  local conc="${maxp:-${#run_ids[@]}}"
   # 평면 flow 정의 생성: 의존 없는 command_node 들(즉시 병렬). 각 노드 = execute-task start <id>.
   local def; def="$(mktemp "${TMPDIR:-/tmp}/wt-def.XXXXXX.py")"
   {
     echo "from workflow_replica.nodes import command_node"
     echo "CONCURRENCY = $conc"
     echo "NODES = ["
-    local id argv_json
-    for id in "${ids[@]}"; do
+    local argv_json
+    for id in "${run_ids[@]}"; do
       # EXECUTE_CMD(공백 분리) + start <id> 를 argv 리스트로
       argv_json="$(printf '%s\n' $EXECUTE_CMD start "$id" | jq -R . | jq -sc .)"
       printf '  command_node(%s, %s, cwd=%s),\n' "$(printf '%s' "$id" | jq -R .)" "$argv_json" "$(printf '%s' "$ROOT_DIR" | jq -R .)"
@@ -53,8 +86,9 @@ wt_start() {
   failed_ids="$(printf '%s' "$out" | jq -c '.failed // []' 2>/dev/null || echo '[]')"
   [[ -n "$failed_ids" ]] || failed_ids='[]'
   jq -nc --argjson r "${#ids[@]}" --argjson s "${succ:-0}" --argjson f "${failed:-0}" \
-    --argjson fids "$failed_ids" --arg ok "$ok" \
-    '{ready:$r, succeeded:$s, failed:$f, failed_ids:$fids, flow_ok:($ok=="true")}'
+    --argjson fids "$failed_ids" --argjson d "${#deferred[@]}" --argjson dids "$deferred_ids" \
+    --arg ok "$ok" \
+    '{ready:$r, succeeded:$s, failed:$f, failed_ids:$fids, deferred:$d, deferred_ids:$dids, flow_ok:($ok=="true")}'
   [[ "${failed:-0}" -eq 0 ]] || return 1
 }
 
