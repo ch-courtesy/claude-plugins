@@ -7,6 +7,11 @@
 ### 버그 수정
 - **통합이 stale 로컬 브랜치를 재사용해 루프 결과 커밋을 유실 (task 605)** — `in_ensure_work_branch`가 동명의 로컬 작업 브랜치 존재만으로 멱등 판정해, 재실행 시 낡은 시도의 브랜치를 그대로 push하고 루프의 최신 결과 커밋을 조용히 버렸다(관측: 진부한 구현이 되살아나 `plugin.json` 버전 되감김). 이제 기존 브랜치가 loop 결과 커밋을 조상으로 포함할 때만 멱등 통과하고, 미포함(stale)이면 정리 안내(로컬 브랜치 삭제 후 재실행)와 함께 차단한다. force 재배치는 계속 금지. 결과 커밋 미판독(loop 워크트리 이상)도 조용히 통과하지 않고 차단한다(terminal=done 은 워크트리 존재를 전제 — 정리 후 재진입은 pending 으로 빠져 이 경로에 오지 않음). 회귀 가드 `test-integration-stale-branch.sh` 추가.
 
+## project-init 0.25.0
+
+### 새 기능
+- **소비 프로젝트 훅 구조 표준 + 결정적 검사기 신설 (run 616)** — `shared/hook-standard/` 추가. `standard.md`가 소비 프로젝트 `.claude/hooks/`의 2계층 레이아웃(직속=이벤트명 kebab-case 핸들러, `lib/<command>/`=기능별 디렉터리)·역할 분리(핸들러는 디스패처, 로직은 lib)·스크립트 계약(POSIX sh·jq 우선 sed 폴백·비차단 exit 0·차단 exit 2·실행권한·`${CLAUDE_PROJECT_DIR}` 등록)을 단일 출처로 정의하고, 검사기 판정 10항목과 모델 판정 5항목을 분리된 절로 둔다. `hook_checker.py`(Python3 표준 라이브러리 전용)가 레이아웃·파일명·실행권한·셔뱅·settings↔핸들러 정합·lib 구조를 판정해 항목별 severity+evidence JSON을 stdout으로 내며, 결함이 있어도 평가 성공이면 exit 0. `checker-invocation.md`가 호출 계약(절대경로 고정·실행 형식·결과 해석)을 정의하고, `tests/`가 통과·위반 5종 픽스처로 판정을 검증한다. 후속 `create-hook`·`repair-hook` 스킬이 공유할 기준선(`shared/rubric`이 create-skill·repair-skill에 하는 역할과 대칭).
+
 ## thinktank 1.0.2
 
 ### 변경(호환)
