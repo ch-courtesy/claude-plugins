@@ -5,12 +5,17 @@
 ## autopilot 0.64.4
 
 ### 버그 수정
-- **라벨 설정 실패 사유를 라벨 부재로 오귀속(권한 거부 은폐) (#629)** — github 백엔드 `be_set_status`가 gh stderr를 버리고 실패를 "라벨 존재 필요" 고정 문구로 단정해 권한 거부·네트워크 오류 등 실제 원인이 은폐되던 문제 수정. `github.sh`가 원본 stderr를 보존해 진단에 포함한다(성공 시 무진단 유지). 회귀 가드: `lib/task-backend/tests/test-github-status-fail.sh`.
+- **통합이 stale 로컬 브랜치를 재사용해 루프 결과 커밋을 유실 (task 605)** — `in_ensure_work_branch`가 동명의 로컬 작업 브랜치 존재만으로 멱등 판정해, 재실행 시 낡은 시도의 브랜치를 그대로 push하고 루프의 최신 결과 커밋을 조용히 버렸다(관측: 진부한 구현이 되살아나 `plugin.json` 버전 되감김). 이제 기존 브랜치가 loop 결과 커밋을 조상으로 포함할 때만 멱등 통과하고, 미포함(stale)이면 정리 안내(로컬 브랜치 삭제 후 재실행)와 함께 차단한다. force 재배치는 계속 금지. 결과 커밋 미판독(loop 워크트리 이상)도 조용히 통과하지 않고 차단한다(terminal=done 은 워크트리 존재를 전제 — 정리 후 재진입은 pending 으로 빠져 이 경로에 오지 않음). 회귀 가드 `test-integration-stale-branch.sh` 추가.
 
 ## autopilot 0.64.3
 
 ### 버그 수정
 - **재실행이 충돌 브랜치를 재통합하지 않아 blocked 무한 루프 (#626)** — blocked 태스크 재실행(open PR 존재) 시 base sync가 무조건 조기 반환해 충돌이 남은 채 리뷰 승인만 폴링하다 상한 초과로 다시 blocked되던 문제 수정. `forge/lib/integration.sh` base sync가 open PR 브랜치의 충돌을 감지하면 `origin/main`을 원격 tip에 merge-in(history 미재작성, non-force)으로 자율 해소해 갱신된 head를 직접 push하고, 무충돌이면 기존 동작(재작성·push 없음)을 유지한다. 재통합 실패 시 리뷰 폴링에 들어가지 않고 integrate 단계에서 즉시 차단된다. 회귀 가드: `tests/autopilot/execute-task/test-execute-task-reentry-conflict-resync.sh`.
+
+## project-init 0.25.0
+
+### 새 기능
+- **소비 프로젝트 훅 구조 표준 + 결정적 검사기 신설 (run 616)** — `shared/hook-standard/` 추가. `standard.md`가 소비 프로젝트 `.claude/hooks/`의 2계층 레이아웃(직속=이벤트명 kebab-case 핸들러, `lib/<command>/`=기능별 디렉터리)·역할 분리(핸들러는 디스패처, 로직은 lib)·스크립트 계약(POSIX sh·jq 우선 sed 폴백·비차단 exit 0·차단 exit 2·실행권한·`${CLAUDE_PROJECT_DIR}` 등록)을 단일 출처로 정의하고, 검사기 판정 10항목과 모델 판정 5항목을 분리된 절로 둔다. `hook_checker.py`(Python3 표준 라이브러리 전용)가 레이아웃·파일명·실행권한·셔뱅·settings↔핸들러 정합·lib 구조를 판정해 항목별 severity+evidence JSON을 stdout으로 내며, 결함이 있어도 평가 성공이면 exit 0. `checker-invocation.md`가 호출 계약(절대경로 고정·실행 형식·결과 해석)을 정의하고, `tests/`가 통과·위반 5종 픽스처로 판정을 검증한다. 후속 `create-hook`·`repair-hook` 스킬이 공유할 기준선(`shared/rubric`이 create-skill·repair-skill에 하는 역할과 대칭).
 
 ## thinktank 1.0.2
 

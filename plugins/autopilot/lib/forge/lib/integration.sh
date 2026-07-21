@@ -153,15 +153,25 @@ in_loop_result_commit() {
 }
 
 # in_ensure_work_branch <branch> <spec> — 작업 브랜치 보장(없으면 loop 결과 커밋에서 생성).
-#   이미 있으면 그대로 사용(재실행 멱등). 어떤 경로에서도 force 로 옮기지 않는다.
+#   이미 있으면 loop 결과 커밋을 조상으로 포함할 때만 그대로 사용(재실행 멱등) — 포함하지
+#   않으면(낡은 시도의 stale 브랜치, task 605) 조용히 재사용해 결과 커밋을 유실하는 대신
+#   불일치를 표면화해 차단한다. 어떤 경로에서도 force 로 옮기지 않는다.
 #   forge·direct 서브모드가 공유하는 단일 진입(브랜치 이식 중복 방지).
 in_ensure_work_branch() {
   local branch="$1" spec="$2"
+  # 결과 커밋은 브랜치 존재 여부와 무관하게 필수 — terminal=done 은 loop 워크트리 존재를
+  # 전제하므로(status 는 <WT>/.loop/signals 로 판정), 미판독은 정상 재진입이 아니라 이상이다.
+  # 조용한 통과 대신 표면화한다(in_loop_result_commit 이 in_die 로 사유를 낸다).
+  local commit; commit="$(in_loop_result_commit "$spec")" || return 1
   # shellcheck disable=SC2086
   if $GIT_CMD rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1; then
-    return 0   # 이미 존재 — 멱등, force 재배치 안 함.
+    # shellcheck disable=SC2086
+    if $GIT_CMD merge-base --is-ancestor "$commit" "refs/heads/$branch" 2>/dev/null; then
+      return 0   # 결과 커밋 포함 — 멱등, force 재배치 안 함.
+    fi
+    in_die "stale 작업 브랜치: $branch 가 loop 결과 커밋($commit)을 포함하지 않음 — 조용한 재사용은 결과를 유실하므로 차단(force 재배치 금지). 정리: 로컬 브랜치 삭제(git branch -D $branch, 원격 동명 브랜치·열린 PR 도 정리) 후 재실행하세요."
+    return 1
   fi
-  local commit; commit="$(in_loop_result_commit "$spec")" || return 1
   # shellcheck disable=SC2086
   $GIT_CMD branch "$branch" "$commit" \
     || { in_die "작업 브랜치 생성 실패: $branch ← $commit"; return 1; }
