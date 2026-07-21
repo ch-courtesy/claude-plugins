@@ -7,6 +7,11 @@
 ### 변경(호환)
 - **공유 session-conventions 해체 — 규범을 각 SKILL.md에 용어 특화 인라인 (run 604)** — `skills/shared/session-conventions.md`를 제거하고 규범 5영역(호출 규약·세션 파일 규율·디스패치 공통 규범·중앙 리서치 공통 규범·공통 안전 경계)을 brainstorm(세션 파일, `.brainstorm/<session-id>.md`)·roundtable(회의 파일, `.roundtable/<meeting-id>.md`) 각 SKILL.md 본문에 각 스킬 용어로 자체 정의. `../shared/` 참조·위임 문구 제거(스킬 자기완결). 규범 의미·강도 불변.
 
+## autopilot 0.64.1
+
+### 변경(호환)
+- **create-task 등록-후 상태 전이 문구 단일화 (run 611)** — 마커 없음 분기가 "전이를 생략하거나 명시적으로 `set_status --status backlog` 를 호출한다"로 두 갈래를 허용해 실행 세션마다 동사 시퀀스가 달라지던 비결정성을 제거. 이제 초기 상태 `backlog` 유지라는 단일 행동만 지시한다(추가 전이 호출 없음). 전이 의미론(backlog/in_design 기준)·재개 경로 불변. 회귀 가드: `tests/autopilot/test-create-task-status-transition.sh` TEST 5.
+
 ## autopilot 0.64.0
 
 ### 변경(호환)

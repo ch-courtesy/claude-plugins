@@ -93,8 +93,7 @@ auto-merge, 없으면 로컬 메인 merge. `.autopilot/` 는 워치 디렉토리
    ```
 5. **등록-후 상태 전이 (소유)** — 등록 직후 본문의 `[NEEDS CLARIFICATION` 마커 유무로 최종 상태를 분기한다.
    이 전이는 이 등록 프리미티브가 소유한다:
-   - 마커가 **없으면**(완성 SPEC) 초기 상태 `backlog`를 유지한다 — 전이를 생략하거나 명시적으로
-     `bash "$ADAPTER" set_status --task-id <id> --status backlog` 를 호출한다.
+   - 마커가 **없으면**(완성 SPEC) 초기 상태 `backlog`를 유지한다 — 추가 전이 호출을 하지 않는다.
    - 마커가 **남아 있으면**(미해결 잔존) `bash "$ADAPTER" set_status --task-id <id> --status in_design` 로
      상태를 전이한다.
 6. **본문 갱신은 set_body에 위임** — 등록된 태스크의 본문을 나중에 갱신해야 하면(예: `in_design` 태스크의
