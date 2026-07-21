@@ -1,6 +1,6 @@
 ---
 name: create-task
-description: 외부 작성자(feature·fix)가 만든 자기완결적 태스크 본문(=SPEC)을 받아 선택된 백엔드(filesystem/github-project/beads)에 태스크로 등록하려 할 때 사용하는 등록 프리미티브 — 등록과 등록-후 상태 전이(완성→backlog / 미해결 잔존→in_design)를 소유하고, 본문 갱신은 백엔드 set_body 동사에 위임한다. 인터뷰·정적분석 같은 작성 로직은 갖지 않는다(작성은 feature·fix가 소유). 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 호출 'Skill(skill="create-task", args="<제목>\n\n<태스크 본문>")'.
+description: 완성된 태스크 본문(=SPEC)을 태스크 백엔드에 등록할 때 사용 — "이거 태스크로 등록해줘"·"백로그에 올려줘"·"태스크 만들어줘"·"이 스펙 등록해줘" 같은 직접 등록 요청, 작성자 feature·fix가 완성 본문을 넘겨 등록을 요청하는 경우, 그리고 'resume <task-id>'로 기존 in_design 태스크 본문을 갱신할 때. 받은 본문을 선택된 백엔드(filesystem/github-project/beads)에 등록하고 등록-후 상태(backlog/in_design)를 전이한다. 본문 작성이 아직 필요한 신호(새 기능 의도·버그 증상·실패 테스트)는 작성자 feature·fix가 먼저이므로 이 스킬을 직접 쓰지 않는다. 호출 'Skill(skill="create-task", args="<제목>\n\n<태스크 본문>")'.
 allowed-tools:
   - AskUserQuestion
   - Read
