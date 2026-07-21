@@ -16,12 +16,16 @@ allowed-tools:
 **DAG 없는 1회 드레이너**다. `references/workflow-task.sh`가 다음을 수행한다:
 
 1. `adapter list_ready` — 준비된(모든 `depends_on`이 done, 또는 lease가 stale한 in_progress 회수분) 태스크를 모은다.
-2. **flow 평면 병렬 fan-out** — 의존 없는 노드 집합으로 각 태스크에 `execute-task start <id>`를 동시성 상한 내
-   병렬 실행한다(`--max-parallel N`, 기본=준비 태스크 수). flow가 동시성·실패 격리·resume을 제공한다.
-3. 한 패스 종료. done/blocked 상태 전이는 execute-task가 이미 수행하므로 별도 동기화가 없다.
+2. **산출물 겹침 직렬화** — 각 태스크 본문 frontmatter `scope.include` 항목이 앞선 태스크에 이미 선점됐으면
+   이번 패스에서 실행하지 않고 유예한다(공유 버전 표면 — CHANGELOG·매니페스트 — 을 동시에 만지면 첫 머지가
+   형제 브랜치를 연쇄 충돌시킨다). 유예분은 `deferred_ids`로 보고되고 다음 틱 `list_ready`가 다시 집는다.
+3. **flow 평면 병렬 fan-out** — 의존 없는 노드 집합으로 각 실행 대상에 `execute-task start <id>`를 동시성 상한 내
+   병렬 실행한다(`--max-parallel N`, 기본=실행 대상 수). flow가 동시성·실패 격리·resume을 제공한다.
+4. 한 패스 종료. done/blocked 상태 전이는 execute-task가 이미 수행하므로 별도 동기화가 없다.
 
-**DAG를 갖지 않는다**: `list_ready`가 의존 충족분만 반환하므로 한 패스의 태스크들은 상호 독립이고, 의존 순서
-해결은 백엔드가 **틱 간**에 한다(다음 스케줄러 호출의 `list_ready`가 새로 ready된 후행을 잡는다).
+**DAG를 갖지 않는다**: `list_ready`가 의존 충족분만 반환하므로 한 패스의 태스크들은 `depends_on` 상 독립이고,
+의존 순서 해결은 백엔드가 **틱 간**에 한다(다음 스케줄러 호출의 `list_ready`가 새로 ready된 후행을 잡는다).
+단, 공유 산출물(버전 표면)이 만드는 암묵적 결합은 위 직렬화가 패스 안에서 해소한다.
 
 ## 호출
 
@@ -30,9 +34,10 @@ WT="${CLAUDE_PLUGIN_ROOT}/skills/workflow-task/references/workflow-task.sh"
 bash "$WT" start [--max-parallel N]
 ```
 
-출력은 한 줄 JSON(`{ready,succeeded,failed,failed_ids,flow_ok}`). 준비 태스크가 없으면 `{"ready":0,...}`로 즉시
-종료. `failed_ids`는 이번 패스에서 `execute-task`가 `blocked`로 둔 태스크 id 배열로, 아래 「버그 신호 수거」의
-입력이다.
+출력은 한 줄 JSON(`{ready,succeeded,failed,failed_ids,deferred,deferred_ids,flow_ok}`). 준비 태스크가 없으면
+`{"ready":0,...}`로 즉시 종료. `failed_ids`는 이번 패스에서 `execute-task`가 `blocked`로 둔 태스크 id 배열로,
+아래 「버그 신호 수거」의 입력이다. `deferred_ids`는 산출물 겹침으로 이번 패스에서 실행하지 않은(다음 틱이
+집는) 태스크 id 배열이다 — 조용한 누락 없이 여기로 드러난다.
 
 ## 버그 신호 수거 (드레인자 중앙 fix 호출)
 

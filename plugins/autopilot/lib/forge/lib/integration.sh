@@ -399,6 +399,54 @@ in_push_branch() {
 }
 
 # =====================================================================
+# 3d) CHANGELOG 순수-추가 게이트 (#628) — CHANGELOG 는 누적 계약(추가만).
+#   워커가 base 전진을 못 따라가 기존 섹션을 자기 항목으로 덮어쓰면(기존 라인 삭제) 직전
+#   릴리스 기록이 소실된 채 머지될 수 있다(리뷰 봇 포착은 확률적). 통합이 결정적으로 막는다:
+#   base 대비 브랜치 쪽 변경(three-dot diff = merge-base 기준)이 CHANGELOG 라인을 삭제하면
+#   머지 후보(PR·리뷰)로 통과시키지 않고 차단한다. three-dot 이라 base 전진분(형제 머지)은
+#   오탐하지 않고, base 재동기화 merge-in 이 main 항목을 덮어쓴 경우는 merge-base 전진으로
+#   잡힌다. 경로는 INT_CHANGELOG_FILE 로 설정 가능(기본 CHANGELOG.md) — 빈 값이면 게이트
+#   비활성(정당한 오타 수정·항목 재배치 우회), base 에 파일이 없으면 적용하지 않는다
+#   (버전·changelog 정책은 컨슈밍 프로젝트 소유 — 존재할 때만 계약을 지킨다).
+# =====================================================================
+
+# in_changelog_additive_gate <branch> — 순수-추가면 0, 기존 라인 삭제 감지면 1(사유 stderr).
+#   INT_BASESYNC_PUSHED=1 이면 base sync 가 분리 워크트리에서 원격으로 직접 push 한 상태라
+#   로컬 ref 가 결과를 반영하지 않는다 — 원격 tip(origin/<branch>)을 게이트 대상으로 삼는다.
+in_changelog_additive_gate() {
+  local branch="$1" file="${INT_CHANGELOG_FILE-CHANGELOG.md}" base ref del
+  [[ -n "$file" ]] || return 0        # 빈 값 = 게이트 비활성(명시적 우회).
+  # shellcheck disable=SC2086
+  if $GIT_CMD rev-parse --verify --quiet "refs/remotes/origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+    base="refs/remotes/origin/$DEFAULT_BRANCH"
+  elif $GIT_CMD rev-parse --verify --quiet "refs/heads/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+    base="refs/heads/$DEFAULT_BRANCH"
+  else
+    return 0                          # base 미상 → 판정 불가, 게이트 미적용.
+  fi
+  # shellcheck disable=SC2086
+  $GIT_CMD cat-file -e "$base:$file" 2>/dev/null || return 0   # base 에 파일 존재할 때만 적용.
+  if [[ "${INT_BASESYNC_PUSHED:-}" == "1" ]]; then
+    # shellcheck disable=SC2086
+    $GIT_CMD fetch origin "$branch" >/dev/null 2>&1 || true
+    ref="refs/remotes/origin/$branch"
+  else
+    ref="refs/heads/$branch"
+  fi
+  # 삭제 라인 수: diff '-' 줄 중 파일 헤더(정확히 '--- a/…' 또는 '--- /dev/null')와 빈 줄
+  # 삭제(단독 '-')는 제외. 헤더를 '^---' 전체로 제외하면 '-- ' 로 시작하는 콘텐츠 라인의
+  # 삭제('---…' 로 렌더)가 미탐된다 — 실제 헤더 형태만 정확히 제외한다.
+  # shellcheck disable=SC2086
+  del="$($GIT_CMD diff "$base...$ref" -- "$file" 2>/dev/null \
+    | awk '/^-/ && !/^--- (a\/|\/dev\/null)/ && $0 != "-" { n++ } END { print n+0 }')"
+  if [[ "${del:-0}" -gt 0 ]]; then
+    in_die "CHANGELOG 순수-추가 게이트: $file 의 기존 라인 ${del}개 삭제 감지 — CHANGELOG 는 누적 계약(추가만)이라 머지 후보로 통과시키지 않는다(branch=$branch). 기존 섹션을 덮어쓰지 말고 자기 항목을 최상단에 '추가'로 재작성하세요. 정당한 오타 수정·항목 재배치라면 INT_CHANGELOG_FILE='' 로 게이트를 끄고 재실행해 우회할 수 있다."
+    return 1
+  fi
+  return 0
+}
+
+# =====================================================================
 # 3c) 재실행 stale 잔여 정리 — 직전 실패/blocked 시도가 남긴 원격 작업 브랜치/열린 PR 이
 #   현재 로컬 작업 커밋과 non-ff 비호환이고 **현재 실행 소유 stale 잔여**로 식별되면,
 #   push 전에 안전하게 정리(PR close + 원격 브랜치 삭제)해 non-ff push 거부를 막는다.
@@ -644,6 +692,8 @@ in_integrate() {
       # #452: rebase 경로에선 base_sync 가 분리 워크트리에서 원격으로 직접 push 하므로(INT_BASESYNC_PUSHED)
       # in_push_branch 를 건너뛴다. rebase 불필요(조기 반환) 경로에선 ref 이름으로 push.
       [[ "${INT_BASESYNC_PUSHED:-}" == "1" ]] || in_push_branch "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      # CHANGELOG 순수-추가 게이트(#628): 기존 항목 삭제 변경은 PR(머지 후보)로 넘기지 않는다.
+      in_changelog_additive_gate "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       local title pr
       title="$(in_spec_title "$spec")"
       pr="$(in_ensure_pr "$branch" "$title" "$spec")" || { int_set_phase "$rd" "$key" blocked; return 4; }
@@ -720,6 +770,8 @@ in_integrate_direct() {
       int_set_branch "$rd" "$key" "$branch"
       # 다리: 머지 대상으로 쓰기 전에 작업 브랜치가 없으면 loop 결과 커밋에서 생성(멱등·공통 헬퍼).
       in_ensure_work_branch "$branch" "$spec" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      # CHANGELOG 순수-추가 게이트(#628): 기존 항목 삭제 변경은 리뷰(머지 후보)로 넘기지 않는다.
+      in_changelog_additive_gate "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       int_set_phase "$rd" "$key" review
       int_log "$rd" "$key" "직접 통합(승인 요청·PR·push 우회) → 적대적 리뷰 게이트: branch=$branch → review"
       echo "key:    $key"
