@@ -31,8 +31,8 @@ check "Codex marketplace has required policy and category" bash -c \
 check "Codex marketplace omits plugin version" bash -c \
   "[ \"\$(jq -r '.plugins[0] | has(\"version\")' '$CODEX_MARKETPLACE')\" = false ]"
 
-check "project-init release surfaces are version 0.24.7" bash -c \
-  "[ \"\$(jq -r .version '$CODEX_MANIFEST')\" = 0.24.7 ] && [ \"\$(jq -r .version '$CLAUDE_MANIFEST')\" = 0.24.7 ] && [ \"\$(jq -r '.plugins[] | select(.name == \"project-init\") | .version' '$CLAUDE_MARKETPLACE')\" = 0.24.7 ]"
+check "project-init release surfaces are version 0.25.0" bash -c \
+  "[ \"\$(jq -r .version '$CODEX_MANIFEST')\" = 0.25.0 ] && [ \"\$(jq -r .version '$CLAUDE_MANIFEST')\" = 0.25.0 ] && [ \"\$(jq -r '.plugins[] | select(.name == \"project-init\") | .version' '$CLAUDE_MARKETPLACE')\" = 0.25.0 ]"
 check "Codex manifest uses default plugin hook discovery without override" bash -c \
   "[ \"\$(jq -r 'has(\"hooks\")' '$CODEX_MANIFEST')\" = false ]"
 

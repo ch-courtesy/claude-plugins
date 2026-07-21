@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## project-init 0.25.0
+
+### 새 기능
+- **소비 프로젝트 훅 구조 표준 + 결정적 검사기 신설 (run 616)** — `shared/hook-standard/` 추가. `standard.md`가 소비 프로젝트 `.claude/hooks/`의 2계층 레이아웃(직속=이벤트명 kebab-case 핸들러, `lib/<command>/`=기능별 디렉터리)·역할 분리(핸들러는 디스패처, 로직은 lib)·스크립트 계약(POSIX sh·jq 우선 sed 폴백·비차단 exit 0·차단 exit 2·실행권한·`${CLAUDE_PROJECT_DIR}` 등록)을 단일 출처로 정의하고, 검사기 판정 10항목과 모델 판정 5항목을 분리된 절로 둔다. `hook_checker.py`(Python3 표준 라이브러리 전용)가 레이아웃·파일명·실행권한·셔뱅·settings↔핸들러 정합·lib 구조를 판정해 항목별 severity+evidence JSON을 stdout으로 내며, 결함이 있어도 평가 성공이면 exit 0. `checker-invocation.md`가 호출 계약(절대경로 고정·실행 형식·결과 해석)을 정의하고, `tests/`가 통과·위반 5종 픽스처로 판정을 검증한다. 후속 `create-hook`·`repair-hook` 스킬이 공유할 기준선(`shared/rubric`이 create-skill·repair-skill에 하는 역할과 대칭).
+
 ## thinktank 1.0.2
 
 ### 변경(호환)
