@@ -92,7 +92,9 @@ be_set_status() {
   local id s; id="$(_argval --task-id "$@")"; s="$(_argval --status "$@")"
   local old; old="$(gh_status_label "$id")"
   [[ -n "$old" ]] && gh issue edit "$id" $(gh_repo_args) --remove-label "status:$old" >/dev/null 2>&1 || true
-  gh issue edit "$id" $(gh_repo_args) --add-label "status:$s" >/dev/null 2>&1 || tb_die "라벨 status:$s 설정 실패(라벨 존재 필요)"
+  # 실패 원인(권한 거부·라벨 부재·네트워크)을 오귀속하지 않도록 원본 stderr 를 보존해 전달한다.
+  local err
+  err="$(gh issue edit "$id" $(gh_repo_args) --add-label "status:$s" 2>&1 >/dev/null)" || tb_die "라벨 status:$s 설정 실패: $err"
   if [[ "$s" == "in_progress" ]]; then gh_set_lease "$id" "$(tb_now_epoch)" "$(_argval --owner "$@")"; fi
   # review 진입 시각을 lease 에 기록(owner="review"). heartbeat 없는 forge 단계의 crash 감지에 사용.
   if [[ "$s" == "review" ]]; then gh_set_lease "$id" "$(tb_now_epoch)" "review"; fi
