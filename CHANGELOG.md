@@ -7,6 +7,11 @@
 ### 변경(호환)
 - **공유 session-conventions 해체 — 규범을 각 SKILL.md에 용어 특화 인라인 (run 604)** — `skills/shared/session-conventions.md`를 제거하고 규범 5영역(호출 규약·세션 파일 규율·디스패치 공통 규범·중앙 리서치 공통 규범·공통 안전 경계)을 brainstorm(세션 파일, `.brainstorm/<session-id>.md`)·roundtable(회의 파일, `.roundtable/<meeting-id>.md`) 각 SKILL.md 본문에 각 스킬 용어로 자체 정의. `../shared/` 참조·위임 문구 제거(스킬 자기완결). 규범 의미·강도 불변.
 
+## autopilot 0.64.0
+
+### 변경(호환)
+- **scope-coverage 매핑을 컨슈밍 프로젝트 설정으로 공급 (#609)** — `scope-coverage-check.sh`에 하드코딩돼 있던 이 저장소 전용 소스→테스트 매핑(`plugins/autopilot/skills/<S>` → `tests/autopilot/…`)을 제거하고, 프로젝트가 `<repo-root>/.autopilot/scope-coverage-map.json`으로 매핑 규칙(`rules[].source` prefix + `<name>` 세그먼트 캡처, `rules[].tests` 디렉토리·글롭)을 공급하는 구조로 전환. 설정이 없는 프로젝트는 검사가 경고 없이 exit 0으로 통과(등록 비차단 계약 불변). `references/scope-coverage-map.md`는 매핑 표가 아니라 설정 스키마 규약 문서로 갱신. 이 저장소는 자체 `.autopilot/scope-coverage-map.json`을 제공해 기존 검사 동작 유지. 플러그인이 컨슈밍 프로젝트 정책을 내장하던 계층 역전 해소(#482 계열).
+
 ## autopilot 0.63.6
 
 ### 변경(호환)
