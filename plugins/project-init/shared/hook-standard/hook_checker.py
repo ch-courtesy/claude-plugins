@@ -174,13 +174,15 @@ def evaluate(hooks_dir):
                         f"셔뱅이 '{SHEBANG}' 가 아닌 스크립트: {bad_shebang}" if bad_shebang
                         else f"모든 스크립트 셔뱅 {SHEBANG}")
 
-    # settings 정합
-    registered = {_command_basename(c) for _, c in regs}
+    # settings 정합 — 등록은 (이벤트, 핸들러 파일명) 쌍으로 비교한다: 같은 파일명이라도
+    # 다른 이벤트에 등록된 것은 정합이 아니다(훅은 등록된 이벤트에서만 실행된다).
+    registered = {(e, _command_basename(c)) for e, c in regs}
     unregistered = [os.path.basename(p) for p in top
-                    if os.path.basename(p) not in registered]
+                    if (HANDLER_NAMES.get(os.path.basename(p)),
+                        os.path.basename(p)) not in registered]
     res["G-REGISTERED"] = (not unregistered,
-                           f"settings 에 등록 없는 핸들러: {unregistered}" if unregistered
-                           else f"핸들러 {len(top)}개 모두 등록됨")
+                           f"settings 에 자기 이벤트로 등록 없는 핸들러: {unregistered}" if unregistered
+                           else f"핸들러 {len(top)}개 모두 자기 이벤트로 등록됨")
     existing = {os.path.basename(p) for p in top}
     missing = sorted({_command_basename(c) for _, c in regs
                       if _command_basename(c) not in existing})

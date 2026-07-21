@@ -59,6 +59,7 @@ ok "standard.md: 검사기 항목·모델 판정 항목 분리 절"
 chmod +x "$FIXTURES"/good/hooks/*.sh "$FIXTURES"/good/hooks/lib/*/*.sh
 chmod +x "$FIXTURES"/violation-bad-name/hooks/*.sh
 chmod +x "$FIXTURES"/violation-settings-mismatch/hooks/*.sh
+chmod +x "$FIXTURES"/violation-wrong-event/hooks/*.sh
 chmod +x "$FIXTURES"/violation-stray-script/hooks/*.sh "$FIXTURES"/violation-stray-script/hooks/helpers/*.sh
 chmod +x "$FIXTURES"/violation-shebang/hooks/*.sh
 chmod -x "$FIXTURES"/violation-no-exec/hooks/pre-tool-use.sh
@@ -83,6 +84,13 @@ run "$FIXTURES/violation-settings-mismatch/hooks"
 assert_json "등록↔파일 불일치는 양방향 FAIL" grade=F pass:G-REGISTERED=false pass:G-FILE-EXISTS=false \
   evidence:G-REGISTERED=nonempty evidence:G-FILE-EXISTS=nonempty
 ok "violation-settings-mismatch: G-REGISTERED·G-FILE-EXISTS BLOCKER → F"
+
+# 같은 파일명이라도 다른 이벤트에 등록되면 정합이 아니다 — (이벤트, 파일명) 쌍 비교.
+run "$FIXTURES/violation-wrong-event/hooks"
+[ "$EC" -eq 0 ] || fail "violation-wrong-event exit 0 기대(실제 $EC)"
+assert_json "다른 이벤트 등록은 G-REGISTERED FAIL" grade=F pass:G-REGISTERED=false \
+  pass:G-FILE-EXISTS=true evidence:G-REGISTERED=nonempty
+ok "violation-wrong-event: 이벤트↔핸들러 불일치 G-REGISTERED BLOCKER → F"
 
 run "$FIXTURES/violation-stray-script/hooks"
 [ "$EC" -eq 0 ] || fail "violation-stray-script exit 0 기대(실제 $EC)"
