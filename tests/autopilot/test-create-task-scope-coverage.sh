@@ -150,5 +150,54 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["rules"], 
   || fail "T14: scope-coverage-map.json 파싱 실패 또는 rules 비어 있음"
 ok "저장소 매핑 설정 존재"
 
+# === T15: thinktank 소스만 있고 테스트 누락 → SCOPE_COVERAGE_WARNING ===
+echo "=== T15: thinktank 소스만 있고 테스트 누락 → SCOPE_COVERAGE_WARNING ==="
+BODY_TT_MISSING="---
+scope:
+  include:
+    - plugins/thinktank/skills/brainstorm/**
+---
+
+## 무엇을 만들 것인가
+thinktank 테스트 경로 누락 샘플 본문.
+"
+out6="$(echo "$BODY_TT_MISSING" | bash "$CHECKER")"
+echo "$out6" | grep -q 'SCOPE_COVERAGE_WARNING' \
+  || fail "T15: thinktank 소스 테스트 누락 시 SCOPE_COVERAGE_WARNING 없음 (실제: '$out6')"
+ok "thinktank 소스 테스트 누락 → SCOPE_COVERAGE_WARNING"
+
+# === T16: thinktank 소스 + 테스트 경로 모두 포함 → 경고 없음 ===
+echo "=== T16: thinktank 소스+테스트 모두 포함 → 경고 없음 ==="
+BODY_TT_COVERED="---
+scope:
+  include:
+    - plugins/thinktank/skills/brainstorm/**
+    - tests/thinktank/test-brainstorm-skill.sh
+---
+
+## 무엇을 만들 것인가
+thinktank 소스+테스트 모두 포함 샘플 본문.
+"
+out7="$(echo "$BODY_TT_COVERED" | bash "$CHECKER")"
+[[ -z "$out7" ]] \
+  || fail "T16: thinktank 소스+테스트 모두 포함 시 경고 발생 (실제: '$out7')"
+ok "thinktank 소스+테스트 모두 포함 → 경고 없음"
+
+# === T17: 매핑 테스트가 파일시스템에 없으면 검사 생략 (오탐 방지) ===
+echo "=== T17: thinktank 신규 스킬(테스트 부재) → 오탐 없음 ==="
+BODY_TT_NEW="---
+scope:
+  include:
+    - plugins/thinktank/skills/nonexistent-skill/**
+---
+
+## 무엇을 만들 것인가
+아직 테스트가 없는 신규 thinktank 스킬 샘플.
+"
+out8="$(echo "$BODY_TT_NEW" | bash "$CHECKER")"
+[[ -z "$out8" ]] \
+  || fail "T17: 테스트 부재 신규 스킬에서 오탐 발생 (실제: '$out8')"
+ok "테스트 부재 신규 스킬 → 오탐 없음"
+
 echo ""
 echo "=== 모든 #498 scope-coverage 검증 테스트 통과 ==="
