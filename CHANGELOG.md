@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.64.4
+
+### 버그 수정
+- **라벨 설정 실패 사유를 라벨 부재로 오귀속(권한 거부 은폐) (#629)** — github 백엔드 `be_set_status`가 gh stderr를 버리고 실패를 "라벨 존재 필요" 고정 문구로 단정해 권한 거부·네트워크 오류 등 실제 원인이 은폐되던 문제 수정. `github.sh`가 원본 stderr를 보존해 진단에 포함한다(성공 시 무진단 유지). 회귀 가드: `lib/task-backend/tests/test-github-status-fail.sh`.
+
 ## autopilot 0.64.3
 
 ### 버그 수정
