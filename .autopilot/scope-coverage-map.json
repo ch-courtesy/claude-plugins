@@ -8,6 +8,12 @@
       ]
     },
     {
+      "source": "plugins/thinktank/skills/<name>/",
+      "tests": [
+        "tests/thinktank/test-<name>*.sh"
+      ]
+    },
+    {
       "source": "plugins/autopilot/lib/task-backend/",
       "tests": [
         "plugins/autopilot/lib/task-backend/tests/"
