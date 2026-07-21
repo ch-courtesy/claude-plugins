@@ -72,7 +72,9 @@ auto-merge, 없으면 로컬 메인 merge. `.autopilot/` 는 워치 디렉토리
    영속화」 헬퍼를 실행해 config를 메인까지 영속화한다(멱등).
 3. **scope-coverage 검증** — 등록 전에 scope-coverage 검증을 수행한다. 본문 frontmatter의
    `scope.include`에서 소스 경로를 읽어, 그 소스를 덮는 **기존** 테스트 경로가 scope.include에 함께 있는지
-   확인한다. 매핑 관례의 단일 출처는 `references/scope-coverage-map.md`다:
+   확인한다. 소스→테스트 매핑은 **컨슈밍 프로젝트가 `.autopilot/scope-coverage-map.json`으로 공급**하며,
+   그 설정 스키마의 단일 출처는 `references/scope-coverage-map.md`다. 설정이 없는 프로젝트에서는 검사가
+   경고 없이 통과한다:
    ```
    CHECKER="${CLAUDE_PLUGIN_ROOT}/skills/create-task/references/scope-coverage-check.sh"
    echo "<본문>" | bash "$CHECKER"
@@ -91,8 +93,7 @@ auto-merge, 없으면 로컬 메인 merge. `.autopilot/` 는 워치 디렉토리
    ```
 5. **등록-후 상태 전이 (소유)** — 등록 직후 본문의 `[NEEDS CLARIFICATION` 마커 유무로 최종 상태를 분기한다.
    이 전이는 이 등록 프리미티브가 소유한다:
-   - 마커가 **없으면**(완성 SPEC) 초기 상태 `backlog`를 유지한다 — 전이를 생략하거나 명시적으로
-     `bash "$ADAPTER" set_status --task-id <id> --status backlog` 를 호출한다.
+   - 마커가 **없으면**(완성 SPEC) 초기 상태 `backlog`를 유지한다 — 추가 전이 호출을 하지 않는다.
    - 마커가 **남아 있으면**(미해결 잔존) `bash "$ADAPTER" set_status --task-id <id> --status in_design` 로
      상태를 전이한다.
 6. **본문 갱신은 set_body에 위임** — 등록된 태스크의 본문을 나중에 갱신해야 하면(예: `in_design` 태스크의

@@ -2,8 +2,9 @@
 # scope-coverage-check.sh — SPEC 본문의 scope.include 소스 경로를 덮는
 # 기존 테스트 경로가 scope.include에 함께 있는지 검증한다 (#498).
 #
-# 매핑 관례의 단일 출처: references/scope-coverage-map.md
-# 항상 0 exit — 등록을 막지 않고 누락만 플래그한다.
+# 소스→테스트 매핑은 컨슈밍 프로젝트가 `.autopilot/scope-coverage-map.json` 으로 공급한다.
+# 설정 스키마의 단일 출처: references/scope-coverage-map.md
+# 설정이 없으면 검사하지 않고 통과한다. 항상 0 exit — 등록을 막지 않고 누락만 플래그한다.
 #
 # Usage:
 #   bash scope-coverage-check.sh [--body-file <path>]
@@ -36,7 +37,7 @@ fi
 
 # Python으로 파싱 + 검증 (stdin = 스크립트, argv = 파일경로)
 python3 - "$body_path" "$REPO_ROOT" <<'PYEOF'
-import sys, re, os
+import sys, re, os, json, glob
 
 body_path = sys.argv[1]
 repo_root = sys.argv[2]
@@ -72,6 +73,17 @@ def parse_includes(body):
                 in_include = in_scope = False
     return includes
 
+def load_rules(repo_root):
+    """프로젝트가 공급한 매핑 규칙 목록. 설정이 없거나 불량이면 빈 목록."""
+    cfg = os.path.join(repo_root, '.autopilot', 'scope-coverage-map.json')
+    if not os.path.isfile(cfg):
+        return []
+    try:
+        with open(cfg) as f:
+            return json.load(f).get('rules', [])
+    except Exception:
+        return []
+
 def is_covered(test_path, includes):
     """테스트 경로가 includes의 항목 중 하나로 커버되는지 확인.
 
@@ -86,51 +98,53 @@ def is_covered(test_path, includes):
 
 try:
     includes = parse_includes(body)
-    if not includes:
+    rules = load_rules(repo_root)
+    if not includes or not rules:
         sys.exit(0)
 
     missing = []
     checked = set()
 
-    for inc in includes:
-        # 매핑 규칙 1: plugins/autopilot/skills/<S>/...
-        m = re.match(r'^plugins/autopilot/skills/([^/]+)/', inc)
-        if m:
-            skill = m.group(1)
-            if skill in checked:
-                continue
-            checked.add(skill)
-
-            expected = []
-
-            # 1a) tests/autopilot/<S>/ 디렉터리
-            dir_test = f'tests/autopilot/{skill}/'
-            if os.path.isdir(os.path.join(repo_root, dir_test)):
-                expected.append(dir_test)
-
-            # 1b) tests/autopilot/test-<S>*.sh 파일
-            test_dir = os.path.join(repo_root, 'tests/autopilot')
-            if os.path.isdir(test_dir):
-                for f in sorted(os.listdir(test_dir)):
-                    if f.startswith(f'test-{skill}') and f.endswith('.sh'):
-                        expected.append(f'tests/autopilot/{f}')
-
-            # 기존 테스트 없는 신규 소스 → 오탐 방지, 통과
-            if not expected:
-                continue
-
-            if not any(is_covered(exp, includes) for exp in expected):
-                rep = expected[0] + (', ...' if len(expected) > 1 else '')
-                missing.append(f'[{skill}] {rep}')
+    for rule in rules:
+        source = rule.get('source', '')
+        tests = rule.get('tests', [])
+        if not source or not tests:
             continue
 
-        # 매핑 규칙 2: plugins/autopilot/lib/task-backend/...
-        if inc.startswith('plugins/autopilot/lib/task-backend/') and 'task-backend' not in checked:
-            checked.add('task-backend')
-            tb_dir = 'plugins/autopilot/lib/task-backend/tests/'
-            if os.path.isdir(os.path.join(repo_root, tb_dir)):
-                if not is_covered(tb_dir, includes):
-                    missing.append(f'[task-backend] {tb_dir}')
+        # source 의 <name> 은 경로 세그먼트 1개를 캡처한다.
+        if '<name>' in source:
+            pre, post = source.split('<name>', 1)
+            pattern = '^' + re.escape(pre) + r'([^/]+)' + re.escape(post)
+        else:
+            pattern = '^' + re.escape(source)
+
+        for inc in includes:
+            m = re.match(pattern, inc)
+            if not m:
+                continue
+            name = m.group(1) if m.groups() else ''
+            key = (source, name)
+            if key in checked:
+                continue
+            checked.add(key)
+
+            # 실제로 존재하는 기대 테스트 경로만 수집 (신규 소스 오탐 방지)
+            existing = []
+            for t in tests:
+                expected = t.replace('<name>', name)
+                if expected.endswith('/'):
+                    if os.path.isdir(os.path.join(repo_root, expected)):
+                        existing.append(expected)
+                else:
+                    for p in sorted(glob.glob(os.path.join(repo_root, expected), recursive=True)):
+                        existing.append(os.path.relpath(p, repo_root))
+
+            if not existing:
+                continue
+
+            if not any(is_covered(exp, includes) for exp in existing):
+                rep = existing[0] + (', ...' if len(existing) > 1 else '')
+                missing.append(f'[{name or source}] {rep}')
 
     if missing:
         print('SCOPE_COVERAGE_WARNING: 아래 소스를 덮는 기존 테스트 경로가 scope.include에 없습니다.')

@@ -7,10 +7,25 @@
 ### 변경(호환)
 - **공유 session-conventions 해체 — 규범을 각 SKILL.md에 용어 특화 인라인 (run 604)** — `skills/shared/session-conventions.md`를 제거하고 규범 5영역(호출 규약·세션 파일 규율·디스패치 공통 규범·중앙 리서치 공통 규범·공통 안전 경계)을 brainstorm(세션 파일, `.brainstorm/<session-id>.md`)·roundtable(회의 파일, `.roundtable/<meeting-id>.md`) 각 SKILL.md 본문에 각 스킬 용어로 자체 정의. `../shared/` 참조·위임 문구 제거(스킬 자기완결). 규범 의미·강도 불변.
 
-## autopilot 0.63.6
+## autopilot 0.64.2
 
 ### 변경(호환)
 - **create-task description WHEN-중심 재작성 (#560 컨벤션 정렬)** — 소유권·아키텍처 경계 서술 위주였던 frontmatter description을 트리거(WHEN) 중심으로 재작성. "태스크로 등록해줘"·"백로그에 올려줘"·"태스크 만들어줘" 같은 실사용 표현과 `resume <task-id>` 재개 신호를 담고, WHAT은 "본문을 백엔드에 등록하고 등록-후 상태를 전이한다" 한 구절로 축약. 작성 로직 비소유·`set_body` 위임 등 경계 상세는 본문(「규칙」·워크플로)이 계속 소유한다(정보 손실 없음). 워크플로·동사 계약 불변.
+
+## autopilot 0.64.1
+
+### 변경(호환)
+- **create-task 등록-후 상태 전이 문구 단일화 (run 611)** — 마커 없음 분기가 "전이를 생략하거나 명시적으로 `set_status --status backlog` 를 호출한다"로 두 갈래를 허용해 실행 세션마다 동사 시퀀스가 달라지던 비결정성을 제거. 이제 초기 상태 `backlog` 유지라는 단일 행동만 지시한다(추가 전이 호출 없음). 전이 의미론(backlog/in_design 기준)·재개 경로 불변. 회귀 가드: `tests/autopilot/test-create-task-status-transition.sh` TEST 5.
+
+## autopilot 0.64.0
+
+### 변경(호환)
+- **scope-coverage 매핑을 컨슈밍 프로젝트 설정으로 공급 (#609)** — `scope-coverage-check.sh`에 하드코딩돼 있던 이 저장소 전용 소스→테스트 매핑(`plugins/autopilot/skills/<S>` → `tests/autopilot/…`)을 제거하고, 프로젝트가 `<repo-root>/.autopilot/scope-coverage-map.json`으로 매핑 규칙(`rules[].source` prefix + `<name>` 세그먼트 캡처, `rules[].tests` 디렉토리·글롭)을 공급하는 구조로 전환. 설정이 없는 프로젝트는 검사가 경고 없이 exit 0으로 통과(등록 비차단 계약 불변). `references/scope-coverage-map.md`는 매핑 표가 아니라 설정 스키마 규약 문서로 갱신. 이 저장소는 자체 `.autopilot/scope-coverage-map.json`을 제공해 기존 검사 동작 유지. 플러그인이 컨슈밍 프로젝트 정책을 내장하던 계층 역전 해소(#482 계열).
+
+## autopilot 0.63.6
+
+### 변경(호환)
+- **create-task scope-coverage-map 자기완결화 (#608)** — `references/scope-coverage-map.md`가 `skills/loop/SKILL.md`를 경로 표기 관례의 단일 출처로 지시하던 중첩 참조(SKILL.md→references→타 스킬 SKILL.md)를 제거하고, 경고가 제시하는 경로의 수용 형식(후행 `/` 디렉토리 표기·파일 글롭)과 매칭 의미론(prefix 재귀 매칭)을 map 문서에 계약 수준으로 인라인. create-task 의 "다른 스킬 doc-link 금지" 자기 규칙과의 자기모순 해소. 매핑 규칙·`scope-coverage-check.sh` 동작 불변.
 
 ## autopilot 0.63.5
 

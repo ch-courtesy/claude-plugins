@@ -1,32 +1,63 @@
-# scope-coverage 매핑 관례 (create-task 자체 소유 단일 출처)
+# scope-coverage 매핑 설정 스키마 (create-task 자체 소유 단일 출처)
 
-`scope-coverage-check.sh`가 소스 경로 → 프로젝트 테스트 경로를 매핑할 때 따르는 관례.
-구현체는 `scope-coverage-check.sh`이며, 이 문서는 인간 가독 규약 문서다.
+소스 경로 → 기대 테스트 경로 매핑은 **컨슈밍 프로젝트의 소유물**이다. 플러그인은 매핑을 내장하지 않고,
+프로젝트가 공급한 설정을 읽어 검사한다. 구현체는 `scope-coverage-check.sh`이며, 이 문서는 그 설정
+스키마의 규약 문서다.
 
-## 매핑 규칙
+## 설정 위치
 
-| 소스 패턴 | 기대 테스트 경로 |
+`<repo-root>/.autopilot/scope-coverage-map.json` (벤더-중립 `.autopilot/` 관례).
+
+설정 파일이 없거나 파싱에 실패하면 **검사하지 않고 경고 없이 통과**한다. 등록은 어떤 경우에도 막지 않는다.
+
+## 스키마
+
+```json
+{
+  "rules": [
+    {
+      "source": "<소스 경로 prefix, 선택적 <name> 플레이스홀더>",
+      "tests": ["<기대 테스트 경로>", "..."]
+    }
+  ]
+}
+```
+
+| 필드 | 의미 |
 |---|---|
-| `plugins/autopilot/skills/<S>/...` | `tests/autopilot/test-<S>*.sh` (파일 glob) |
-| `plugins/autopilot/skills/<S>/...` | `tests/autopilot/<S>/` (디렉터리, 있으면) |
-| `plugins/autopilot/lib/task-backend/...` | `plugins/autopilot/lib/task-backend/tests/` |
+| `source` | `scope.include` 항목의 **prefix**로 매칭한다. `<name>` 은 경로 세그먼트 **1개**를 캡처한다. |
+| `tests` | 그 소스를 덮을 것으로 기대되는 테스트 경로 목록. `<name>` 은 캡처된 값으로 치환된다. |
 
-`<S>`는 스킬 이름(예: `create-task`, `loop`, `execute-task`, `feature`, `fix`).
+`tests` 항목 표기:
+
+| 표기 | 매칭 | 존재 판정 |
+|---|---|---|
+| 디렉토리(후행 `/`) | 그 디렉토리 하위 전체(깊이 무관) prefix 매칭 | 디렉토리 존재 |
+| 파일 글롭 | glob 패턴 매칭 | 매칭 파일 1개 이상 |
+
+여기 제시되는 경로는 SPEC frontmatter 의 `scope.include` 에 그대로 넣을 수 있는 형식이다 — 경고가 제시한
+경로를 붙여 넣으면 그 아래 파일 수정이 scope 밖으로 오탐되지 않는다. 디렉토리 전체를 덮으려면 후행 `/` 를
+반드시 붙인다(후행 `/` 없으면 글롭·정확 경로로 해석된다).
+
+## 예
+
+```json
+{
+  "rules": [
+    { "source": "src/modules/<name>/", "tests": ["spec/modules/<name>/", "spec/modules/<name>_spec.rb"] },
+    { "source": "lib/adapter/", "tests": ["lib/adapter/tests/"] }
+  ]
+}
+```
 
 ## 커버드(covered) 판정
 
 `scope.include`의 항목 중 기대 테스트 경로를 **prefix-포함**하거나 **정확히 일치**하면 커버드로 본다.
-예: scope에 `tests/autopilot/` 이나 `tests/autopilot/test-create-task*.sh` 가 있으면 create-task 커버.
-
-이 검사가 누락 경고에 제시하는 디렉토리 경로(후행 `/`, 예 `tests/autopilot/<S>/`)는 loop scope 게이트가
-그대로 수용하는 형식이다 — 제시된 경로를 `scope.include` 에 그대로 넣으면 그 아래 파일 수정이 scope 밖으로
-오탐되지 않는다. 경로 표기 관례(수용 형식·매칭 의미론)의 단일 출처는 `skills/loop/SKILL.md` "Scope 경로 표기".
 
 ## 오탐 방지 조건
 
 - **기존 테스트 없는 신규 소스**: 매핑된 테스트 경로가 파일시스템에 존재하지 않으면 검사하지 않는다. 존재 확인이 전제다.
-- **테스트-only 경로**: `plugins/autopilot/` 외 경로(예: `tests/`, `CHANGELOG.md`, `rules/`)는 소스로 취급하지 않는다.
-- **문서-only 경로**: `rules/**`, `CHANGELOG.md`, `*.md` 등은 소스 취급 안 함.
+- **규칙에 없는 경로**: 어떤 `source` prefix에도 매칭되지 않는 항목(문서·설정·테스트 경로 등)은 소스로 취급하지 않는다.
 
 ## #483과 역할 분담
 

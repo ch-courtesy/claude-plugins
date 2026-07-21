@@ -1,0 +1,17 @@
+{
+  "rules": [
+    {
+      "source": "plugins/autopilot/skills/<name>/",
+      "tests": [
+        "tests/autopilot/<name>/",
+        "tests/autopilot/test-<name>*.sh"
+      ]
+    },
+    {
+      "source": "plugins/autopilot/lib/task-backend/",
+      "tests": [
+        "plugins/autopilot/lib/task-backend/tests/"
+      ]
+    }
+  ]
+}
