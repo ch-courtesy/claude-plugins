@@ -58,6 +58,7 @@ mock_git() {
         *origin/*)                       return 1 ;;  # base(origin/main) 전진 — 브랜치 조상 아님.
         *"remotetip localcommit"*)       return 1 ;;  # 원격 tip 은 로컬의 조상 아님(원격이 더 많음).
         *"localcommit remotetip"*)       return 0 ;;  # 로컬은 원격 tip 의 조상 = 원격-앞섬.
+        *"localcommit refs/heads/"*)     return 0 ;;  # loop 결과 커밋 = 브랜치 tip — 자기 자신은 조상.
         *) return 1 ;;
       esac ;;
     branch) printf '%s\n' "$2" >> "$BRANCHES"; return 0 ;;
