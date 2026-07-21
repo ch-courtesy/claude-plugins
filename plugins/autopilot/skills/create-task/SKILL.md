@@ -72,7 +72,9 @@ auto-merge, 없으면 로컬 메인 merge. `.autopilot/` 는 워치 디렉토리
    영속화」 헬퍼를 실행해 config를 메인까지 영속화한다(멱등).
 3. **scope-coverage 검증** — 등록 전에 scope-coverage 검증을 수행한다. 본문 frontmatter의
    `scope.include`에서 소스 경로를 읽어, 그 소스를 덮는 **기존** 테스트 경로가 scope.include에 함께 있는지
-   확인한다. 매핑 관례의 단일 출처는 `references/scope-coverage-map.md`다:
+   확인한다. 소스→테스트 매핑은 **컨슈밍 프로젝트가 `.autopilot/scope-coverage-map.json`으로 공급**하며,
+   그 설정 스키마의 단일 출처는 `references/scope-coverage-map.md`다. 설정이 없는 프로젝트에서는 검사가
+   경고 없이 통과한다:
    ```
    CHECKER="${CLAUDE_PLUGIN_ROOT}/skills/create-task/references/scope-coverage-check.sh"
    echo "<본문>" | bash "$CHECKER"
