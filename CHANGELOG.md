@@ -7,6 +7,11 @@
 ### 변경(호환)
 - **공유 session-conventions 해체 — 규범을 각 SKILL.md에 용어 특화 인라인 (run 604)** — `skills/shared/session-conventions.md`를 제거하고 규범 5영역(호출 규약·세션 파일 규율·디스패치 공통 규범·중앙 리서치 공통 규범·공통 안전 경계)을 brainstorm(세션 파일, `.brainstorm/<session-id>.md`)·roundtable(회의 파일, `.roundtable/<meeting-id>.md`) 각 SKILL.md 본문에 각 스킬 용어로 자체 정의. `../shared/` 참조·위임 문구 제거(스킬 자기완결). 규범 의미·강도 불변.
 
+## autopilot 0.64.3
+
+### 버그 수정
+- **forge review-loop 신뢰봇 게이트 — 머신유저 리뷰봇 미인식 + 같은-head approve/approve 무한 대기 (#627)** — (1) `REVIEW_BOT_LOGIN_RE` 기본값에 `-bot$` 접미 관례를 추가해 GitHub App 이 아닌 머신유저 리뷰봇 계정(예: courtesy-bot)을 세 게이트(승인 마커·현재-head 재리뷰 증거·미해결 스레드 차단)가 인식한다 — 미인식 시 blocking 스레드가 비가시(blocked=0·reviewed=0)라 approve 가 합성돼 승인 가림(#493)이 무력화되던 결함 수정. 접미 앵커로 오포섭을 최소화하고 배제 방향(비접미 계정 비신뢰)을 selftest 로 검증. (2) 같은-head 분기에서 기록 approve+판정 approve 인데 phase 가 강등된 상태(머지 게이트 차단 후 재진입이 phase=review 로 재설정)가 rc=20 무한 반복하던 경로를 approved 재전이(머지 복귀)로 종착시킨다. phase=approved 정상 멱등(rc=20)과 기존 가드(#493/#549/#571/#600, 라운드 상한·무진전·핑퐁)는 selftest 로 회귀 없이 보존. marketplace.json 의 stale autopilot 버전(0.63.5)도 SoT(plugin.json)와 동기화.
+
 ## autopilot 0.64.2
 
 ### 변경(호환)

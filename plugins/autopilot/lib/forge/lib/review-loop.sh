@@ -50,7 +50,10 @@ set +e
 set -uo pipefail
 
 REVIEW_ROUNDS_MAX="${REVIEW_ROUNDS_MAX:-3}"
-REVIEW_BOT_LOGIN_RE="${REVIEW_BOT_LOGIN_RE:-(\[bot\]$|claude|github-actions)}"
+# 신뢰봇 로그인 판별(세 게이트 공용: 승인 마커·현재-head 재리뷰 증거·미해결 스레드 차단).
+#   `-bot$`: GitHub App 이 아닌 머신유저 리뷰봇 계정의 접미 관례(예: courtesy-bot) — #627.
+#   접미 앵커라 임의 계정 오포섭을 최소화한다. 저장소별 커스텀은 env override 로.
+REVIEW_BOT_LOGIN_RE="${REVIEW_BOT_LOGIN_RE:-(\[bot\]$|-bot$|claude|github-actions)}"
 
 REVIEW_FETCH_CMD="${REVIEW_FETCH_CMD:-rl_review_fetch_gh}"
 REVIEW_PRODUCE_CMD="${REVIEW_PRODUCE_CMD:-rl_produce_review_skill}"
@@ -323,6 +326,16 @@ rl_round() {
           && "$(rl_review_field "$pr" blocked)" == "1" ]]; then
       rl_escalate "$rd" "$key" "approve 기록 후 같은 head($head)의 신뢰봇 미해결 스레드가 승인을 가리나 현재 head 재리뷰 증거 없음(#549) — 재작업·머지 모두 불가 교착, 스레드 해소·수동 개입 필요"
       return 10
+    # #627: 머지 게이트 차단(phase=blocked) 후 재진입은 integration 이 phase 를 review 로 재설정한다.
+    #   이때 head 불변+판정 approve 조합이 else(rc=20) 로 떨어지면 approved 재전이 경로가 없어 폴링
+    #   상한까지 무행동 대기 — approved 로 재전이해 머지로 복귀시킨다(유한 종착). phase==review 로
+    #   좁혀 의도한 강등 시나리오만 겨냥한다 — approved 정상 멱등(rc=20)을 보존하고, merged/merging
+    #   등에서의 직접 재호출이 phase 를 역행시키지 않는다.
+    elif [[ "$rec_verdict" == "approve" && "$gate_verdict" == "approve" \
+          && "$(int_get_phase "$rd" "$key")" == "review" ]]; then
+      int_set_phase "$rd" "$key" approved
+      int_log "$rd" "$key" "head 동일($head)·판정 approve 인데 phase 강등 상태 — approved 재전이(머지 복귀, #627)"
+      return 30
     else
       int_log "$rd" "$key" "head 동일($head) — 새 커밋 없음, 라운드 미시작"
       return 20
@@ -678,6 +691,24 @@ rl_selftest() {
   case "$out" in *교착*) ok "#600 교착 사유 표면화";; *) bad "#600 교착 사유 표면화 (out='$out')";; esac
   [[ ! -s "$IMPLLOG" ]] && ok "#600 증거 없는 스레드 재작업 미실행(#549 보존)" || bad "#600 증거 없는 스레드 재작업 미실행(#549 보존)"
 
+  # ---- #627: approve 기록+같은 head+판정 approve 인데 phase 가 강등된 상태 → approved 재전이 ----
+  #   머지 게이트 차단(phase=blocked) 후 재진입하면 integration 이 phase=review 로 재설정한다.
+  #   이때 head 불변+판정 approve 조합이 rc=20 무한 반복하면 머지 복귀가 영구 불가 — 재전이로 종착.
+  local kM="m-mmm3"; : > "$IMPLLOG"
+  forge_review sha-M approve > "$RV/113.review"
+  rl_round "$rd" "$kM" "$base" 113 "feat/run1-m"; chk "#627 선행 approve(rc=30)" "$?" "30"
+  int_set_phase "$rd" "$kM" review   # 머지 게이트 차단 후 재진입이 phase 를 review 로 강등한 상황 모사
+  rl_round "$rd" "$kM" "$base" 113 "feat/run1-m"; rc=$?
+  chk "#627 같은 head approve/approve+phase 강등 → approved 재전이(rc=30, rc=20 반복 아님)" "$rc" "30"
+  chk "#627 재전이 후 phase=approved" "$(int_get_phase "$rd" "$kM")" "approved"
+  [[ ! -s "$IMPLLOG" ]] && ok "#627 재전이 시 구현 미위임" || bad "#627 재전이 시 구현 미위임"
+  # phase=approved 정상 상태의 같은 head 재호출은 기존 멱등 유지(rc=20) — kB 케이스와 동일 계약.
+  rl_round "$rd" "$kM" "$base" 113 "feat/run1-m"; chk "#627 재전이 후 재호출 멱등(rc=20)" "$?" "20"
+  # 재전이는 phase==review 강등 시나리오만 겨냥 — merged 등 다른 phase 를 approved 로 역행시키지 않는다.
+  int_set_phase "$rd" "$kM" merged
+  rl_round "$rd" "$kM" "$base" 113 "feat/run1-m"; chk "#627 phase=merged 재호출 → 역행 없이 대기(rc=20)" "$?" "20"
+  chk "#627 phase=merged 유지(approved 역행 안 함)" "$(int_get_phase "$rd" "$kM")" "merged"
+
   # ---- pending(승인X·지적X) → 대기(rc=20), 로컬 review 미호출 ----
   local kPd="pd-ppp0"
   forge_review sha-PD pending > "$RV/110.review"
@@ -864,6 +895,17 @@ rl_selftest() {
     "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$GBLK" rl_review_fetch_gh 206 2>/dev/null | grep -c '^blocked: 1')" "1"
   chk "#600 스레드 없는 pending 은 blocked 미표면화" \
     "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="$MARK_OLD2" SC_THREADS="$GEMPTY" rl_review_fetch_gh 207 2>/dev/null | grep -c '^blocked: 1')" "0"
+  # #627: `*-bot` 접미 머신유저(예: courtesy-bot)도 신뢰봇 — GitHub App 이 아닌 실리뷰봇 계정 관례.
+  #   미인식이면 blocked=0·reviewed=0 으로 approve 가 합성돼 승인 가림(#493)이 무력화된다.
+  local MARK_CB="courtesy-bot\t<!-- claude-formal-review head_sha=$GH verdict=comment -->\n"
+  local CBBLK; CBBLK="$(thr false "courtesy-bot" "$GH" "**[blocking/90] 실봇 차단 지적**")"
+  chk "#627 courtesy-bot 미해결 스레드+approve → changes(approve 합성 금지)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_REVIEWS="$MARK_CB" SC_THREADS="$CBBLK" rvg)" "changes"
+  chk "#627 courtesy-bot 마커승인 → approve" \
+    "$(SC_DECISION=REVIEW_REQUIRED SC_HEAD="$GH" SC_REVIEWS="courtesy-bot\t<!-- claude-formal-review head_sha=$GH verdict=approve -->\n" SC_THREADS="$GEMPTY" rvg)" "approve"
+  # 배제 방향: `-bot` 접미가 아닌 계정(abbot)은 여전히 비신뢰 — 차단 게이트에 잡히지 않는다.
+  chk "#627 비접미 계정(abbot) 스레드 → 차단 안 함(approve 유지)" \
+    "$(SC_DECISION=APPROVED SC_HEAD="$GH" SC_THREADS="$(thr false "abbot" "$GH" "**[blocking/90] 위조**")" rvg)" "approve"
   unset -f gh
 
   # ---- force 미사용 (mock_git force 보면 exit99; 여기 도달했으면 미사용) ----
