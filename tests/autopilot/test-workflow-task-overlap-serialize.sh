@@ -71,6 +71,27 @@ chk "disjoint 패스 deferred=0" "$(printf '%s' "$out3" | jq -r .deferred)" "0"
 chk "disjoint 패스 deferred_ids=[]" "$(printf '%s' "$out3" | jq -c '.deferred_ids')" "[]"
 chk "disjoint 패스 실행 2건" "$(wc -l < execlog | tr -d ' ')" "2"
 
+# ---- 의미 겹침(#637): 후행 '/' prefix·글롭이 문자열 불일치라도 같은 산출물을 덮으면 유예 ----
+# loop path_matches_pattern 의미론과 동일: 'dir/'는 하위 전체 prefix, 그 외는 bash 글롭.
+# 양방향 — 선점 항목이 새 항목을 덮는 경우(T8→T9)와 새 항목이 선점 항목을 덮는 경우(T10→T11) 모두 차단.
+: > execlog
+t8="$(bash "$ADAPTER" create_task --title T8 --body "$(mkbody 'plugins/autopilot/')" | jq -r .task_id)"
+t9="$(bash "$ADAPTER" create_task --title T9 --body "$(mkbody 'plugins/autopilot/.claude-plugin/plugin.json')" | jq -r .task_id)"
+t10="$(bash "$ADAPTER" create_task --title T10 --body "$(mkbody 'src/foo.sh')" | jq -r .task_id)"
+t11="$(bash "$ADAPTER" create_task --title T11 --body "$(mkbody 'src/**')" | jq -r .task_id)"
+out5="$(drain)"
+chk "의미겹침 패스 deferred=2(prefix 1 + 글롭 1)" "$(printf '%s' "$out5" | jq -r .deferred)" "2"
+printf '%s' "$out5" | jq -r '.deferred_ids[]' | grep -Fxq "$t9" \
+  && ok "prefix: 선점 'plugins/autopilot/'가 하위 파일 태스크 유예" \
+  || bad "prefix: 선점 'plugins/autopilot/'가 하위 파일 태스크 유예"
+printf '%s' "$out5" | jq -r '.deferred_ids[]' | grep -Fxq "$t11" \
+  && ok "글롭 역방향: 새 'src/**'가 선점 'src/foo.sh'를 덮으면 유예" \
+  || bad "글롭 역방향: 새 'src/**'가 선점 'src/foo.sh'를 덮으면 유예"
+chk "의미겹침 패스 실행 2건(T8·T10)" "$(wc -l < execlog | tr -d ' ')" "2"
+out6="$(drain)"
+chk "의미겹침 유예분 다음 틱 흡수(ready=2)" "$(printf '%s' "$out6" | jq -r .ready)" "2"
+chk "의미겹침 유예분 다음 틱 deferred=0" "$(printf '%s' "$out6" | jq -r .deferred)" "0"
+
 # ---- scope frontmatter 없는 본문 → 겹침 판정 없이 기존대로 실행 ----
 : > execlog
 t6="$(bash "$ADAPTER" create_task --title T6 --body '## 목표'$'\n'x | jq -r .task_id)"

@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.64.6
+
+### 버그 수정
+- **드레이너 겹침 직렬화가 디렉터리·글롭 의미 겹침을 미탐 (PR 637 리뷰 반영)** — `workflow-task` 산출물 겹침 판정이 `scope.include` 항목의 문자열 일치만 봐서, 앞선 태스크가 `plugins/autopilot/`(후행 `/` prefix)나 `src/**`(글롭)를 선점해도 뒤 태스크의 그 하위 경로(`plugins/autopilot/.claude-plugin/plugin.json`·`src/foo.sh`)를 겹침으로 보지 못하고 동시 실행했다. 이제 loop `path_matches_pattern` 의미론(후행 `/`=prefix, 그 외=bash 글롭)으로 어느 한쪽이 다른 쪽을 덮으면 양방향 모두 겹침으로 유예한다. 회귀 케이스를 `tests/autopilot/test-workflow-task-overlap-serialize.sh`에 추가.
+
 ## autopilot 0.64.5
 
 ### 버그 수정

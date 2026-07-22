@@ -17,6 +17,24 @@ EXECUTE_CMD="${EXECUTE_CMD:-bash $PLUGIN/skills/execute-task/references/execute-
 
 die() { echo "workflow-task: $*" >&2; exit 1; }
 
+# scope 항목 커버 판정(#637). loop path_matches_pattern 의미론과 동일(표기 SoT:
+# skills/loop/SKILL.md "Scope 경로 표기") — 후행 '/' 항목은 prefix, 그 외는 bash 글롭.
+wt_pattern_covers() { # <pat> <path> — pat 이 path 를 덮으면 0.
+  local pat="$1" path="$2"
+  if [[ "$pat" == */ ]]; then
+    [[ "$path" == "$pat"* ]]
+  else
+    # shellcheck disable=SC2053
+    [[ "$path" == $pat ]]
+  fi
+}
+
+# 두 scope.include 항목의 산출물 교집합 판정 — 정확 일치 또는 어느 방향이든 커버면 겹침(0).
+# 예: 'plugins/autopilot/' vs 'plugins/autopilot/x.json', 'src/**' vs 'src/foo.sh' (양방향).
+wt_scope_overlap() {
+  [[ "$1" == "$2" ]] || wt_pattern_covers "$1" "$2" || wt_pattern_covers "$2" "$1"
+}
+
 wt_start() {
   local maxp=""
   while [[ $# -gt 0 ]]; do case "$1" in --max-parallel) maxp="$2"; shift 2;; *) shift;; esac; done
@@ -42,9 +60,14 @@ wt_start() {
     ')"
     overlap=0
     if [[ -n "$entries" ]]; then
+      local c
       while IFS= read -r e; do
         [[ -n "$e" ]] || continue
-        case "$claimed" in *$'\n'"$e"$'\n'*) overlap=1; break;; esac
+        while IFS= read -r c; do
+          [[ -n "$c" ]] || continue
+          if wt_scope_overlap "$e" "$c"; then overlap=1; break; fi
+        done <<< "$claimed"
+        [[ "$overlap" == "1" ]] && break
       done <<< "$entries"
     fi
     if [[ "$overlap" == "1" ]]; then deferred+=("$id"); continue; fi
