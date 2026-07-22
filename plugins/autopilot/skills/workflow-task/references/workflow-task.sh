@@ -17,6 +17,31 @@ EXECUTE_CMD="${EXECUTE_CMD:-bash $PLUGIN/skills/execute-task/references/execute-
 
 die() { echo "workflow-task: $*" >&2; exit 1; }
 
+# wt_scope_covers <pattern> <path> — scope 표기 <pattern> 이 <path> 를 덮으면 0.
+#   정확 일치 / 후행 '/' 디렉터리 prefix / 글롭('*' 포함, bash 확장 패턴 매칭).
+wt_scope_covers() {
+  local pat="$1" path="$2"
+  [[ "$pat" == "$path" ]] && return 0
+  case "$pat" in
+    */) [[ "$path" == "$pat"* ]] && return 0 ;;
+    *'*'*)
+      # shellcheck disable=SC2053
+      [[ "$path" == $pat ]] && return 0
+      # 'dir/**' 는 dir/ 하위 전체를 덮는다(글롭 매칭이 '/' 를 넘지 못하는 경우 보완).
+      local base="${pat%%\**}"
+      [[ -n "$base" && "$path" == "$base"* ]] && return 0
+      ;;
+  esac
+  return 1
+}
+
+# wt_paths_overlap <a> <b> — 두 scope 표기가 산출물에서 겹치면 0(양방향 판정).
+wt_paths_overlap() {
+  wt_scope_covers "$1" "$2" && return 0
+  wt_scope_covers "$2" "$1" && return 0
+  return 1
+}
+
 wt_start() {
   local maxp=""
   while [[ $# -gt 0 ]]; do case "$1" in --max-parallel) maxp="$2"; shift 2;; *) shift;; esac; done
@@ -30,7 +55,7 @@ wt_start() {
   # 만지면 첫 머지가 형제 브랜치를 연쇄 충돌시킨다). 유예분은 deferred_ids 로 보고(조용한 누락
   # 금지)하고 다음 틱 list_ready 가 다시 집는다. 특정 경로 하드코딩 없음 — 일반 경로 겹침.
   local run_ids=() deferred=() claimed=$'\n'
-  local id body entries e overlap
+  local id body entries e c overlap
   for id in "${ids[@]}"; do
     body="$($ADAPTER_CMD get_body --task-id "$id" 2>/dev/null | jq -r '.body // empty' 2>/dev/null || true)"
     entries="$(printf '%s\n' "$body" | awk '
@@ -44,7 +69,10 @@ wt_start() {
     if [[ -n "$entries" ]]; then
       while IFS= read -r e; do
         [[ -n "$e" ]] || continue
-        case "$claimed" in *$'\n'"$e"$'\n'*) overlap=1; break;; esac
+        while IFS= read -r c; do
+          [[ -n "$c" ]] || continue
+          if wt_paths_overlap "$c" "$e"; then overlap=1; break 2; fi
+        done <<< "$claimed"
       done <<< "$entries"
     fi
     if [[ "$overlap" == "1" ]]; then deferred+=("$id"); continue; fi

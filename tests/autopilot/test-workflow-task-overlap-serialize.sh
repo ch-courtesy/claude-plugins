@@ -79,4 +79,29 @@ out4="$(drain)"
 chk "scope 없음 deferred=0" "$(printf '%s' "$out4" | jq -r .deferred)" "0"
 chk "scope 없음 실행 2건" "$(wc -l < execlog | tr -d ' ')" "2"
 
+# ---- 디렉터리 prefix 겹침(후행 '/') → 정확 일치가 아니어도 직렬화 (PR 637 [blocking/90]) ----
+: > execlog
+t8="$(bash "$ADAPTER" create_task --title T8 --body "$(mkbody 'plugins/autopilot/')" | jq -r .task_id)"
+t9="$(bash "$ADAPTER" create_task --title T9 \
+  --body "$(mkbody 'plugins/autopilot/.claude-plugin/plugin.json')" | jq -r .task_id)"
+out5="$(drain)"
+chk "prefix 겹침 deferred=1" "$(printf '%s' "$out5" | jq -r .deferred)" "1"
+chk "prefix 겹침 실행 1건" "$(wc -l < execlog | tr -d ' ')" "1"
+
+# ---- 글롭 겹침('dir/**' vs 하위 파일) → 직렬화 ----
+: > execlog
+bash "$ADAPTER" set_status --task-id "$(printf '%s' "$out5" | jq -r '.deferred_ids[0]')" --status done >/dev/null
+t10="$(bash "$ADAPTER" create_task --title T10 --body "$(mkbody 'src/**')" | jq -r .task_id)"
+t11="$(bash "$ADAPTER" create_task --title T11 --body "$(mkbody 'src/foo.sh')" | jq -r .task_id)"
+out6="$(drain)"
+chk "글롭 겹침 deferred=1" "$(printf '%s' "$out6" | jq -r .deferred)" "1"
+
+# ---- 역방향(넓은 include 가 뒤에 와도 겹침) ----
+: > execlog
+bash "$ADAPTER" set_status --task-id "$(printf '%s' "$out6" | jq -r '.deferred_ids[0]')" --status done >/dev/null
+t12="$(bash "$ADAPTER" create_task --title T12 --body "$(mkbody 'lib/deep/x.sh')" | jq -r .task_id)"
+t13="$(bash "$ADAPTER" create_task --title T13 --body "$(mkbody 'lib/')" | jq -r .task_id)"
+out7="$(drain)"
+chk "역방향 겹침 deferred=1" "$(printf '%s' "$out7" | jq -r .deferred)" "1"
+
 echo "----"; [[ $fail -eq 0 ]] && echo "ALL PASS" || echo "FAILURES present"; exit $fail
