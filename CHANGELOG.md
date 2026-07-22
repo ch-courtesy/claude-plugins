@@ -7,6 +7,16 @@
 ### 변경(호환)
 - **공유 session-conventions 해체 — 규범을 각 SKILL.md에 용어 특화 인라인 (run 604)** — `skills/shared/session-conventions.md`를 제거하고 규범 5영역(호출 규약·세션 파일 규율·디스패치 공통 규범·중앙 리서치 공통 규범·공통 안전 경계)을 brainstorm(세션 파일, `.brainstorm/<session-id>.md`)·roundtable(회의 파일, `.roundtable/<meeting-id>.md`) 각 SKILL.md 본문에 각 스킬 용어로 자체 정의. `../shared/` 참조·위임 문구 제거(스킬 자기완결). 규범 의미·강도 불변.
 
+## autopilot 0.64.5
+
+### 변경(호환)
+- **create-task 스킬 벤더 독립화 — CLAUDE_PLUGIN_ROOT 폴백·도구명 중립화 (#634)** — SKILL.md 본문의 `${CLAUDE_PLUGIN_ROOT}` 경로 참조 3곳(어댑터·persist-backend-config.sh·scope-coverage-check.sh)을 env 폴백 형태(`${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}`, `$SKILL_DIR` = 스킬 문서 위치 디렉토리)로 교체하고, 본문 산문의 Claude 전용 도구명(`TodoWrite`·`AskUserQuestion`)을 벤더 중립 기능 서술 + 기능 부재 폴백(간결한 직접 질문 등)으로 대체. frontmatter `allowed-tools`는 유지(타 런타임은 무시). 절차·워크플로 의미 불변. marketplace.json의 stale autopilot 버전(0.64.3)·머지 중 소실된 0.64.4 CHANGELOG 섹션도 복구.
+
+## autopilot 0.64.4
+
+### 버그 수정
+- **라벨 설정 실패 사유를 라벨 부재로 오귀속(권한 거부 은폐) (#629)** — github 백엔드 `be_set_status`가 gh stderr를 버리고 실패를 "라벨 존재 필요" 고정 문구로 단정해 권한 거부·네트워크 오류 등 실제 원인이 은폐되던 문제 수정. `github.sh`가 원본 stderr를 보존해 진단에 포함한다(성공 시 무진단 유지). 회귀 가드: `lib/task-backend/tests/test-github-status-fail.sh`.
+
 ## autopilot 0.64.3
 
 ### 버그 수정
