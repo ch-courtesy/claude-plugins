@@ -1,6 +1,7 @@
 ---
 name: feature
-description: 새 기능·변경·지침 의도를 명확화 인터뷰로 탐색해 자기완결적 태스크 본문(frontmatter-first 스펙)을 작성하려 할 때 사용 — 인터뷰로 본문을 떠서 등록 프리미티브 create-task에 넘겨 태스크 백엔드에 등록한다. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 작성만 책임지고 등록·상태 전이는 create-task가 소유한다. 신규 작성은 현재 런타임의 스킬 호출 기능으로 feature 호출(인자: "<자연어 기능 설명>"), 미완성 in_design 태스크를 인터뷰로 이어 완성하는 재개는 현재 런타임의 스킬 호출 기능으로 feature 호출(인자: "resume <task-id>").
+description: >-
+  새 기능·변경·지침 의도를 명확화 인터뷰로 탐색해 자기완결적 태스크 본문(frontmatter-first 스펙)을 작성하려 할 때 사용 — 인터뷰로 본문을 떠서 등록 프리미티브 create-task에 넘겨 태스크 백엔드에 등록한다. 본문이 곧 SPEC이며 별도 SPEC 파일은 만들지 않는다. 작성만 책임지고 등록·상태 전이는 create-task가 소유한다. 신규 작성은 현재 런타임의 스킬 호출 기능으로 feature 호출(인자: "<자연어 기능 설명>"), 미완성 in_design 태스크를 인터뷰로 이어 완성하는 재개는 현재 런타임의 스킬 호출 기능으로 feature 호출(인자: "resume <task-id>").
 allowed-tools:
   - AskUserQuestion
   - Read
