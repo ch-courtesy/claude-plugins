@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.64.6
+
+### 변경(호환)
+- **feature 스킬 벤더-중립화 — 상호작용 도구명·스킬 호출 표기·플러그인 루트 경로 (run 638)** — feature 스킬 문서 3종(`SKILL.md`·`README.md`·`references/clarification.md`)의 벤더 종속 표기를 런타임-중립 표기로 교체. `TodoWrite`·`AskUserQuestion`을 "현재 런타임의 할 일(단계) 추적 기능"·"현재 런타임의 구조화된 사용자 질문 기능"으로, `Skill(skill="...")` 호출 표기를 "현재 런타임의 스킬 호출 기능으로 `<스킬명>` 호출(인자: ...)"로, `${CLAUDE_PLUGIN_ROOT}` 경로를 `<플러그인 루트>` 표기로 대체하고 SKILL.md 서두에 해석 규칙(스킬 베이스 두 단계 상위 `../..`) 한 줄을 정의. frontmatter `allowed-tools`는 유지(타 런타임은 무시). 7단계 워크플로·resume 모드·규칙·references 구조와 지시 내용 불변. marketplace.json 동기화는 SPEC scope 밖으로 후속 처리(parity 예외 문서화).
+
 ## thinktank 1.0.2
 
 ### 변경(호환)
