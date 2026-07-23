@@ -377,25 +377,69 @@ _in_base_sync_core() {
   return 0
 }
 
+# in_worktree_delta_commit <branch> <ref_commit> — 로컬 브랜치 ref 뒤에 남은 워크트리 델타 커밋.
+#   #452 설계상 loop·리뷰 재구현은 분리(detached) 워크트리 HEAD 만 전진시키고 로컬 브랜치 ref 는
+#   갱신하지 않는다(공유 체크아웃 미오염). 그래서 리뷰-수정 커밋은 브랜치 ref 에 없고 워크트리
+#   HEAD 에만 있다(run 638) — ref 만 보면 "원격-앞섬"으로 오판해 push 를 생략하고 수정을 유실한다.
+#   ref_commit 의 **엄격한 자손**인 워크트리 HEAD 를 실제 통합 대상으로 되찾는다. 되찾을 것이
+#   없으면 빈 출력(= 기존 ref 기준 동작). 오염 방지 가드:
+#     - 브랜치 ref 가 이미 origin/<default> 에 포함되면(머지 완료 등) 무관한 run 워크트리가
+#       자손으로 잡힐 수 있으므로 되찾지 않는다.
+#     - 자손 후보가 둘 이상이면 어느 것이 대상인지 모호하므로 되찾지 않는다.
+in_worktree_delta_commit() {
+  local branch="$1" ref_commit="$2" c cands=""
+  [[ -n "$ref_commit" ]] || return 0
+  # 가드 판정 전에 base 를 fetch 한다 — stale 한 origin/<default> 로는 "이미 머지됨"을 놓쳐
+  # 가드가 헛돈다(무관 워크트리 커밋 되찾기 위험).
+  # shellcheck disable=SC2086
+  $GIT_CMD fetch origin "$DEFAULT_BRANCH" >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086
+  if $GIT_CMD merge-base --is-ancestor "refs/heads/$branch" "origin/$DEFAULT_BRANCH" 2>/dev/null; then
+    return 0
+  fi
+  while read -r c; do
+    [[ -n "$c" && "$c" != "$ref_commit" ]] || continue
+    # shellcheck disable=SC2086
+    $GIT_CMD merge-base --is-ancestor "$ref_commit" "$c" 2>/dev/null && cands="$cands $c"
+  done < <($GIT_CMD worktree list --porcelain 2>/dev/null | awk '$1=="HEAD" { print $2 }')
+  # shellcheck disable=SC2086
+  set -- $cands
+  if [[ "$#" -gt 1 ]]; then
+    # 조용히 생략하면 이 결함(리뷰-수정 유실)이 흔적 없이 재발한다 — 표면화한다.
+    echo "integration: 워크트리 델타 후보가 둘 이상($*) — 통합 대상 모호로 되찾지 않음: $branch" >&2
+    return 0
+  fi
+  [[ "$#" -eq 1 ]] && printf '%s\n' "$1"
+  return 0
+}
+
 in_push_branch() {
-  # 원격-앞섬 정합(run 592): 로컬 ref 가 원격 tip 의 조상이면(리뷰 수정 푸시 등 정당한 전진으로
-  # 원격이 앞섬) 원격이 이미 모든 로컬 커밋을 보유 — push 는 불필요하고 non-ff 로 거부만 되므로
-  # 건너뛴다. fetch 시점 레이스 완화를 위해 판정 직전에 원격 ref 를 fetch 한다. force 금지 유지.
-  local branch="$1" tip local_commit
+  # 원격-앞섬 정합(run 592): **통합 대상 커밋**이 원격 tip 의 조상이면(리뷰 수정 푸시 등 정당한
+  # 전진으로 원격이 앞섬) 원격이 이미 모든 로컬 커밋을 보유 — push 는 불필요하고 non-ff 로
+  # 거부만 되므로 건너뛴다. 통합 대상은 stale 할 수 있는 로컬 브랜치 ref 가 아니라 그 뒤의
+  # 워크트리 델타 커밋까지 포함한다(run 638). fetch 시점 레이스 완화를 위해 판정 직전에 원격
+  # ref 를 fetch 한다. force 금지 유지.
+  local branch="$1" tip ref_commit delta local_commit refspec
+  # shellcheck disable=SC2086
+  ref_commit="$($GIT_CMD rev-parse "refs/heads/$branch" 2>/dev/null)"
+  delta="$(in_worktree_delta_commit "$branch" "$ref_commit")"
+  local_commit="${delta:-$ref_commit}"
   tip="$(in_remote_tip "$branch")"
   if [[ -n "$tip" ]]; then
     # shellcheck disable=SC2086
     $GIT_CMD fetch origin "$branch" >/dev/null 2>&1 || true
     # shellcheck disable=SC2086
-    local_commit="$($GIT_CMD rev-parse "refs/heads/$branch" 2>/dev/null)"
-    # shellcheck disable=SC2086
     if [[ -n "$local_commit" ]] && $GIT_CMD merge-base --is-ancestor "$local_commit" "$tip" 2>/dev/null; then
-      echo "integration: push 생략 — 원격 브랜치가 로컬 ref 를 이미 포함(원격-앞섬): $branch" >&2
+      echo "integration: push 생략 — 원격 브랜치가 통합 대상 커밋을 이미 포함(원격-앞섬): $branch" >&2
       return 0
     fi
   fi
+  # 델타가 있으면 그 커밋을 원격 작업 브랜치로 **직접 push** 한다(#452 와 동일 방식) — 로컬
+  # $branch ref 를 갱신하지 않으므로 공유 체크아웃을 더럽히지 않는다. force 아님(ff push).
+  refspec="$branch"
+  [[ -n "$delta" ]] && refspec="$delta:refs/heads/$branch"
   # shellcheck disable=SC2086
-  $GIT_CMD push origin "$branch" || { in_die "push 실패(force 금지): $branch"; return 1; }
+  $GIT_CMD push origin "$refspec" || { in_die "push 실패(force 금지): $branch"; return 1; }
 }
 
 # =====================================================================
