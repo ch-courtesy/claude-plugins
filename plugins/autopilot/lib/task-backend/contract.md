@@ -25,13 +25,15 @@ bash <plugin>/lib/task-backend/adapter.sh <verb> [args...]
   "github_owner": "<owner>",
   "github_repo": "<repo>",
   "lease_ttl_seconds": 300,
-  "heartbeat_interval_seconds": 60
+  "heartbeat_interval_seconds": 60,
+  "worker_vendor": "claude | codex"
 }
 ```
 
 - `backend` 필수. 나머지는 백엔드별 선택.
 - config 부재 시 어댑터는 `init` 안내 후 비-0 exit(조용한 폴백 없음).
 - `lease_ttl_seconds` 기본 300, `heartbeat_interval_seconds` 기본 60(ttl보다 작아야 함).
+- `worker_vendor` 선택 — 구현 워커 CLI. 어댑터가 아니라 **loop 엔진**이 읽는다(같은 파일을 공유하는 프로젝트 단위 벤더-중립 설정). 우선순위는 환경 변수 `AUTOPILOT_WORKER_VENDOR` > 이 필드 > 기본값 `claude`이며, 지원 밖 값이면 loop `start`가 지원 벤더 목록을 명시한 오류로 중단한다. env는 무인 경로(cron·드레인)에서 유실되므로 프로젝트 고정 선택은 이 필드에 둔다.
 
 ## 상태 집합 (플러그인 자체 정의)
 

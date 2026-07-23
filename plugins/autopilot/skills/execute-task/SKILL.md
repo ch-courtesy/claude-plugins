@@ -30,7 +30,7 @@ allowed-tools:
 ## 호출
 
 ```
-EXEC="${CLAUDE_PLUGIN_ROOT}/skills/execute-task/references/execute-task.sh"
+EXEC="${CLAUDE_PLUGIN_ROOT:-$CODEX_PLUGIN_ROOT}/skills/execute-task/references/execute-task.sh"
 bash "$EXEC" start <task-id> [--stop-at review]   # ← run_in_background: true 필수 (아래 참고)
 bash "$EXEC" status|stop|logs <task-id>
 ```
