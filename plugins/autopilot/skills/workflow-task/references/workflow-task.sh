@@ -29,10 +29,29 @@ wt_pattern_covers() { # <pat> <path> — pat 이 path 를 덮으면 0.
   fi
 }
 
-# 두 scope.include 항목의 산출물 교집합 판정 — 정확 일치 또는 어느 방향이든 커버면 겹침(0).
-# 예: 'plugins/autopilot/' vs 'plugins/autopilot/x.json', 'src/**' vs 'src/foo.sh' (양방향).
+# 글롭 항목의 리터럴 디렉터리 베이스 — 첫 글롭 문자 앞까지의 마지막 '/' 까지.
+#   'src/*.sh' → 'src/', 'a/b/**' → 'a/b/', '*.md' → ''.
+wt_glob_base() {
+  local pat="$1" lit="${1%%[*?[]*}"
+  [[ "$pat" == "$lit" ]] && { printf '%s' "$pat"; return; }
+  printf '%s' "${lit%/*}/"
+}
+
+# 두 scope.include 항목의 산출물 교집합 판정 — 겹치면 0.
+#   (1) 정확 일치, (2) 어느 방향이든 커버('plugins/autopilot/' vs 하위 파일, 'src/**' vs 'src/foo.sh'),
+#   (3) 글롭끼리 부분 겹침 — 서로의 패턴 문자열은 못 덮어도 파일 집합이 교차하는 조합
+#       (예: 'src/*.sh' vs 'src/foo.*' 는 둘 다 'src/foo.sh' 를 포함). 파일시스템을 읽지 않고
+#       판정하므로, 두 글롭의 리터럴 베이스가 prefix 관계면 보수적으로 겹침으로 본다
+#       (오탐은 다음 틱 유예로 끝나지만, 미탐은 연쇄 충돌을 만든다).
 wt_scope_overlap() {
-  [[ "$1" == "$2" ]] || wt_pattern_covers "$1" "$2" || wt_pattern_covers "$2" "$1"
+  [[ "$1" == "$2" ]] && return 0
+  wt_pattern_covers "$1" "$2" && return 0
+  wt_pattern_covers "$2" "$1" && return 0
+  # (3) 양쪽 모두 글롭일 때만 — 한쪽이 리터럴이면 위 커버 판정이 이미 정확하다.
+  case "$1" in *[*?[]*) ;; *) return 1;; esac
+  case "$2" in *[*?[]*) ;; *) return 1;; esac
+  local b1 b2; b1="$(wt_glob_base "$1")"; b2="$(wt_glob_base "$2")"
+  [[ "$b1" == "$b2"* || "$b2" == "$b1"* ]]
 }
 
 wt_start() {

@@ -21,7 +21,9 @@ allowed-tools:
    형제 브랜치를 연쇄 충돌시킨다). 겹침 판정은 정확 일치 외에 scope 경로 표기 의미론(후행 `/`=prefix,
    그 외=bash 글롭; 표기 SoT: loop SKILL "Scope 경로 표기")으로 어느 한쪽이 다른 쪽을 덮는 경우를
    양방향으로 포함한다 — `plugins/autopilot/` 선점 후 그 하위 파일 태스크, `src/foo.sh` 선점 후 `src/**`
-   태스크 모두 유예된다. 유예분은 `deferred_ids`로 보고되고 다음 틱 `list_ready`가 다시 집는다.
+   태스크 모두 유예된다. 글롭끼리 서로의 패턴은 못 덮어도 파일 집합이 교차하는 조합(`src/*.sh` vs
+   `src/foo.*`)도 리터럴 베이스 prefix 관계로 보수적으로 유예한다(미탐이 연쇄 충돌을 만들므로 오탐 쪽으로
+   기운다). 유예분은 `deferred_ids`로 보고되고 다음 틱 `list_ready`가 다시 집는다.
 3. **flow 평면 병렬 fan-out** — 의존 없는 노드 집합으로 각 실행 대상에 `execute-task start <id>`를 동시성 상한 내
    병렬 실행한다(`--max-parallel N`, 기본=실행 대상 수). flow가 동시성·실패 격리·resume을 제공한다.
 4. 한 패스 종료. done/blocked 상태 전이는 execute-task가 이미 수행하므로 별도 동기화가 없다.

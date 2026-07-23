@@ -92,6 +92,24 @@ out6="$(drain)"
 chk "의미겹침 유예분 다음 틱 흡수(ready=2)" "$(printf '%s' "$out6" | jq -r .ready)" "2"
 chk "의미겹침 유예분 다음 틱 deferred=0" "$(printf '%s' "$out6" | jq -r .deferred)" "0"
 
+# ---- 글롭 부분 겹침(PR 641 리뷰): 서로의 패턴은 못 덮어도 파일 집합이 교차하면 유예 ----
+# 'src/*.sh' 와 'src/foo.*' 는 둘 다 'src/foo.sh' 를 포함한다(어느 쪽도 상대 패턴 문자열은 미매치).
+: > execlog
+t12="$(bash "$ADAPTER" create_task --title T12 --body "$(mkbody 'src/*.sh')" | jq -r .task_id)"
+t13="$(bash "$ADAPTER" create_task --title T13 --body "$(mkbody 'src/foo.*')" | jq -r .task_id)"
+out7="$(drain)"
+chk "글롭 부분겹침 deferred=1" "$(printf '%s' "$out7" | jq -r .deferred)" "1"
+chk "글롭 부분겹침 실행 1건" "$(wc -l < execlog | tr -d ' ')" "1"
+bash "$ADAPTER" set_status --task-id "$(printf '%s' "$out7" | jq -r '.deferred_ids[0]')" --status done >/dev/null
+
+# ---- 서로 다른 디렉터리 글롭은 겹치지 않는다(과유예 방지) ----
+: > execlog
+t14="$(bash "$ADAPTER" create_task --title T14 --body "$(mkbody 'alpha/*.sh')" | jq -r .task_id)"
+t15="$(bash "$ADAPTER" create_task --title T15 --body "$(mkbody 'beta/*.sh')" | jq -r .task_id)"
+out8="$(drain)"
+chk "다른 디렉터리 글롭 deferred=0" "$(printf '%s' "$out8" | jq -r .deferred)" "0"
+chk "다른 디렉터리 글롭 실행 2건" "$(wc -l < execlog | tr -d ' ')" "2"
+
 # ---- scope frontmatter 없는 본문 → 겹침 판정 없이 기존대로 실행 ----
 : > execlog
 t6="$(bash "$ADAPTER" create_task --title T6 --body '## 목표'$'\n'x | jq -r .task_id)"

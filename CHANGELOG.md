@@ -2,36 +2,37 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
-## autopilot 0.64.6
+## autopilot 0.64.7
 
 ### 버그 수정
 - **드레이너 겹침 직렬화가 디렉터리·글롭 의미 겹침을 미탐 (PR 637 리뷰 반영)** — `workflow-task` 산출물 겹침 판정이 `scope.include` 항목의 문자열 일치만 봐서, 앞선 태스크가 `plugins/autopilot/`(후행 `/` prefix)나 `src/**`(글롭)를 선점해도 뒤 태스크의 그 하위 경로(`plugins/autopilot/.claude-plugin/plugin.json`·`src/foo.sh`)를 겹침으로 보지 못하고 동시 실행했다. 이제 loop `path_matches_pattern` 의미론(후행 `/`=prefix, 그 외=bash 글롭)으로 어느 한쪽이 다른 쪽을 덮으면 양방향 모두 겹침으로 유예한다. 회귀 케이스를 `tests/autopilot/test-workflow-task-overlap-serialize.sh`에 추가.
-
-## autopilot 0.64.5
-
-### 버그 수정
 - **병렬 fan-out이 버전 표면 공유 태스크를 동시 실행해 연쇄 충돌 (#628)** — `workflow-task` 드레이너가 `list_ready`의 의존 충족만 보고 산출물 경로 겹침을 보지 않아, 같은 플러그인(공유 CHANGELOG·`plugin.json`)을 만지는 태스크들이 동시에 실행되고 첫 머지가 나머지 형제 브랜치를 일괄 `CONFLICTING`으로 만들었다(관측: 605·608·610·611 병렬 드레인). 이제 태스크 본문 frontmatter `scope.include` 항목이 앞선 태스크에 선점됐으면 그 패스에서 실행하지 않고 `deferred`/`deferred_ids`로 보고하며(조용한 누락 금지) 다음 틱 드레인이 집는다. 산출물이 겹치지 않는 태스크는 기존대로 병렬. 특정 경로 하드코딩 없음(일반 경로 겹침 판정). 회귀 가드 `tests/autopilot/test-workflow-task-overlap-serialize.sh` 추가.
 - **CHANGELOG 기존 항목 덮어쓰기가 게이트 없이 머지 (#628)** — CHANGELOG 는 누적 계약(추가만)인데 강제 게이트가 없어, 워커가 base 전진을 못 따라가면 기존 섹션을 자기 항목으로 교체해 직전 릴리스 기록을 삭제한 채 머지될 수 있었다(관측: PR 633이 project-init 0.25.0 기록을 삭제하고 main에 머지 — 후속 복구). `forge/lib/integration.sh`에 순수-추가 게이트 `in_changelog_additive_gate` 추가: base(origin/main) 대비 three-dot diff에서 CHANGELOG 기존 라인 삭제를 감지하면 PR·리뷰(머지 후보)로 넘기지 않고 차단한다(base 전진분은 오탐하지 않고, base 재동기화 merge-in의 덮어쓰기도 잡힘). 추가만 있는 변경(삭제 0)은 기존대로 통과. 경로는 `INT_CHANGELOG_FILE`로 설정 가능하고 빈 값이면 비활성(정당한 오타 수정·항목 재배치 우회), base에 파일이 없으면 미적용(정책 비내장). 회귀 가드 `tests/autopilot/execute-task/test-execute-task-changelog-gate.sh` 추가.
 
-## autopilot 0.64.4
+## autopilot 0.64.6
 
-### 버그 수정
-- **통합이 stale 로컬 브랜치를 재사용해 루프 결과 커밋을 유실 (task 605)** — `in_ensure_work_branch`가 동명의 로컬 작업 브랜치 존재만으로 멱등 판정해, 재실행 시 낡은 시도의 브랜치를 그대로 push하고 루프의 최신 결과 커밋을 조용히 버렸다(관측: 진부한 구현이 되살아나 `plugin.json` 버전 되감김). 이제 기존 브랜치가 loop 결과 커밋을 조상으로 포함할 때만 멱등 통과하고, 미포함(stale)이면 정리 안내(로컬 브랜치 삭제 후 재실행)와 함께 차단한다. force 재배치는 계속 금지. 결과 커밋 미판독(loop 워크트리 이상)도 조용히 통과하지 않고 차단한다(terminal=done 은 워크트리 존재를 전제 — 정리 후 재진입은 pending 으로 빠져 이 경로에 오지 않음). 회귀 가드 `test-integration-stale-branch.sh` 추가.
-
-## autopilot 0.64.3
-
-### 버그 수정
-- **재실행이 충돌 브랜치를 재통합하지 않아 blocked 무한 루프 (#626)** — blocked 태스크 재실행(open PR 존재) 시 base sync가 무조건 조기 반환해 충돌이 남은 채 리뷰 승인만 폴링하다 상한 초과로 다시 blocked되던 문제 수정. `forge/lib/integration.sh` base sync가 open PR 브랜치의 충돌을 감지하면 `origin/main`을 원격 tip에 merge-in(history 미재작성, non-force)으로 자율 해소해 갱신된 head를 직접 push하고, 무충돌이면 기존 동작(재작성·push 없음)을 유지한다. 재통합 실패 시 리뷰 폴링에 들어가지 않고 integrate 단계에서 즉시 차단된다. 회귀 가드: `tests/autopilot/execute-task/test-execute-task-reentry-conflict-resync.sh`.
-
-## project-init 0.25.0
-
-### 새 기능
-- **소비 프로젝트 훅 구조 표준 + 결정적 검사기 신설 (run 616)** — `shared/hook-standard/` 추가. `standard.md`가 소비 프로젝트 `.claude/hooks/`의 2계층 레이아웃(직속=이벤트명 kebab-case 핸들러, `lib/<command>/`=기능별 디렉터리)·역할 분리(핸들러는 디스패처, 로직은 lib)·스크립트 계약(POSIX sh·jq 우선 sed 폴백·비차단 exit 0·차단 exit 2·실행권한·`${CLAUDE_PROJECT_DIR}` 등록)을 단일 출처로 정의하고, 검사기 판정 10항목과 모델 판정 5항목을 분리된 절로 둔다. `hook_checker.py`(Python3 표준 라이브러리 전용)가 레이아웃·파일명·실행권한·셔뱅·settings↔핸들러 정합·lib 구조를 판정해 항목별 severity+evidence JSON을 stdout으로 내며, 결함이 있어도 평가 성공이면 exit 0. `checker-invocation.md`가 호출 계약(절대경로 고정·실행 형식·결과 해석)을 정의하고, `tests/`가 통과·위반 5종 픽스처로 판정을 검증한다. 후속 `create-hook`·`repair-hook` 스킬이 공유할 기준선(`shared/rubric`이 create-skill·repair-skill에 하는 역할과 대칭).
+### 변경(호환)
+- **feature 스킬 벤더-중립화 — 상호작용 도구명·스킬 호출 표기·플러그인 루트 경로 (run 638)** — feature 스킬 문서 3종(`SKILL.md`·`README.md`·`references/clarification.md`)의 벤더 종속 표기를 런타임-중립 표기로 교체. `TodoWrite`·`AskUserQuestion`을 "현재 런타임의 할 일(단계) 추적 기능"·"현재 런타임의 구조화된 사용자 질문 기능"으로, `Skill(skill="...")` 호출 표기를 "현재 런타임의 스킬 호출 기능으로 `<스킬명>` 호출(인자: ...)"로, `${CLAUDE_PLUGIN_ROOT}` 경로를 `<플러그인 루트>` 표기로 대체하고 SKILL.md 서두에 해석 규칙(스킬 베이스 두 단계 상위 `../..`) 한 줄을 정의. frontmatter `allowed-tools`는 유지(타 런타임은 무시). 7단계 워크플로·resume 모드·규칙·references 구조와 지시 내용 불변. marketplace.json 동기화는 SPEC scope 밖으로 후속 처리(parity 예외 문서화).
 
 ## thinktank 1.0.2
 
 ### 변경(호환)
 - **공유 session-conventions 해체 — 규범을 각 SKILL.md에 용어 특화 인라인 (run 604)** — `skills/shared/session-conventions.md`를 제거하고 규범 5영역(호출 규약·세션 파일 규율·디스패치 공통 규범·중앙 리서치 공통 규범·공통 안전 경계)을 brainstorm(세션 파일, `.brainstorm/<session-id>.md`)·roundtable(회의 파일, `.roundtable/<meeting-id>.md`) 각 SKILL.md 본문에 각 스킬 용어로 자체 정의. `../shared/` 참조·위임 문구 제거(스킬 자기완결). 규범 의미·강도 불변.
+
+## autopilot 0.64.5
+
+### 변경(호환)
+- **create-task 스킬 벤더 독립화 — CLAUDE_PLUGIN_ROOT 폴백·도구명 중립화 (#634)** — SKILL.md 본문의 `${CLAUDE_PLUGIN_ROOT}` 경로 참조 3곳(어댑터·persist-backend-config.sh·scope-coverage-check.sh)을 env 폴백 형태(`${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}`, `$SKILL_DIR` = 스킬 문서 위치 디렉토리)로 교체하고, 본문 산문의 Claude 전용 도구명(`TodoWrite`·`AskUserQuestion`)을 벤더 중립 기능 서술 + 기능 부재 폴백(간결한 직접 질문 등)으로 대체. frontmatter `allowed-tools`는 유지(타 런타임은 무시). 절차·워크플로 의미 불변. marketplace.json의 stale autopilot 버전(0.64.3)·머지 중 소실된 0.64.4 CHANGELOG 섹션도 복구.
+
+## autopilot 0.64.4
+
+### 버그 수정
+- **라벨 설정 실패 사유를 라벨 부재로 오귀속(권한 거부 은폐) (#629)** — github 백엔드 `be_set_status`가 gh stderr를 버리고 실패를 "라벨 존재 필요" 고정 문구로 단정해 권한 거부·네트워크 오류 등 실제 원인이 은폐되던 문제 수정. `github.sh`가 원본 stderr를 보존해 진단에 포함한다(성공 시 무진단 유지). 회귀 가드: `lib/task-backend/tests/test-github-status-fail.sh`.
+
+## autopilot 0.64.3
+
+### 버그 수정
+- **forge review-loop 신뢰봇 게이트 — 머신유저 리뷰봇 미인식 + 같은-head approve/approve 무한 대기 (#627)** — (1) 저장소 관리 allowlist(`<repo>/.autopilot/review-bot-logins`, 한 줄당 로그인 정확일치)를 신뢰봇 판별 기본값에 합성해 GitHub App 이 아닌 머신유저 리뷰봇 계정(예: courtesy-bot)을 세 게이트(승인 마커·현재-head 재리뷰 증거·미해결 스레드 차단)가 인식한다 — 미인식 시 blocking 스레드가 비가시(blocked=0·reviewed=0)라 approve 가 합성돼 승인 가림(#493)이 무력화되던 결함 수정. 기본값 자체는 플랫폼 보장 식별자만 유지한다 — 접미 관례(`-bot$`) 기본 신뢰는 임의 계정의 승인 마커 위조를 허용하므로 채택하지 않음(리뷰 반영). 포함(allowlist 등록)·배제(미등록 계정 비신뢰) 양방향을 selftest 로 검증. (2) 같은-head 분기에서 기록 approve+판정 approve 인데 phase 가 강등된 상태(머지 게이트 차단 후 재진입이 phase=review 로 재설정)가 rc=20 무한 반복하던 경로를 approved 재전이(머지 복귀)로 종착시킨다. phase=approved 정상 멱등(rc=20)과 기존 가드(#493/#549/#571/#600, 라운드 상한·무진전·핑퐁)는 selftest 로 회귀 없이 보존. marketplace.json 의 stale autopilot 버전(0.63.5)도 SoT(plugin.json)와 동기화.
 
 ## autopilot 0.64.2
 
