@@ -29,12 +29,17 @@ allowed-tools:
 ## 백엔드 어댑터
 
 ```
-ADAPTER="${CLAUDE_PLUGIN_ROOT}/lib/task-backend/adapter.sh"
+# SKILL_DIR = 이 스킬 문서(SKILL.md)가 위치한 디렉토리 (런타임이 스킬 로드 시 제공)
+ADAPTER="${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}/lib/task-backend/adapter.sh"
 bash "$ADAPTER" <verb> [args]
 ```
 
+경로 해석: `CLAUDE_PLUGIN_ROOT`가 정의된 런타임(Claude Code)에서는 그 값을 쓰고, 없으면 이 스킬
+문서가 위치한 디렉토리 기준 상대 경로로 해석한다(플러그인 루트 = 스킬 디렉토리의 두 단계 상위).
+
 동사·상태 집합·태스크 본문 구조의 단일 출처는 `task-backend/contract.md`다. 백엔드 미설정 시
-`bash "$ADAPTER" init --backend <filesystem|github-project|beads>`를 안내한다(선택은 `AskUserQuestion`).
+`bash "$ADAPTER" init --backend <filesystem|github-project|beads>`를 안내한다(선택은 현재 런타임의
+구조화된 사용자 질문 기능으로 받고, 없으면 간결한 직접 질문으로 폴백한다).
 
 ### 백엔드 선택 SoT 영속화
 
@@ -42,7 +47,7 @@ bash "$ADAPTER" <verb> [args]
 헬퍼를 실행해 이 SoT를 **메인 브랜치까지 영속화**한다(새 체크아웃·CI·다른 세션에서 동일 백엔드 보장):
 
 ```
-bash "${CLAUDE_PLUGIN_ROOT}/skills/create-task/references/persist-backend-config.sh"
+bash "${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}/skills/create-task/references/persist-backend-config.sh"
 ```
 
 헬퍼는 멱등이며 config 파일 **단독** 변경만 커밋한다 — origin 있으면 config-only 브랜치 push → PR →
@@ -55,7 +60,9 @@ auto-merge, 없으면 로컬 메인 merge. `.autopilot/` 는 워치 디렉토리
 
 ## 워크플로
 
-호출 시 단계를 TodoWrite로 등록한다. 결정·승인은 `AskUserQuestion`으로 받는다(자유 텍스트 질문 종결구 금지).
+호출 시 단계를 현재 런타임의 체크리스트(todo) 기능으로 등록한다(없으면 응답 내 인라인 목록으로 단계를
+추적한다). 결정·승인은 현재 런타임의 구조화된 사용자 질문 기능으로 받는다(자유 텍스트 질문 종결구 금지;
+기능이 없으면 간결한 직접 질문으로 폴백한다).
 
 1. **입력 수신·경로 분기** — 작성자(`feature`/`fix`)가 넘긴 **완성 태스크 본문**(제목 + frontmatter-first 스펙:
    scope frontmatter·무엇을 만들 것인가·완료 조건(EARS) 등)을 입력으로 받는다. 본문 작성·인터뷰·분해는 하지
@@ -68,20 +75,21 @@ auto-merge, 없으면 로컬 메인 merge. `.autopilot/` 는 워치 디렉토리
      `bash "$ADAPTER" get_task --task-id <task-id>`로 그 id가 **실존 태스크로 해석되는지** 확인한다. 해석
      성공이면 재개, 해석 실패(유효 task-id 형식이 아니거나 없는 id)면 첫 줄을 자연어 제목으로 보고 **신규
      등록으로 처리**한다(전체 입력 = `<제목>\n\n<본문>`).
-2. **백엔드 준비** — 백엔드 미설정이면 `adapter init`(선택은 `AskUserQuestion`) 후 위 「백엔드 선택 SoT
-   영속화」 헬퍼를 실행해 config를 메인까지 영속화한다(멱등).
+2. **백엔드 준비** — 백엔드 미설정이면 `adapter init`(선택은 현재 런타임의 구조화된 사용자 질문 기능,
+   없으면 간결한 직접 질문) 후 위 「백엔드 선택 SoT 영속화」 헬퍼를 실행해 config를 메인까지 영속화한다(멱등).
 3. **scope-coverage 검증** — 등록 전에 scope-coverage 검증을 수행한다. 본문 frontmatter의
    `scope.include`에서 소스 경로를 읽어, 그 소스를 덮는 **기존** 테스트 경로가 scope.include에 함께 있는지
    확인한다. 소스→테스트 매핑은 **컨슈밍 프로젝트가 `.autopilot/scope-coverage-map.json`으로 공급**하며,
    그 설정 스키마의 단일 출처는 `references/scope-coverage-map.md`다. 설정이 없는 프로젝트에서는 검사가
    경고 없이 통과한다:
    ```
-   CHECKER="${CLAUDE_PLUGIN_ROOT}/skills/create-task/references/scope-coverage-check.sh"
+   CHECKER="${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}/skills/create-task/references/scope-coverage-check.sh"
    echo "<본문>" | bash "$CHECKER"
    ```
    누락이 있으면 `SCOPE_COVERAGE_WARNING` 과 누락 경로 목록을 출력한다. **등록을 막지 않는다** — 경고를
-   작성자에게 보고하고 다음 단계로 진행한다. 인터랙티브 맥락에서는 `AskUserQuestion`으로 scope.include에
-   추가할지 확인할 수 있다. 스크립트는 항상 0 exit이므로 경고 유무와 관계없이 다음 단계로 진행된다.
+   작성자에게 보고하고 다음 단계로 진행한다. 인터랙티브 맥락에서는 현재 런타임의 구조화된 사용자 질문
+   기능(없으면 간결한 직접 질문)으로 scope.include에 추가할지 확인할 수 있다. 스크립트는 항상 0 exit이므로
+   경고 유무와 관계없이 다음 단계로 진행된다.
 4. **등록** — 받은 본문을 그대로 등록한다(`create_task`의 초기 상태는 `backlog`다). 작성자가 의존 관계를
    넘겼으면 `--depends-on`으로 함께 전달한다:
    ```
