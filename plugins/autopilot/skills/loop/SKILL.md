@@ -61,6 +61,16 @@ driver 동작: 검증 → lock 획득 → 작업 공간 준비(헌법을 `CLAUDE
 
 driver 인터페이스의 self-emit 단일 출처: `loop.sh env`(환경 변수) · `loop.sh gates`(객관 게이트) · `loop.sh paths <spec>`(계산된 경로) · `loop.sh deps`(의존성 + 설치 상태). 지침은 본문에 중복 열거하지 않고 이 subcommand 를 가리킨다.
 
+## 워커 벤더 선택
+
+구현 워커 CLI(`claude`|`codex`)는 다음 우선순위로 정해진다:
+
+1. 환경 변수 `AUTOPILOT_WORKER_VENDOR`
+2. 벤더-중립 설정 `.autopilot/task-backend.json` 의 `worker_vendor`(**spec 저장소**의 메인 워크트리 기준 — 호출 cwd 와 무관하고, 링크드 워크트리 안에서도 같은 파일)
+3. 기본값 `claude`
+
+env 는 무인 경로(cron·드레인)에서 유실되므로 프로젝트 고정 선택은 설정 파일에 둔다. 지원 밖 값이면 `start` 가 지원 벤더 목록을 명시한 오류로 중단한다(조용한 폴백 없음). 필드 정의는 `lib/task-backend/contract.md`.
+
 ## Scope 경로 표기 (표기 관례 단일 출처)
 
 SPEC frontmatter 의 경로 필드(`scope.include`·`scope.exclude`·`test_sweep_paths`)가 수용하는 표기와 매칭 의미론의 단일 출처다. driver(`loop.sh`)의 scope 게이트가 이 관례로 변경 파일을 판정한다.
