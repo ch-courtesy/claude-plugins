@@ -3,6 +3,7 @@ name: repair-hook
 description: 소비 프로젝트의 기존 `.claude/hooks/` 훅 구조를 `shared/hook-standard` 15항목(검사기 10 + 모델 5) 기준으로 평가하고 사용자 승인을 받은 항목만 직접 수정한 뒤 재평가까지 끝낸다. 사용자가 기존 훅의 수정·보수·고치기·리페어·표준화·구조 정리를 요청하거나 훅 BLOCKER·MAJOR 해소가 필요할 때는 물론, 수정 없이 훅 품질 점검·표준 준수 평가·등급 확인만 원할 때도 활성화된다 — 평가-전용 요청이면 평가·등급 보고까지만 수행하고 수정 승인 단계로 넘어가지 않는다. 표준 도입 전 플랫 구조를 만나면 2계층 레이아웃 이행안을 제시한다. 호출 `Skill(skill="repair-hook", args="[<훅 디렉터리 경로>]")`.
 allowed-tools:
   - Read
+  - Glob
   - Edit
   - Write
   - AskUserQuestion
@@ -36,10 +37,11 @@ allowed-tools:
 
 ### 3. 모델 검사 (의미적 5항목)
 
-`../../shared/hook-standard/standard.md`의 "5. 모델 판정 항목" 절을 읽고, 핸들러·
-lib 스크립트와 settings 등록 내용을 직접 읽어 5개 모델 항목(M-NONBLOCKING·
-M-DESTRUCTIVE·M-MATCHER-SCOPE·M-DISPATCH·M-JQ-FALLBACK)을 판정한다. 확신이
-없으면 보수적으로 FAIL한다.
+`../../shared/hook-standard/standard.md`의 "5. 모델 판정 항목" 절을 읽고, 검사
+대상 파일을 `Glob`으로 열거한 뒤(대상 디렉터리의 `**/*.sh`와 저장소 루트의
+`.claude/settings*.json`) 핸들러·lib 스크립트와 settings 등록 내용을 직접 읽어
+5개 모델 항목(M-NONBLOCKING·M-DESTRUCTIVE·M-MATCHER-SCOPE·M-DISPATCH·
+M-JQ-FALLBACK)을 판정한다. 확신이 없으면 보수적으로 FAIL한다.
 
 ### 4. 병합·등급
 

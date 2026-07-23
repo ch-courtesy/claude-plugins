@@ -30,6 +30,9 @@ check "rejection leaves item unresolved without edits" grep -qE '거부' "$SKILL
 check "proposes 2-tier migration for flat layout" bash -c "grep -qE '플랫' '$SKILL' && grep -qE '2계층' '$SKILL'"
 
 check "no destructive tools in allowed-tools" bash -c "! grep -qE 'rm -rf|push --force' '$SKILL'"
+# 모델 검사(3단계)는 핸들러·lib 스크립트·settings 를 직접 읽어야 하므로 파일 열거
+# 수단이 allowed-tools 에 있어야 한다 (PR 639 [blocking/85]).
+check "allowed-tools includes Glob for model-check file enumeration" grep -qE '^  - Glob$' "$SKILL"
 
 # Bash 실행 인자는 cwd 비의존 절대경로(repo_root 기준)여야 한다 — Read 전용 상대경로(../../)와
 # 구분: 코드펜스 안의 'python3 ...hook_checker.py' 줄에 상대경로가 남아있으면 실패.
