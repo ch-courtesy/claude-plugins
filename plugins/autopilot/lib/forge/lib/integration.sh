@@ -518,6 +518,24 @@ in_clear_stale_residue() {
   return 0
 }
 
+# in_stale_remote_guard <branch> — 자동 정리 불가한 stale 원격 작업 브랜치를 push 전에 차단(#630).
+#   in_clear_stale_residue 가 정리하지 못한 잔재(열린 PR 없음 = 소유 확증 불가)가 non-ff 로 남아
+#   있으면, base sync 는 이를 '최초 통합(원격 미존재)'으로 오인해 push 하고 "push 실패" 한 줄로만
+#   끝난다 — 무엇을 어떻게 치울지 알 수 없어 재실행이 같은 자리에서 무한 반복된다. 여기서 정리
+#   방법을 담은 사유로 즉시 차단한다. force 재배치·소유 미확증 원격 자동 삭제는 하지 않는다.
+#   열린 PR 이 있는 경로는 기존 재동기화(in_resync_open_pr)가 처리하므로 건드리지 않는다.
+in_stale_remote_guard() {
+  local branch="$1" local_commit
+  [[ -n "$branch" ]] || return 0
+  # shellcheck disable=SC2086
+  local_commit="$($GIT_CMD rev-parse "refs/heads/$branch" 2>/dev/null)"
+  [[ -n "$local_commit" ]] || return 0
+  in_remote_ff_incompatible "$branch" "$local_commit" || return 0   # 원격부재/ff호환 → 기존 동작.
+  [[ -z "$(in_existing_open_pr "$branch")" ]] || return 0           # 열린 PR → 재동기화 경로 소관.
+  in_die "stale 원격 작업 브랜치: origin/$branch 가 이번 결과 커밋($local_commit)과 non-fast-forward 라 force 없이 push 할 수 없다(force 금지). 열린 PR 이 없어 소유를 확증할 수 없으므로 자동 삭제하지 않는다. 정리: (1) 'git fetch origin $branch && git log --oneline origin/$branch' 로 보존할 커밋이 없는지 확인, (2) 'git push origin --delete $branch' 로 원격 브랜치 삭제, (3) execute-task start 로 재실행."
+  return 1
+}
+
 # =====================================================================
 # 3b) 실패/터미널 경로 조건부 워크트리 정리 — "보존되면 정리, 아니면 보존"(비대칭).
 #   머지 성공 경로는 merge.sh 가 무조건 정리(머지=대상 브랜치에 보존)한다. 여기서는 실패/비완료
@@ -687,6 +705,8 @@ in_integrate() {
       # 재실행 안전: 직전 실패/blocked 가 남긴 non-ff·autopilot-소유 stale 원격 브랜치/PR 을
       # push 전에 정리(force 금지·미소유 보존) — non-ff push 거부를 막는다.
       in_clear_stale_residue "$branch"
+      # 정리하지 못한 non-ff 잔재는 push 전에 정리 방법을 담은 사유로 차단(#630) — 재실행 무한 반복 방지.
+      in_stale_remote_guard "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       int_log "$rd" "$key" "base sync → push → PR (branch=$branch)"
       in_base_sync   "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       # #452: rebase 경로에선 base_sync 가 분리 워크트리에서 원격으로 직접 push 하므로(INT_BASESYNC_PUSHED)
@@ -1002,6 +1022,23 @@ in_selftest() {
     MOCK_REMOTE_FF=0 in_integrate "$spec" "$rd" "$kSE" >/dev/null
   grep -q -- '--delete' "$PUSHLOG" && bad "AC#462 외부 소유 동명 브랜치 삭제(오삭제)" || ok "AC#462 외부 소유 동명 브랜치 미삭제"
   [[ ! -s "$PRCLOSELOG" ]] && ok "AC#462 외부 소유 PR 미close" || bad "AC#462 외부 소유 PR 미close"
+  : > "$REMOTE_BRANCHES"
+
+  # ---- AC(#630): 자동 정리 불가한 stale 원격 작업 브랜치(열린 PR 없음 = 소유 확증 불가)는
+  #   '최초 통합'으로 오인해 non-ff push 로 실패하는 대신, push 전에 정리 방법을 담은 사유로 차단한다.
+  #   force 덮어쓰기·소유 미확증 원격 자동 삭제는 하지 않는다. ----
+  local kSR="x-sr33dddd"; : > "$PUSHLOG"; : > "$PRLOG"; : > "$PRCLOSELOG"; : > "$BRANCHES"; : > "$GITLOG"
+  st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
+  printf '%s\n' "$wbST" > "$REMOTE_BRANCHES"
+  err="$(MOCK_EXISTING_PR="" MOCK_REMOTE_FF=0 in_integrate "$spec" "$rd" "$kSR" 2>&1 >/dev/null)"; rc=$?
+  chk "AC#630 정리 불가 stale 원격 → rc=4(차단)" "$rc" "4"
+  chk "AC#630 phase=blocked" "$(int_get_phase "$rd" "$kSR")" "blocked"
+  case "$err" in
+    *"git push origin --delete $wbST"*) ok "AC#630 차단 사유에 정리 방법(명령) 포함";;
+    *) bad "AC#630 차단 사유에 정리 방법(명령) 포함 (got: $err)";;
+  esac
+  [[ ! -s "$PUSHLOG" ]] && ok "AC#630 차단 시 push 미수행(force 금지)" || bad "AC#630 차단 시 push 미수행(force 금지)"
+  [[ ! -s "$PRCLOSELOG" ]] && ok "AC#630 소유 미확증 원격 자동 삭제·PR close 안 함" || bad "AC#630 소유 미확증 자동 삭제 안 함"
   : > "$REMOTE_BRANCHES"
 
   # ---- AC9: spec-gap BLOCKED → push·PR 없이 blocked-spec-gap ----
