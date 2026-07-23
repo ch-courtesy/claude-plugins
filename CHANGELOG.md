@@ -2,10 +2,15 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
-## autopilot 0.64.8
+## autopilot 0.64.9
 
 ### 버그 수정
 - **forge integration push 게이트 — detached-HEAD 리뷰-수정 커밋 유실 (run 644)** — `in_push_branch`가 원격-앞섬 판정의 로컬 기준으로 **stale 할 수 있는 로컬 브랜치 ref**를 써서, 리뷰-수정 커밋이 loop 워크트리의 분리(detached) HEAD 에만 쌓인 경우(#452: 공유 체크아웃 미오염을 위해 로컬 ref 미갱신) "원격-앞섬"으로 오판해 push 를 생략하고 수정이 원격 PR 에 반영되지 않던 결함을 수정. 이제 판정·push 대상을 **실제 통합 대상 커밋**(브랜치 ref 뒤의 워크트리 델타 커밋 포함)으로 잡고, 델타가 있으면 `<commit>:refs/heads/<branch>` 직접 push 로 반영한다(로컬 ref 미갱신 유지). 오염 방지 가드 — 브랜치 ref 가 이미 origin/main 에 포함되거나(판정 전 base fetch) 자손 후보가 둘 이상이면 되찾지 않고, 모호로 인한 생략은 stderr 로 표면화한다(조용한 재발 방지). 정당한 원격-앞섬 보존(run 592)·force 금지 불변. 회귀 가드 `tests/test-integration-worktree-delta.sh` 추가. marketplace.json 버전 동기화는 SPEC scope 밖으로 후속 처리(parity 예외).
+
+## autopilot 0.64.8
+
+### 버그 수정
+- **재실행이 이전 시도 잔재를 정리하지 않아 자력 회복 불가 (#630)** — 브랜치명·워크트리 경로가 태스크 id 에서 결정적으로 파생되므로 이전 시도의 잔재가 남으면 재실행이 반드시 같은 자리에서 실패했고, 실패 문구만으로는 무엇을 치울지 알 수 없어 무한 반복됐다. (1) `execute-task` 가 loop 진입 전에 run-dir 워크트리 **등록**이 stale(디렉터리 부재)인지 보고 `git worktree prune` 으로 정리한 뒤 진행한다(`fatal: ... is a missing but already registered worktree` 회귀 해소, 살아 있는 워크트리는 미훼손). (2) `forge/lib/integration.sh` 는 자동 정리하지 못한 non-ff 원격 작업 브랜치(열린 PR 없음 = 소유 확증 불가)를 '최초 통합' 으로 오인해 push 하고 "push 실패" 한 줄로 끝내는 대신, 확인·삭제·재실행 명령을 담은 사유로 push 전에 차단한다. force 덮어쓰기·소유 미확증 원격 자동 삭제는 도입하지 않았고, 잔재가 없으면 기존 재실행 동작 그대로다. 회귀 가드 `tests/autopilot/execute-task/test-execute-task-stale-residue.sh` 추가 + `integration.sh selftest` AC#630 케이스.
 
 ## autopilot 0.64.7
 
