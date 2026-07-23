@@ -56,6 +56,22 @@ et_cleanup_dirs() {
   for d in "$@"; do rm -rf "$d" 2>/dev/null || true; done
 }
 
+# et_prune_stale_worktree <run_dir> — 이전 시도가 남긴 stale 워크트리 '등록' 정리(#630).
+#   run-dir 를 디렉터리 삭제로만 치우면 git 의 워크트리 등록은 남고, 다음 실행의 worktree add 가
+#   "missing but already registered worktree" 로 반드시 실패한다(브랜치명·경로가 태스크 id 에서
+#   결정적이라 재실행이 같은 자리에서 무한 반복). 등록만 남고 디렉터리가 없을 때만 **그 경로
+#   하나를** 정리한다 — 전역 prune 은 병렬 드레인(workflow-task fan-out)에서 다른 태스크가 막
+#   등록하고 디렉터리를 만들기 전인 워크트리까지 지울 수 있으므로 쓰지 않는다. 디렉터리가 살아
+#   있으면 건드리지 않는다(worktree remove 는 살아 있는 워크트리를 실제로 지우므로 이 가드가 필수).
+et_prune_stale_worktree() {
+  local wt="$1/.worktree"
+  git -C "$ROOT_DIR" worktree list --porcelain 2>/dev/null \
+    | grep -Fxq "worktree $wt" || return 0
+  [[ -d "$wt" ]] && return 0
+  echo "execute-task: stale 워크트리 등록 정리 — $wt" >&2
+  git -C "$ROOT_DIR" worktree remove "$wt" >/dev/null 2>&1 || true
+}
+
 # et_approval_gh <pr> — PR 호스팅 리뷰가 승인 상태면 0, 아니면 1.
 #   승인 신호 두 가지(merge.sh mg_approval_gh / review-loop rl_review_fetch_gh 와 동일 컨벤션):
 #     (a) 공식 APPROVE 리뷰 → reviewDecision==APPROVED.
@@ -163,6 +179,9 @@ et_start() {
   local run_dir="$ROOT_DIR/.autopilot/runs/$id"
   local reentry=0
   [[ -f "$run_dir/review_entered" ]] && reentry=1
+
+  # 재실행 잔재: 이전 시도의 stale 워크트리 등록을 정리하고 진행(#630). loop 의 worktree add 보다 앞선다.
+  et_prune_stale_worktree "$run_dir"
 
   # reclaim: 죽은 워커 잔재 정리(최초 실행/loop-단계 재진입). forge-단계 재진입(reentry=1)은 loop 가
   #   이미 DONE 이라 회수할 워커가 없고, 완료된 .worktree 를 forge integrate 가 loop 결과(HEAD)로 읽으므로
