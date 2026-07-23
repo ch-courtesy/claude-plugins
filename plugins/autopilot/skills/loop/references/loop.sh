@@ -18,7 +18,8 @@
 #   WALL_CLOCK_MINUTES     시계 캡 (기본: 120)
 #   AUTOPILOT_BASE_REF     워크트리 base ref 주입 (미지정 시 fetch 한
 #                          origin/<default-branch>; --base-ref 가 우선)
-#   AUTOPILOT_WORKER_VENDOR  worker CLI 선택 (기본: claude; claude|codex)
+#   AUTOPILOT_WORKER_VENDOR  worker CLI 선택 (claude|codex). 우선순위:
+#                          env > .autopilot/task-backend.json 의 worker_vendor > claude
 #   AUTOPILOT_WORKER_FAIL_STREAK_LIMIT  worker 비정상 exit 연속 허용 (기본: 3)
 
 set -euo pipefail
@@ -40,8 +41,34 @@ require_tool() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' 명령이 필요합니다."
 }
 
+# 메인 워크트리 루트 — 링크드 워크트리 안에서 --show-toplevel 은 워크트리 루트를
+# 반환하므로, worktree list --porcelain 첫 항목(항상 메인 워크트리)을 우선한다.
+# 구버전 git(< 2.7)·git 미설치는 --show-toplevel 으로 폴백.
+main_repo_root() {
+  local root
+  root="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10); exit}')" || true
+  [[ -n "$root" ]] || root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  printf '%s' "$root"
+}
+
+# .autopilot/task-backend.json 의 worker_vendor (벤더-중립 설정 SoT).
+# loop 엔진은 jq 무의존 — awk 로 문자열 필드만 뽑고, 파싱 불가면 빈 값(=폴백).
+config_worker_vendor() {
+  local cfg; cfg="$(main_repo_root)/.autopilot/task-backend.json"
+  [[ -f "$cfg" ]] || return 0
+  awk 'match($0, /"worker_vendor"[[:space:]]*:[[:space:]]*"[^"]*"/) {
+         s = substr($0, RSTART, RLENGTH)
+         sub(/^"worker_vendor"[[:space:]]*:[[:space:]]*"/, "", s)
+         sub(/"$/, "", s)
+         print s; exit
+       }' "$cfg" 2>/dev/null || true
+}
+
+# 우선순위: env AUTOPILOT_WORKER_VENDOR > 설정 파일 worker_vendor > 기본값 claude.
 worker_vendor() {
-  printf '%s' "${AUTOPILOT_WORKER_VENDOR:-claude}"
+  local v="${AUTOPILOT_WORKER_VENDOR:-}"
+  [[ -n "$v" ]] || v="$(config_worker_vendor)"
+  printf '%s' "${v:-claude}"
 }
 
 worker_executable() {
@@ -1045,6 +1072,8 @@ start 동작을 조정하는 환경 변수:
   MAX_ITERATIONS             기본 30      이터 상한 (--max-iterations 로 override)
   WALL_CLOCK_MINUTES         기본 120     시간 상한 (--wall-clock-minutes 로 override)
   AUTOPILOT_WORKER_VENDOR              기본 claude  worker CLI (claude|codex)
+                                                  우선순위: env > .autopilot/task-backend.json
+                                                  의 worker_vendor > claude
   AUTOPILOT_WORKER_FAIL_STREAK_LIMIT  기본 3       worker 비정상 exit 연속 허용 횟수
 EOF
 }
