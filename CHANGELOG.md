@@ -7,6 +7,11 @@
 ### 새 기능
 - **create-hook 스킬 — 훅 생성 (hook-standard 소비) (run 617)** — 소비 프로젝트에 Claude Code 훅(이벤트 핸들러 + `lib/<command>/` 기능 스크립트 + settings 등록)을 인터뷰 기반으로 설계·작성하는 `skills/create-hook` 신설. 구조화된 질문으로 이벤트·기능(command)·차단 여부·대상 디렉토리를 확정하고, `shared/hook-standard`(단일 출처)의 2계층 레이아웃·스크립트 계약(POSIX sh·jq 폴백·비차단 exit 0·`${CLAUDE_PROJECT_DIR}` placeholder 등록)대로 산출한다. 같은 이벤트 핸들러가 이미 있으면 새 핸들러 대신 기존 핸들러에 디스패치를 추가하고, 기존 파일 덮어쓰기는 diff 제시 후 명시적 승인에서만 수행하며, 작성 후 `hook_checker.py`로 BLOCKER·MAJOR 0 을 확인(발견 시 수정 후 1회만 재검)한다.
 
+## autopilot 0.64.6
+
+### 변경(호환)
+- **feature 스킬 벤더-중립화 — 상호작용 도구명·스킬 호출 표기·플러그인 루트 경로 (run 638)** — feature 스킬 문서 3종(`SKILL.md`·`README.md`·`references/clarification.md`)의 벤더 종속 표기를 런타임-중립 표기로 교체. `TodoWrite`·`AskUserQuestion`을 "현재 런타임의 할 일(단계) 추적 기능"·"현재 런타임의 구조화된 사용자 질문 기능"으로, `Skill(skill="...")` 호출 표기를 "현재 런타임의 스킬 호출 기능으로 `<스킬명>` 호출(인자: ...)"로, `${CLAUDE_PLUGIN_ROOT}` 경로를 `<플러그인 루트>` 표기로 대체하고 SKILL.md 서두에 해석 규칙(스킬 베이스 두 단계 상위 `../..`) 한 줄을 정의. frontmatter `allowed-tools`는 유지(타 런타임은 무시). 7단계 워크플로·resume 모드·규칙·references 구조와 지시 내용 불변. marketplace.json 동기화는 SPEC scope 밖으로 후속 처리(parity 예외 문서화).
+
 ## thinktank 1.0.2
 
 ### 변경(호환)
