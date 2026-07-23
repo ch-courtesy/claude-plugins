@@ -2,6 +2,13 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.64.7
+
+### 버그 수정
+- **드레이너 겹침 직렬화가 디렉터리·글롭 의미 겹침을 미탐 (PR 637 리뷰 반영)** — `workflow-task` 산출물 겹침 판정이 `scope.include` 항목의 문자열 일치만 봐서, 앞선 태스크가 `plugins/autopilot/`(후행 `/` prefix)나 `src/**`(글롭)를 선점해도 뒤 태스크의 그 하위 경로(`plugins/autopilot/.claude-plugin/plugin.json`·`src/foo.sh`)를 겹침으로 보지 못하고 동시 실행했다. 이제 loop `path_matches_pattern` 의미론(후행 `/`=prefix, 그 외=bash 글롭)으로 어느 한쪽이 다른 쪽을 덮으면 양방향 모두 겹침으로 유예한다. 회귀 케이스를 `tests/autopilot/test-workflow-task-overlap-serialize.sh`에 추가.
+- **병렬 fan-out이 버전 표면 공유 태스크를 동시 실행해 연쇄 충돌 (#628)** — `workflow-task` 드레이너가 `list_ready`의 의존 충족만 보고 산출물 경로 겹침을 보지 않아, 같은 플러그인(공유 CHANGELOG·`plugin.json`)을 만지는 태스크들이 동시에 실행되고 첫 머지가 나머지 형제 브랜치를 일괄 `CONFLICTING`으로 만들었다(관측: 605·608·610·611 병렬 드레인). 이제 태스크 본문 frontmatter `scope.include` 항목이 앞선 태스크에 선점됐으면 그 패스에서 실행하지 않고 `deferred`/`deferred_ids`로 보고하며(조용한 누락 금지) 다음 틱 드레인이 집는다. 산출물이 겹치지 않는 태스크는 기존대로 병렬. 특정 경로 하드코딩 없음(일반 경로 겹침 판정). 회귀 가드 `tests/autopilot/test-workflow-task-overlap-serialize.sh` 추가.
+- **CHANGELOG 기존 항목 덮어쓰기가 게이트 없이 머지 (#628)** — CHANGELOG 는 누적 계약(추가만)인데 강제 게이트가 없어, 워커가 base 전진을 못 따라가면 기존 섹션을 자기 항목으로 교체해 직전 릴리스 기록을 삭제한 채 머지될 수 있었다(관측: PR 633이 project-init 0.25.0 기록을 삭제하고 main에 머지 — 후속 복구). `forge/lib/integration.sh`에 순수-추가 게이트 `in_changelog_additive_gate` 추가: base(origin/main) 대비 three-dot diff에서 CHANGELOG 기존 라인 삭제를 감지하면 PR·리뷰(머지 후보)로 넘기지 않고 차단한다(base 전진분은 오탐하지 않고, base 재동기화 merge-in의 덮어쓰기도 잡힘). 추가만 있는 변경(삭제 0)은 기존대로 통과. 경로는 `INT_CHANGELOG_FILE`로 설정 가능하고 빈 값이면 비활성(정당한 오타 수정·항목 재배치 우회), base에 파일이 없으면 미적용(정책 비내장). 회귀 가드 `tests/autopilot/execute-task/test-execute-task-changelog-gate.sh` 추가.
+
 ## project-init 0.26.0
 
 ### 새 기능

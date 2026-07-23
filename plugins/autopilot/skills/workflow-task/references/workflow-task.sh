@@ -17,6 +17,43 @@ EXECUTE_CMD="${EXECUTE_CMD:-bash $PLUGIN/skills/execute-task/references/execute-
 
 die() { echo "workflow-task: $*" >&2; exit 1; }
 
+# scope 항목 커버 판정(#637). loop path_matches_pattern 의미론과 동일(표기 SoT:
+# skills/loop/SKILL.md "Scope 경로 표기") — 후행 '/' 항목은 prefix, 그 외는 bash 글롭.
+wt_pattern_covers() { # <pat> <path> — pat 이 path 를 덮으면 0.
+  local pat="$1" path="$2"
+  if [[ "$pat" == */ ]]; then
+    [[ "$path" == "$pat"* ]]
+  else
+    # shellcheck disable=SC2053
+    [[ "$path" == $pat ]]
+  fi
+}
+
+# 글롭 항목의 리터럴 디렉터리 베이스 — 첫 글롭 문자 앞까지의 마지막 '/' 까지.
+#   'src/*.sh' → 'src/', 'a/b/**' → 'a/b/', '*.md' → ''.
+wt_glob_base() {
+  local pat="$1" lit="${1%%[*?[]*}"
+  [[ "$pat" == "$lit" ]] && { printf '%s' "$pat"; return; }
+  printf '%s' "${lit%/*}/"
+}
+
+# 두 scope.include 항목의 산출물 교집합 판정 — 겹치면 0.
+#   (1) 정확 일치, (2) 어느 방향이든 커버('plugins/autopilot/' vs 하위 파일, 'src/**' vs 'src/foo.sh'),
+#   (3) 글롭끼리 부분 겹침 — 서로의 패턴 문자열은 못 덮어도 파일 집합이 교차하는 조합
+#       (예: 'src/*.sh' vs 'src/foo.*' 는 둘 다 'src/foo.sh' 를 포함). 파일시스템을 읽지 않고
+#       판정하므로, 두 글롭의 리터럴 베이스가 prefix 관계면 보수적으로 겹침으로 본다
+#       (오탐은 다음 틱 유예로 끝나지만, 미탐은 연쇄 충돌을 만든다).
+wt_scope_overlap() {
+  [[ "$1" == "$2" ]] && return 0
+  wt_pattern_covers "$1" "$2" && return 0
+  wt_pattern_covers "$2" "$1" && return 0
+  # (3) 양쪽 모두 글롭일 때만 — 한쪽이 리터럴이면 위 커버 판정이 이미 정확하다.
+  case "$1" in *[*?[]*) ;; *) return 1;; esac
+  case "$2" in *[*?[]*) ;; *) return 1;; esac
+  local b1 b2; b1="$(wt_glob_base "$1")"; b2="$(wt_glob_base "$2")"
+  [[ "$b1" == "$b2"* || "$b2" == "$b1"* ]]
+}
+
 wt_start() {
   local maxp=""
   while [[ $# -gt 0 ]]; do case "$1" in --max-parallel) maxp="$2"; shift 2;; *) shift;; esac; done
@@ -25,15 +62,53 @@ wt_start() {
   mapfile -t ids < <(printf '%s' "$ready" | jq -r '.[].task_id')
   if [[ ${#ids[@]} -eq 0 ]]; then echo '{"drained":0,"ready":0,"note":"no ready tasks"}'; return 0; fi
 
-  local conc="${maxp:-${#ids[@]}}"
+  # 산출물(버전 표면) 겹침 직렬화(#628): 태스크 본문 frontmatter scope.include 항목이 이미
+  # 앞선 태스크에 선점됐으면 이번 패스에서 실행하지 않는다(공유 CHANGELOG·매니페스트를 동시에
+  # 만지면 첫 머지가 형제 브랜치를 연쇄 충돌시킨다). 유예분은 deferred_ids 로 보고(조용한 누락
+  # 금지)하고 다음 틱 list_ready 가 다시 집는다. 특정 경로 하드코딩 없음 — 일반 경로 겹침.
+  local run_ids=() deferred=() claimed=$'\n'
+  local id body entries e overlap
+  for id in "${ids[@]}"; do
+    body="$($ADAPTER_CMD get_body --task-id "$id" 2>/dev/null | jq -r '.body // empty' 2>/dev/null || true)"
+    entries="$(printf '%s\n' "$body" | awk '
+      NR==1 && /^---[[:space:]]*$/ { fm=1; next }
+      fm && /^---[[:space:]]*$/ { exit }
+      fm && /^[[:space:]]*include:[[:space:]]*$/ { inc=1; next }
+      fm && inc && /^[[:space:]]*-[[:space:]]/ { s=$0; sub(/^[[:space:]]*-[[:space:]]*/, "", s); print s; next }
+      fm && inc { inc=0 }
+    ')"
+    overlap=0
+    if [[ -n "$entries" ]]; then
+      local c
+      while IFS= read -r e; do
+        [[ -n "$e" ]] || continue
+        while IFS= read -r c; do
+          [[ -n "$c" ]] || continue
+          if wt_scope_overlap "$e" "$c"; then overlap=1; break; fi
+        done <<< "$claimed"
+        [[ "$overlap" == "1" ]] && break
+      done <<< "$entries"
+    fi
+    if [[ "$overlap" == "1" ]]; then deferred+=("$id"); continue; fi
+    if [[ -n "$entries" ]]; then
+      while IFS= read -r e; do [[ -n "$e" ]] && claimed+="$e"$'\n'; done <<< "$entries"
+    fi
+    run_ids+=("$id")
+  done
+  local deferred_ids='[]'
+  if [[ ${#deferred[@]} -gt 0 ]]; then
+    deferred_ids="$(printf '%s\n' "${deferred[@]}" | jq -R . | jq -sc .)"
+  fi
+
+  local conc="${maxp:-${#run_ids[@]}}"
   # 평면 flow 정의 생성: 의존 없는 command_node 들(즉시 병렬). 각 노드 = execute-task start <id>.
   local def; def="$(mktemp "${TMPDIR:-/tmp}/wt-def.XXXXXX.py")"
   {
     echo "from workflow_replica.nodes import command_node"
     echo "CONCURRENCY = $conc"
     echo "NODES = ["
-    local id argv_json
-    for id in "${ids[@]}"; do
+    local argv_json
+    for id in "${run_ids[@]}"; do
       # EXECUTE_CMD(공백 분리) + start <id> 를 argv 리스트로
       argv_json="$(printf '%s\n' $EXECUTE_CMD start "$id" | jq -R . | jq -sc .)"
       printf '  command_node(%s, %s, cwd=%s),\n' "$(printf '%s' "$id" | jq -R .)" "$argv_json" "$(printf '%s' "$ROOT_DIR" | jq -R .)"
@@ -53,8 +128,9 @@ wt_start() {
   failed_ids="$(printf '%s' "$out" | jq -c '.failed // []' 2>/dev/null || echo '[]')"
   [[ -n "$failed_ids" ]] || failed_ids='[]'
   jq -nc --argjson r "${#ids[@]}" --argjson s "${succ:-0}" --argjson f "${failed:-0}" \
-    --argjson fids "$failed_ids" --arg ok "$ok" \
-    '{ready:$r, succeeded:$s, failed:$f, failed_ids:$fids, flow_ok:($ok=="true")}'
+    --argjson fids "$failed_ids" --argjson d "${#deferred[@]}" --argjson dids "$deferred_ids" \
+    --arg ok "$ok" \
+    '{ready:$r, succeeded:$s, failed:$f, failed_ids:$fids, deferred:$d, deferred_ids:$dids, flow_ok:($ok=="true")}'
   [[ "${failed:-0}" -eq 0 ]] || return 1
 }
 
