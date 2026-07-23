@@ -100,4 +100,39 @@ got="$(
 [[ "$got" == "codex" ]] || fail "T5: 링크드 워크트리에서 메인 설정 미해석. got='$got' want='codex'"
 ok "링크드 워크트리에서도 메인 워크트리 설정 해석"
 
+echo "=== T6: start 사전 검사가 spec 저장소 설정을 읽음 (호출 cwd 아님) ==="
+# loop 은 spec 절대 경로로 어느 cwd 에서든 실행된다. 사전 의존성 검사가 호출 cwd 의
+# 설정을 읽으면, 실제 이터(=spec 저장소 워크트리에서 실행)와 다른 워커를 요구해
+# 시작 전에 잘못 실패한다. spec 저장소=codex, 호출 cwd=설정 없음으로 분리 검증.
+write_config codex
+printf -- '---\nscope:\n  include:\n    - README.md\n---\n\n# t\n' > "$PROJECT/spec.md"
+
+OTHER="$WORK_DIR/other"
+mkdir -p "$OTHER"
+git -C "$OTHER" init -q
+
+# claude·codex 가 실제 PATH 에 있으면 require_tool 이 통과해 루프가 시작되므로,
+# 사전 검사에 필요한 도구만 담은 최소 PATH 로 격리한다(둘 다 부재 → 어느 쪽을
+# 요구하는지가 오류 메시지로 관측된다).
+STUB="$WORK_DIR/stub"
+mkdir -p "$STUB"
+for t in bash git awk dirname basename; do
+  p="$(command -v "$t")" || fail "T6: 전제 도구 부재: $t"
+  ln -sf "$p" "$STUB/$t"
+done
+printf '#!/bin/sh\nexit 0\n' > "$STUB/yq"; chmod +x "$STUB/yq"
+
+set +e
+out=$(
+  cd "$OTHER"
+  unset AUTOPILOT_WORKER_VENDOR
+  PATH="$STUB" "$STUB/bash" "$LOOP_SH" start "$PROJECT/spec.md" 2>&1
+)
+rc=$?
+set -e
+[[ $rc -ne 0 ]] || fail "T6: 워커 CLI 부재인데 0 exit. out='$out'"
+echo "$out" | grep -q "codex" \
+  || fail "T6: 사전 검사가 spec 저장소 설정(codex) 대신 호출 cwd 기준으로 판정. out='$out'"
+ok "start 사전 검사가 spec 저장소 기준으로 워커 벤더 해석"
+
 echo "ALL PASS"

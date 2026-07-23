@@ -5,7 +5,7 @@
 ## autopilot 0.65.0
 
 ### 새 기능
-- **워커 벤더 영속 설정 — `.autopilot/task-backend.json` 의 `worker_vendor` (run 635)** — 구현 워커 CLI(`claude`|`codex`) 선택이 환경 변수 `AUTOPILOT_WORKER_VENDOR` 로만 가능해 무인 경로(cron 드레인 등 env 미전달)에서 항상 기본값으로 떨어지던 문제를 해소. loop 엔진이 벤더-중립 설정 SoT `.autopilot/task-backend.json` 의 `worker_vendor` 를 읽는다. 우선순위는 env > 설정 파일 > 기본값 `claude`(기존 프로젝트 동작 불변), 지원 밖 값이면 `start` 가 지원 벤더 목록을 명시한 오류로 중단한다. 설정 파일은 메인 워크트리 기준으로 확정해 링크드 워크트리 안에서도 같은 파일을 읽으며, 파싱은 jq 무의존(파싱 불가 시 env/기본값 경로).
+- **워커 벤더 영속 설정 — `.autopilot/task-backend.json` 의 `worker_vendor` (run 635)** — 구현 워커 CLI(`claude`|`codex`) 선택이 환경 변수 `AUTOPILOT_WORKER_VENDOR` 로만 가능해 무인 경로(cron 드레인 등 env 미전달)에서 항상 기본값으로 떨어지던 문제를 해소. loop 엔진이 벤더-중립 설정 SoT `.autopilot/task-backend.json` 의 `worker_vendor` 를 읽는다. 우선순위는 env > 설정 파일 > 기본값 `claude`(기존 프로젝트 동작 불변), 지원 밖 값이면 `start` 가 지원 벤더 목록을 명시한 오류로 중단한다. 설정 파일은 호출 cwd 가 아니라 **spec 저장소**의 메인 워크트리 기준으로 확정해(사전 의존성 검사와 실제 이터가 같은 워커를 본다) 링크드 워크트리 안에서도 같은 파일을 읽으며, 파싱은 jq 무의존(파싱 불가 시 env/기본값 경로).
 
 ### 변경(호환)
 - **execute-task 스킬 호출 표기 벤더 중립화 (run 635)** — SKILL.md 의 실행 스크립트 경로를 `${CLAUDE_PLUGIN_ROOT}` 에서 계약 관례 `${CLAUDE_PLUGIN_ROOT:-$CODEX_PLUGIN_ROOT}` 로 교체해 Claude 전용 변수 부재 환경에서도 성립하게 함. 벤더 선택 우선순위는 loop SKILL.md·`lib/task-backend/contract.md` 에 기술.

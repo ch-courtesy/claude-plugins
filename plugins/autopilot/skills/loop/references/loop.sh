@@ -44,10 +44,13 @@ require_tool() {
 # 메인 워크트리 루트 — 링크드 워크트리 안에서 --show-toplevel 은 워크트리 루트를
 # 반환하므로, worktree list --porcelain 첫 항목(항상 메인 워크트리)을 우선한다.
 # 구버전 git(< 2.7)·git 미설치는 --show-toplevel 으로 폴백.
+# 기준점은 SPEC_DIR(정체성) — loop 은 spec 절대 경로로 어느 cwd 에서든 실행되므로
+# 호출 cwd 기준으로 풀면 다른 저장소의 설정을 읽는다. SPEC_DIR 미확정(compute_paths
+# 이전·cmd_deps 등 spec 없는 경로)일 때만 cwd 기준.
 main_repo_root() {
-  local root
-  root="$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10); exit}')" || true
-  [[ -n "$root" ]] || root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  local from="${SPEC_DIR:-.}" root
+  root="$(git -C "$from" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10); exit}')" || true
+  [[ -n "$root" ]] || root="$(git -C "$from" rev-parse --show-toplevel 2>/dev/null || pwd)"
   printf '%s' "$root"
 }
 
@@ -723,9 +726,6 @@ cmd_start() {
   local input="$1"; shift || true
   [[ -z "$input" ]] && die "사용: $0 start <spec-path> [--max-iterations N] [--wall-clock-minutes N]"
   [[ -f "$input" ]] || die "스펙 파일을 찾을 수 없음: $input"
-  # 게이트(yq)·worker CLI는 start에서만 필요 — 여기서 검사.
-  require_tool yq
-  require_tool "$(worker_executable)"
 
   local max_iterations_override="" wall_clock_minutes_override="" base_ref_override=""
   while [[ $# -gt 0 ]]; do
@@ -742,6 +742,13 @@ cmd_start() {
   BASE_REF="${base_ref_override:-${AUTOPILOT_BASE_REF:-}}"
 
   compute_paths "$input"
+
+  # 게이트(yq)·worker CLI는 start에서만 필요 — 여기서 검사. compute_paths 뒤에 두는
+  # 이유: 워커 벤더 설정은 호출 cwd 가 아니라 spec 저장소 기준으로 해석해야 하고
+  # (main_repo_root 가 SPEC_DIR 을 기준점으로 쓴다), 그래야 사전 검사와 실제 이터가
+  # 같은 워커를 본다.
+  require_tool yq
+  require_tool "$(worker_executable)"
 
   # 스펙 내용 검증은 하지 않는다 — 특정 스펙 작성 도구의 규약(마커·placeholder)에
   # 비결합. 스펙 강화 필요 여부는 워커가 signals/ 에 차단 신호로 표현하고, 호출자가

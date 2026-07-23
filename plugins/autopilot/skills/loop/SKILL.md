@@ -66,7 +66,7 @@ driver 인터페이스의 self-emit 단일 출처: `loop.sh env`(환경 변수) 
 구현 워커 CLI(`claude`|`codex`)는 다음 우선순위로 정해진다:
 
 1. 환경 변수 `AUTOPILOT_WORKER_VENDOR`
-2. 벤더-중립 설정 `.autopilot/task-backend.json` 의 `worker_vendor`(메인 워크트리 기준 — 링크드 워크트리 안에서도 같은 파일)
+2. 벤더-중립 설정 `.autopilot/task-backend.json` 의 `worker_vendor`(**spec 저장소**의 메인 워크트리 기준 — 호출 cwd 와 무관하고, 링크드 워크트리 안에서도 같은 파일)
 3. 기본값 `claude`
 
 env 는 무인 경로(cron·드레인)에서 유실되므로 프로젝트 고정 선택은 설정 파일에 둔다. 지원 밖 값이면 `start` 가 지원 벤더 목록을 명시한 오류로 중단한다(조용한 폴백 없음). 필드 정의는 `lib/task-backend/contract.md`.
