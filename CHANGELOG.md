@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## autopilot 0.65.2
+
+### 버그 수정
+- **base 재동기화 자율 해소가 CHANGELOG 누적 항목을 삭제 (run 648)** — open-PR base 재동기화의 충돌 자율 해소가 충돌 파일을 **파일 단위 한쪽 채택**(`checkout --ours/--theirs`)으로 닫아, 누적(추가-전용) 계약 파일에선 전략과 무관하게 다른 쪽 섹션이 통째로 삭제된 채 커밋·push 되던 결함을 수정(run 635 관측: main 의 `## autopilot 0.64.8` 섹션 소실 후 순수-추가 게이트가 사후 차단 → 자력 회복 불가). 이제 누적 계약 파일(판별 표면은 순수-추가 게이트와 동일한 `INT_CHANGELOG_FILE`, 기본 `CHANGELOG.md`)은 **union 병합으로 양쪽 항목을 모두 보존**해 해소하고, 그 결과가 base 쪽 라인을 하나라도 잃으면 커밋·push 없이 merge/rebase 를 중단하고 사유를 남긴다. merge-in·rebase 두 경로 모두 적용. 일반 충돌 파일의 전략(`FORGE_CONFLICT_STRATEGY`)과 게이트 비활성(`INT_CHANGELOG_FILE=''`) 동작은 그대로(후방 호환), force 미사용 불변. 회귀 가드 `plugins/autopilot/lib/forge/lib/tests/test-integration-changelog-union.sh` 추가.
+
 ## autopilot 0.65.1
 
 ### 버그 수정

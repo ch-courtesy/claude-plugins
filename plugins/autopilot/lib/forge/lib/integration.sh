@@ -189,6 +189,43 @@ in_ensure_work_branch() {
 #   진행한다(거짓 green 방지). 충돌 해소가 없었으면 비어 있음.
 INT_AUTORESOLVE_FLAG=""
 
+# in_accumulating_file <path> — 누적(추가-전용) 계약 파일이면 0. 판별 표면은 순수-추가
+#   게이트와 동일(INT_CHANGELOG_FILE, 기본 CHANGELOG.md; 빈 값이면 비활성 → 일반 파일 취급).
+in_accumulating_file() {
+  local file="${INT_CHANGELOG_FILE-CHANGELOG.md}"
+  [[ -n "$file" && "$1" == "$file" ]]
+}
+
+# in_union_resolve <path> <base-stage> — 누적 계약 파일 충돌을 **양쪽 보존**(union)으로 해소.
+#   한쪽 채택(checkout --ours/--theirs)은 누적 파일에선 곧 다른 쪽 항목의 삭제라, 전략과
+#   무관하게 손실이 난다(run 635). union 병합으로 양쪽 항목을 모두 남기고, 그 결과가 base
+#   쪽 라인을 하나라도 잃으면 실패(1)로 보고해 호출자가 커밋·push 전에 중단하게 한다.
+#   <base-stage>: base(origin/main) 쪽 인덱스 스테이지 — merge-in 은 3(theirs), rebase 는 2(ours).
+in_union_resolve() {
+  local f="$1" base_stage="$2" d top side rc=0
+  # shellcheck disable=SC2086
+  top="$($GIT_CMD rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [[ -n "$top" ]] || return 1
+  d="$(mktemp -d)"
+  # 공통 조상(stage 1)은 add/add 충돌이면 없을 수 있다 — 빈 파일로 대체.
+  # shellcheck disable=SC2086
+  $GIT_CMD show ":1:$f" > "$d/base" 2>/dev/null || : > "$d/base"
+  # shellcheck disable=SC2086
+  $GIT_CMD show ":2:$f" > "$d/ours" 2>/dev/null || rc=1
+  # shellcheck disable=SC2086
+  $GIT_CMD show ":3:$f" > "$d/theirs" 2>/dev/null || rc=1
+  if [[ "$rc" == 0 ]]; then
+    # shellcheck disable=SC2086
+    $GIT_CMD merge-file -p --union "$d/ours" "$d/base" "$d/theirs" > "$d/merged" 2>/dev/null || rc=1
+    side="$d/theirs"; [[ "$base_stage" == "2" ]] && side="$d/ours"
+    # base 쪽에 있던 라인이 결과에서 사라졌으면 손실 — 순수-추가 계약을 만족하지 못한다.
+    [[ "$(diff "$side" "$d/merged" | grep -c '^<')" == "0" ]] || rc=1
+  fi
+  [[ "$rc" == 0 ]] && cp "$d/merged" "$top/$f"
+  rm -rf "$d"
+  return "$rc"
+}
+
 # in_autoresolve_rebase <branch> — 진행 중(충돌 정지) rebase 를 자율 해결.
 #   파일별: FORGE_CONFLICT_STRATEGY (기본 incoming=재적용 중 작업 커밋 쪽 --theirs,
 #   base=새 베이스 쪽 --ours) + 비결정 표시. plugin.json 버전 충돌도 일반 충돌로 처리한다
@@ -201,6 +238,17 @@ in_autoresolve_rebase() {
   [[ -n "$unmerged" ]] || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
+    if in_accumulating_file "$f"; then
+      # rebase 에선 --ours=새 베이스 쪽(stage 2) — 그쪽 라인을 잃지 않아야 한다.
+      if ! in_union_resolve "$f" 2; then
+        echo "autoresolve: 누적 계약 파일 양쪽 보존 해소 실패 — 손실 결과를 만들지 않고 중단(rebase abort): $f" >&2
+        $GIT_CMD rebase --abort 2>/dev/null || true; return 1
+      fi
+      resolved_general=1
+      # shellcheck disable=SC2086
+      $GIT_CMD add -- "$f" 2>/dev/null || true
+      continue
+    fi
     # shellcheck disable=SC2086
     case "${FORGE_CONFLICT_STRATEGY:-incoming}" in
       base) $GIT_CMD checkout --ours   -- "$f" 2>/dev/null || true ;;
@@ -234,6 +282,17 @@ in_autoresolve_merge() {
   [[ -n "$unmerged" ]] || { $GIT_CMD merge --abort 2>/dev/null || true; return 1; }
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
+    if in_accumulating_file "$f"; then
+      # merge-in 에선 --theirs=새 베이스(origin/main) 쪽(stage 3) — 그쪽 라인을 잃지 않아야 한다.
+      if ! in_union_resolve "$f" 3; then
+        echo "autoresolve: 누적 계약 파일 양쪽 보존 해소 실패 — 손실 결과를 만들지 않고 중단(merge abort): $f" >&2
+        $GIT_CMD merge --abort 2>/dev/null || true; return 1
+      fi
+      resolved_general=1
+      # shellcheck disable=SC2086
+      $GIT_CMD add -- "$f" 2>/dev/null || true
+      continue
+    fi
     # shellcheck disable=SC2086
     case "${FORGE_CONFLICT_STRATEGY:-incoming}" in
       base) $GIT_CMD checkout --theirs -- "$f" 2>/dev/null || true ;;
