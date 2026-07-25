@@ -189,6 +189,43 @@ in_ensure_work_branch() {
 #   진행한다(거짓 green 방지). 충돌 해소가 없었으면 비어 있음.
 INT_AUTORESOLVE_FLAG=""
 
+# in_accumulating_file <path> — 누적(추가-전용) 계약 파일이면 0. 판별 표면은 순수-추가
+#   게이트와 동일(INT_CHANGELOG_FILE, 기본 CHANGELOG.md; 빈 값이면 비활성 → 일반 파일 취급).
+in_accumulating_file() {
+  local file="${INT_CHANGELOG_FILE-CHANGELOG.md}"
+  [[ -n "$file" && "$1" == "$file" ]]
+}
+
+# in_union_resolve <path> <base-stage> — 누적 계약 파일 충돌을 **양쪽 보존**(union)으로 해소.
+#   한쪽 채택(checkout --ours/--theirs)은 누적 파일에선 곧 다른 쪽 항목의 삭제라, 전략과
+#   무관하게 손실이 난다(run 635). union 병합으로 양쪽 항목을 모두 남기고, 그 결과가 base
+#   쪽 라인을 하나라도 잃으면 실패(1)로 보고해 호출자가 커밋·push 전에 중단하게 한다.
+#   <base-stage>: base(origin/main) 쪽 인덱스 스테이지 — merge-in 은 3(theirs), rebase 는 2(ours).
+in_union_resolve() {
+  local f="$1" base_stage="$2" d top side rc=0
+  # shellcheck disable=SC2086
+  top="$($GIT_CMD rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [[ -n "$top" ]] || return 1
+  d="$(mktemp -d)"
+  # 공통 조상(stage 1)은 add/add 충돌이면 없을 수 있다 — 빈 파일로 대체.
+  # shellcheck disable=SC2086
+  $GIT_CMD show ":1:$f" > "$d/base" 2>/dev/null || : > "$d/base"
+  # shellcheck disable=SC2086
+  $GIT_CMD show ":2:$f" > "$d/ours" 2>/dev/null || rc=1
+  # shellcheck disable=SC2086
+  $GIT_CMD show ":3:$f" > "$d/theirs" 2>/dev/null || rc=1
+  if [[ "$rc" == 0 ]]; then
+    # shellcheck disable=SC2086
+    $GIT_CMD merge-file -p --union "$d/ours" "$d/base" "$d/theirs" > "$d/merged" 2>/dev/null || rc=1
+    side="$d/theirs"; [[ "$base_stage" == "2" ]] && side="$d/ours"
+    # base 쪽에 있던 라인이 결과에서 사라졌으면 손실 — 순수-추가 계약을 만족하지 못한다.
+    [[ "$(diff "$side" "$d/merged" | grep -c '^<')" == "0" ]] || rc=1
+  fi
+  [[ "$rc" == 0 ]] && cp "$d/merged" "$top/$f"
+  rm -rf "$d"
+  return "$rc"
+}
+
 # in_autoresolve_rebase <branch> — 진행 중(충돌 정지) rebase 를 자율 해결.
 #   파일별: FORGE_CONFLICT_STRATEGY (기본 incoming=재적용 중 작업 커밋 쪽 --theirs,
 #   base=새 베이스 쪽 --ours) + 비결정 표시. plugin.json 버전 충돌도 일반 충돌로 처리한다
@@ -201,6 +238,17 @@ in_autoresolve_rebase() {
   [[ -n "$unmerged" ]] || { $GIT_CMD rebase --abort 2>/dev/null || true; return 1; }
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
+    if in_accumulating_file "$f"; then
+      # rebase 에선 --ours=새 베이스 쪽(stage 2) — 그쪽 라인을 잃지 않아야 한다.
+      if ! in_union_resolve "$f" 2; then
+        echo "autoresolve: 누적 계약 파일 양쪽 보존 해소 실패 — 손실 결과를 만들지 않고 중단(rebase abort): $f" >&2
+        $GIT_CMD rebase --abort 2>/dev/null || true; return 1
+      fi
+      resolved_general=1
+      # shellcheck disable=SC2086
+      $GIT_CMD add -- "$f" 2>/dev/null || true
+      continue
+    fi
     # shellcheck disable=SC2086
     case "${FORGE_CONFLICT_STRATEGY:-incoming}" in
       base) $GIT_CMD checkout --ours   -- "$f" 2>/dev/null || true ;;
@@ -234,6 +282,17 @@ in_autoresolve_merge() {
   [[ -n "$unmerged" ]] || { $GIT_CMD merge --abort 2>/dev/null || true; return 1; }
   while IFS= read -r f; do
     [[ -n "$f" ]] || continue
+    if in_accumulating_file "$f"; then
+      # merge-in 에선 --theirs=새 베이스(origin/main) 쪽(stage 3) — 그쪽 라인을 잃지 않아야 한다.
+      if ! in_union_resolve "$f" 3; then
+        echo "autoresolve: 누적 계약 파일 양쪽 보존 해소 실패 — 손실 결과를 만들지 않고 중단(merge abort): $f" >&2
+        $GIT_CMD merge --abort 2>/dev/null || true; return 1
+      fi
+      resolved_general=1
+      # shellcheck disable=SC2086
+      $GIT_CMD add -- "$f" 2>/dev/null || true
+      continue
+    fi
     # shellcheck disable=SC2086
     case "${FORGE_CONFLICT_STRATEGY:-incoming}" in
       base) $GIT_CMD checkout --theirs -- "$f" 2>/dev/null || true ;;
@@ -377,25 +436,117 @@ _in_base_sync_core() {
   return 0
 }
 
+# in_worktree_delta_commit <branch> <ref_commit> — 로컬 브랜치 ref 뒤에 남은 워크트리 델타 커밋.
+#   #452 설계상 loop·리뷰 재구현은 분리(detached) 워크트리 HEAD 만 전진시키고 로컬 브랜치 ref 는
+#   갱신하지 않는다(공유 체크아웃 미오염). 그래서 리뷰-수정 커밋은 브랜치 ref 에 없고 워크트리
+#   HEAD 에만 있다(run 638) — ref 만 보면 "원격-앞섬"으로 오판해 push 를 생략하고 수정을 유실한다.
+#   ref_commit 의 **엄격한 자손**인 워크트리 HEAD 를 실제 통합 대상으로 되찾는다. 되찾을 것이
+#   없으면 빈 출력(= 기존 ref 기준 동작). 오염 방지 가드:
+#     - 브랜치 ref 가 이미 origin/<default> 에 포함되면(머지 완료 등) 무관한 run 워크트리가
+#       자손으로 잡힐 수 있으므로 되찾지 않는다.
+#     - 자손 후보가 둘 이상이면 어느 것이 대상인지 모호하므로 되찾지 않는다.
+in_worktree_delta_commit() {
+  local branch="$1" ref_commit="$2" c cands=""
+  [[ -n "$ref_commit" ]] || return 0
+  # 가드 판정 전에 base 를 fetch 한다 — stale 한 origin/<default> 로는 "이미 머지됨"을 놓쳐
+  # 가드가 헛돈다(무관 워크트리 커밋 되찾기 위험).
+  # shellcheck disable=SC2086
+  $GIT_CMD fetch origin "$DEFAULT_BRANCH" >/dev/null 2>&1 || true
+  # shellcheck disable=SC2086
+  if $GIT_CMD merge-base --is-ancestor "refs/heads/$branch" "origin/$DEFAULT_BRANCH" 2>/dev/null; then
+    return 0
+  fi
+  while read -r c; do
+    [[ -n "$c" && "$c" != "$ref_commit" ]] || continue
+    # shellcheck disable=SC2086
+    $GIT_CMD merge-base --is-ancestor "$ref_commit" "$c" 2>/dev/null && cands="$cands $c"
+  done < <($GIT_CMD worktree list --porcelain 2>/dev/null | awk '$1=="HEAD" { print $2 }')
+  # shellcheck disable=SC2086
+  set -- $cands
+  if [[ "$#" -gt 1 ]]; then
+    # 조용히 생략하면 이 결함(리뷰-수정 유실)이 흔적 없이 재발한다 — 표면화한다.
+    echo "integration: 워크트리 델타 후보가 둘 이상($*) — 통합 대상 모호로 되찾지 않음: $branch" >&2
+    return 0
+  fi
+  [[ "$#" -eq 1 ]] && printf '%s\n' "$1"
+  return 0
+}
+
 in_push_branch() {
-  # 원격-앞섬 정합(run 592): 로컬 ref 가 원격 tip 의 조상이면(리뷰 수정 푸시 등 정당한 전진으로
-  # 원격이 앞섬) 원격이 이미 모든 로컬 커밋을 보유 — push 는 불필요하고 non-ff 로 거부만 되므로
-  # 건너뛴다. fetch 시점 레이스 완화를 위해 판정 직전에 원격 ref 를 fetch 한다. force 금지 유지.
-  local branch="$1" tip local_commit
+  # 원격-앞섬 정합(run 592): **통합 대상 커밋**이 원격 tip 의 조상이면(리뷰 수정 푸시 등 정당한
+  # 전진으로 원격이 앞섬) 원격이 이미 모든 로컬 커밋을 보유 — push 는 불필요하고 non-ff 로
+  # 거부만 되므로 건너뛴다. 통합 대상은 stale 할 수 있는 로컬 브랜치 ref 가 아니라 그 뒤의
+  # 워크트리 델타 커밋까지 포함한다(run 638). fetch 시점 레이스 완화를 위해 판정 직전에 원격
+  # ref 를 fetch 한다. force 금지 유지.
+  local branch="$1" tip ref_commit delta local_commit refspec
+  # shellcheck disable=SC2086
+  ref_commit="$($GIT_CMD rev-parse "refs/heads/$branch" 2>/dev/null)"
+  delta="$(in_worktree_delta_commit "$branch" "$ref_commit")"
+  local_commit="${delta:-$ref_commit}"
   tip="$(in_remote_tip "$branch")"
   if [[ -n "$tip" ]]; then
     # shellcheck disable=SC2086
     $GIT_CMD fetch origin "$branch" >/dev/null 2>&1 || true
     # shellcheck disable=SC2086
-    local_commit="$($GIT_CMD rev-parse "refs/heads/$branch" 2>/dev/null)"
-    # shellcheck disable=SC2086
     if [[ -n "$local_commit" ]] && $GIT_CMD merge-base --is-ancestor "$local_commit" "$tip" 2>/dev/null; then
-      echo "integration: push 생략 — 원격 브랜치가 로컬 ref 를 이미 포함(원격-앞섬): $branch" >&2
+      echo "integration: push 생략 — 원격 브랜치가 통합 대상 커밋을 이미 포함(원격-앞섬): $branch" >&2
       return 0
     fi
   fi
+  # 델타가 있으면 그 커밋을 원격 작업 브랜치로 **직접 push** 한다(#452 와 동일 방식) — 로컬
+  # $branch ref 를 갱신하지 않으므로 공유 체크아웃을 더럽히지 않는다. force 아님(ff push).
+  refspec="$branch"
+  [[ -n "$delta" ]] && refspec="$delta:refs/heads/$branch"
   # shellcheck disable=SC2086
-  $GIT_CMD push origin "$branch" || { in_die "push 실패(force 금지): $branch"; return 1; }
+  $GIT_CMD push origin "$refspec" || { in_die "push 실패(force 금지): $branch"; return 1; }
+}
+
+# =====================================================================
+# 3d) CHANGELOG 순수-추가 게이트 (#628) — CHANGELOG 는 누적 계약(추가만).
+#   워커가 base 전진을 못 따라가 기존 섹션을 자기 항목으로 덮어쓰면(기존 라인 삭제) 직전
+#   릴리스 기록이 소실된 채 머지될 수 있다(리뷰 봇 포착은 확률적). 통합이 결정적으로 막는다:
+#   base 대비 브랜치 쪽 변경(three-dot diff = merge-base 기준)이 CHANGELOG 라인을 삭제하면
+#   머지 후보(PR·리뷰)로 통과시키지 않고 차단한다. three-dot 이라 base 전진분(형제 머지)은
+#   오탐하지 않고, base 재동기화 merge-in 이 main 항목을 덮어쓴 경우는 merge-base 전진으로
+#   잡힌다. 경로는 INT_CHANGELOG_FILE 로 설정 가능(기본 CHANGELOG.md) — 빈 값이면 게이트
+#   비활성(정당한 오타 수정·항목 재배치 우회), base 에 파일이 없으면 적용하지 않는다
+#   (버전·changelog 정책은 컨슈밍 프로젝트 소유 — 존재할 때만 계약을 지킨다).
+# =====================================================================
+
+# in_changelog_additive_gate <branch> — 순수-추가면 0, 기존 라인 삭제 감지면 1(사유 stderr).
+#   INT_BASESYNC_PUSHED=1 이면 base sync 가 분리 워크트리에서 원격으로 직접 push 한 상태라
+#   로컬 ref 가 결과를 반영하지 않는다 — 원격 tip(origin/<branch>)을 게이트 대상으로 삼는다.
+in_changelog_additive_gate() {
+  local branch="$1" file="${INT_CHANGELOG_FILE-CHANGELOG.md}" base ref del
+  [[ -n "$file" ]] || return 0        # 빈 값 = 게이트 비활성(명시적 우회).
+  # shellcheck disable=SC2086
+  if $GIT_CMD rev-parse --verify --quiet "refs/remotes/origin/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+    base="refs/remotes/origin/$DEFAULT_BRANCH"
+  elif $GIT_CMD rev-parse --verify --quiet "refs/heads/$DEFAULT_BRANCH" >/dev/null 2>&1; then
+    base="refs/heads/$DEFAULT_BRANCH"
+  else
+    return 0                          # base 미상 → 판정 불가, 게이트 미적용.
+  fi
+  # shellcheck disable=SC2086
+  $GIT_CMD cat-file -e "$base:$file" 2>/dev/null || return 0   # base 에 파일 존재할 때만 적용.
+  if [[ "${INT_BASESYNC_PUSHED:-}" == "1" ]]; then
+    # shellcheck disable=SC2086
+    $GIT_CMD fetch origin "$branch" >/dev/null 2>&1 || true
+    ref="refs/remotes/origin/$branch"
+  else
+    ref="refs/heads/$branch"
+  fi
+  # 삭제 라인 수: diff '-' 줄 중 파일 헤더(정확히 '--- a/…' 또는 '--- /dev/null')와 빈 줄
+  # 삭제(단독 '-')는 제외. 헤더를 '^---' 전체로 제외하면 '-- ' 로 시작하는 콘텐츠 라인의
+  # 삭제('---…' 로 렌더)가 미탐된다 — 실제 헤더 형태만 정확히 제외한다.
+  # shellcheck disable=SC2086
+  del="$($GIT_CMD diff "$base...$ref" -- "$file" 2>/dev/null \
+    | awk '/^-/ && !/^--- (a\/|\/dev\/null)/ && $0 != "-" { n++ } END { print n+0 }')"
+  if [[ "${del:-0}" -gt 0 ]]; then
+    in_die "CHANGELOG 순수-추가 게이트: $file 의 기존 라인 ${del}개 삭제 감지 — CHANGELOG 는 누적 계약(추가만)이라 머지 후보로 통과시키지 않는다(branch=$branch). 기존 섹션을 덮어쓰지 말고 자기 항목을 최상단에 '추가'로 재작성하세요. 정당한 오타 수정·항목 재배치라면 INT_CHANGELOG_FILE='' 로 게이트를 끄고 재실행해 우회할 수 있다."
+    return 1
+  fi
+  return 0
 }
 
 # =====================================================================
@@ -468,6 +619,24 @@ in_clear_stale_residue() {
   # shellcheck disable=SC2086
   $GIT_CMD push origin --delete "$branch" >/dev/null 2>&1 || true
   return 0
+}
+
+# in_stale_remote_guard <branch> — 자동 정리 불가한 stale 원격 작업 브랜치를 push 전에 차단(#630).
+#   in_clear_stale_residue 가 정리하지 못한 잔재(열린 PR 없음 = 소유 확증 불가)가 non-ff 로 남아
+#   있으면, base sync 는 이를 '최초 통합(원격 미존재)'으로 오인해 push 하고 "push 실패" 한 줄로만
+#   끝난다 — 무엇을 어떻게 치울지 알 수 없어 재실행이 같은 자리에서 무한 반복된다. 여기서 정리
+#   방법을 담은 사유로 즉시 차단한다. force 재배치·소유 미확증 원격 자동 삭제는 하지 않는다.
+#   열린 PR 이 있는 경로는 기존 재동기화(in_resync_open_pr)가 처리하므로 건드리지 않는다.
+in_stale_remote_guard() {
+  local branch="$1" local_commit
+  [[ -n "$branch" ]] || return 0
+  # shellcheck disable=SC2086
+  local_commit="$($GIT_CMD rev-parse "refs/heads/$branch" 2>/dev/null)"
+  [[ -n "$local_commit" ]] || return 0
+  in_remote_ff_incompatible "$branch" "$local_commit" || return 0   # 원격부재/ff호환 → 기존 동작.
+  [[ -z "$(in_existing_open_pr "$branch")" ]] || return 0           # 열린 PR → 재동기화 경로 소관.
+  in_die "stale 원격 작업 브랜치: origin/$branch 가 이번 결과 커밋($local_commit)과 non-fast-forward 라 force 없이 push 할 수 없다(force 금지). 열린 PR 이 없어 소유를 확증할 수 없으므로 자동 삭제하지 않는다. 정리: (1) 'git fetch origin $branch && git log --oneline origin/$branch' 로 보존할 커밋이 없는지 확인, (2) 'git push origin --delete $branch' 로 원격 브랜치 삭제, (3) execute-task start 로 재실행."
+  return 1
 }
 
 # =====================================================================
@@ -639,11 +808,15 @@ in_integrate() {
       # 재실행 안전: 직전 실패/blocked 가 남긴 non-ff·autopilot-소유 stale 원격 브랜치/PR 을
       # push 전에 정리(force 금지·미소유 보존) — non-ff push 거부를 막는다.
       in_clear_stale_residue "$branch"
+      # 정리하지 못한 non-ff 잔재는 push 전에 정리 방법을 담은 사유로 차단(#630) — 재실행 무한 반복 방지.
+      in_stale_remote_guard "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       int_log "$rd" "$key" "base sync → push → PR (branch=$branch)"
       in_base_sync   "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       # #452: rebase 경로에선 base_sync 가 분리 워크트리에서 원격으로 직접 push 하므로(INT_BASESYNC_PUSHED)
       # in_push_branch 를 건너뛴다. rebase 불필요(조기 반환) 경로에선 ref 이름으로 push.
       [[ "${INT_BASESYNC_PUSHED:-}" == "1" ]] || in_push_branch "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      # CHANGELOG 순수-추가 게이트(#628): 기존 항목 삭제 변경은 PR(머지 후보)로 넘기지 않는다.
+      in_changelog_additive_gate "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       local title pr
       title="$(in_spec_title "$spec")"
       pr="$(in_ensure_pr "$branch" "$title" "$spec")" || { int_set_phase "$rd" "$key" blocked; return 4; }
@@ -720,6 +893,8 @@ in_integrate_direct() {
       int_set_branch "$rd" "$key" "$branch"
       # 다리: 머지 대상으로 쓰기 전에 작업 브랜치가 없으면 loop 결과 커밋에서 생성(멱등·공통 헬퍼).
       in_ensure_work_branch "$branch" "$spec" || { int_set_phase "$rd" "$key" blocked; return 4; }
+      # CHANGELOG 순수-추가 게이트(#628): 기존 항목 삭제 변경은 리뷰(머지 후보)로 넘기지 않는다.
+      in_changelog_additive_gate "$branch" || { int_set_phase "$rd" "$key" blocked; return 4; }
       int_set_phase "$rd" "$key" review
       int_log "$rd" "$key" "직접 통합(승인 요청·PR·push 우회) → 적대적 리뷰 게이트: branch=$branch → review"
       echo "key:    $key"
@@ -950,6 +1125,23 @@ in_selftest() {
     MOCK_REMOTE_FF=0 in_integrate "$spec" "$rd" "$kSE" >/dev/null
   grep -q -- '--delete' "$PUSHLOG" && bad "AC#462 외부 소유 동명 브랜치 삭제(오삭제)" || ok "AC#462 외부 소유 동명 브랜치 미삭제"
   [[ ! -s "$PRCLOSELOG" ]] && ok "AC#462 외부 소유 PR 미close" || bad "AC#462 외부 소유 PR 미close"
+  : > "$REMOTE_BRANCHES"
+
+  # ---- AC(#630): 자동 정리 불가한 stale 원격 작업 브랜치(열린 PR 없음 = 소유 확증 불가)는
+  #   '최초 통합'으로 오인해 non-ff push 로 실패하는 대신, push 전에 정리 방법을 담은 사유로 차단한다.
+  #   force 덮어쓰기·소유 미확증 원격 자동 삭제는 하지 않는다. ----
+  local kSR="x-sr33dddd"; : > "$PUSHLOG"; : > "$PRLOG"; : > "$PRCLOSELOG"; : > "$BRANCHES"; : > "$GITLOG"
+  st_done > "$LP/SPEC.md.json"; : > "$LP/SPEC.md.logs"
+  printf '%s\n' "$wbST" > "$REMOTE_BRANCHES"
+  err="$(MOCK_EXISTING_PR="" MOCK_REMOTE_FF=0 in_integrate "$spec" "$rd" "$kSR" 2>&1 >/dev/null)"; rc=$?
+  chk "AC#630 정리 불가 stale 원격 → rc=4(차단)" "$rc" "4"
+  chk "AC#630 phase=blocked" "$(int_get_phase "$rd" "$kSR")" "blocked"
+  case "$err" in
+    *"git push origin --delete $wbST"*) ok "AC#630 차단 사유에 정리 방법(명령) 포함";;
+    *) bad "AC#630 차단 사유에 정리 방법(명령) 포함 (got: $err)";;
+  esac
+  [[ ! -s "$PUSHLOG" ]] && ok "AC#630 차단 시 push 미수행(force 금지)" || bad "AC#630 차단 시 push 미수행(force 금지)"
+  [[ ! -s "$PRCLOSELOG" ]] && ok "AC#630 소유 미확증 원격 자동 삭제·PR close 안 함" || bad "AC#630 소유 미확증 자동 삭제 안 함"
   : > "$REMOTE_BRANCHES"
 
   # ---- AC9: spec-gap BLOCKED → push·PR 없이 blocked-spec-gap ----
