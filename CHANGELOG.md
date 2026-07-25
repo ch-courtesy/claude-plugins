@@ -2,6 +2,11 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## project-init 0.27.0
+
+### 새 기능
+- **repair-hook 스킬 신설 — 소비 프로젝트 훅 평가·수리 (run 618)** — 기존 `.claude/hooks/`를 `shared/hook-standard` 15항목(검사기 결정 10 + 모델 의미 5) 기준으로 평가해 등급(BLOCKER≥1→F, 아니면 MAJOR 수로 S/A/B/C)을 보고하고, BLOCKER·MAJOR 항목별 수정안 diff를 제시해 승인된 항목만 수정한 뒤 재평가 1회로 해소 여부를 확인한다. 평가-전용 모드(수정 없이 등급 확인)를 지원하고, 표준 도입 전 플랫 구조에는 2계층 레이아웃 이행안을 제시한다. 표준·검사기의 단일 출처는 `shared/hook-standard/`(사본 없음). 계약 테스트 `skills/repair-hook/tests/repair-hook-contract.test.sh` 추가.
+
 ## autopilot 0.65.2
 
 ### 버그 수정
