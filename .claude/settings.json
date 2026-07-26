@@ -4,9 +4,7 @@
     "ENABLE_PROMPT_CACHING_1H": "1",
     "BASH_MAX_OUTPUT_LENGTH": "10000"
   },
-  "enabledPlugins": {
-    "superpowers@claude-plugins-official": true
-  },
+  "enabledPlugins": {},
   "extraKnownMarketplaces": {
     "courtesy-claude-plugins": {
       "source": {
