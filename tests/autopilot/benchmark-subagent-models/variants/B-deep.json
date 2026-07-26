@@ -1,9 +1,0 @@
-{
-  "name": "B-deep",
-  "description": "전원 깊은 모델 (opus) — 품질 천장 기준. 비용·속도 패널티 측정",
-  "roles": {
-    "spec-compliance-reviewer": "opus",
-    "code-quality-reviewer": "opus",
-    "parallel-hypothesis-tester": "opus"
-  }
-}
