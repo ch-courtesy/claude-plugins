@@ -1,9 +1,0 @@
-{
-  "name": "A-fast",
-  "description": "전원 빠른 모델 (haiku) — 비용·속도 최적, 품질 변동성 측정 기준선",
-  "roles": {
-    "spec-compliance-reviewer": "haiku",
-    "code-quality-reviewer": "haiku",
-    "parallel-hypothesis-tester": "haiku"
-  }
-}
