@@ -5,7 +5,7 @@
 ## marketplace 0.2.0
 
 ### 변경(깨짐)
-- **배포 범위를 `thinktank` 하나로 축소 — `autopilot`·`project-init`·`superpowers` 제거 (run 650)** — 서로 무관한 네 플러그인을 한 저장소가 안고 있어 늘어나던 유지 비용과 상호 참조를 끊고 저장소 책임을 단일화한다. 세 플러그인의 본체 디렉터리(`plugins/autopilot/`·`plugins/project-init/`·`plugins/superpowers/`), Claude 마켓플레이스 등록(`.claude-plugin/marketplace.json`), Codex 마켓플레이스 등록(`.agents/plugins/marketplace.json` — 남는 등록 없음, `thinktank`에 Codex 매니페스트가 없어 빈 목록 유지), 저장소 로컬 활성화 설정(`.claude/settings.json`의 이 저장소 마켓플레이스 소속 항목 — 외부 마켓플레이스 소속 항목은 유지), 해당 플러그인 전용 테스트(`tests/autopilot/`·`tests/forge/`), 고아가 된 테스트-소스 커버리지 매핑 규칙(`.autopilot/scope-coverage-map.json`)을 함께 제거했다. README를 남은 구성에 맞게 갱신하고 마켓플레이스 버전을 `0.1.0 → 0.2.0`으로 올렸다(0.x 구간이므로 호환성 깨짐을 MINOR로 표현). `thinktank` 본체·테스트·버전 값과 PR 리뷰 CI 자동화(저장소 공통 자산)는 변경하지 않았다. **영향** — 이 저장소 마켓플레이스를 구독하던 환경에서 제거된 세 플러그인의 설치·업데이트가 끊긴다.
+- **배포 범위를 `thinktank` 하나로 축소 — `autopilot`·`project-init`·`superpowers` 제거 (run 650)** — 서로 무관한 네 플러그인을 한 저장소가 안고 있어 늘어나던 유지 비용과 상호 참조를 끊고 저장소 책임을 단일화한다. 세 플러그인의 본체 디렉터리(`plugins/autopilot/`·`plugins/project-init/`·`plugins/superpowers/`), Claude 마켓플레이스 등록(`.claude-plugin/marketplace.json`), Codex 마켓플레이스 매니페스트(`.agents/plugins/marketplace.json` — `project-init`이 유일한 Codex 플러그인이었고 `thinktank`에는 Codex 매니페스트가 없어 Codex 지원 자체를 제거), 저장소 로컬 활성화 설정(`.claude/settings.json`의 `enabledPlugins`를 비움), 해당 플러그인 전용 테스트(`tests/autopilot/`·`tests/forge/`), 고아가 된 테스트-소스 커버리지 매핑 규칙(`.autopilot/scope-coverage-map.json`)을 함께 제거했다. README를 Claude 전용 구성으로 갱신하고 마켓플레이스 버전을 `0.1.0 → 0.2.0`으로 올렸다(0.x 구간이므로 호환성 깨짐을 MINOR로 표현). `thinktank` 본체·테스트·버전 값과 PR 리뷰 CI 자동화(저장소 공통 자산)는 변경하지 않았다. **영향** — 이 저장소 마켓플레이스를 구독하던 환경에서 제거된 세 플러그인의 설치·업데이트가 끊긴다.
 
 ## project-init 0.27.0
 
