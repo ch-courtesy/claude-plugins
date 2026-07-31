@@ -5,7 +5,7 @@
 ## thinktank 1.1.0
 
 ### 변경(호환)
-- **brainstorm 아이디어 상태 `archived` → `parked`·`eliminated` 분리 (성숙도 재분석 권고 2건 적용)** — `archived` 단일 상태를 `parked`(관찰 가능한 재검토 조건 `park-recondition` 필수)와 `eliminated`(근거 있는 탈락 사유 `elimination-reason` 필수)로 분리했다. 최종 enum: `raw | transformed | clustered | shortlisted | parked | eliminated`. NGT 수렴 절에 성숙도 미사용 규칙(구체화 부족을 후보 탈락 근거로 쓰지 않는다)과 상태 전환 규칙(수렴 완료 시 세션 책임자가 미선택 아이디어를 관찰 가능한 재검토 조건 유무에 따라 parked 또는 eliminated로 판별 표시)을 추가했다.
+- **brainstorm 아이디어 상태 `archived` → `parked`·`eliminated` 분리 (성숙도 재분석 권고 2건 적용)** — `archived` 단일 상태를 `parked`(관찰 가능한 재검토 조건 `park-recondition` 필수)와 `eliminated`(근거 있는 탈락 사유 `elimination-reason` 필수)로 분리했다. 최종 enum: `raw | transformed | clustered | shortlisted | parked | eliminated`. NGT 수렴 절에 성숙도 미사용 규칙(구체화 부족을 후보 탈락 근거로 쓰지 않는다)과 상태 전환 규칙(수렴 완료 시 세션 책임자가 미선택 아이디어를 관찰 가능한 재검토 조건 유무에 따라 parked 또는 eliminated로 판별 표시)을 추가했다. 호환 분류 근거: 이 enum은 새 세션 파일 작성 시에만 적용되는 문서 템플릿 계약이며, 릴리스 시점 검증에서 `archived`를 참조하는 외부 소비자·코드·테스트·기존 `.brainstorm/` 세션 파일이 없음을 확인했다(참조는 `document-templates.md` 자신 2곳뿐). `resume` 라우팅은 세션 상태 블록 기준이라 아이디어 status 값에 의존하지 않으며, 구 세션 파일의 `archived` 잔존은 기존 "resume 불일치 보고" 규율이 처리한다 — 마이그레이션 불필요.
 
 ## marketplace 0.2.0
 
