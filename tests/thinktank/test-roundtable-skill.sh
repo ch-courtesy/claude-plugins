@@ -132,10 +132,13 @@ grep -qF '.roundtable/<meeting-id>.md' "$REFS/document-templates.md" \
   || fail "단일 회의 파일 템플릿 누락"
 grep -q '## 상태' "$REFS/document-templates.md" \
   || fail "상태 블록 섹션 누락"
-for field in 'status' 'next_action'; do
+for field in 'status' 'next-action'; do
   grep -q "$field" "$REFS/document-templates.md" \
     || fail "상태 블록 필드 누락: $field"
 done
+if grep -qE 'meeting_id|next_action|current_round|max_rounds|(research|agent)_calls_used|last_updated' "$REFS/document-templates.md"; then
+  fail "상태 블록 snake_case 필드 잔존 (kebab-case 통일 필요)"
+fi
 for section in '아젠다' '리서치 계획' '증거 팩' '로스터' '초기 입장' '결정 지도' '논의 기록' '최종 문서'; do
   grep -q "## ${section}" "$REFS/document-templates.md" \
     || fail "회의 파일 섹션 누락: $section"
@@ -173,6 +176,26 @@ echo "=== TEST 9: 마켓플레이스 등록 ==="
 grep -q '"name": "thinktank"' "$MARKETPLACE" \
   || fail "마켓플레이스에 thinktank 미등록"
 ok "마켓플레이스 등록"
+
+echo ""
+echo "=== TEST 10: 숙의 강화 계약 (상호 반박·반대 강제·증거 임계치·brief 규범) ==="
+grep -qF '반박 → 재반박 1왕복' "$REFS/meeting-protocol.md" \
+  || fail "상호 반박 왕복 계약 누락"
+grep -qF '반대 강제' "$REFS/meeting-protocol.md" \
+  || fail "반대 강제 계약 누락"
+grep -qF '가장 강한 반대 논거' "$REFS/meeting-protocol.md" \
+  || fail "최강 반대 논거 요구 누락"
+grep -qF '독립인 출처 2개 이상' "$REFS/research-protocol.md" \
+  || fail "핵심 주장 독립 출처 임계치 누락"
+grep -qF '반증 시도 결과' "$REFS/research-protocol.md" \
+  || fail "반증 시도 기록 요구 누락"
+grep -qF '메인 세션 컨텍스트는 보이지 않는다' "$REFS/role-prompts.md" \
+  || fail "brief 메인 컨텍스트 비가시성 명시 누락 (role-prompts)"
+grep -qF '중첩 Agent를 호출하지 않는다' "$REFS/role-prompts.md" \
+  || fail "brief 중첩 Agent 금지 명시 누락 (role-prompts)"
+grep -qF '메인 컨텍스트는 보이지 않는다' "$REFS/participant-personas.md" \
+  || fail "brief 메인 컨텍스트 비가시성 명시 누락 (participant-personas)"
+ok "숙의 강화 계약"
 
 echo ""
 echo "=== 모든 roundtable 스킬 테스트 통과 ==="

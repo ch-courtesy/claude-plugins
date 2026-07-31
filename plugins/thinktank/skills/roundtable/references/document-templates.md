@@ -8,14 +8,14 @@
 # Roundtable Meeting: <meeting-id>
 
 ## 상태
-- meeting_id:
+- meeting-id:
 - status: interviewing | agenda_approval | researching | research_review | roster_approval | discussing | documenting | completed | no_consensus
-- current_round:
-- max_rounds:
-- research_calls_used:
-- agent_calls_used:
-- next_action:
-- last_updated:
+- current-round:
+- max-rounds:
+- research-calls-used:
+- agent-calls-used:
+- next-action:
+- last-updated:
 
 ## 아젠다
 
