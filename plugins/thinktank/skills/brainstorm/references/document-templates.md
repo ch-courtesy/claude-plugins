@@ -54,10 +54,12 @@
 - novelty:
 - assumptions:
 - duplicate-of:
-- status: raw | transformed | clustered | shortlisted | archived
+- status: raw | transformed | clustered | shortlisted | parked | eliminated
+- park-recondition:
+- elimination-reason:
 ```
 
-원본 아이디어를 보존하고 삭제하지 않는다. 변환은 새 항목으로 추가하며 `parent-id`로 부모를 추적한다. `archived`는 제외 근거를 남기는 상태이지 삭제가 아니다.
+원본 아이디어를 보존하고 삭제하지 않는다. 변환은 새 항목으로 추가하며 `parent-id`로 부모를 추적한다. `parked`는 범위 밖 보존 상태로 관찰 가능한 재검토 조건(park-recondition)을 필수로 남기고, `eliminated`는 근거 있는 탈락(elimination-reason 필수)으로 재논의하지 않는다. 둘 다 삭제가 아니다.
 
 ## 숏리스트 후보 항목
 
