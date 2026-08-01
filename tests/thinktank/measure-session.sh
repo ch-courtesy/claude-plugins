@@ -66,6 +66,24 @@ extract_marker_all() {
     || true
 }
 
+# 아이디어 블록(### 헤딩 단위) 중 status가 <state>인데 비어 있지 않은 <field>가 같은 블록에 없는 블록 수 출력
+# — 전역 카운트가 아닌 블록 단위 100% 충족률 검사 (게이트 오판정 방지)
+count_blocks_missing_field() {
+  local state="$1"
+  local field="$2"
+  local content="$3"
+  printf '%s\n' "$content" | awk -v state="$state" -v field="$field" '
+    function check_block() {
+      if (block ~ ("(^|\n)[[:space:]]*(-[[:space:]]+)?status:[[:space:]]*" state "[[:space:]]*(\n|$)")) {
+        if (block !~ ("(^|\n)[[:space:]]*(-[[:space:]]+)?" field ":[[:space:]]*[^[:space:]]")) missing++
+      }
+    }
+    /^###[[:space:]]/ { check_block(); block = "" }
+    { block = block "\n" $0 }
+    END { check_block(); print missing + 0 }
+  '
+}
+
 # ── roundtable 파서 ───────────────────────────────────────────────────────────
 # 필수 마커: dissent-forcing-triggered (yes|no), rebuttal-exchange (정수), core-claim (1개+)
 # 누락·손상(corrupt) 시 non-zero exit + 명시적 오류
@@ -148,30 +166,28 @@ parse_brainstorm() {
 
   info "--- brainstorm 파서 실행 ---"
 
-  # 1. park-recondition: parked 아이디어 존재 시 필수
-  local parked_count
+  # 1. park-recondition: status가 parked인 각 아이디어 블록에 비어 있지 않은 값 필수 (블록 단위 100% 검사)
+  local parked_count park_missing
   parked_count="$(printf '%s\n' "$content" | grep -cE "^[[:space:]]*(-[[:space:]]+)?status:[[:space:]]*parked" || true)"
-  local park_recon_count
-  park_recon_count="$(count_marker "park-recondition" "$content")"
+  park_missing="$(count_blocks_missing_field "parked" "park-recondition" "$content")"
 
-  if [[ "$parked_count" -gt 0 && "$park_recon_count" -eq 0 ]]; then
-    echo "ERROR: 필수 마커 누락 — park-recondition (parked 아이디어 ${parked_count}개 존재)" >&2
+  if [[ "$park_missing" -gt 0 ]]; then
+    echo "ERROR: 필수 마커 누락 — park-recondition 누락 블록 ${park_missing}/${parked_count} (parked 아이디어 전수에 필수)" >&2
     errors=$((errors + 1))
   else
-    info "park-recondition: ${park_recon_count}개 (parked: ${parked_count}개)"
+    info "park-recondition: parked ${parked_count}개 블록 전수 충족 (100%)"
   fi
 
-  # 2. elimination-reason: eliminated 아이디어 존재 시 필수
-  local eliminated_count
+  # 2. elimination-reason: status가 eliminated인 각 아이디어 블록에 비어 있지 않은 값 필수 (블록 단위 100% 검사)
+  local eliminated_count elim_missing
   eliminated_count="$(printf '%s\n' "$content" | grep -cE "^[[:space:]]*(-[[:space:]]+)?status:[[:space:]]*eliminated" || true)"
-  local elim_reason_count
-  elim_reason_count="$(count_marker "elimination-reason" "$content")"
+  elim_missing="$(count_blocks_missing_field "eliminated" "elimination-reason" "$content")"
 
-  if [[ "$eliminated_count" -gt 0 && "$elim_reason_count" -eq 0 ]]; then
-    echo "ERROR: 필수 마커 누락 — elimination-reason (eliminated 아이디어 ${eliminated_count}개 존재)" >&2
+  if [[ "$elim_missing" -gt 0 ]]; then
+    echo "ERROR: 필수 마커 누락 — elimination-reason 누락 블록 ${elim_missing}/${eliminated_count} (eliminated 아이디어 전수에 필수)" >&2
     errors=$((errors + 1))
   else
-    info "elimination-reason: ${elim_reason_count}개 (eliminated: ${eliminated_count}개)"
+    info "elimination-reason: eliminated ${eliminated_count}개 블록 전수 충족 (100%)"
   fi
 
   # 3. parent-id: 정보 마커 (필수 아님)
@@ -235,7 +251,7 @@ RT_THRESHOLD_CORE_CLAIM_MIN=1               # core-claim 최소 개수/세션   
 BS_THRESHOLD_CORE_FACT_MIN=1                # core-fact 최소 개수/세션           (decision-mode: 1회 충족)
 BS_THRESHOLD_INDEPENDENT_SOURCES_MIN=2      # independent-sources 최소 수        (gate-status: shadow — 기록 전용)
 # independent-sources는 파일럿 실측 최대값이 1~5로 분산되어 재파일럿 1회 후에도 판정이 갈려
-# shadow(기록 전용)로 강등됨 (2026-08-02 게이트 승인). 게이트를 차단하지 않고 GATE_SHADOW로 보고만 한다.
+# shadow(기록 전용)로 강등됨 (2026-08-01 게이트 승인). 게이트를 차단하지 않고 GATE_SHADOW로 보고만 한다.
 # park-recondition 충족률 100% 및 elimination-reason 충족률 100%는
 # parse_brainstorm fail-loud 규정으로 강제 (threshold: 100%, decision-mode: 1회 충족)
 
@@ -570,6 +586,45 @@ FIXTURE
     selftest_pass "brainstorm multi: independent-sources 최대값 집계 (1,3,0 → 3)"
   else
     selftest_fail "brainstorm multi: independent-sources 최대값 집계 실패"
+  fi
+
+  # ── brainstorm: 블록 단위 부분 누락 케이스 (100% 충족률 강제) ─────────────
+  echo ""
+  echo "--- [brainstorm] 블록 단위 부분 누락 케이스 (전역 1건으로 우회 불가) ---"
+  BS_PARTIAL="$(cat <<'FIXTURE'
+# Brainstorm Session: 20240101-partial
+
+## 상태
+- session-id: 20240101-partial
+- state: completed
+
+## 아이디어 풀
+
+### IDEA-001
+- idea-id: IDEA-001
+- status: parked
+- park-recondition: 예산 확보 시 재검토
+- core-fact: 사실 A
+- independent-sources: 2
+
+### IDEA-002
+- idea-id: IDEA-002
+- status: parked
+- core-fact: 사실 B
+- independent-sources: 2
+FIXTURE
+)"
+
+  bs_partial_out="$(parse_brainstorm "$BS_PARTIAL" 2>&1)" || true
+  if echo "$bs_partial_out" | grep -q "누락 블록 1/2"; then
+    selftest_pass "brainstorm partial: park-recondition 누락 블록 1/2 검출"
+  else
+    selftest_fail "brainstorm partial: 블록 단위 누락 미검출 (전역 카운트 우회 — 게이트 오판정)"
+  fi
+  if ! ( parse_brainstorm "$BS_PARTIAL" > /dev/null 2>&1 ); then
+    selftest_pass "brainstorm partial: non-zero exit 확인"
+  else
+    selftest_fail "brainstorm partial: zero exit (fail-loud 위반)"
   fi
 
   # ── brainstorm: 필수 마커 누락 케이스 ────────────────────────────────────

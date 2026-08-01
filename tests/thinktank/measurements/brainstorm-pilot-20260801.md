@@ -1,4 +1,4 @@
-# 측정 기록: brainstorm-pilot-20260802
+# 측정 기록: brainstorm-pilot-20260801
 
 ## 측정 메타데이터
 
@@ -9,13 +9,13 @@
 - threshold-core-fact-min: 1
 - threshold-independent-sources-min: 2
 - decision-mode: 1회 충족
-- measured-at: 2026-08-02
+- measured-at: 2026-08-01
 - gate-status: active
 - gate-pass-count: 3
 - pilot-run-count: 3
 - measured-variance: active 지표(core-fact·park·elim)는 전 실행 판정 일치, independent-sources 최대값은 1/3(+판정 불가 2회)로 분산 — shadow 강등
 - shadow-metric: independent-sources
-- shadow-reason: 실측 최대값 1~5 분산, 문서 템플릿 규약 조정·재파일럿 1회 상한 후에도 통과/실패 판정이 갈림 — 기록 전용으로 강등 (2026-08-02 사용자 승인)
+- shadow-reason: 실측 최대값 1~5 분산, 문서 템플릿 규약 조정·재파일럿 1회 상한 후에도 통과/실패 판정이 갈림 — 기록 전용으로 강등 (2026-08-01 사용자 승인)
 
 ## 측정 방법
 
@@ -47,4 +47,4 @@ independent-sources는 판정 가능 실행에서 1(미충족)/3(충족)으로 �
 | elimination-reason 충족률 | 100% | 100% (fail-loud) | active |
 | independent-sources | 최대 1~5 (분산) | ≥2 | shadow (기록 전용) |
 
-- 게이트 승인: 2026-08-02 (사용자 승인 — CHANGELOG `## thinktank 1.2.0` 섹션 마커 참조)
+- 게이트 승인: 2026-08-01 (사용자 승인 — CHANGELOG `## thinktank 1.2.0` 섹션 마커 참조)

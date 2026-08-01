@@ -15,8 +15,8 @@
 - **측정 방법** — 커밋된 표준 시나리오 픽스처로 스킬 계약을 실제 수행하는 세션을 구동해(세션에 측정 목표 비공개, 원본 산출물 `tests/thinktank/measurements/sessions/` 보존) 하니스로 판정했다. 측정 모델: claude-fable-5. 세션 집계 의미론: dissent any-yes / rebuttal 라운드 합계 / independent-sources 항목 최대값.
 - **roundtable 게이트 지표** (gate-status: active, decision-mode: 1회 충족) — `dissent-forcing-triggered`=yes (실측 3/3 발동), `rebuttal-exchange` ≥1왕복 (실측 합계 1/2/2), `core-claim` ≥1개 (실측 3/6/4).
 - **brainstorm 게이트 지표** — `core-fact` ≥1개/세션 (active, 실측 25~27), `park-recondition`·`elimination-reason` 충족률 100% (active, fail-loud 강제, 전 실행 100%). `independent-sources` ≥2는 **shadow(기록 전용) 강등** — 실측 최대값 1~5 분산으로 템플릿 규약 조정·재파일럿 1회 상한 후에도 판정이 갈림(스킬별 안정 지표 ≥1 요건은 active 3개로 충족).
-- 초기 파일럿 중 3회는 마커 값 산문 주석(형식 위반)으로 판정 제외 — 문서 템플릿에 "마커 값은 순수 값만" 규칙을 추가하고 정책상 재파일럿 1회로 대체했다. 상세: `tests/thinktank/measurements/*-pilot-20260802.md`, `tests/thinktank/measurement-runbook.md`.
-- 게이트 승인: 2026-08-02, 사용자 승인 — roundtable active 3지표·brainstorm active 3지표 + shadow 1지표(independent-sources)로 1.2.0 정량 게이트 발효.
+- 초기 파일럿 중 3회는 마커 값 산문 주석(형식 위반)으로 판정 제외 — 문서 템플릿에 "마커 값은 순수 값만" 규칙을 추가하고 정책상 재파일럿 1회로 대체했다. 상세: `tests/thinktank/measurements/*-pilot-20260801.md`, `tests/thinktank/measurement-runbook.md`.
+- 게이트 승인: 2026-08-01, 사용자 승인 — roundtable active 3지표·brainstorm active 3지표 + shadow 1지표(independent-sources)로 1.2.0 정량 게이트 발효.
 
 ### 버그 수정
 - **디스패치 규범이 brief 템플릿에 미구현 (정합성 결함)** — 두 SKILL.md는 "서브에이전트 brief에 메인 컨텍스트 비가시성과 중첩 Agent 호출 금지를 명시한다"고 규정했지만 실제 brief 템플릿에는 해당 문구가 없었다(`participant-personas.md`의 중첩 Agent 금지 1건 제외). brainstorm·roundtable `role-prompts.md`와 `participant-personas.md`에 명시 문구를 반영했다. 회귀 가드: 두 테스트 스크립트에 명시 문구 grep 가드 추가.

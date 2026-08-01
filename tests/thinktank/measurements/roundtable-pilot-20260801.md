@@ -1,4 +1,4 @@
-# 측정 기록: roundtable-pilot-20260802
+# 측정 기록: roundtable-pilot-20260801
 
 ## 측정 메타데이터
 
@@ -10,7 +10,7 @@
 - threshold-rebuttal-min: 1
 - threshold-core-claim-min: 1
 - decision-mode: 1회 충족
-- measured-at: 2026-08-02
+- measured-at: 2026-08-01
 - gate-status: active
 - gate-pass-count: 3
 - pilot-run-count: 3
@@ -44,4 +44,4 @@ run2 원본의 형식 위반을 계기로 문서 템플릿에 "마커 값은 순
 | rebuttal-exchange | 1~2 | ≥1 | active |
 | core-claim | 3~6 | ≥1 | active |
 
-- 게이트 승인: 2026-08-02 (사용자 승인 — CHANGELOG `## thinktank 1.2.0` 섹션 마커 참조)
+- 게이트 승인: 2026-08-01 (사용자 승인 — CHANGELOG `## thinktank 1.2.0` 섹션 마커 참조)

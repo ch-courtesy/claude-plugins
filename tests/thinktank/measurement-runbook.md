@@ -99,7 +99,7 @@ bash tests/thinktank/measure-session.sh \
 
 ---
 
-## 게이트 임계치 (파일럿 실측 기반, 2026-08-02 승인)
+## 게이트 임계치 (파일럿 실측 기반, 2026-08-01 승인)
 
 측정 모델: claude-fable-5. 실측 상세는 `tests/thinktank/measurements/`의 측정 기록과
 `sessions/` 하위의 원본 세션 산출물 참조. 세션 집계 의미론: dissent-forcing-triggered는
