@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "예의상 채널에서 공유하는 플러그인들의 마켓플레이스",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "plugins": [
     {
@@ -37,6 +37,21 @@
         "consensus",
         "ideation",
         "decision-making"
+      ]
+    },
+    {
+      "name": "agent-kit",
+      "source": "./plugins/agent-kit",
+      "description": "판단 전담 Advisor 에이전트가 Worker(호출 세션)를 감독하는 위임·검증 워크플로",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": [
+        "advisor",
+        "delegation",
+        "verification",
+        "supervision",
+        "agents",
+        "workflow"
       ]
     }
   ]
