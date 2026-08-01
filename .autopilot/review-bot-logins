@@ -1,3 +1,0 @@
-# forge review-loop 신뢰 리뷰봇 allowlist — 한 줄당 GitHub 로그인 정확일치. `#` 주석.
-# GitHub App 이 아닌 머신유저 리뷰봇만 여기에 명시 등록한다(임의 `*-bot` 자동 신뢰 금지).
-courtesy-bot
