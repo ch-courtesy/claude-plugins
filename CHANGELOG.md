@@ -7,10 +7,128 @@
 ### 새 기능
 - **codex-auth-reseed 스킬 신규 플러그인으로 등록** — codex-review CI의 `CODEX_AUTH_JSON` 시크릿이 회전 리프레시 토큰 소진·desync로 깨질 때, host `~/.codex`를 건드리지 않는 격리 docker 컨테이너에서 `codex login --device-auth`로 새 토큰을 발급받아 대상 repo 시크릿을 갱신한다. 컨테이너는 `--network host`로 기동(bridge IPv6 egress 단절 시 codex 자체 리졸버 실패 회피)하고 `ca-certificates`를 설치(rustls TLS 검증에 시스템 CA 스토어 필수 — node slim 이미지엔 없음)하며, 실행 전 대상 repo에 `codex-review.yml` 존재를 검증한다.
 
+## explain-diff 0.1.0
+
+### 새 기능
+- **explain 스킬(설명서)** — 방금 바뀐 코드(작업 트리 diff·커밋·브랜치·PR)를 코드베이스가 처음인 독자에게 설명한다. 주변 코드를 넓게 탐색한 뒤 배경 → 직관(장난감 데이터 예시) → 코드 워크스루 순서를 강제하고, 코드는 맨 마지막에만 보여준다.
+- **quiz 스킬(퀴즈)** — 직전 설명 내용으로 중간 난이도 4지선다 5문항을 출제·채점한다. 전부 맞히기 전에는 정답·해설을 공개하지 않고, 틀린 문항이 드러내는 오해 지점만 짚어 재시도를 유도한다(명시적 포기 시에만 공개).
+- **playground 스킬(놀이터)** — 방금 개발한 코드를 자체 완결 단일 HTML 파일(목차·배경·직관·코드 워크스루, 상호작용 데모·HTML 다이어그램)로 시각화한다. 서비스 코드는 수정하지 않으며 산출물은 버전 관리 밖에 날짜 접두사 파일명으로 저장한다. geoffreylitt의 explain-diff-html 프롬프트(gist)를 기반으로 했다.
+
+## thinktank 1.2.0
+
+### 새 기능
+- **roundtable 반대 강제(거짓 합의 방지)** — 합의 후보 검증에서 모든 핵심 참여자의 평가가 수용·조건부 수용뿐이면(중대한 반대·판단 불가 0건), 진행자가 종료 판정 전 참여자 1명(로스터에 반대 관점 대변인이 있으면 그 역할)에게 가장 강한 반대 논거 1건을 증거 ID와 함께 요구한다. 논거가 중대한 반대 요건을 충족하면 정상 숙의로 처리하고, 반박되면 반박 근거를 결정 지도에 기록 후 종료 판정으로 진행한다(`meeting-protocol.md`).
+- **roundtable 상호 반박 왕복** — 핵심 이견 쟁점은 진행자가 대립 입장의 참여자를 지정해 반박 → 재반박 1왕복을 교환하게 하고, 이때만 해당 쟁점의 상대 주장 전문과 근거 ID를 그대로 전달한다. 미해소 쟁점은 결정 지도에 기록하고 같은 쟁점의 추가 왕복은 새 증거·논거가 있을 때만 허용한다(`meeting-protocol.md`).
+- **핵심 주장 증거 임계치** — roundtable: 합의문·결정사항이 직접 의존하는 핵심 주장은 서로 독립인 출처 2개 이상이어야 `확인`으로 표시하고, 단일 출처면 `추정` + 주의사항 기록, 반증 시도 결과를 함께 기록한다(`research-protocol.md`). brainstorm: 후보 채택·탈락을 좌우하는 핵심 사실에 같은 독립 출처 2개·추정 표시·반증 기록 규칙을 적용한다(`research-protocol.md` 2단계).
+- **정량 검증 인프라 — 구조화 마커·측정 하니스·표준 시나리오 픽스처·runbook** — 세션 파일 템플릿에 하니스 파싱용 kebab-case 구조화 마커를 추가했다(roundtable 라운드 항목: `core-claim`·`dissent-forcing-triggered`·`rebuttal-exchange` / brainstorm: `core-fact`·`independent-sources` 신규 + 기존 `park-recondition`·`elimination-reason`·`parent-id` 재사용). 측정 하니스 `tests/thinktank/measure-session.sh`(마커 파싱·절대 임계치 판정·fail-loud — 필수 마커 누락·손상 시 non-zero exit, selftest 15케이스), 스킬별 표준 시나리오 픽스처(`tests/thinktank/fixtures/`), 측정 절차·모델 교체 재검증 runbook(`tests/thinktank/measurement-runbook.md`)을 추가했다. 임계치·판정 방식은 아래 "정량 게이트 임계치 확정" 항목으로 발효됐다.
+
+### 정량 게이트 임계치 확정 (파일럿 실측 기반)
+
+- **측정 방법** — 커밋된 표준 시나리오 픽스처로 스킬 계약을 실제 수행하는 세션을 구동해(세션에 측정 목표 비공개, 원본 산출물 `tests/thinktank/measurements/sessions/` 보존) 하니스로 판정했다. 측정 모델: claude-fable-5. 세션 집계 의미론: dissent any-yes / rebuttal 라운드 합계 / independent-sources 항목 최대값.
+- **roundtable 게이트 지표** (gate-status: active, decision-mode: 1회 충족) — `dissent-forcing-triggered`=yes (실측 3/3 발동), `rebuttal-exchange` ≥1왕복 (실측 합계 1/2/2), `core-claim` ≥1개 (실측 3/6/4).
+- **brainstorm 게이트 지표** — `core-fact` ≥1개/세션 (active, 실측 25~27), `park-recondition`·`elimination-reason` 충족률 100% (active, fail-loud 강제, 전 실행 100%). `independent-sources` ≥2는 **shadow(기록 전용) 강등** — 실측 최대값 1~5 분산으로 템플릿 규약 조정·재파일럿 1회 상한 후에도 판정이 갈림(스킬별 안정 지표 ≥1 요건은 active 3개로 충족).
+- 초기 파일럿 중 3회는 마커 값 산문 주석(형식 위반)으로 판정 제외 — 문서 템플릿에 "마커 값은 순수 값만" 규칙을 추가하고 정책상 재파일럿 1회로 대체했다. 상세: `tests/thinktank/measurements/*-pilot-20260801.md`, `tests/thinktank/measurement-runbook.md`.
+- 게이트 승인: 2026-08-01, 사용자 승인 — roundtable active 3지표·brainstorm active 3지표 + shadow 1지표(independent-sources)로 1.2.0 정량 게이트 발효.
+
+### 버그 수정
+- **디스패치 규범이 brief 템플릿에 미구현 (정합성 결함)** — 두 SKILL.md는 "서브에이전트 brief에 메인 컨텍스트 비가시성과 중첩 Agent 호출 금지를 명시한다"고 규정했지만 실제 brief 템플릿에는 해당 문구가 없었다(`participant-personas.md`의 중첩 Agent 금지 1건 제외). brainstorm·roundtable `role-prompts.md`와 `participant-personas.md`에 명시 문구를 반영했다. 회귀 가드: 두 테스트 스크립트에 명시 문구 grep 가드 추가.
+
+### 변경(호환)
+- **roundtable 상태 블록 필드 kebab-case 통일** — `meeting_id`·`current_round`·`max_rounds`·`research_calls_used`·`agent_calls_used`·`next_action`·`last_updated`를 brainstorm과 동일한 kebab-case(`meeting-id` 등)로 통일했다(`document-templates.md`). 호환 분류 근거: 이 필드명은 새 회의 파일 작성 시에만 적용되는 문서 템플릿 계약이고, 상태 머신 enum 값(`agenda_approval` 등)은 변경하지 않았다. `resume`는 회의 파일에 기록된 상태 블록을 산문으로 읽으므로 구 회의 파일의 snake_case 필드도 해석에 영향이 없고, 불일치는 기존 "resume 불일치 보고" 규율이 처리한다 — 마이그레이션 불필요. 회귀 가드: roundtable 테스트에 snake_case 잔존 부정 가드 추가.
+
+## thinktank 1.1.0
+
+### 변경(호환)
+- **brainstorm 아이디어 상태 `archived` → `parked`·`eliminated` 분리 (성숙도 재분석 권고 2건 적용)** — `archived` 단일 상태를 `parked`(관찰 가능한 재검토 조건 `park-recondition` 필수)와 `eliminated`(근거 있는 탈락 사유 `elimination-reason` 필수)로 분리했다. 최종 enum: `raw | transformed | clustered | shortlisted | parked | eliminated`. NGT 수렴 절에 성숙도 미사용 규칙(구체화 부족을 후보 탈락 근거로 쓰지 않는다)과 상태 전환 규칙(수렴 완료 시 세션 책임자가 미선택 아이디어를 관찰 가능한 재검토 조건 유무에 따라 parked 또는 eliminated로 판별 표시)을 추가했다. 호환 분류 근거: 이 enum은 새 세션 파일 작성 시에만 적용되는 문서 템플릿 계약이며, 릴리스 시점 검증에서 `archived`를 참조하는 외부 소비자·코드·테스트·기존 `.brainstorm/` 세션 파일이 없음을 확인했다(참조는 `document-templates.md` 자신 2곳뿐). `resume` 라우팅은 세션 상태 블록 기준이라 아이디어 status 값에 의존하지 않으며, 구 세션 파일의 `archived` 잔존은 기존 "resume 불일치 보고" 규율이 처리한다 — 마이그레이션 불필요.
+
+## marketplace 0.2.0
+
+### 변경(깨짐)
+- **배포 범위를 `thinktank` 하나로 축소 — `autopilot`·`project-init`·`superpowers` 제거 (run 650)** — 서로 무관한 네 플러그인을 한 저장소가 안고 있어 늘어나던 유지 비용과 상호 참조를 끊고 저장소 책임을 단일화한다. 세 플러그인의 본체 디렉터리(`plugins/autopilot/`·`plugins/project-init/`·`plugins/superpowers/`), Claude 마켓플레이스 등록(`.claude-plugin/marketplace.json`), Codex 마켓플레이스 매니페스트(`.agents/plugins/marketplace.json` — `project-init`이 유일한 Codex 플러그인이었고 `thinktank`에는 Codex 매니페스트가 없어 Codex 지원 자체를 제거), 저장소 로컬 활성화 설정(`.claude/settings.json`의 `enabledPlugins`를 비움), 해당 플러그인 전용 테스트(`tests/autopilot/`·`tests/forge/`), 고아가 된 테스트-소스 커버리지 매핑 규칙(`.autopilot/scope-coverage-map.json`)을 함께 제거했다. README를 Claude 전용 구성으로 갱신하고 마켓플레이스 버전을 `0.1.0 → 0.2.0`으로 올렸다(0.x 구간이므로 호환성 깨짐을 MINOR로 표현). `thinktank` 본체·테스트·버전 값과 PR 리뷰 CI 자동화(저장소 공통 자산)는 변경하지 않았다. **영향** — 이 저장소 마켓플레이스를 구독하던 환경에서 제거된 세 플러그인의 설치·업데이트가 끊긴다.
+
+## project-init 0.27.0
+
+### 새 기능
+- **repair-hook 스킬 신설 — 소비 프로젝트 훅 평가·수리 (run 618)** — 기존 `.claude/hooks/`를 `shared/hook-standard` 15항목(검사기 결정 10 + 모델 의미 5) 기준으로 평가해 등급(BLOCKER≥1→F, 아니면 MAJOR 수로 S/A/B/C)을 보고하고, BLOCKER·MAJOR 항목별 수정안 diff를 제시해 승인된 항목만 수정한 뒤 재평가 1회로 해소 여부를 확인한다. 평가-전용 모드(수정 없이 등급 확인)를 지원하고, 표준 도입 전 플랫 구조에는 2계층 레이아웃 이행안을 제시한다. 표준·검사기의 단일 출처는 `shared/hook-standard/`(사본 없음). 계약 테스트 `skills/repair-hook/tests/repair-hook-contract.test.sh` 추가.
+
+## autopilot 0.65.2
+
+### 버그 수정
+- **base 재동기화 자율 해소가 CHANGELOG 누적 항목을 삭제 (run 648)** — open-PR base 재동기화의 충돌 자율 해소가 충돌 파일을 **파일 단위 한쪽 채택**(`checkout --ours/--theirs`)으로 닫아, 누적(추가-전용) 계약 파일에선 전략과 무관하게 다른 쪽 섹션이 통째로 삭제된 채 커밋·push 되던 결함을 수정(run 635 관측: main 의 `## autopilot 0.64.8` 섹션 소실 후 순수-추가 게이트가 사후 차단 → 자력 회복 불가). 이제 누적 계약 파일(판별 표면은 순수-추가 게이트와 동일한 `INT_CHANGELOG_FILE`, 기본 `CHANGELOG.md`)은 **union 병합으로 양쪽 항목을 모두 보존**해 해소하고, 그 결과가 base 쪽 라인을 하나라도 잃으면 커밋·push 없이 merge/rebase 를 중단하고 사유를 남긴다. merge-in·rebase 두 경로 모두 적용. 일반 충돌 파일의 전략(`FORGE_CONFLICT_STRATEGY`)과 게이트 비활성(`INT_CHANGELOG_FILE=''`) 동작은 그대로(후방 호환), force 미사용 불변. 회귀 가드 `plugins/autopilot/lib/forge/lib/tests/test-integration-changelog-union.sh` 추가.
+
+## autopilot 0.65.1
+
+### 버그 수정
+- **forge integration push 게이트 — detached-HEAD 리뷰-수정 커밋 유실 (run 644)** — `in_push_branch`가 원격-앞섬 판정의 로컬 기준으로 **stale 할 수 있는 로컬 브랜치 ref**를 써서, 리뷰-수정 커밋이 loop 워크트리의 분리(detached) HEAD 에만 쌓인 경우(#452: 공유 체크아웃 미오염을 위해 로컬 ref 미갱신) "원격-앞섬"으로 오판해 push 를 생략하고 수정이 원격 PR 에 반영되지 않던 결함을 수정. 이제 판정·push 대상을 **실제 통합 대상 커밋**(브랜치 ref 뒤의 워크트리 델타 커밋 포함)으로 잡고, 델타가 있으면 `<commit>:refs/heads/<branch>` 직접 push 로 반영한다(로컬 ref 미갱신 유지). 오염 방지 가드 — 브랜치 ref 가 이미 origin/main 에 포함되거나(판정 전 base fetch) 자손 후보가 둘 이상이면 되찾지 않고, 모호로 인한 생략은 stderr 로 표면화한다(조용한 재발 방지). 정당한 원격-앞섬 보존(run 592)·force 금지 불변. 회귀 가드 `tests/test-integration-worktree-delta.sh` 추가. marketplace.json 버전 동기화는 SPEC scope 밖으로 후속 처리(parity 예외).
+
+## autopilot 0.65.0
+
+### 새 기능
+- **워커 벤더 영속 설정 — `.autopilot/task-backend.json` 의 `worker_vendor` (run 635)** — 구현 워커 CLI(`claude`|`codex`) 선택이 환경 변수 `AUTOPILOT_WORKER_VENDOR` 로만 가능해 무인 경로(cron 드레인 등 env 미전달)에서 항상 기본값으로 떨어지던 문제를 해소. loop 엔진이 벤더-중립 설정 SoT `.autopilot/task-backend.json` 의 `worker_vendor` 를 읽는다. 우선순위는 env > 설정 파일 > 기본값 `claude`(기존 프로젝트 동작 불변), 지원 밖 값이면 `start` 가 지원 벤더 목록을 명시한 오류로 중단한다. 설정 파일은 호출 cwd 가 아니라 **spec 저장소**의 메인 워크트리 기준으로 확정해(사전 의존성 검사와 실제 이터가 같은 워커를 본다) 링크드 워크트리 안에서도 같은 파일을 읽으며, 파싱은 jq 무의존(파싱 불가 시 env/기본값 경로).
+
+### 변경(호환)
+- **execute-task 스킬 호출 표기 벤더 중립화 (run 635)** — SKILL.md 의 실행 스크립트 경로를 `${CLAUDE_PLUGIN_ROOT}` 에서 계약 관례 `${CLAUDE_PLUGIN_ROOT:-$CODEX_PLUGIN_ROOT}` 로 교체해 Claude 전용 변수 부재 환경에서도 성립하게 함. 벤더 선택 우선순위는 loop SKILL.md·`lib/task-backend/contract.md` 에 기술.
+## autopilot 0.64.8
+
+### 버그 수정
+- **재실행이 이전 시도 잔재를 정리하지 않아 자력 회복 불가 (#630)** — 브랜치명·워크트리 경로가 태스크 id 에서 결정적으로 파생되므로 이전 시도의 잔재가 남으면 재실행이 반드시 같은 자리에서 실패했고, 실패 문구만으로는 무엇을 치울지 알 수 없어 무한 반복됐다. (1) `execute-task` 가 loop 진입 전에 run-dir 워크트리 **등록**이 stale(디렉터리 부재)인지 보고 `git worktree prune` 으로 정리한 뒤 진행한다(`fatal: ... is a missing but already registered worktree` 회귀 해소, 살아 있는 워크트리는 미훼손). (2) `forge/lib/integration.sh` 는 자동 정리하지 못한 non-ff 원격 작업 브랜치(열린 PR 없음 = 소유 확증 불가)를 '최초 통합' 으로 오인해 push 하고 "push 실패" 한 줄로 끝내는 대신, 확인·삭제·재실행 명령을 담은 사유로 push 전에 차단한다. force 덮어쓰기·소유 미확증 원격 자동 삭제는 도입하지 않았고, 잔재가 없으면 기존 재실행 동작 그대로다. 회귀 가드 `tests/autopilot/execute-task/test-execute-task-stale-residue.sh` 추가 + `integration.sh selftest` AC#630 케이스.
+
+## autopilot 0.64.7
+
+### 버그 수정
+- **드레이너 겹침 직렬화가 디렉터리·글롭 의미 겹침을 미탐 (PR 637 리뷰 반영)** — `workflow-task` 산출물 겹침 판정이 `scope.include` 항목의 문자열 일치만 봐서, 앞선 태스크가 `plugins/autopilot/`(후행 `/` prefix)나 `src/**`(글롭)를 선점해도 뒤 태스크의 그 하위 경로(`plugins/autopilot/.claude-plugin/plugin.json`·`src/foo.sh`)를 겹침으로 보지 못하고 동시 실행했다. 이제 loop `path_matches_pattern` 의미론(후행 `/`=prefix, 그 외=bash 글롭)으로 어느 한쪽이 다른 쪽을 덮으면 양방향 모두 겹침으로 유예한다. 회귀 케이스를 `tests/autopilot/test-workflow-task-overlap-serialize.sh`에 추가.
+- **병렬 fan-out이 버전 표면 공유 태스크를 동시 실행해 연쇄 충돌 (#628)** — `workflow-task` 드레이너가 `list_ready`의 의존 충족만 보고 산출물 경로 겹침을 보지 않아, 같은 플러그인(공유 CHANGELOG·`plugin.json`)을 만지는 태스크들이 동시에 실행되고 첫 머지가 나머지 형제 브랜치를 일괄 `CONFLICTING`으로 만들었다(관측: 605·608·610·611 병렬 드레인). 이제 태스크 본문 frontmatter `scope.include` 항목이 앞선 태스크에 선점됐으면 그 패스에서 실행하지 않고 `deferred`/`deferred_ids`로 보고하며(조용한 누락 금지) 다음 틱 드레인이 집는다. 산출물이 겹치지 않는 태스크는 기존대로 병렬. 특정 경로 하드코딩 없음(일반 경로 겹침 판정). 회귀 가드 `tests/autopilot/test-workflow-task-overlap-serialize.sh` 추가.
+- **CHANGELOG 기존 항목 덮어쓰기가 게이트 없이 머지 (#628)** — CHANGELOG 는 누적 계약(추가만)인데 강제 게이트가 없어, 워커가 base 전진을 못 따라가면 기존 섹션을 자기 항목으로 교체해 직전 릴리스 기록을 삭제한 채 머지될 수 있었다(관측: PR 633이 project-init 0.25.0 기록을 삭제하고 main에 머지 — 후속 복구). `forge/lib/integration.sh`에 순수-추가 게이트 `in_changelog_additive_gate` 추가: base(origin/main) 대비 three-dot diff에서 CHANGELOG 기존 라인 삭제를 감지하면 PR·리뷰(머지 후보)로 넘기지 않고 차단한다(base 전진분은 오탐하지 않고, base 재동기화 merge-in의 덮어쓰기도 잡힘). 추가만 있는 변경(삭제 0)은 기존대로 통과. 경로는 `INT_CHANGELOG_FILE`로 설정 가능하고 빈 값이면 비활성(정당한 오타 수정·항목 재배치 우회), base에 파일이 없으면 미적용(정책 비내장). 회귀 가드 `tests/autopilot/execute-task/test-execute-task-changelog-gate.sh` 추가.
+
+## project-init 0.26.0
+
+### 새 기능
+- **create-hook 스킬 — 훅 생성 (hook-standard 소비) (run 617)** — 소비 프로젝트에 Claude Code 훅(이벤트 핸들러 + `lib/<command>/` 기능 스크립트 + settings 등록)을 인터뷰 기반으로 설계·작성하는 `skills/create-hook` 신설. 구조화된 질문으로 이벤트·기능(command)·차단 여부·대상 디렉토리를 확정하고, `shared/hook-standard`(단일 출처)의 2계층 레이아웃·스크립트 계약(POSIX sh·jq 폴백·비차단 exit 0·`${CLAUDE_PROJECT_DIR}` placeholder 등록)대로 산출한다. 같은 이벤트 핸들러가 이미 있으면 새 핸들러 대신 기존 핸들러에 디스패치를 추가하고, 기존 파일 덮어쓰기는 diff 제시 후 명시적 승인에서만 수행하며, 작성 후 `hook_checker.py`로 BLOCKER·MAJOR 0 을 확인(발견 시 수정 후 1회만 재검)한다.
+
+## autopilot 0.64.6
+
+### 변경(호환)
+- **feature 스킬 벤더-중립화 — 상호작용 도구명·스킬 호출 표기·플러그인 루트 경로 (run 638)** — feature 스킬 문서 3종(`SKILL.md`·`README.md`·`references/clarification.md`)의 벤더 종속 표기를 런타임-중립 표기로 교체. `TodoWrite`·`AskUserQuestion`을 "현재 런타임의 할 일(단계) 추적 기능"·"현재 런타임의 구조화된 사용자 질문 기능"으로, `Skill(skill="...")` 호출 표기를 "현재 런타임의 스킬 호출 기능으로 `<스킬명>` 호출(인자: ...)"로, `${CLAUDE_PLUGIN_ROOT}` 경로를 `<플러그인 루트>` 표기로 대체하고 SKILL.md 서두에 해석 규칙(스킬 베이스 두 단계 상위 `../..`) 한 줄을 정의. frontmatter `allowed-tools`는 유지(타 런타임은 무시). 7단계 워크플로·resume 모드·규칙·references 구조와 지시 내용 불변. marketplace.json 동기화는 SPEC scope 밖으로 후속 처리(parity 예외 문서화).
+
 ## thinktank 1.0.2
 
 ### 변경(호환)
 - **공유 session-conventions 해체 — 규범을 각 SKILL.md에 용어 특화 인라인 (run 604)** — `skills/shared/session-conventions.md`를 제거하고 규범 5영역(호출 규약·세션 파일 규율·디스패치 공통 규범·중앙 리서치 공통 규범·공통 안전 경계)을 brainstorm(세션 파일, `.brainstorm/<session-id>.md`)·roundtable(회의 파일, `.roundtable/<meeting-id>.md`) 각 SKILL.md 본문에 각 스킬 용어로 자체 정의. `../shared/` 참조·위임 문구 제거(스킬 자기완결). 규범 의미·강도 불변.
+
+## autopilot 0.64.5
+
+### 변경(호환)
+- **create-task 스킬 벤더 독립화 — CLAUDE_PLUGIN_ROOT 폴백·도구명 중립화 (#634)** — SKILL.md 본문의 `${CLAUDE_PLUGIN_ROOT}` 경로 참조 3곳(어댑터·persist-backend-config.sh·scope-coverage-check.sh)을 env 폴백 형태(`${CLAUDE_PLUGIN_ROOT:-$SKILL_DIR/../..}`, `$SKILL_DIR` = 스킬 문서 위치 디렉토리)로 교체하고, 본문 산문의 Claude 전용 도구명(`TodoWrite`·`AskUserQuestion`)을 벤더 중립 기능 서술 + 기능 부재 폴백(간결한 직접 질문 등)으로 대체. frontmatter `allowed-tools`는 유지(타 런타임은 무시). 절차·워크플로 의미 불변. marketplace.json의 stale autopilot 버전(0.64.3)·머지 중 소실된 0.64.4 CHANGELOG 섹션도 복구.
+
+## autopilot 0.64.4
+
+### 버그 수정
+- **라벨 설정 실패 사유를 라벨 부재로 오귀속(권한 거부 은폐) (#629)** — github 백엔드 `be_set_status`가 gh stderr를 버리고 실패를 "라벨 존재 필요" 고정 문구로 단정해 권한 거부·네트워크 오류 등 실제 원인이 은폐되던 문제 수정. `github.sh`가 원본 stderr를 보존해 진단에 포함한다(성공 시 무진단 유지). 회귀 가드: `lib/task-backend/tests/test-github-status-fail.sh`.
+
+## autopilot 0.64.3
+
+### 버그 수정
+- **forge review-loop 신뢰봇 게이트 — 머신유저 리뷰봇 미인식 + 같은-head approve/approve 무한 대기 (#627)** — (1) 저장소 관리 allowlist(`<repo>/.autopilot/review-bot-logins`, 한 줄당 로그인 정확일치)를 신뢰봇 판별 기본값에 합성해 GitHub App 이 아닌 머신유저 리뷰봇 계정(예: courtesy-bot)을 세 게이트(승인 마커·현재-head 재리뷰 증거·미해결 스레드 차단)가 인식한다 — 미인식 시 blocking 스레드가 비가시(blocked=0·reviewed=0)라 approve 가 합성돼 승인 가림(#493)이 무력화되던 결함 수정. 기본값 자체는 플랫폼 보장 식별자만 유지한다 — 접미 관례(`-bot$`) 기본 신뢰는 임의 계정의 승인 마커 위조를 허용하므로 채택하지 않음(리뷰 반영). 포함(allowlist 등록)·배제(미등록 계정 비신뢰) 양방향을 selftest 로 검증. (2) 같은-head 분기에서 기록 approve+판정 approve 인데 phase 가 강등된 상태(머지 게이트 차단 후 재진입이 phase=review 로 재설정)가 rc=20 무한 반복하던 경로를 approved 재전이(머지 복귀)로 종착시킨다. phase=approved 정상 멱등(rc=20)과 기존 가드(#493/#549/#571/#600, 라운드 상한·무진전·핑퐁)는 selftest 로 회귀 없이 보존. marketplace.json 의 stale autopilot 버전(0.63.5)도 SoT(plugin.json)와 동기화.
+
+## autopilot 0.64.2
+
+### 변경(호환)
+- **create-task description WHEN-중심 재작성 (#560 컨벤션 정렬)** — 소유권·아키텍처 경계 서술 위주였던 frontmatter description을 트리거(WHEN) 중심으로 재작성. "태스크로 등록해줘"·"백로그에 올려줘"·"태스크 만들어줘" 같은 실사용 표현과 `resume <task-id>` 재개 신호를 담고, WHAT은 "본문을 백엔드에 등록하고 등록-후 상태를 전이한다" 한 구절로 축약. 작성 로직 비소유·`set_body` 위임 등 경계 상세는 본문(「규칙」·워크플로)이 계속 소유한다(정보 손실 없음). 워크플로·동사 계약 불변.
+
+## autopilot 0.64.1
+
+### 변경(호환)
+- **create-task 등록-후 상태 전이 문구 단일화 (run 611)** — 마커 없음 분기가 "전이를 생략하거나 명시적으로 `set_status --status backlog` 를 호출한다"로 두 갈래를 허용해 실행 세션마다 동사 시퀀스가 달라지던 비결정성을 제거. 이제 초기 상태 `backlog` 유지라는 단일 행동만 지시한다(추가 전이 호출 없음). 전이 의미론(backlog/in_design 기준)·재개 경로 불변. 회귀 가드: `tests/autopilot/test-create-task-status-transition.sh` TEST 5.
+
+## autopilot 0.64.0
+
+### 변경(호환)
+- **scope-coverage 매핑을 컨슈밍 프로젝트 설정으로 공급 (#609)** — `scope-coverage-check.sh`에 하드코딩돼 있던 이 저장소 전용 소스→테스트 매핑(`plugins/autopilot/skills/<S>` → `tests/autopilot/…`)을 제거하고, 프로젝트가 `<repo-root>/.autopilot/scope-coverage-map.json`으로 매핑 규칙(`rules[].source` prefix + `<name>` 세그먼트 캡처, `rules[].tests` 디렉토리·글롭)을 공급하는 구조로 전환. 설정이 없는 프로젝트는 검사가 경고 없이 exit 0으로 통과(등록 비차단 계약 불변). `references/scope-coverage-map.md`는 매핑 표가 아니라 설정 스키마 규약 문서로 갱신. 이 저장소는 자체 `.autopilot/scope-coverage-map.json`을 제공해 기존 검사 동작 유지. 플러그인이 컨슈밍 프로젝트 정책을 내장하던 계층 역전 해소(#482 계열).
+
+## autopilot 0.63.6
+
+### 변경(호환)
+- **create-task scope-coverage-map 자기완결화 (#608)** — `references/scope-coverage-map.md`가 `skills/loop/SKILL.md`를 경로 표기 관례의 단일 출처로 지시하던 중첩 참조(SKILL.md→references→타 스킬 SKILL.md)를 제거하고, 경고가 제시하는 경로의 수용 형식(후행 `/` 디렉토리 표기·파일 글롭)과 매칭 의미론(prefix 재귀 매칭)을 map 문서에 계약 수준으로 인라인. create-task 의 "다른 스킬 doc-link 금지" 자기 규칙과의 자기모순 해소. 매핑 규칙·`scope-coverage-check.sh` 동작 불변.
 
 ## autopilot 0.63.5
 

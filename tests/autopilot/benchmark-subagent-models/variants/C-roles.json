@@ -1,9 +1,0 @@
-{
-  "name": "C-roles",
-  "description": "역할별 분리 — agent-prompts.md의 **권장 모델** 라인 그대로. A·B 사이 최적해 가설",
-  "roles": {
-    "spec-compliance-reviewer": "sonnet",
-    "code-quality-reviewer": "opus",
-    "parallel-hypothesis-tester": "sonnet"
-  }
-}

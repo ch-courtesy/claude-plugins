@@ -455,6 +455,17 @@ jobs:
         with:
           name: codex-review-prep
 
+      # follow-up context 해석은 git cat-file/show 를 PR_HEAD_SHA 기준으로 실행한다.
+      # 위 checkout 은 base ref 만 받으므로 PR head 커밋 객체를 별도로 fetch 하지
+      # 않으면 모든 context_requests 가 조용히 실패해 2차 리뷰가 영영 스킵된다.
+      - name: Fetch PR head for follow-up context
+        if: ${{ needs.prep.outputs.pr_number != '' }}
+        env:
+          PR_NUMBER: ${{ needs.prep.outputs.pr_number }}
+        run: |
+          git fetch --no-tags --depth=1 origin \
+            "+refs/pull/$PR_NUMBER/head:refs/remotes/pull/$PR_NUMBER/head"
+
       - name: Bootstrap Codex auth.json
         # ChatGPT account authentication: write the CODEX_AUTH_JSON secret into a
         # dedicated codex-home directory as auth.json (chmod 600) and expose ONLY
@@ -897,6 +908,55 @@ jobs:
               event = 'APPROVE';
             } else {
               event = 'COMMENT';
+            }
+
+            // 불완전 verdict(needs_context/unavailable) 청크 때문에 승인이 막혔는데
+            // 게시할 inline finding 도 없으면, formal review 는 마커만 남아 사용자에게
+            // 아무 설명이 없다. skip-reason 댓글과 같은 방식으로 사유·모델이 요청한
+            // 추가 컨텍스트를 issue 댓글로 upsert 해 가시화한다(formal review 제출과
+            // 멱등 마커 의미론은 그대로 유지).
+            if (!canApprove && inlineFindings.length === 0 && !allReviewed) {
+              const reviewerName = /^codex/.test(prefix) ? 'Codex' : 'Claude';
+              const incompleteMarker = `<!-- ${prefix}-incomplete -->`;
+              const incomplete = reviewedResults.filter((r) =>
+                r.verdict !== 'approve' && r.verdict !== 'comment');
+              const incompleteVerdicts = [...new Set(incomplete.map((r) => r.verdict))];
+              const reasons = [...new Set(incomplete
+                .map((r) => String(r.automation_safety?.reason || r.eligibility?.reason || '').trim())
+                .filter(Boolean))];
+              const requestedFiles = [...new Set(incomplete
+                .flatMap((r) => (r.context_requests || []).flatMap((c) => c.files || [])))];
+              const incompleteLines = [
+                `🤖 **${reviewerName} 리뷰** — 리뷰가 불완전하게 끝났습니다 (verdict: ${incompleteVerdicts.join(', ')})`,
+                '',
+                reasons.length ? reasons.join('\n\n')
+                  : '모델이 최종 판정에 필요한 컨텍스트를 확보하지 못했습니다.',
+              ];
+              if (requestedFiles.length > 0) {
+                incompleteLines.push('', '모델이 요청한 추가 컨텍스트:',
+                  ...requestedFiles.map((f) => `- \`${f}\``));
+              }
+              incompleteLines.push('', `<sub>head: \`${head_sha}\`</sub>`, incompleteMarker);
+              const incompleteBody = incompleteLines.join('\n');
+              try {
+                const comments = await github.paginate(github.rest.issues.listComments,
+                  { owner, repo, issue_number: pull_number, per_page: 100 });
+                // 작성자 검증: skip-reason 댓글과 동일 — 우리 토큰 신원(botLogin)의
+                // 댓글만 upsert 대상으로 본다(위조 차단).
+                const existing = comments.find((c) =>
+                  c.user?.login === botLogin && (c.body || '').includes(incompleteMarker));
+                if (existing) {
+                  await github.rest.issues.updateComment(
+                    { owner, repo, comment_id: existing.id, body: incompleteBody });
+                  core.info(`Updated incomplete-review comment (${existing.id}).`);
+                } else {
+                  await github.rest.issues.createComment(
+                    { owner, repo, issue_number: pull_number, body: incompleteBody });
+                  core.info('Created incomplete-review comment.');
+                }
+              } catch (e) {
+                core.warning(`Incomplete-review comment upsert failed: ${e.message}`);
+              }
             }
 
             // Review body — built from the ACTUAL submit event, not the intended

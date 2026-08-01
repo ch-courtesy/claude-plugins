@@ -2,26 +2,15 @@
 node_modules/
 .env
 .env.*
-.loop/
-milestones/**/loops/**/.worktree/
-milestones/**/loops/**/.lock
 .claude/worktrees/
 .claude/settings.local.json
-.fsd/
-# 업그레이드 전 conductor(구 이름) 런타임 상태 — 추적 노출 방지를 위해 유지
-.conductor/
-# 업그레이드 전 .task-work(구 위치, #580 에서 .autopilot/runs/ 로 통합) 잔재 — 추적 노출 방지를 위해 유지
-.task-work/
-
-# task-centric family 런타임 산출물 (materialize 임시 spec, claim 락, run 상태 — .autopilot/runs/ 통합, #580)
-# .autopilot/task-backend.json(백엔드 선택 SoT)은 추적; 런타임만 무시
-.autopilot/runs/
-# review 스킬 런타임 상태 (태스크별 렌즈 산출물; done 시 execute-task 가 정리, #528)
-.review/
-
-# 임시·스크래치 파일 (rules/workspace/temp-files.md)
-.tmp/
 
 # Python 바이트코드 캐시
 __pycache__/
 *.pyc
+
+# orca 워크트리
+.orca/
+
+# 임시파일
+.tmp/

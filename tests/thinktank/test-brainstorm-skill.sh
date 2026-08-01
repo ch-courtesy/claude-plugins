@@ -169,16 +169,44 @@ done
 ok "구 다중 파일 계약 부재"
 
 echo ""
-echo "=== TEST 10: 플러그인 버전 ==="
+echo "=== TEST 10: 아이디어 상태 enum 계약 (archived 제거, parked/eliminated + 필수 필드, NGT 규칙) ==="
+grep -qF 'parked' "$REFS/document-templates.md" \
+  || fail "status enum에 parked 누락"
+grep -qF 'eliminated' "$REFS/document-templates.md" \
+  || fail "status enum에 eliminated 누락"
+! grep -qF 'archived' "$REFS/document-templates.md" \
+  || fail "status enum에 archived 잔존 (제거 필요)"
+grep -qF 'park-recondition' "$REFS/document-templates.md" \
+  || fail "park-recondition 필수 필드 누락"
+grep -qF 'elimination-reason' "$REFS/document-templates.md" \
+  || fail "elimination-reason 필수 필드 누락"
+grep -qF '구체화 부족(덜 익음)을 후보 탈락 근거로 쓰지 않는다' "$REFS/strategy-protocols.md" \
+  || fail "NGT 성숙도 미사용 규칙 문장 누락"
+grep -qF '관찰 가능한 재검토 조건을 쓸 수 있으면 parked' "$REFS/strategy-protocols.md" \
+  || fail "NGT 상태 전환 규칙 문장 누락"
+ok "아이디어 상태 enum 계약 (parked/eliminated 분리, 필수 필드 2개, NGT 규칙 2문장)"
+
+echo ""
+echo "=== TEST 11: 플러그인 버전 ==="
 PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN_DIR/.claude-plugin/plugin.json")"
 MARKET_VERSION="$(python3 -c 'import json,sys; print(next(p["version"] for p in json.load(open(sys.argv[1]))["plugins"] if p["name"]=="thinktank"))' "$MARKETPLACE")"
 [[ -n "$PLUGIN_VERSION" && "$PLUGIN_VERSION" == "$MARKET_VERSION" ]] \
   || fail "플러그인/마켓플레이스 버전 불일치: plugin.json=$PLUGIN_VERSION marketplace=$MARKET_VERSION"
 # 버전 범프 회귀 가드: 릴리스 시 이 핀도 함께 올린다 (parity만으로는 미범프를 못 잡는다)
-EXPECTED_VERSION="1.0.2"
+EXPECTED_VERSION="1.2.0"
 [[ "$PLUGIN_VERSION" == "$EXPECTED_VERSION" ]] \
   || fail "플러그인 버전이 현재 릴리스 핀과 다름: plugin.json=$PLUGIN_VERSION expected=$EXPECTED_VERSION (릴리스 시 핀 갱신)"
 ok "플러그인과 마켓플레이스 버전 동기 + 릴리스 핀 일치 ($PLUGIN_VERSION)"
+
+echo ""
+echo "=== TEST 12: brief 디스패치 규범·증거 임계치 계약 ==="
+grep -qF '메인 세션 컨텍스트는 보이지 않는다' "$REFS/role-prompts.md" \
+  || fail "brief 메인 컨텍스트 비가시성 명시 누락 (role-prompts)"
+grep -qF '중첩 Agent를 호출하지 않는다' "$REFS/role-prompts.md" \
+  || fail "brief 중첩 Agent 금지 명시 누락 (role-prompts)"
+grep -qF '독립인 출처 2개 이상' "$REFS/research-protocol.md" \
+  || fail "핵심 사실 독립 출처 임계치 누락"
+ok "brief 디스패치 규범과 증거 임계치 계약"
 
 echo ""
 echo "=== 모든 brainstorm 스킬 테스트 통과 ==="
