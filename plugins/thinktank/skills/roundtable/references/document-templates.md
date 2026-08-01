@@ -81,11 +81,16 @@
 - 질문:
 - 참여 역할:
 - 주요 주장과 증거 ID:
+- core-claim:
+- dissent-forcing-triggered: yes | no
+- rebuttal-exchange:
 - 반론과 해소 조건:
 - 입장 변화와 이유:
 - 추가 조사:
 - 진행자 판정:
 ```
+
+`core-claim`은 이 라운드의 핵심 주장 문장이다. `dissent-forcing-triggered`는 반대 강제 장치가 발동됐으면 `yes`, 아니면 `no`를 기록한다. `rebuttal-exchange`는 반박→재반박 왕복 횟수(정수)를 기록한다. 이 세 필드는 정량 측정 하니스가 파싱하는 구조화 마커이므로 kebab-case `key: value` 형식을 지킨다.
 
 ## 최종 문서 섹션
 
