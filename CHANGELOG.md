@@ -9,6 +9,11 @@
 - **quiz 스킬(퀴즈)** — 직전 설명 내용으로 중간 난이도 4지선다 5문항을 출제·채점한다. 전부 맞히기 전에는 정답·해설을 공개하지 않고, 틀린 문항이 드러내는 오해 지점만 짚어 재시도를 유도한다(명시적 포기 시에만 공개).
 - **playground 스킬(놀이터)** — 방금 개발한 코드를 자체 완결 단일 HTML 파일(목차·배경·직관·코드 워크스루, 상호작용 데모·HTML 다이어그램)로 시각화한다. 서비스 코드는 수정하지 않으며 산출물은 버전 관리 밖에 날짜 접두사 파일명으로 저장한다. geoffreylitt의 explain-diff-html 프롬프트(gist)를 기반으로 했다.
 
+## thinktank 2.0.0
+
+### 변경(깨짐)
+- **brainstorm 스킬 → forum 이름 변경** — 타 마켓플레이스·사용자 레벨 스킬과의 `brainstorm` 이름 충돌을 피하기 위해 스킬 이름을 `forum`으로 바꿨다. 호출은 `Skill(skill="thinktank:forum", ...)` / `forum start|resume|status`. 세션 디렉토리도 `.brainstorm/` → `.forum/`으로 바뀌며, 기존 `.brainstorm/` 세션 파일의 자동 이관은 없다(재개하려면 `.forum/`으로 수동 이동). 활성화 트리거(브레인스토밍, 아이디어 발산 등)와 매니페스트 키워드(`brainstorming`·`ideation`)는 그대로 유지되어 기존 자연어 요청으로는 동일하게 발동한다. 테스트·픽스처·runbook의 스킬명 참조를 함께 갱신했다(`tests/thinktank/test-forum-skill.sh`, `fixtures/forum/`). 과거 측정 기록(`measurements/`)은 이력 보존을 위해 이름을 유지한다.
+
 ## thinktank 1.2.0
 
 ### 새 기능

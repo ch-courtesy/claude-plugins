@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# brainstorm 스킬 패키지와 핵심 발산·수렴·검증 계약 검증
+# forum 스킬 패키지와 핵심 발산·수렴·검증 계약 검증
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 PLUGIN_DIR="$REPO_ROOT/plugins/thinktank"
-SKILL_DIR="$PLUGIN_DIR/skills/brainstorm"
+SKILL_DIR="$PLUGIN_DIR/skills/forum"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REFS="$SKILL_DIR/references"
 MARKETPLACE="$REPO_ROOT/.claude-plugin/marketplace.json"
@@ -33,14 +33,14 @@ ok "필수 파일 존재 + 공유 디렉터리·참조 부재"
 echo ""
 echo "=== TEST 2: 공개 인터페이스와 상태 ==="
 for command in start resume status; do
-  grep -qE "brainstorm ${command}|### ${command}" "$SKILL_MD" \
+  grep -qE "forum ${command}|### ${command}" "$SKILL_MD" \
     || fail "서브커맨드 누락: $command"
 done
 for state in framing frame_approval minimal_research diverging transforming clustering converging validation_approval validating completed; do
   grep -q "$state" "$SKILL_MD" \
     || fail "상태 누락: $state"
 done
-grep -qF '.brainstorm/<session-id>.md' "$SKILL_MD" \
+grep -qF '.forum/<session-id>.md' "$SKILL_MD" \
   || fail "단일 세션 파일 계약 누락"
 grep -qE 'resume 라우팅|재개 라우팅' "$SKILL_MD" \
   || fail "상태별 resume 라우팅 누락"
@@ -55,8 +55,8 @@ ok "인터페이스와 상태 계약"
 echo ""
 echo "=== TEST 3: 세션 책임과 승인 게이트 ==="
 FRONTMATTER="$(awk '/^---$/{n++; next} n==1' "$SKILL_MD")"
-printf '%s\n' "$FRONTMATTER" | grep -qxF '  - Write(.brainstorm/**)' \
-  || fail "Write 권한이 .brainstorm/**로 제한되지 않음"
+printf '%s\n' "$FRONTMATTER" | grep -qxF '  - Write(.forum/**)' \
+  || fail "Write 권한이 .forum/**로 제한되지 않음"
 if printf '%s\n' "$FRONTMATTER" | grep -qxF '  - Write'; then
   fail "제한 없는 Write 권한이 남아 있음"
 fi
@@ -134,7 +134,7 @@ ok "검증 경계와 산출물 계약"
 
 echo ""
 echo "=== TEST 8: 단일 세션 파일 계약 ==="
-grep -qF '.brainstorm/<session-id>.md' "$REFS/document-templates.md" \
+grep -qF '.forum/<session-id>.md' "$REFS/document-templates.md" \
   || fail "단일 세션 파일 템플릿 누락"
 grep -q '## 상태' "$REFS/document-templates.md" \
   || fail "상태 블록 섹션 누락"
@@ -158,8 +158,8 @@ ok "단일 세션 파일 계약"
 
 echo ""
 echo "=== TEST 9: 구 다중 파일 계약 부재 ==="
-if grep -rqF '.brainstorm/<session-id>/' "$SKILL_DIR"; then
-  fail "구 디렉터리 계약 잔존: .brainstorm/<session-id>/"
+if grep -rqF '.forum/<session-id>/' "$SKILL_DIR"; then
+  fail "구 디렉터리 계약 잔존: .forum/<session-id>/"
 fi
 for artifact in state.md brief.md research-context.md roster.md idea-pool.md clusters.md shortlist.md validation-plan.md experiments.md report.md; do
   if grep -rqF "$artifact" "$SKILL_DIR"; then
@@ -193,7 +193,7 @@ MARKET_VERSION="$(python3 -c 'import json,sys; print(next(p["version"] for p in 
 [[ -n "$PLUGIN_VERSION" && "$PLUGIN_VERSION" == "$MARKET_VERSION" ]] \
   || fail "플러그인/마켓플레이스 버전 불일치: plugin.json=$PLUGIN_VERSION marketplace=$MARKET_VERSION"
 # 버전 범프 회귀 가드: 릴리스 시 이 핀도 함께 올린다 (parity만으로는 미범프를 못 잡는다)
-EXPECTED_VERSION="1.2.0"
+EXPECTED_VERSION="2.0.0"
 [[ "$PLUGIN_VERSION" == "$EXPECTED_VERSION" ]] \
   || fail "플러그인 버전이 현재 릴리스 핀과 다름: plugin.json=$PLUGIN_VERSION expected=$EXPECTED_VERSION (릴리스 시 핀 갱신)"
 ok "플러그인과 마켓플레이스 버전 동기 + 릴리스 핀 일치 ($PLUGIN_VERSION)"
@@ -209,4 +209,4 @@ grep -qF '독립인 출처 2개 이상' "$REFS/research-protocol.md" \
 ok "brief 디스패치 규범과 증거 임계치 계약"
 
 echo ""
-echo "=== 모든 brainstorm 스킬 테스트 통과 ==="
+echo "=== 모든 forum 스킬 테스트 통과 ==="

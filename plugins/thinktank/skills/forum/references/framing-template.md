@@ -14,7 +14,7 @@
 
 ## 브리프 섹션 규격
 
-세션 파일(`.brainstorm/<session-id>.md`)의 브리프 섹션에 다음 필드를 기록한다.
+세션 파일(`.forum/<session-id>.md`)의 브리프 섹션에 다음 필드를 기록한다.
 
 ```markdown
 - session-id:

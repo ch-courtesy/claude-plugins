@@ -1,15 +1,15 @@
-# 표준 시나리오 픽스처: brainstorm-scenario-01
+# 표준 시나리오 픽스처: forum-scenario-01
 
 ## 시나리오 메타데이터
-- fixture-id: brainstorm-scenario-01
-- skill: brainstorm
+- fixture-id: forum-scenario-01
+- skill: forum
 - version: 1.2.0
 - created-at: 2026-08-01
 - purpose: core-fact·independent-sources·park-recondition·elimination-reason 마커 정량 측정 재현용 표준 입력
 
 ## 시나리오 설명
 
-이 픽스처는 brainstorm 스킬 1.2.0 정량 게이트 검증을 위한 표준 입력 시나리오다.
+이 픽스처는 forum 스킬 1.2.0 정량 게이트 검증을 위한 표준 입력 시나리오다.
 측정 세션을 재현할 때 이 파일의 브리프와 제약 조건을 그대로 사용한다.
 
 ## 브리프 (측정 세션 입력)
@@ -31,7 +31,7 @@
 
 ## 측정 목표 마커
 
-이 시나리오로 구동된 brainstorm 세션은 다음 구조화 마커를 생성해야 한다:
+이 시나리오로 구동된 forum 세션은 다음 구조화 마커를 생성해야 한다:
 
 - `core-fact: ...` — 최소 1개, 핵심 사실(채택·탈락을 좌우하는 근거)
 - `independent-sources: N` — N ≥ 2, 독립 출처 수 (정수)
