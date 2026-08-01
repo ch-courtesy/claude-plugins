@@ -6,9 +6,24 @@
   },
   "metadata": {
     "description": "예의상 채널에서 공유하는 플러그인들의 마켓플레이스",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "plugins": [
+    {
+      "name": "explain-diff",
+      "source": "./plugins/explain-diff",
+      "description": "방금 바뀐 코드를 초심자 눈높이 설명·퀴즈·상호작용 HTML 시각화로 이해시키는 학습 플러그인",
+      "version": "0.1.0",
+      "category": "learning",
+      "tags": [
+        "diff",
+        "explanation",
+        "quiz",
+        "visualization",
+        "onboarding",
+        "learning"
+      ]
+    },
     {
       "name": "thinktank",
       "source": "./plugins/thinktank",
