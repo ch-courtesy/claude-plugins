@@ -1,6 +1,6 @@
 # Changelog
 
-이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며, 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
+이 저장소가 **현재 배포하는 플러그인**의 사용자 가시(behavior-changing) 변경을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`입니다. 배포에서 제거된 플러그인(autopilot·project-init·skill-rubric 등)의 엔트리는 본 파일에서 정리하며, 그 과거 기록은 git 이력에 보존됩니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
 ## explain-diff 0.1.0
 
