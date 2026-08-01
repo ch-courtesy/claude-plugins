@@ -55,6 +55,17 @@ count_marker() {
   printf '%s\n' "$content" | grep -cE "^[[:space:]]*(-[[:space:]]+)?${key}:" || true
 }
 
+# 모든 매칭 "- key: value" 라인의 값을 한 줄씩 출력 (세션 집계용 — 라운드·항목별 다중 출현 처리)
+extract_marker_all() {
+  local key="$1"
+  local content="$2"
+  printf '%s\n' "$content" \
+    | grep -E "^[[:space:]]*(-[[:space:]]+)?${key}:" \
+    | sed -E "s/^[[:space:]]*(-[[:space:]]+)?${key}:[[:space:]]*//" \
+    | sed 's/[[:space:]]*$//' \
+    || true
+}
+
 # ── roundtable 파서 ───────────────────────────────────────────────────────────
 # 필수 마커: dissent-forcing-triggered (yes|no), rebuttal-exchange (정수), core-claim (1개+)
 # 누락·손상(corrupt) 시 non-zero exit + 명시적 오류
@@ -64,34 +75,44 @@ parse_roundtable() {
 
   info "--- roundtable 파서 실행 ---"
 
-  # 1. dissent-forcing-triggered: yes 또는 no 여야 함
-  local dissent
-  dissent="$(extract_marker "dissent-forcing-triggered" "$content")"
-  if [[ -z "$dissent" ]]; then
+  # 1. dissent-forcing-triggered: 라운드별 다중 출현 — 각 값은 yes|no, 세션 집계는 any-yes
+  #    (반대 강제는 발동 조건이 충족된 라운드에만 yes로 기록되므로 첫 값이 아닌 전체를 본다)
+  local dissent="" dissent_val dissent_count=0
+  while IFS= read -r dissent_val; do
+    [[ -z "$dissent_val" ]] && continue
+    dissent_count=$((dissent_count + 1))
+    if [[ "$dissent_val" != "yes" && "$dissent_val" != "no" ]]; then
+      echo "ERROR: 손상된 마커(corrupt value) — dissent-forcing-triggered='${dissent_val}' (허용값: yes|no)" >&2
+      errors=$((errors + 1))
+    elif [[ "$dissent_val" == "yes" ]]; then
+      dissent="yes"
+    fi
+  done < <(extract_marker_all "dissent-forcing-triggered" "$content")
+  if [[ "$dissent_count" -eq 0 ]]; then
     echo "ERROR: 필수 마커 누락 — dissent-forcing-triggered" >&2
     errors=$((errors + 1))
-  elif [[ "$dissent" != "yes" && "$dissent" != "no" ]]; then
-    echo "ERROR: 손상된 마커(corrupt value) — dissent-forcing-triggered='${dissent}' (허용값: yes|no)" >&2
-    errors=$((errors + 1))
   else
-    info "dissent-forcing-triggered: $dissent"
+    [[ -z "$dissent" ]] && dissent="no"
+    info "dissent-forcing-triggered: ${dissent} (라운드 기록 ${dissent_count}건 any-yes 집계)"
   fi
 
-  # 2. rebuttal-exchange: 정수여야 함
-  local rebuttal_count
-  rebuttal_count="$(count_marker "rebuttal-exchange" "$content")"
-  if [[ "$rebuttal_count" -eq 0 ]]; then
-    echo "ERROR: 필수 마커 누락 — rebuttal-exchange" >&2
-    errors=$((errors + 1))
-  else
-    local rebuttal_val
-    rebuttal_val="$(extract_marker "rebuttal-exchange" "$content")"
+  # 2. rebuttal-exchange: 라운드별 다중 출현 — 각 값은 정수, 세션 집계는 합계
+  local rebuttal_sum=0 rebuttal_val rebuttal_count=0
+  while IFS= read -r rebuttal_val; do
+    [[ -z "$rebuttal_val" ]] && continue
+    rebuttal_count=$((rebuttal_count + 1))
     if ! [[ "$rebuttal_val" =~ ^[0-9]+$ ]]; then
       echo "ERROR: 손상된 마커(corrupt value) — rebuttal-exchange='${rebuttal_val}' (정수 필요)" >&2
       errors=$((errors + 1))
     else
-      info "rebuttal-exchange: ${rebuttal_val}왕복"
+      rebuttal_sum=$((rebuttal_sum + rebuttal_val))
     fi
+  done < <(extract_marker_all "rebuttal-exchange" "$content")
+  if [[ "$rebuttal_count" -eq 0 ]]; then
+    echo "ERROR: 필수 마커 누락 — rebuttal-exchange" >&2
+    errors=$((errors + 1))
+  else
+    info "rebuttal-exchange: 합계 ${rebuttal_sum}왕복 (라운드 기록 ${rebuttal_count}건)"
   fi
 
   # 3. core-claim: 최소 1개 필요
@@ -108,9 +129,9 @@ parse_roundtable() {
     fail "roundtable 마커 파싱 실패: ${errors}개 오류"
   fi
 
-  # 파싱 결과 출력 (key=value 형식)
+  # 파싱 결과 출력 (key=value 형식) — 세션 단위 집계값
   echo "PARSE_DISSENT_TRIGGERED=${dissent}"
-  echo "PARSE_REBUTTAL_EXCHANGES=$(extract_marker "rebuttal-exchange" "$content")"
+  echo "PARSE_REBUTTAL_EXCHANGES=${rebuttal_sum}"
   echo "PARSE_CORE_CLAIM_COUNT=${core_claim_count}"
 }
 
@@ -168,21 +189,24 @@ parse_brainstorm() {
     info "core-fact: ${core_fact_count}개"
   fi
 
-  # 5. independent-sources: 정수여야 함
-  local ind_src_count
-  ind_src_count="$(count_marker "independent-sources" "$content")"
+  # 5. independent-sources: 연구 항목별 다중 출현 — 각 값은 정수, 세션 집계는 최대값
+  #    (핵심 사실 중 가장 잘 검증된 항목의 독립 출처 수를 게이트 대상으로 본다)
+  local ind_src_max=0 ind_src_val ind_src_count=0
+  while IFS= read -r ind_src_val; do
+    [[ -z "$ind_src_val" ]] && continue
+    ind_src_count=$((ind_src_count + 1))
+    if ! [[ "$ind_src_val" =~ ^[0-9]+$ ]]; then
+      echo "ERROR: 손상된 마커(corrupt value) — independent-sources='${ind_src_val}' (정수 필요)" >&2
+      errors=$((errors + 1))
+    elif [[ "$ind_src_val" -gt "$ind_src_max" ]]; then
+      ind_src_max="$ind_src_val"
+    fi
+  done < <(extract_marker_all "independent-sources" "$content")
   if [[ "$ind_src_count" -eq 0 ]]; then
     echo "ERROR: 필수 마커 누락 — independent-sources (최소 1개 필요)" >&2
     errors=$((errors + 1))
   else
-    local ind_src_val
-    ind_src_val="$(extract_marker "independent-sources" "$content")"
-    if ! [[ "$ind_src_val" =~ ^[0-9]+$ ]]; then
-      echo "ERROR: 손상된 마커(corrupt value) — independent-sources='${ind_src_val}' (정수 필요)" >&2
-      errors=$((errors + 1))
-    else
-      info "independent-sources: ${ind_src_val}개"
-    fi
+    info "independent-sources: 최대 ${ind_src_max}개 (연구 항목 ${ind_src_count}건)"
   fi
 
   if [[ "$errors" -gt 0 ]]; then
@@ -193,13 +217,14 @@ parse_brainstorm() {
   echo "PARSE_PARKED_COUNT=${parked_count}"
   echo "PARSE_ELIMINATED_COUNT=${eliminated_count}"
   echo "PARSE_CORE_FACT_COUNT=${core_fact_count}"
-  echo "PARSE_INDEPENDENT_SOURCES=$(extract_marker "independent-sources" "$content")"
+  echo "PARSE_INDEPENDENT_SOURCES=${ind_src_max}"
 }
 
-# ── 임계치 상수 (파일럿 실측 3회 기반, gate-status: active) ─────────────────────
-# 파일럿 분산: selftest 내장 픽스처로 3회 측정, 분산 없음 → decision-mode: 1회 충족 채택
+# ── 임계치 상수 ───────────────────────────────────────────────────────────────
+# 아래 값은 파일럿 실측(표준 시나리오 픽스처로 구동한 실제 스킬 세션) 분산 분석 후
+# 구현자 제안 → 사용자 승인(CHANGELOG `- 게이트 승인:` 마커)으로 확정된다.
 # decision-mode: '1회 충족' = 단일 측정 세션 통과로 게이트 충족
-#               'N회 안정 충족' = N회 연속 측정 통과 필요 (본 실측에서 분산 없어 불채택)
+#               'N회 안정 충족' = N회 연속 측정 통과 필요
 
 # roundtable 절대 임계치 (threshold)
 RT_THRESHOLD_DISSENT_FORCED="yes"           # dissent-forcing-triggered 필수값  (decision-mode: 1회 충족)
@@ -208,7 +233,9 @@ RT_THRESHOLD_CORE_CLAIM_MIN=1               # core-claim 최소 개수/세션   
 
 # brainstorm 절대 임계치 (threshold)
 BS_THRESHOLD_CORE_FACT_MIN=1                # core-fact 최소 개수/세션           (decision-mode: 1회 충족)
-BS_THRESHOLD_INDEPENDENT_SOURCES_MIN=2      # independent-sources 최소 수        (decision-mode: 1회 충족)
+BS_THRESHOLD_INDEPENDENT_SOURCES_MIN=2      # independent-sources 최소 수        (gate-status: shadow — 기록 전용)
+# independent-sources는 파일럿 실측 최대값이 1~5로 분산되어 재파일럿 1회 후에도 판정이 갈려
+# shadow(기록 전용)로 강등됨 (2026-08-02 게이트 승인). 게이트를 차단하지 않고 GATE_SHADOW로 보고만 한다.
 # park-recondition 충족률 100% 및 elimination-reason 충족률 100%는
 # parse_brainstorm fail-loud 규정으로 강제 (threshold: 100%, decision-mode: 1회 충족)
 
@@ -294,13 +321,12 @@ judge_brainstorm() {
     gate_errors=$((gate_errors + 1))
   fi
 
-  # Gate 2: independent-sources (threshold: ≥BS_THRESHOLD_INDEPENDENT_SOURCES_MIN, decision-mode: 1회 충족)
+  # Shadow 지표: independent-sources (threshold: ≥BS_THRESHOLD_INDEPENDENT_SOURCES_MIN, gate-status: shadow)
+  # 실측 분산으로 강등된 기록 전용 지표 — 게이트 판정을 차단하지 않고 관찰값만 보고한다
   if [[ -n "$ind_sources" ]] && [[ "$ind_sources" -ge "$BS_THRESHOLD_INDEPENDENT_SOURCES_MIN" ]] 2>/dev/null; then
-    ok "GATE_PASS: independent-sources=${ind_sources} threshold>=${BS_THRESHOLD_INDEPENDENT_SOURCES_MIN} decision-mode=1회충족"
-    gates_passed=$((gates_passed + 1))
+    info "GATE_SHADOW: independent-sources=${ind_sources} threshold>=${BS_THRESHOLD_INDEPENDENT_SOURCES_MIN} (기록 전용 — 관찰: 충족)"
   else
-    echo "GATE_FAIL: independent-sources=${ind_sources} threshold>=${BS_THRESHOLD_INDEPENDENT_SOURCES_MIN} decision-mode=1회충족" >&2
-    gate_errors=$((gate_errors + 1))
+    info "GATE_SHADOW: independent-sources=${ind_sources} threshold>=${BS_THRESHOLD_INDEPENDENT_SOURCES_MIN} (기록 전용 — 관찰: 미충족, 게이트 비차단)"
   fi
 
   # park-recondition 충족률 100% 및 elimination-reason 충족률 100%는
@@ -361,6 +387,44 @@ FIXTURE
     selftest_pass "roundtable valid: core-claim=1 파싱"
   else
     selftest_fail "roundtable valid: core-claim count 파싱 실패"
+  fi
+
+  # ── roundtable: 다중 라운드 집계 케이스 ───────────────────────────────────
+  echo ""
+  echo "--- [roundtable] 다중 라운드 집계 케이스 (any-yes·합계) ---"
+  RT_MULTI="$(cat <<'FIXTURE'
+# Roundtable Meeting: 20240101-multi
+
+## 상태
+- meeting-id: 20240101-multi
+- status: completed
+- next-action: none
+
+## 논의 기록
+### Round 1
+- core-claim: 첫 라운드 주장
+- dissent-forcing-triggered: no
+- rebuttal-exchange: 1
+### Round 2
+- core-claim: 둘째 라운드 주장
+- dissent-forcing-triggered: no
+- rebuttal-exchange: 0
+### Round 3
+- dissent-forcing-triggered: yes
+- rebuttal-exchange: 1
+FIXTURE
+)"
+
+  rt_multi_out="$(parse_roundtable "$RT_MULTI" 2>&1)" || true
+  if echo "$rt_multi_out" | grep -q "PARSE_DISSENT_TRIGGERED=yes"; then
+    selftest_pass "roundtable multi: dissent any-yes 집계 (no,no,yes → yes)"
+  else
+    selftest_fail "roundtable multi: dissent any-yes 집계 실패"
+  fi
+  if echo "$rt_multi_out" | grep -q "PARSE_REBUTTAL_EXCHANGES=2"; then
+    selftest_pass "roundtable multi: rebuttal 합계 집계 (1+0+1 → 2)"
+  else
+    selftest_fail "roundtable multi: rebuttal 합계 집계 실패"
   fi
 
   # ── roundtable: 필수 마커 누락 케이스 ─────────────────────────────────────
@@ -467,6 +531,45 @@ FIXTURE
     selftest_pass "brainstorm valid: independent-sources=3 파싱"
   else
     selftest_fail "brainstorm valid: independent-sources 파싱 실패"
+  fi
+
+  # ── brainstorm: 다중 항목 집계 케이스 ─────────────────────────────────────
+  echo ""
+  echo "--- [brainstorm] 다중 항목 집계 케이스 (independent-sources 최대값) ---"
+  BS_MULTI="$(cat <<'FIXTURE'
+# Brainstorm Session: 20240101-multi
+
+## 상태
+- session-id: 20240101-multi
+- state: completed
+
+## 아이디어 풀
+
+### IDEA-001
+- idea-id: IDEA-001
+- status: shortlisted
+- core-fact: 사실 A
+- independent-sources: 1
+
+### IDEA-002
+- idea-id: IDEA-002
+- status: shortlisted
+- core-fact: 사실 B
+- independent-sources: 3
+
+### IDEA-003
+- idea-id: IDEA-003
+- status: shortlisted
+- core-fact: 사실 C
+- independent-sources: 0
+FIXTURE
+)"
+
+  bs_multi_out="$(parse_brainstorm "$BS_MULTI" 2>&1)" || true
+  if echo "$bs_multi_out" | grep -q "PARSE_INDEPENDENT_SOURCES=3"; then
+    selftest_pass "brainstorm multi: independent-sources 최대값 집계 (1,3,0 → 3)"
+  else
+    selftest_fail "brainstorm multi: independent-sources 최대값 집계 실패"
   fi
 
   # ── brainstorm: 필수 마커 누락 케이스 ────────────────────────────────────

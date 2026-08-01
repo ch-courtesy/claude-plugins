@@ -90,7 +90,7 @@
 - 진행자 판정:
 ```
 
-`core-claim`은 이 라운드의 핵심 주장 문장이다. `dissent-forcing-triggered`는 반대 강제 장치가 발동됐으면 `yes`, 아니면 `no`를 기록한다. `rebuttal-exchange`는 반박→재반박 왕복 횟수(정수)를 기록한다. 이 세 필드는 정량 측정 하니스가 파싱하는 구조화 마커이므로 kebab-case `key: value` 형식을 지킨다.
+`core-claim`은 이 라운드의 핵심 주장 문장이다. `dissent-forcing-triggered`는 반대 강제 장치가 발동됐으면 `yes`, 아니면 `no`를 기록한다. `rebuttal-exchange`는 반박→재반박 왕복 횟수(정수)를 기록한다. 이 세 필드는 정량 측정 하니스가 파싱하는 구조화 마커이므로 kebab-case `key: value` 형식을 지킨다. 마커 값에는 주석·부연을 붙이지 않는다(순수 값만 — 예: `rebuttal-exchange: 1`). 부연은 '반론과 해소 조건' 같은 서술 필드에 적는다. 값이 오염되면 하니스가 fail-loud로 실패한다. 세션 집계는 하니스가 수행한다(dissent-forcing-triggered: 라운드 중 하나라도 yes면 yes / rebuttal-exchange: 라운드 합계).
 
 ## 최종 문서 섹션
 

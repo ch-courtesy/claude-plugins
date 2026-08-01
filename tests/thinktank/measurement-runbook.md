@@ -99,26 +99,34 @@ bash tests/thinktank/measure-session.sh \
 
 ---
 
-## 게이트 임계치 (파일럿 실측 3회 기반)
+## 게이트 임계치 (파일럿 실측 기반, 2026-08-02 승인)
+
+측정 모델: claude-fable-5. 실측 상세는 `tests/thinktank/measurements/`의 측정 기록과
+`sessions/` 하위의 원본 세션 산출물 참조. 세션 집계 의미론: dissent-forcing-triggered는
+라운드 중 any-yes, rebuttal-exchange는 라운드 합계, independent-sources는 연구 항목 최대값.
 
 ### roundtable 임계치 (gate-status: active)
 
-| 지표 | 임계치 | decision-mode |
-|---|---|---|
-| dissent-forcing-triggered | yes | 1회 충족 |
-| rebuttal-exchange | ≥1 왕복 | 1회 충족 |
-| core-claim | ≥1 개 | 1회 충족 |
+| 지표 | 임계치 | decision-mode | 실측(판정 가능 3회) |
+|---|---|---|---|
+| dissent-forcing-triggered | yes | 1회 충족 | yes / yes / yes |
+| rebuttal-exchange | ≥1 왕복 | 1회 충족 | 1 / 2 / 2 |
+| core-claim | ≥1 개 | 1회 충족 | 3 / 6 / 4 |
 
-### brainstorm 임계치 (gate-status: active)
+### brainstorm 임계치
 
-| 지표 | 임계치 | decision-mode |
-|---|---|---|
-| core-fact | ≥1 개/세션 | 1회 충족 |
-| independent-sources | ≥2 | 1회 충족 |
-| park-recondition 충족률 | 100% (fail-loud 강제) | 1회 충족 |
-| elimination-reason 충족률 | 100% (fail-loud 강제) | 1회 충족 |
+| 지표 | 임계치 | gate-status | 실측 |
+|---|---|---|---|
+| core-fact | ≥1 개/세션 | active (1회 충족) | 27 / 26 (전 실행 ≥1) |
+| park-recondition 충족률 | 100% (fail-loud 강제) | active | 전 실행 100% |
+| elimination-reason 충족률 | 100% (fail-loud 강제) | active | 전 실행 100% |
+| independent-sources | ≥2 | **shadow (기록 전용)** | 최대값 1 / 3 (재파일럿 후에도 판정 갈림) |
 
-파일럿 분산: 3회 측정 모두 동일 판정 — 분산 없음. `decision-mode: 1회 충족` 채택.
+파일럿 분산: active 지표는 판정 가능 실행에서 전부 일치 → `decision-mode: 1회 충족` 채택.
+`independent-sources`는 실측 최대값이 1~5로 분산되어 재파일럿 1회 상한 후에도 통과/실패가 갈려
+shadow로 강등(사유는 측정 기록의 shadow-reason 참조). 초기 파일럿 3회 중 1회는 마커 값에 산문
+주석이 붙는 형식 위반으로 판정 불가 — 문서 템플릿에 "마커 값은 순수 값만" 규칙을 추가하고
+재파일럿 1회로 대체했다.
 
 ---
 
