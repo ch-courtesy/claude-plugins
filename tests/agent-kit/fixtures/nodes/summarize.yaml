@@ -1,0 +1,13 @@
+# llm 노드 표준 픽스처
+name: summarize
+kind: llm
+description: 텍스트 요약
+inputs:
+  text: {type: string, required: true}
+  max_words: {type: number, default: 100}
+outputs:
+  summary: {type: string}
+run:
+  prompt: |
+    다음 텍스트를 {{max_words}} 단어 이내로 요약하고
+    {"summary": "..."} 형태의 JSON만 출력하라: {{text}}

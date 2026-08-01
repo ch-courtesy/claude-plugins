@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# pipeline 스킬 패키지와 정의·컴파일 계약 검증
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PLUGIN_DIR="$REPO_ROOT/plugins/agent-kit"
+SKILL_DIR="$PLUGIN_DIR/skills/pipeline"
+SKILL_MD="$SKILL_DIR/SKILL.md"
+REFS="$SKILL_DIR/references"
+MARKETPLACE="$REPO_ROOT/.claude-plugin/marketplace.json"
+FIXTURES="$REPO_ROOT/tests/agent-kit/fixtures"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+ok()   { echo "OK: $*"; }
+
+echo "=== TEST 1: 스킬 구조와 등록 ==="
+for file in \
+  "$SKILL_MD" \
+  "$REFS/pipeline-schema.md" \
+  "$REFS/util-nodes.md" \
+  "$REFS/validate-checklist.md" \
+  "$REFS/compile-template.md"; do
+  [[ -f "$file" ]] || fail "필수 파일 부재: $file"
+done
+jq -e '.plugins[] | select(.name == "agent-kit")' "$MARKETPLACE" >/dev/null \
+  || fail "marketplace.json에 agent-kit 미등록"
+jq -e '.name == "agent-kit"' "$PLUGIN_DIR/.claude-plugin/plugin.json" >/dev/null \
+  || fail "plugin.json name 불일치"
+ok "필수 파일 존재 + 마켓플레이스 등록"
+
+echo ""
+echo "=== TEST 2: 공개 인터페이스와 원칙 ==="
+for command in create compile list; do
+  grep -qE "pipeline ${command}|## ${command} 워크플로" "$SKILL_MD" \
+    || fail "서브커맨드 누락: $command"
+done
+grep -qE '인자가 없으면.*create' "$SKILL_MD" \
+  || fail "무인자 create 기본 규약 누락"
+grep -qE 'run 서브커맨드는 없다' "$SKILL_MD" \
+  || fail "run 부재 계약 누락"
+grep -qE '정의 = 소스.*스킬 = 바이너리|정의=소스' "$SKILL_MD" \
+  || fail "정의=소스 원칙 누락"
+grep -qF 'compiled-from' "$SKILL_MD" \
+  || fail "compiled-from 해시 규약 누락"
+grep -qF '.pipelines/<이름>.yaml' "$SKILL_MD" \
+  || fail "정의 파일 경로 계약 누락"
+grep -qF '.claude/skills/<이름>/' "$SKILL_MD" \
+  || fail "컴파일 산출 경로 계약 누락"
+grep -qE '재컴파일 필요' "$SKILL_MD" \
+  || fail "list의 해시 대조 표시 누락"
+ok "인터페이스와 원칙"
+
+echo ""
+echo "=== TEST 3: 권한과 안전 경계 ==="
+FRONTMATTER="$(awk '/^---$/{n++; next} n==1' "$SKILL_MD")"
+printf '%s\n' "$FRONTMATTER" | grep -qxF '  - Write(.pipelines/**)' \
+  || fail "Write 권한에 .pipelines/** 부재"
+printf '%s\n' "$FRONTMATTER" | grep -qxF '  - Write(.claude/skills/**)' \
+  || fail "Write 권한에 .claude/skills/** 부재"
+if printf '%s\n' "$FRONTMATTER" | grep -qxF '  - Write'; then
+  fail "제한 없는 Write 권한이 남아 있음"
+fi
+grep -qE '실행하지 않는다' "$SKILL_MD" \
+  || fail "파이프라인 비실행 경계 누락"
+grep -qE 'validate를 통과하지 못한.*(만들지 않)' "$SKILL_MD" \
+  || fail "validate 실패 시 산출 금지 규약 누락"
+ok "권한과 안전 경계"
+
+echo ""
+echo "=== TEST 4: 유틸 노드와 validate 계약 ==="
+for util in if switch foreach merge transform human-gate; do
+  grep -q -- "$util" "$REFS/util-nodes.md" \
+    || fail "util-nodes에 누락: $util"
+done
+for check in '참조 무결성' '순환' 'required' '타입'; do
+  grep -q "$check" "$REFS/validate-checklist.md" \
+    || fail "validate-checklist에 누락: $check"
+done
+for ref in '\$pipeline\.' '\$item' 'needs' 'retry' 'timeout' 'on_error' \
+  'fail' 'continue'; do
+  grep -qE "$ref" "$REFS/pipeline-schema.md" \
+    || fail "pipeline-schema에 누락: $ref"
+done
+ok "유틸 노드와 validate"
+
+echo ""
+echo "=== TEST 5: 컴파일 템플릿 런타임 계약 ==="
+for contract in 'state.json' 'resume' 'run-id' 'skipped' 'aborted' \
+  'compiled-from' '자기완결' '안전 경계'; do
+  grep -q -- "$contract" "$REFS/compile-template.md" \
+    || fail "compile-template에 누락: $contract"
+done
+grep -qE '이 2파일만으로.*동작|2파일만으로' "$REFS/compile-template.md" \
+  || fail "자립성 계약 누락"
+grep -qE '최소 집합' "$REFS/compile-template.md" \
+  || fail "allowed-tools 최소화 규약 누락"
+ok "컴파일 템플릿"
+
+echo ""
+echo "=== TEST 6: 픽스처 정합성 ==="
+for file in \
+  "$FIXTURES/nodes/greet.yaml" \
+  "$FIXTURES/nodes/summarize.yaml" \
+  "$FIXTURES/sample-pipeline.yaml" \
+  "$FIXTURES/broken-pipeline.yaml"; do
+  [[ -f "$file" ]] || fail "픽스처 부재: $file"
+done
+for field in 'name:' 'kind:' 'description:' 'inputs:' 'outputs:' 'run:'; do
+  grep -q "$field" "$FIXTURES/nodes/greet.yaml" \
+    || fail "greet.yaml에 필드 누락: $field"
+done
+grep -q 'kind: script' "$FIXTURES/nodes/greet.yaml" || fail "greet는 script여야 함"
+grep -q 'kind: llm' "$FIXTURES/nodes/summarize.yaml" || fail "summarize는 llm이어야 함"
+for field in 'name:' 'description:' 'inputs:' 'nodes:'; do
+  grep -q "$field" "$FIXTURES/sample-pipeline.yaml" \
+    || fail "sample-pipeline에 필드 누락: $field"
+done
+grep -qE 'util: (if|foreach|transform|human-gate|merge|switch)' "$FIXTURES/sample-pipeline.yaml" \
+  || fail "sample-pipeline에 유틸 노드 사용 예 부재"
+grep -q 'no-such-node' "$FIXTURES/broken-pipeline.yaml" \
+  || fail "broken-pipeline에 의도된 위반(없는 타입 참조) 부재"
+ok "픽스처 정합성"
+
+echo ""
+echo "모든 pipeline 스킬 테스트 통과"

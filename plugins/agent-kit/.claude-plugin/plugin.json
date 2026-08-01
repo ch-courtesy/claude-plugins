@@ -1,11 +1,11 @@
 {
   "name": "agent-kit",
-  "version": "0.1.0",
-  "description": "에이전트 협업 유틸 모음 — 판단 전담 Advisor가 Worker를 감독하는 위임·검증 워크플로 제공",
+  "version": "0.2.0",
+  "description": "에이전트 협업 도구 모음 — Advisor 감독 워크플로와 입출력 노드 기반 워크플로 정의·컴파일 제공",
   "author": {
     "name": "예의상",
     "email": "ch.courtesy@gmail.com"
   },
   "license": "MIT",
-  "keywords": ["advisor", "delegation", "verification", "supervision", "agents", "workflow"]
+  "keywords": ["advisor", "delegation", "verification", "supervision", "agents", "workflow", "pipeline", "node", "orchestration", "compiler", "automation"]
 }

@@ -7,6 +7,12 @@
 ### 새 기능
 - **advisor 스킬** — 호출 세션(Worker)이 판단 전담 Advisor 서브에이전트를 생성해 감독 아래 구현하는 역할 역전 워크플로. Advisor는 요구사항 분석·작업 브리프 작성·결과 검증(diff·테스트 직접 실행)·커밋 승인을 소유하고, 구현 노동은 Worker가 수행한다. 상태 태그 6종(BRIEF/QUESTION/SKIP/APPROVED/REVISE/ESCALATE) 프로토콜, REVISE 3라운드 초과 시 사용자 에스컬레이션, 커밋은 사용자가 요청한 세션에서만 실행.
 
+## agent-kit 0.2.0
+
+### 새 기능
+- **node 스킬(노드 타입)** — 파이프라인의 재사용 부품인 노드 타입을 만들고 검증한다. 노드는 JSON Schema식 입출력 선언 + kind별 실행법(`llm`(서브에이전트) / `script`(셸) / `http`(curl) / `mcp`(도구 호출))을 가진 `.pipelines/nodes/<이름>.yaml` 단일 파일이다. `create`(대화형 정의) / `test <이름>`(모의 입력 단독 실행 후 출력 스키마 대조 — script·http는 실행 전 명령 전문 확인) / `list`.
+- **pipeline 스킬(워크플로 컴파일러)** — 노드들을 연결한 그래프를 `.pipelines/<이름>.yaml`로 정의하고 자립 실행형 워크플로 스킬(`.claude/skills/<이름>/` — SKILL.md + graph.yaml 스냅샷)로 컴파일한다. 원칙: 정의 = 소스, 생성된 스킬 = 바이너리(`compiled-from` 해시로 드리프트 감지, `list`가 재컴파일 필요를 표시). edge 선언 없이 `$노드id.출력` 참조로 의존성 자동 도출, 의존 없는 노드는 자동 병렬. 유틸 노드 5종(if/switch·foreach·merge·transform(jq)·human-gate) + 공통 속성 retry/timeout/on_error. compile은 validate(참조 무결성·필수 입력·타입 일치·순환) 통과 시에만 산출한다. 생성된 스킬은 실행마다 `.pipelines/runs/<run-id>/`에 노드별 출력과 state.json을 남기고 `resume <run-id>`로 실패·중단 지점부터 재개한다. 설계 스펙: `docs/superpowers/specs/2026-08-02-agent-kit-pipeline-node-design.md`.
+
 ## explain-diff 0.1.0
 
 ### 새 기능
@@ -45,6 +51,11 @@
 
 ### 변경(호환)
 - **brainstorm 아이디어 상태 `archived` → `parked`·`eliminated` 분리 (성숙도 재분석 권고 2건 적용)** — `archived` 단일 상태를 `parked`(관찰 가능한 재검토 조건 `park-recondition` 필수)와 `eliminated`(근거 있는 탈락 사유 `elimination-reason` 필수)로 분리했다. 최종 enum: `raw | transformed | clustered | shortlisted | parked | eliminated`. NGT 수렴 절에 성숙도 미사용 규칙(구체화 부족을 후보 탈락 근거로 쓰지 않는다)과 상태 전환 규칙(수렴 완료 시 세션 책임자가 미선택 아이디어를 관찰 가능한 재검토 조건 유무에 따라 parked 또는 eliminated로 판별 표시)을 추가했다. 호환 분류 근거: 이 enum은 새 세션 파일 작성 시에만 적용되는 문서 템플릿 계약이며, 릴리스 시점 검증에서 `archived`를 참조하는 외부 소비자·코드·테스트·기존 `.brainstorm/` 세션 파일이 없음을 확인했다(참조는 `document-templates.md` 자신 2곳뿐). `resume` 라우팅은 세션 상태 블록 기준이라 아이디어 status 값에 의존하지 않으며, 구 세션 파일의 `archived` 잔존은 기존 "resume 불일치 보고" 규율이 처리한다 — 마이그레이션 불필요.
+
+## marketplace 0.4.0
+
+### 새 기능
+- **agent-kit 0.1.0 등록** — 에이전트 협업 플러그인(`plugins/agent-kit/`)을 마켓플레이스에 추가하고 버전을 `0.3.0 → 0.4.0`으로 올렸다.
 
 ## marketplace 0.2.0
 

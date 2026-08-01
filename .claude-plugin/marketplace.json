@@ -25,6 +25,26 @@
       ]
     },
     {
+      "name": "agent-kit",
+      "source": "./plugins/agent-kit",
+      "description": "Advisor 감독 워크플로와 입출력 노드 기반 워크플로 정의·컴파일을 제공하는 에이전트 협업 도구 모음",
+      "version": "0.2.0",
+      "category": "productivity",
+      "tags": [
+        "advisor",
+        "delegation",
+        "verification",
+        "supervision",
+        "agents",
+        "workflow",
+        "pipeline",
+        "node",
+        "orchestration",
+        "compiler",
+        "automation"
+      ]
+    },
+    {
       "name": "thinktank",
       "source": "./plugins/thinktank",
       "description": "중앙 리서치를 바탕으로 다중 관점 숙의와 추적 가능한 브레인스토밍을 진행",
