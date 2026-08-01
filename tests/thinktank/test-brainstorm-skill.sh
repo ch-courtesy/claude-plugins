@@ -193,10 +193,20 @@ MARKET_VERSION="$(python3 -c 'import json,sys; print(next(p["version"] for p in 
 [[ -n "$PLUGIN_VERSION" && "$PLUGIN_VERSION" == "$MARKET_VERSION" ]] \
   || fail "플러그인/마켓플레이스 버전 불일치: plugin.json=$PLUGIN_VERSION marketplace=$MARKET_VERSION"
 # 버전 범프 회귀 가드: 릴리스 시 이 핀도 함께 올린다 (parity만으로는 미범프를 못 잡는다)
-EXPECTED_VERSION="1.1.0"
+EXPECTED_VERSION="1.2.0"
 [[ "$PLUGIN_VERSION" == "$EXPECTED_VERSION" ]] \
   || fail "플러그인 버전이 현재 릴리스 핀과 다름: plugin.json=$PLUGIN_VERSION expected=$EXPECTED_VERSION (릴리스 시 핀 갱신)"
 ok "플러그인과 마켓플레이스 버전 동기 + 릴리스 핀 일치 ($PLUGIN_VERSION)"
+
+echo ""
+echo "=== TEST 12: brief 디스패치 규범·증거 임계치 계약 ==="
+grep -qF '메인 세션 컨텍스트는 보이지 않는다' "$REFS/role-prompts.md" \
+  || fail "brief 메인 컨텍스트 비가시성 명시 누락 (role-prompts)"
+grep -qF '중첩 Agent를 호출하지 않는다' "$REFS/role-prompts.md" \
+  || fail "brief 중첩 Agent 금지 명시 누락 (role-prompts)"
+grep -qF '독립인 출처 2개 이상' "$REFS/research-protocol.md" \
+  || fail "핵심 사실 독립 출처 임계치 누락"
+ok "brief 디스패치 규범과 증거 임계치 계약"
 
 echo ""
 echo "=== 모든 brainstorm 스킬 테스트 통과 ==="

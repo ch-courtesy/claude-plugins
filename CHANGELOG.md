@@ -2,6 +2,28 @@
 
 이 저장소의 **사용자 가시(behavior-changing) 변경**을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`이며(`rules/engineering/versioning.md`), 본 파일은 변경이 머지될 때마다 누적합니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## thinktank 1.2.0
+
+### 새 기능
+- **roundtable 반대 강제(거짓 합의 방지)** — 합의 후보 검증에서 모든 핵심 참여자의 평가가 수용·조건부 수용뿐이면(중대한 반대·판단 불가 0건), 진행자가 종료 판정 전 참여자 1명(로스터에 반대 관점 대변인이 있으면 그 역할)에게 가장 강한 반대 논거 1건을 증거 ID와 함께 요구한다. 논거가 중대한 반대 요건을 충족하면 정상 숙의로 처리하고, 반박되면 반박 근거를 결정 지도에 기록 후 종료 판정으로 진행한다(`meeting-protocol.md`).
+- **roundtable 상호 반박 왕복** — 핵심 이견 쟁점은 진행자가 대립 입장의 참여자를 지정해 반박 → 재반박 1왕복을 교환하게 하고, 이때만 해당 쟁점의 상대 주장 전문과 근거 ID를 그대로 전달한다. 미해소 쟁점은 결정 지도에 기록하고 같은 쟁점의 추가 왕복은 새 증거·논거가 있을 때만 허용한다(`meeting-protocol.md`).
+- **핵심 주장 증거 임계치** — roundtable: 합의문·결정사항이 직접 의존하는 핵심 주장은 서로 독립인 출처 2개 이상이어야 `확인`으로 표시하고, 단일 출처면 `추정` + 주의사항 기록, 반증 시도 결과를 함께 기록한다(`research-protocol.md`). brainstorm: 후보 채택·탈락을 좌우하는 핵심 사실에 같은 독립 출처 2개·추정 표시·반증 기록 규칙을 적용한다(`research-protocol.md` 2단계).
+- **정량 검증 인프라 — 구조화 마커·측정 하니스·표준 시나리오 픽스처·runbook** — 세션 파일 템플릿에 하니스 파싱용 kebab-case 구조화 마커를 추가했다(roundtable 라운드 항목: `core-claim`·`dissent-forcing-triggered`·`rebuttal-exchange` / brainstorm: `core-fact`·`independent-sources` 신규 + 기존 `park-recondition`·`elimination-reason`·`parent-id` 재사용). 측정 하니스 `tests/thinktank/measure-session.sh`(마커 파싱·절대 임계치 판정·fail-loud — 필수 마커 누락·손상 시 non-zero exit, selftest 15케이스), 스킬별 표준 시나리오 픽스처(`tests/thinktank/fixtures/`), 측정 절차·모델 교체 재검증 runbook(`tests/thinktank/measurement-runbook.md`)을 추가했다. 임계치·판정 방식은 아래 "정량 게이트 임계치 확정" 항목으로 발효됐다.
+
+### 정량 게이트 임계치 확정 (파일럿 실측 기반)
+
+- **측정 방법** — 커밋된 표준 시나리오 픽스처로 스킬 계약을 실제 수행하는 세션을 구동해(세션에 측정 목표 비공개, 원본 산출물 `tests/thinktank/measurements/sessions/` 보존) 하니스로 판정했다. 측정 모델: claude-fable-5. 세션 집계 의미론: dissent any-yes / rebuttal 라운드 합계 / independent-sources 항목 최대값.
+- **roundtable 게이트 지표** (gate-status: active, decision-mode: 1회 충족) — `dissent-forcing-triggered`=yes (실측 3/3 발동), `rebuttal-exchange` ≥1왕복 (실측 합계 1/2/2), `core-claim` ≥1개 (실측 3/6/4).
+- **brainstorm 게이트 지표** — `core-fact` ≥1개/세션 (active, 실측 25~27), `park-recondition`·`elimination-reason` 충족률 100% (active, fail-loud 강제, 전 실행 100%). `independent-sources` ≥2는 **shadow(기록 전용) 강등** — 실측 최대값 1~5 분산으로 템플릿 규약 조정·재파일럿 1회 상한 후에도 판정이 갈림(스킬별 안정 지표 ≥1 요건은 active 3개로 충족).
+- 초기 파일럿 중 3회는 마커 값 산문 주석(형식 위반)으로 판정 제외 — 문서 템플릿에 "마커 값은 순수 값만" 규칙을 추가하고 정책상 재파일럿 1회로 대체했다. 상세: `tests/thinktank/measurements/*-pilot-20260801.md`, `tests/thinktank/measurement-runbook.md`.
+- 게이트 승인: 2026-08-01, 사용자 승인 — roundtable active 3지표·brainstorm active 3지표 + shadow 1지표(independent-sources)로 1.2.0 정량 게이트 발효.
+
+### 버그 수정
+- **디스패치 규범이 brief 템플릿에 미구현 (정합성 결함)** — 두 SKILL.md는 "서브에이전트 brief에 메인 컨텍스트 비가시성과 중첩 Agent 호출 금지를 명시한다"고 규정했지만 실제 brief 템플릿에는 해당 문구가 없었다(`participant-personas.md`의 중첩 Agent 금지 1건 제외). brainstorm·roundtable `role-prompts.md`와 `participant-personas.md`에 명시 문구를 반영했다. 회귀 가드: 두 테스트 스크립트에 명시 문구 grep 가드 추가.
+
+### 변경(호환)
+- **roundtable 상태 블록 필드 kebab-case 통일** — `meeting_id`·`current_round`·`max_rounds`·`research_calls_used`·`agent_calls_used`·`next_action`·`last_updated`를 brainstorm과 동일한 kebab-case(`meeting-id` 등)로 통일했다(`document-templates.md`). 호환 분류 근거: 이 필드명은 새 회의 파일 작성 시에만 적용되는 문서 템플릿 계약이고, 상태 머신 enum 값(`agenda_approval` 등)은 변경하지 않았다. `resume`는 회의 파일에 기록된 상태 블록을 산문으로 읽으므로 구 회의 파일의 snake_case 필드도 해석에 영향이 없고, 불일치는 기존 "resume 불일치 보고" 규율이 처리한다 — 마이그레이션 불필요. 회귀 가드: roundtable 테스트에 snake_case 잔존 부정 가드 추가.
+
 ## thinktank 1.1.0
 
 ### 변경(호환)
