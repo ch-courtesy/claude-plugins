@@ -5,7 +5,7 @@
 ## codex-ops 0.1.0
 
 ### 새 기능
-- **codex-auth-reseed 스킬 신규 플러그인으로 등록** — codex-review CI의 `CODEX_AUTH_JSON` 시크릿이 회전 리프레시 토큰 소진·desync로 깨질 때, host `~/.codex`를 건드리지 않는 격리 docker 컨테이너에서 `codex login --device-auth`로 새 토큰을 발급받아 대상 repo 시크릿을 갱신한다. 컨테이너는 `--network host`로 기동(bridge IPv6 egress 단절 시 codex 자체 리졸버 실패 회피)하고 `ca-certificates`를 설치(rustls TLS 검증에 시스템 CA 스토어 필수 — node slim 이미지엔 없음)하며, 실행 전 대상 repo에 `codex-review.yml` 존재를 검증한다.
+- **codex-auth-reseed 스킬 신규 플러그인으로 등록** — codex-review CI의 `CODEX_AUTH_JSON` 시크릿이 회전 리프레시 토큰 소진·desync로 깨질 때, 소유자 전용(umask 077) 임시 디렉터리를 격리 `CODEX_HOME`으로 지정해 `codex login --device-auth`로 새 토큰을 발급받아 대상 repo 시크릿을 갱신한다(codex는 인증 상태를 `$CODEX_HOME` 아래에만 쓰므로 host `~/.codex` 시드는 무접촉). 컨테이너 무의존 — host 네트워크·CA 스토어를 그대로 써서 컨테이너 유발 문제(bridge IPv6 egress 단절, slim 이미지 CA 부재)가 없다. codex 미설치면 `npx -y @openai/codex`로 일회 실행하고, 실행 전 대상 repo에 `codex-review.yml` 존재를 검증하며, 완료·중단 시 토큰 파일을 shred 후 격리 디렉터리를 파기한다.
 
 ## explain-diff 0.1.0
 
