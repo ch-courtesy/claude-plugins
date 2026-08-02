@@ -15,10 +15,14 @@ nodes:
     util: transform
     in: {items: $each.results}
     expr: '{lines: [.items[].greeting]}'
+  - id: count
+    util: transform
+    in: {names: $pipeline.names}
+    expr: '{count: (.names | length)}'   # human-gate 치환 값은 스칼라만 — 배열을 건수로 변환
   - id: gate
     util: human-gate
     message: "{{count}}건 저장할까요?"
-    in: {count: $pipeline.names}
+    in: {count: $count.count}
   - id: save
     inline:
       kind: script
