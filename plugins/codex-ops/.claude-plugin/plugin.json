@@ -1,0 +1,11 @@
+{
+  "name": "codex-ops",
+  "version": "0.1.0",
+  "description": "Codex CI 운영 도구 — codex-review CI의 CODEX_AUTH_JSON 시크릿을 격리 컨테이너에서 재시드하는 codex-auth-reseed 스킬 제공",
+  "author": {
+    "name": "예의상",
+    "email": "ch.courtesy@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": ["codex", "ci", "auth", "secrets", "reseed"]
+}

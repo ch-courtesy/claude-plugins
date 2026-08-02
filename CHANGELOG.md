@@ -15,6 +15,11 @@
 ### 새 기능
 - **advisor 스킬** — 호출 세션(Worker)이 판단 전담 Advisor 서브에이전트를 생성해 감독 아래 구현하는 역할 역전 워크플로. Advisor는 요구사항 분석·작업 브리프 작성·결과 검증(diff·테스트 직접 실행)·커밋 승인을 소유하고, 구현 노동은 Worker가 수행한다. 상태 태그 6종(BRIEF/QUESTION/SKIP/APPROVED/REVISE/ESCALATE) 프로토콜, REVISE 3라운드 초과 시 사용자 에스컬레이션, 커밋은 사용자가 요청한 세션에서만 실행.
 
+## codex-ops 0.1.0
+
+### 새 기능
+- **codex-auth-reseed 스킬 신규 플러그인으로 등록** — codex-review CI의 `CODEX_AUTH_JSON` 시크릿이 회전 리프레시 토큰 소진·desync로 깨질 때, 소유자 전용(umask 077) 임시 디렉터리를 격리 `CODEX_HOME`으로 지정해 `codex login --device-auth`로 새 토큰을 발급받아 대상 repo 시크릿을 갱신한다(codex는 인증 상태를 `$CODEX_HOME` 아래에만 쓰므로 host `~/.codex` 시드는 무접촉). 컨테이너 무의존 — host 네트워크·CA 스토어를 그대로 써서 컨테이너 유발 문제(bridge IPv6 egress 단절, slim 이미지 CA 부재)가 없다. codex 미설치면 `npx -y @openai/codex`로 일회 실행하고, 실행 전 대상 repo에 `codex-review.yml` 존재를 검증하며, 완료·중단 시 토큰 파일을 shred 후 격리 디렉터리를 파기한다.
+
 ## explain-diff 0.1.0
 
 ### 새 기능

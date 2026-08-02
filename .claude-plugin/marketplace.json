@@ -73,6 +73,19 @@
         "agents",
         "workflow"
       ]
+    },
+    {
+      "name": "codex-ops",
+      "source": "./plugins/codex-ops",
+      "description": "Codex CI 운영 도구 — codex-review CI의 CODEX_AUTH_JSON 시크릿을 임시 격리 CODEX_HOME에서 재시드하는 codex-auth-reseed 스킬 제공",
+      "version": "0.1.0",
+      "category": "automation",
+      "tags": [
+        "codex",
+        "ci",
+        "auth",
+        "secrets"
+      ]
     }
   ]
 }
