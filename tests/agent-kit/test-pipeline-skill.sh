@@ -49,6 +49,8 @@ grep -qF '.claude/skills/<이름>/' "$SKILL_MD" \
   || fail "컴파일 산출 경로 계약 누락"
 grep -qE '재컴파일 필요' "$SKILL_MD" \
   || fail "list의 해시 대조 표시 누락"
+grep -qE '파이프라인 합성' "$SKILL_MD" \
+  || fail "kind: pipeline 합성 계약 누락"
 ok "인터페이스와 원칙"
 
 echo ""
@@ -77,8 +79,10 @@ for check in '참조 무결성' '순환' 'required' '타입'; do
   grep -q "$check" "$REFS/validate-checklist.md" \
     || fail "validate-checklist에 누락: $check"
 done
+grep -qF '.claude/skills/<이름>/SKILL.md' "$REFS/validate-checklist.md" \
+  || fail "validate가 스킬 frontmatter를 읽는 계약 누락"
 for ref in '\$pipeline\.' '\$item' 'needs' 'retry' 'timeout' 'on_error' \
-  'fail' 'continue'; do
+  'fail' 'continue' 'skill:' 'outputs'; do
   grep -qE "$ref" "$REFS/pipeline-schema.md" \
     || fail "pipeline-schema에 누락: $ref"
 done
@@ -87,7 +91,7 @@ ok "유틸 노드와 validate"
 echo ""
 echo "=== TEST 5: 컴파일 템플릿 런타임 계약 ==="
 for contract in 'state.json' 'resume' 'run-id' 'skipped' 'aborted' \
-  'compiled-from' '자기완결' '안전 경계'; do
+  'compiled-from' 'kind: pipeline' '자기완결' '안전 경계'; do
   grep -q -- "$contract" "$REFS/compile-template.md" \
     || fail "compile-template에 누락: $contract"
 done
@@ -95,31 +99,36 @@ grep -qE '이 2파일만으로.*동작|2파일만으로' "$REFS/compile-template
   || fail "자립성 계약 누락"
 grep -qE '최소 집합' "$REFS/compile-template.md" \
   || fail "allowed-tools 최소화 규약 누락"
+grep -qE '서브에이전트로 실행' "$REFS/compile-template.md" \
+  || fail "kind: pipeline 노드 실행 방식 누락"
 ok "컴파일 템플릿"
 
 echo ""
 echo "=== TEST 6: 픽스처 정합성 ==="
 for file in \
-  "$FIXTURES/nodes/greet.yaml" \
-  "$FIXTURES/nodes/summarize.yaml" \
+  "$FIXTURES/skills/greet/SKILL.md" \
+  "$FIXTURES/skills/summarize/SKILL.md" \
   "$FIXTURES/sample-pipeline.yaml" \
   "$FIXTURES/broken-pipeline.yaml"; do
   [[ -f "$file" ]] || fail "픽스처 부재: $file"
 done
+[[ ! -e "$FIXTURES/nodes" ]] || fail "구 노드 픽스처 디렉터리 잔존"
 for field in 'name:' 'kind:' 'description:' 'inputs:' 'outputs:' 'run:'; do
-  grep -q "$field" "$FIXTURES/nodes/greet.yaml" \
-    || fail "greet.yaml에 필드 누락: $field"
+  grep -q "$field" "$FIXTURES/skills/greet/SKILL.md" \
+    || fail "greet에 필드 누락: $field"
 done
-grep -q 'kind: script' "$FIXTURES/nodes/greet.yaml" || fail "greet는 script여야 함"
-grep -q 'kind: llm' "$FIXTURES/nodes/summarize.yaml" || fail "summarize는 llm이어야 함"
-for field in 'name:' 'description:' 'inputs:' 'nodes:'; do
+grep -q 'kind: script' "$FIXTURES/skills/greet/SKILL.md" || fail "greet는 script여야 함"
+grep -q 'kind: llm' "$FIXTURES/skills/summarize/SKILL.md" || fail "summarize는 llm이어야 함"
+for field in 'name:' 'description:' 'inputs:' 'outputs:' 'nodes:'; do
   grep -q "$field" "$FIXTURES/sample-pipeline.yaml" \
     || fail "sample-pipeline에 필드 누락: $field"
 done
+grep -q 'skill: greet' "$FIXTURES/sample-pipeline.yaml" \
+  || fail "sample-pipeline에 skill: 참조 부재"
 grep -qE 'util: (if|foreach|transform|human-gate|merge|switch)' "$FIXTURES/sample-pipeline.yaml" \
   || fail "sample-pipeline에 유틸 노드 사용 예 부재"
-grep -q 'no-such-node' "$FIXTURES/broken-pipeline.yaml" \
-  || fail "broken-pipeline에 의도된 위반(없는 타입 참조) 부재"
+grep -q 'no-such-skill' "$FIXTURES/broken-pipeline.yaml" \
+  || fail "broken-pipeline에 의도된 위반(없는 스킬 참조) 부재"
 ok "픽스처 정합성"
 
 echo ""

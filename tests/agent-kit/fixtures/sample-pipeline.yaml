@@ -1,13 +1,15 @@
-# 표준 파이프라인 픽스처 — 라이브러리 참조·유틸·인라인 3형태와 참조 문법 예시
+# 표준 파이프라인 픽스처 — 스킬 참조·유틸·인라인 3형태와 참조 문법 예시
 name: greet-report
 description: 이름 목록에 인사하고 승인 후 저장
 inputs:
   names: {type: array, required: true}
+outputs:
+  lines: $combine.lines
 nodes:
   - id: each
     util: foreach
     items: $pipeline.names
-    node: greet
+    skill: greet
     in: {name: $item}
   - id: combine
     util: transform

@@ -1,6 +1,6 @@
 # kind별 run 스펙
 
-노드 실행의 공통 계약: **입력은 inputs 스키마를 만족하는 JSON 객체, 출력은 outputs 스키마를 만족하는 JSON 객체.** kind는 그 사이의 실행 방법만 다르다.
+typed 스킬 실행의 공통 계약: **입력은 inputs 스키마를 만족하는 JSON 객체, 출력은 outputs 스키마를 만족하는 JSON 객체.** kind는 그 사이의 실행 방법만 다르다. (`kind: pipeline`은 pipeline 스킬의 compile 산출물 전용 — run이 없고, 노드로 참조되면 해당 스킬 지시 전체를 서브에이전트로 실행한다.)
 
 ## script
 

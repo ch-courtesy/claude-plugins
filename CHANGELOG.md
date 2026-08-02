@@ -2,16 +2,16 @@
 
 이 저장소가 **현재 배포하는 플러그인**의 사용자 가시(behavior-changing) 변경을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`입니다. 배포에서 제거된 플러그인(autopilot·project-init·skill-rubric 등)의 엔트리는 본 파일에서 정리하며, 그 과거 기록은 git 이력에 보존됩니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## agent-kit 0.2.0
+
+### 새 기능
+- **skill 스킬(typed 스킬)** — 단독 호출과 파이프라인 노드 편입이 모두 가능한 typed 스킬을 만들고 검증한다. typed 스킬은 frontmatter에 기계 가독 계약(JSON Schema식 inputs/outputs + kind별 실행법 — `llm`(서브에이전트) / `script`(셸) / `http`(curl) / `mcp`(도구 호출))을 선언한 `.claude/skills/<이름>/SKILL.md`다. 확장 필드는 harness가 무시하고 pipeline validate·compile이 읽으며, 본문은 계약의 실행 지시(frontmatter가 정본). `create`(대화형 정의) / `test <이름>`(모의 입력 단독 실행 후 출력 스키마 대조 — script·http는 실행 전 명령 전문 확인) / `list`(kind 있는 typed 스킬만).
+- **pipeline 스킬(워크플로 컴파일러)** — typed 스킬들을 노드로 연결한 그래프를 `.pipelines/<이름>.yaml`로 정의하고 자립 실행형 워크플로 스킬(`.claude/skills/<이름>/` — SKILL.md + graph.yaml 스냅샷)로 컴파일한다. 원칙: 정의 = 소스, 생성된 스킬 = 바이너리(`compiled-from` 해시로 드리프트 감지, `list`가 재컴파일 필요를 표시). edge 선언 없이 `$노드id.출력` 참조로 의존성 자동 도출, 의존 없는 노드는 자동 병렬. 유틸 노드 5종(if/switch·foreach·merge·transform(jq)·human-gate) + 공통 속성 retry/timeout/on_error. compile은 validate(참조 무결성·필수 입력·타입 일치·순환) 통과 시에만 산출한다. 컴파일된 스킬 자체도 typed(`kind: pipeline`, inputs/outputs)라 다른 파이프라인이 `skill:`로 노드처럼 참조 가능 — 파이프라인 합성. 생성된 스킬은 실행마다 `.pipelines/runs/<run-id>/`에 노드별 출력과 state.json을 남기고 `resume <run-id>`로 실패·중단 지점부터 재개한다. 설계 스펙: `docs/superpowers/specs/2026-08-02-agent-kit-pipeline-node-design.md`.
+
 ## agent-kit 0.1.0
 
 ### 새 기능
 - **advisor 스킬** — 호출 세션(Worker)이 판단 전담 Advisor 서브에이전트를 생성해 감독 아래 구현하는 역할 역전 워크플로. Advisor는 요구사항 분석·작업 브리프 작성·결과 검증(diff·테스트 직접 실행)·커밋 승인을 소유하고, 구현 노동은 Worker가 수행한다. 상태 태그 6종(BRIEF/QUESTION/SKIP/APPROVED/REVISE/ESCALATE) 프로토콜, REVISE 3라운드 초과 시 사용자 에스컬레이션, 커밋은 사용자가 요청한 세션에서만 실행.
-
-## agent-kit 0.2.0
-
-### 새 기능
-- **node 스킬(노드 타입)** — 파이프라인의 재사용 부품인 노드 타입을 만들고 검증한다. 노드는 JSON Schema식 입출력 선언 + kind별 실행법(`llm`(서브에이전트) / `script`(셸) / `http`(curl) / `mcp`(도구 호출))을 가진 `.pipelines/nodes/<이름>.yaml` 단일 파일이다. `create`(대화형 정의) / `test <이름>`(모의 입력 단독 실행 후 출력 스키마 대조 — script·http는 실행 전 명령 전문 확인) / `list`.
-- **pipeline 스킬(워크플로 컴파일러)** — 노드들을 연결한 그래프를 `.pipelines/<이름>.yaml`로 정의하고 자립 실행형 워크플로 스킬(`.claude/skills/<이름>/` — SKILL.md + graph.yaml 스냅샷)로 컴파일한다. 원칙: 정의 = 소스, 생성된 스킬 = 바이너리(`compiled-from` 해시로 드리프트 감지, `list`가 재컴파일 필요를 표시). edge 선언 없이 `$노드id.출력` 참조로 의존성 자동 도출, 의존 없는 노드는 자동 병렬. 유틸 노드 5종(if/switch·foreach·merge·transform(jq)·human-gate) + 공통 속성 retry/timeout/on_error. compile은 validate(참조 무결성·필수 입력·타입 일치·순환) 통과 시에만 산출한다. 생성된 스킬은 실행마다 `.pipelines/runs/<run-id>/`에 노드별 출력과 state.json을 남기고 `resume <run-id>`로 실패·중단 지점부터 재개한다. 설계 스펙: `docs/superpowers/specs/2026-08-02-agent-kit-pipeline-node-design.md`.
 
 ## explain-diff 0.1.0
 

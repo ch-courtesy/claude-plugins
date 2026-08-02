@@ -27,7 +27,7 @@
     {
       "name": "agent-kit",
       "source": "./plugins/agent-kit",
-      "description": "Advisor 감독 워크플로와 입출력 노드 기반 워크플로 정의·컴파일을 제공하는 에이전트 협업 도구 모음",
+      "description": "Advisor 감독 워크플로와 typed 스킬 기반 워크플로 정의·컴파일을 제공하는 에이전트 협업 도구 모음",
       "version": "0.2.0",
       "category": "productivity",
       "tags": [

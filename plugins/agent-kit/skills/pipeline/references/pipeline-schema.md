@@ -8,8 +8,9 @@
 |---|---|---|
 | `name` | ✔ | 파이프라인 이름 — 컴파일된 스킬 이름이 된다 |
 | `description` | ✔ | 한 줄 목적 — 컴파일된 스킬 description의 바탕 |
-| `inputs` | ✔ | 파이프라인 호출 시 받는 입력 (노드와 같은 필드 선언, 없으면 `{}`) |
+| `inputs` | ✔ | 파이프라인 호출 시 받는 입력 (typed 스킬과 같은 필드 선언, 없으면 `{}`) |
 | `nodes` | ✔ | 노드 인스턴스 목록 |
+| `outputs` | | 출력 매핑 (예: `{report: $combine.summaries}`) — 컴파일된 스킬의 outputs 계약. 다른 파이프라인에 노드로 편입하려면 필수 |
 
 ## 노드 인스턴스
 
@@ -17,15 +18,15 @@
 
 ```yaml
 - id: fetch
-  type: fetch-issues        # ① 라이브러리 참조: .pipelines/nodes/fetch-issues.yaml
-  in: {repo: $pipeline.repo}
+  skill: fetch-issues       # ① typed 스킬 참조: .claude/skills/fetch-issues/SKILL.md
+  in: {repo: $pipeline.repo}   #    kind: pipeline(컴파일된 파이프라인)도 참조 가능 — 합성
 
 - id: gate
   util: human-gate          # ② 유틸 노드: util-nodes.md 참조
   message: "발행할까요?"
 
 - id: publish
-  inline:                   # ③ 일회용 인라인: 노드 타입 스키마의 kind/inputs/outputs/run
+  inline:                   # ③ 일회용 인라인: typed 계약의 kind/inputs/outputs/run
     kind: script
     inputs: {content: {type: string, required: true}}
     outputs: {ok: {type: boolean}}
@@ -38,7 +39,7 @@
 | 필드 | 필수 | 설명 |
 |---|---|---|
 | `id` | ✔ | 파이프라인 내 유일, kebab-case |
-| `in` | 타입에 inputs 있으면 ✔ | 입력 매핑 — 값은 `$참조` 또는 리터럴 |
+| `in` | 계약에 inputs 있으면 ✔ | 입력 매핑 — 값은 `$참조` 또는 리터럴 |
 | `retry` | | 실패 시 재시도 횟수, 기본 0 |
 | `timeout` | | 초 단위 제한, 기본 없음 |
 | `on_error` | | `fail`(기본) \| `continue` — continue면 실패를 기록하고 하류 진행 (해당 노드 출력을 참조하는 노드는 스킵) |
@@ -62,16 +63,18 @@ name: daily-report
 description: 이슈 수집→요약→승인→발행
 inputs:
   repo: {type: string, required: true}
+outputs:
+  summaries: $combine.summaries
 nodes:
   - id: fetch
-    type: fetch-issues
+    skill: fetch-issues
     in: {repo: $pipeline.repo}
     retry: 2
     timeout: 60
   - id: each
     util: foreach
     items: $fetch.issues
-    node: summarize
+    skill: summarize
     in: {text: $item.body}
   - id: combine
     util: transform

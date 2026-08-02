@@ -33,12 +33,12 @@
 - id: each
   util: foreach
   items: $fetch.issues        # 배열 참조
-  node: summarize             # 항목마다 실행할 노드 타입 (라이브러리 참조 또는 inline)
+  skill: summarize            # 항목마다 실행할 typed 스킬 (또는 inline: 정의)
   in: {text: $item.body}      # $item = 현재 항목
   outputs: → results          # 고정: {results: array} — 항목별 출력 객체의 배열, 입력 순서 보존
 ```
 
-- v1은 노드 **하나**를 map한다. 여러 단계를 순회하려면 그 단계들을 노드 하나로 합치거나 v2의 sub-pipeline을 기다린다.
+- v1은 노드 **하나**를 map한다. 여러 단계를 순회하려면 그 단계들을 파이프라인으로 묶어 컴파일한 뒤 그 `kind: pipeline` 스킬을 `skill:`로 참조한다.
 - 항목 하나가 실패하면 노드의 on_error를 따른다: `fail`이면 전체 중단, `continue`면 해당 항목 결과를 `{error: ...}`로 기록하고 계속.
 - 항목 실행 기록은 `runs/<run-id>/<노드id>/<인덱스>.json`에 남긴다.
 
