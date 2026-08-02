@@ -1,0 +1,35 @@
+# 표준 파이프라인 픽스처 — 스킬 참조·유틸·인라인 3형태와 참조 문법 예시
+name: greet-report
+description: 이름 목록에 인사하고 승인 후 저장
+inputs:
+  names: {type: array, required: true}
+outputs:
+  lines: $combine.lines
+nodes:
+  - id: each
+    util: foreach
+    items: $pipeline.names
+    skill: greet
+    in: {name: $item}
+  - id: combine
+    util: transform
+    in: {items: $each.results}
+    expr: '{lines: [.items[].greeting]}'
+  - id: count
+    util: transform
+    in: {names: $pipeline.names}
+    expr: '{count: (.names | length)}'   # human-gate 치환 값은 스칼라만 — 배열을 건수로 변환
+  - id: gate
+    util: human-gate
+    message: "{{count}}건 저장할까요?"
+    in: {count: $count.count}
+  - id: save
+    inline:
+      kind: script
+      inputs: {lines: {type: array, required: true}}
+      outputs: {ok: {type: boolean}}
+      run: {command: "jq -c '{ok: (.lines | length > 0)}'", input: stdin-json, output: stdout-json}
+    in: {lines: $combine.lines}
+    needs: [gate]
+    retry: 1
+    on_error: continue

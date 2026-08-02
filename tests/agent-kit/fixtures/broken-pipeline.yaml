@@ -1,0 +1,17 @@
+# 의도적 위반 픽스처 — compile validate가 잡아야 하는 오류 3종
+# ① 없는 스킬 참조 ② 미해석 $참조 ③ 순환 (a→b→a)
+name: broken
+description: validate 실패 검증용
+inputs: {}
+nodes:
+  - id: fetch
+    skill: no-such-skill        # ① .claude/skills/에 없는 typed 스킬
+    in: {q: $pipeline.query}    # ② inputs에 없는 $pipeline.query
+  - id: a
+    util: transform
+    in: {x: $b.out}             # ③ 순환: a → b
+    expr: '{out: .x}'
+  - id: b
+    util: transform
+    in: {x: $a.out}             # ③ 순환: b → a
+    expr: '{out: .x}'

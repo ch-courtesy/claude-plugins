@@ -2,6 +2,14 @@
 
 이 저장소가 **현재 배포하는 플러그인**의 사용자 가시(behavior-changing) 변경을 기록합니다. 버전의 단일 출처(SoT)는 각 플러그인의 `plugin.json`입니다. 배포에서 제거된 플러그인(autopilot·project-init·skill-rubric 등)의 엔트리는 본 파일에서 정리하며, 그 과거 기록은 git 이력에 보존됩니다. 분류: 새 기능 / 변경(호환) / 변경(깨짐) / 버그 수정 / 보안.
 
+## agent-kit 0.2.0
+
+### 새 기능
+- **벤더 독립화(skill·pipeline)** — typed 스킬·컴파일 산출물 소스를 런타임 중립 위치 `.agents/skills/<이름>/`로 옮기고 Claude Code 어댑터로 `.claude/skills/<이름>` 상대 심링크를 병설한다. SKILL.md 본문에서 특정 런타임 도구명 리터럴을 제거하고 중립 문구("현재 런타임의 구조화된 사용자 질문 기능(없으면 직접 질문)", "런타임의 서브에이전트 기능(없으면 인라인 수행, 출력 스키마 준수)")로 교체했다 — 컴파일 템플릿도 동일해 생성되는 워크플로 스킬 역시 중립. `allowed-tools` frontmatter는 Claude 전용 필드로 명시하고 유지(타 런타임 무시). advisor 스킬은 범위 제외(후속 작업).
+- **Codex 어댑터 재도입** — `plugins/agent-kit/.codex-plugin/plugin.json`과 루트 `.agents/plugins/marketplace.json`(run 650에서 제거됐던 형식 그대로)을 복원해 agent-kit을 Codex 마켓플레이스에 등록했다. Codex 등록은 agent-kit만이며 explain-diff·thinktank는 Claude 전용 유지. 실제 Codex 런타임 동작 검증은 범위 밖(형식 복원).
+- **skill 스킬(typed 스킬)** — 단독 호출과 파이프라인 노드 편입이 모두 가능한 typed 스킬을 만들고 검증한다. typed 스킬은 frontmatter에 기계 가독 계약(JSON Schema식 inputs/outputs + kind별 실행법 — `llm`(서브에이전트) / `script`(셸) / `http`(curl) / `mcp`(도구 호출))을 선언한 `.agents/skills/<이름>/SKILL.md`다. 확장 필드는 스킬 런타임이 무시하고 pipeline validate·compile이 읽으며, 본문은 계약의 실행 지시(frontmatter가 정본). 저장 위치는 벤더 독립화 항목의 `.agents/skills/` 규약을 따른다. `create`(대화형 정의) / `test <이름>`(모의 입력 단독 실행 후 출력 스키마 대조 — script·http는 실행 전 명령 전문 확인) / `list`(kind 있는 typed 스킬만).
+- **pipeline 스킬(워크플로 컴파일러)** — typed 스킬들을 노드로 연결한 그래프를 `.pipelines/<이름>.yaml`로 정의하고 자립 실행형 워크플로 스킬(`.agents/skills/<이름>/` — SKILL.md + graph.yaml 스냅샷)로 컴파일한다. 원칙: 정의 = 소스, 생성된 스킬 = 바이너리(`compiled-from` 해시로 드리프트 감지, `list`가 재컴파일 필요를 표시). edge 선언 없이 `$노드id.출력` 참조로 의존성 자동 도출, 의존 없는 노드는 자동 병렬. 유틸 노드 5종(if/switch·foreach·merge·transform(jq)·human-gate) + 공통 속성 retry/timeout/on_error. compile은 validate(참조 무결성·필수 입력·타입 일치·순환) 통과 시에만 산출한다. 컴파일된 스킬 자체도 typed(`kind: pipeline`, inputs/outputs)라 다른 파이프라인이 `skill:`로 노드처럼 참조 가능 — 파이프라인 합성. 생성된 스킬은 실행마다 `.pipelines/runs/<run-id>/`에 노드별 출력과 state.json을 남기고 `resume <run-id>`로 실패·중단 지점부터 재개한다. 설계 스펙: `docs/superpowers/specs/2026-08-02-agent-kit-pipeline-node-design.md`.
+
 ## agent-kit 0.1.0
 
 ### 새 기능
@@ -45,6 +53,11 @@
 
 ### 변경(호환)
 - **brainstorm 아이디어 상태 `archived` → `parked`·`eliminated` 분리 (성숙도 재분석 권고 2건 적용)** — `archived` 단일 상태를 `parked`(관찰 가능한 재검토 조건 `park-recondition` 필수)와 `eliminated`(근거 있는 탈락 사유 `elimination-reason` 필수)로 분리했다. 최종 enum: `raw | transformed | clustered | shortlisted | parked | eliminated`. NGT 수렴 절에 성숙도 미사용 규칙(구체화 부족을 후보 탈락 근거로 쓰지 않는다)과 상태 전환 규칙(수렴 완료 시 세션 책임자가 미선택 아이디어를 관찰 가능한 재검토 조건 유무에 따라 parked 또는 eliminated로 판별 표시)을 추가했다. 호환 분류 근거: 이 enum은 새 세션 파일 작성 시에만 적용되는 문서 템플릿 계약이며, 릴리스 시점 검증에서 `archived`를 참조하는 외부 소비자·코드·테스트·기존 `.brainstorm/` 세션 파일이 없음을 확인했다(참조는 `document-templates.md` 자신 2곳뿐). `resume` 라우팅은 세션 상태 블록 기준이라 아이디어 status 값에 의존하지 않으며, 구 세션 파일의 `archived` 잔존은 기존 "resume 불일치 보고" 규율이 처리한다 — 마이그레이션 불필요.
+
+## marketplace 0.4.0
+
+### 새 기능
+- **agent-kit 0.1.0 등록** — 에이전트 협업 플러그인(`plugins/agent-kit/`)을 마켓플레이스에 추가하고 버전을 `0.3.0 → 0.4.0`으로 올렸다.
 
 ## marketplace 0.2.0
 
