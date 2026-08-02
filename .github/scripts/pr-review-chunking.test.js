@@ -46,6 +46,13 @@ test('estimateTokens tolerates non-string', () => {
   assert.strictEqual(M.estimateTokens(undefined), 0);
 });
 
+test('estimateTokens weights CJK/Hangul chars ~1 token each (ASCII stays chars/4)', () => {
+  assert.strictEqual(M.estimateTokens('가나다라'), 4);      // 한글 4자 → 4 (chars/4 였다면 1)
+  assert.strictEqual(M.estimateTokens('가나다라abcd'), 5);  // 한글 4 + ASCII 4자(=1)
+  assert.strictEqual(M.estimateTokens('日本語テスト'), 6);   // 한자·가나도 CJK 가중
+  assert.strictEqual(M.estimateTokens('Ａｐｐｌｅ'), 2);     // 전각 라틴은 CJK 가중 제외: ceil(5/4)
+});
+
 // ---- classifyFilePriority ----
 
 test('classify: doc-only is low priority', () => {
