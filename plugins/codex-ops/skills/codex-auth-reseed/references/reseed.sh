@@ -102,6 +102,8 @@ cmd_complete() {
   require
   local repo; repo="$(resolve_repo)"
   [[ -d "$STATE" ]] || die "격리 디렉터리 '$STATE' 가 없음 — 먼저 setup 실행"
+  # EXIT 트랩: die(exit) 로 빠지는 실패 경로에서도 토큰 파일이 반드시 shred·파기되게 한다.
+  trap teardown EXIT
 
   echo "인증 완료 대기(폴링, 최대 ${TIMEOUT}s)..."
   local waited=0
@@ -109,16 +111,16 @@ cmd_complete() {
     [[ -s "$STATE/auth.json" ]] && break
     if grep -qiE 'error|expired|failed' "$STATE/login.out" 2>/dev/null; then
       tail -3 "$STATE/login.out" >&2
-      die "로그인 실패/만료(위 출력 참조) — abort 후 재시도"
+      die "로그인 실패/만료(위 출력 참조) — setup 부터 재시도"
     fi
     sleep 10; waited=$((waited+10))
   done
-  [[ -s "$STATE/auth.json" ]] || die "auth.json 미생성(타임아웃)"
+  [[ -s "$STATE/auth.json" ]] || die "auth.json 미생성(타임아웃) — setup 부터 재시도"
 
   # 토큰 값은 출력하지 않는다. auth.json 은 umask 077 격리 디렉터리 안에만 존재한다.
   jq -e '(.tokens.access_token // .access_token) and (.tokens.refresh_token // .refresh_token)' \
       "$STATE/auth.json" >/dev/null \
-    || die "auth.json 구조 이상(access/refresh token 누락) — abort 후 재시도"
+    || die "auth.json 구조 이상(access/refresh token 누락) — setup 부터 재시도"
   echo "auth.json 검증 OK (account_id=$(jq -r '.tokens.account_id // .account_id // "n/a"' "$STATE/auth.json"))"
 
   echo "시크릿 갱신: $SECRET @ $repo"

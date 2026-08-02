@@ -36,7 +36,7 @@ Codex(ChatGPT) 인증은 **1회용 회전 리프레시 토큰**이다 — 리프
 
 ### 4. 완료 — 시크릿 갱신 + 정리
 
-`references/reseed.sh complete`를 실행한다(인증 완료까지 폴링하므로 백그라운드 실행 권장). setup 에 `RESEED_REPO`를 줬다면 complete 에도 동일하게 준다. 스크립트가 auth.json을 검증(토큰 값 미출력)하고 `gh secret set`으로 시크릿을 갱신한 뒤 격리 디렉터리를 파기한다. `SECRET_UPDATED_OK`가 성공 신호다. 실패·만료 시 `references/reseed.sh abort`로 정리하고 2단계부터 재시도한다.
+`references/reseed.sh complete`를 실행한다(인증 완료까지 폴링하므로 백그라운드 실행 권장). setup 에 `RESEED_REPO`를 줬다면 complete 에도 동일하게 준다. 스크립트가 auth.json을 검증(토큰 값 미출력)하고 `gh secret set`으로 시크릿을 갱신한 뒤 격리 디렉터리를 파기한다. `SECRET_UPDATED_OK`가 성공 신호다. complete는 성공·실패 모두 EXIT 트랩으로 토큰 파일을 shred하고 격리 디렉터리를 파기하므로, 실패·만료 시 별도 정리 없이 2단계부터 재시도한다(`abort`는 complete 진입 전 중도 취소용).
 
 ### 5. 검증
 
