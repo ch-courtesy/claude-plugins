@@ -1,0 +1,11 @@
+{
+  "name": "agent-kit",
+  "version": "0.1.0",
+  "description": "에이전트 협업 유틸 모음 — 판단 전담 Advisor가 Worker를 감독하는 위임·검증 워크플로 제공",
+  "author": {
+    "name": "예의상",
+    "email": "ch.courtesy@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": ["advisor", "delegation", "verification", "supervision", "agents", "workflow"]
+}
