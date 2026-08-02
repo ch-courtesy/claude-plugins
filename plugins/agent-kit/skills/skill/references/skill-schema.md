@@ -1,8 +1,8 @@
 # typed 스킬 스키마
 
-파일 위치: `.claude/skills/<이름>/SKILL.md` (이름 = kebab-case, 디렉토리명과 `name` 필드 일치)
+파일 위치: `.agents/skills/<이름>/SKILL.md` (이름 = kebab-case, 디렉토리명과 `name` 필드 일치). 런타임 중립 소스이며, Claude Code용으로 `.claude/skills/<이름>` 상대 심링크를 함께 둔다.
 
-typed 스킬 = 일반 스킬 frontmatter(name, description) + 기계 가독 계약 확장 필드(kind, inputs, outputs, run). 확장 필드는 harness가 무시하고 pipeline 스킬의 validate·compile이 읽는다. frontmatter가 계약의 정본이고 본문은 그 계약의 실행 지시다.
+typed 스킬 = 일반 스킬 frontmatter(name, description) + 기계 가독 계약 확장 필드(kind, inputs, outputs, run). 확장 필드는 스킬 런타임이 무시하고 pipeline 스킬의 validate·compile이 읽는다. frontmatter가 계약의 정본이고 본문은 그 계약의 실행 지시다.
 
 ## frontmatter 필드
 
@@ -14,6 +14,7 @@ typed 스킬 = 일반 스킬 frontmatter(name, description) + 기계 가독 계�
 | `inputs` | ✔ | 입력 필드 선언 맵 (없으면 `{}` 명시) |
 | `outputs` | ✔ | 출력 필드 선언 맵 |
 | `run` | ✔ | kind별 실행법 — `run-kinds.md` 참조 (`kind: pipeline`은 run 없음) |
+| `allowed-tools` | | Claude Code 전용 권한 필드 — 다른 런타임은 무시하고 자체 권한 체계를 적용한다 |
 
 ## 입출력 필드 선언
 

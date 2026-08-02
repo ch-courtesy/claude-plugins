@@ -76,6 +76,6 @@
   outputs: → {choice: string}
 ```
 
-- AskUserQuestion으로 message와 options를 제시한다. `{{}}` 치환 값은 스칼라만 — 배열·객체는 transform으로 스칼라화(건수 등) 후 매핑한다.
+- 현재 런타임의 구조화된 사용자 질문 기능(없으면 간결한 직접 질문)으로 message와 options를 제시한다. `{{}}` 치환 값은 스칼라만 — 배열·객체는 transform으로 스칼라화(건수 등) 후 매핑한다.
 - 첫 번째 옵션(또는 승인) 외 선택 시: 파이프라인을 `aborted`로 중단하되 상태를 보존한다 — `resume <run-id>`로 게이트부터 재개 가능.
 - 하류에서 `$gate.choice`로 선택값을 쓸 수 있다.

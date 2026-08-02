@@ -12,14 +12,17 @@
 | `skill` | 단독 호출·노드 편입이 모두 가능한 typed 스킬(입출력 스키마 + 실행법) 생성·단독 테스트·목록 |
 | `pipeline` | typed 스킬들을 연결한 그래프 정의 생성, 검증, 자립형 워크플로 스킬 컴파일 |
 
-## 사용자 프로젝트 레이아웃
+## 사용자 프로젝트 레이아웃 (벤더 중립)
 
 ```
-.claude/skills/<이름>/SKILL.md  # typed 스킬 (노드이자 스킬, 커밋 대상)
+.agents/skills/<이름>/SKILL.md  # typed 스킬 소스 — 런타임 중립 위치 (커밋 대상)
+.agents/skills/<이름>/          # 컴파일된 워크플로 스킬 (kind: pipeline)
+.claude/skills/<이름>           # Claude Code 어댑터 — .agents/skills/<이름> 상대 심링크
 .pipelines/<이름>.yaml          # 파이프라인 정의 (커밋 대상)
 .pipelines/runs/<run-id>/       # 실행 기록 — .gitignore에 추가할 것
-.claude/skills/<이름>/          # 컴파일된 워크플로 스킬 (kind: pipeline)
 ```
+
+typed 스킬·컴파일 산출물은 `.agents/skills/`에 한 벌만 두고, 각 런타임은 어댑터(심링크 등)로 연결한다. SKILL.md 본문은 특정 런타임 도구명을 쓰지 않으며(`allowed-tools` frontmatter만 Claude 전용 — 타 런타임은 무시), 실행 지시는 "구조화된 사용자 질문 기능", "서브에이전트 기능" 같은 중립 문구를 쓴다.
 
 ## 흐름
 

@@ -7,7 +7,7 @@ compile 1단계에서 전 항목을 적용한다. 하나라도 실패하면 산�
 - [ ] 최상위 필수 필드 존재: name, description, inputs, nodes
 - [ ] 모든 노드에 `id`가 있고 파이프라인 내 유일
 - [ ] 각 노드는 `skill` / `util` / `inline` 중 정확히 하나 — 단 유틸 노드의 설정 필드(foreach의 `skill:`·`items:`, transform의 `expr:` 등)는 판별자가 아니다: `util:`이 있으면 유틸 노드다
-- [ ] `skill` 참조가 `.claude/skills/<이름>/SKILL.md`로 실재하고, frontmatter가 typed 계약(kind/inputs/outputs — `kind: pipeline`이 아니면 run도)을 만족
+- [ ] `skill` 참조가 `.agents/skills/<이름>/SKILL.md`로 실재하고, frontmatter가 typed 계약(kind/inputs/outputs — `kind: pipeline`이 아니면 run도)을 만족
 - [ ] `inline` 정의가 typed 계약의 kind/inputs/outputs/run을 갖춤 (`kind: pipeline` 인라인 금지)
 - [ ] `util`이 5종(if, switch, foreach, merge, transform, human-gate 중 if·switch는 각각) 중 하나이고 해당 유틸의 필수 필드(cond/then, cases, items/skill, expr, message)를 갖춤
 

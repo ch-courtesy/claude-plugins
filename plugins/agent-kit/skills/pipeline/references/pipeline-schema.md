@@ -18,7 +18,7 @@
 
 ```yaml
 - id: fetch
-  skill: fetch-issues       # ① typed 스킬 참조: .claude/skills/fetch-issues/SKILL.md
+  skill: fetch-issues       # ① typed 스킬 참조: .agents/skills/fetch-issues/SKILL.md
   in: {repo: $pipeline.repo}   #    kind: pipeline(컴파일된 파이프라인)도 참조 가능 — 합성
 
 - id: gate

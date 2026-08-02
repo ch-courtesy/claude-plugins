@@ -1,0 +1,40 @@
+{
+  "name": "agent-kit",
+  "version": "0.2.0",
+  "description": "에이전트 협업 도구 모음 — Advisor 감독 워크플로와 typed 스킬 기반 워크플로 정의·컴파일 제공",
+  "author": {
+    "name": "예의상",
+    "email": "ch.courtesy@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "advisor",
+    "delegation",
+    "verification",
+    "supervision",
+    "agents",
+    "workflow",
+    "pipeline",
+    "node",
+    "orchestration",
+    "compiler",
+    "automation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Kit",
+    "shortDescription": "typed 스킬을 노드로 연결한 워크플로를 정의하고 자립 실행형 스킬로 컴파일합니다.",
+    "longDescription": "A local Codex plugin providing agent collaboration tools: an Advisor-supervised delegation/verification workflow, and a pipeline compiler that wires typed skills (machine-readable input/output contracts) into self-contained workflow skills.",
+    "developerName": "예의상",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "typed 스킬을 하나 만들어줘.",
+      "파이프라인을 정의하고 컴파일해줘."
+    ],
+    "brandColor": "#0F766E"
+  }
+}
