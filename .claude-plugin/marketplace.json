@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "예의상 채널에서 공유하는 플러그인들의 마켓플레이스",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "plugins": [
     {
@@ -28,7 +28,7 @@
       "name": "thinktank",
       "source": "./plugins/thinktank",
       "description": "중앙 리서치를 바탕으로 다중 관점 숙의와 추적 가능한 브레인스토밍을 진행",
-      "version": "1.2.0",
+      "version": "2.0.0",
       "category": "productivity",
       "tags": [
         "roundtable",
@@ -40,9 +40,24 @@
       ]
     },
     {
+      "name": "agent-kit",
+      "source": "./plugins/agent-kit",
+      "description": "판단 전담 Advisor 에이전트가 Worker(호출 세션)를 감독하는 위임·검증 워크플로",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": [
+        "advisor",
+        "delegation",
+        "verification",
+        "supervision",
+        "agents",
+        "workflow"
+      ]
+    },
+    {
       "name": "codex-ops",
       "source": "./plugins/codex-ops",
-      "description": "Codex CI 운영 도구 — codex-review CI의 CODEX_AUTH_JSON 시크릿을 격리 컨테이너에서 재시드하는 codex-auth-reseed 스킬 제공",
+      "description": "Codex CI 운영 도구 — codex-review CI의 CODEX_AUTH_JSON 시크릿을 임시 격리 CODEX_HOME에서 재시드하는 codex-auth-reseed 스킬 제공",
       "version": "0.1.0",
       "category": "automation",
       "tags": [

@@ -1,30 +1,30 @@
 ---
-name: brainstorm
+name: forum
 description: "새로운 아이디어, 대안, 기회 영역을 폭넓게 탐색하고 후보군과 검증 계획을 만들 때 사용. 사용자가 브레인스토밍, 아이디어 발산, 콘셉트 탐색, 대안 생성, 아이디어 검증, 세션 재개·상태 확인을 요청할 때 활성화."
 allowed-tools:
   - AskUserQuestion
   - Agent
   - Read
-  - Write(.brainstorm/**)
+  - Write(.forum/**)
   - Glob
   - Grep
   - WebSearch
   - WebFetch
   - Bash(ls:*)
   - Bash(find:*)
-  - Bash(mkdir -p .brainstorm/**)
+  - Bash(mkdir -p .forum/**)
   - Bash(date:*)
   - Bash(git status:*)
   - Bash(git log:*)
 ---
 
-# brainstorm
+# forum
 
 메인 세션을 **세션 책임자**로 유지하여 프레이밍 인터뷰, 중앙 리서치, 아이디어 생성자 구성, 전략 전환, 수렴, 검증 승인을 관리한다. 목표는 성급한 단일 결론이 아니라 추적 가능한 **복수 후보군**과 검증 계획을 만드는 것이다.
 
 ## 호출
 
-`brainstorm start <주제>` / `brainstorm resume <session-id>` / `brainstorm status [session-id]` — 인자가 없으면 `start`로 간주한다. 세션 ID는 로컬 날짜와 주제 slug를 조합한 `YYYYMMDD-<slug>`다. 같은 ID의 세션이 있으면 임의 suffix를 만들지 말고 `resume` 또는 다른 제목을 선택받는다. 세션 산출물은 `.brainstorm/<session-id>.md` **단일 파일 1개**다.
+`forum start <주제>` / `forum resume <session-id>` / `forum status [session-id]` — 인자가 없으면 `start`로 간주한다. 세션 ID는 로컬 날짜와 주제 slug를 조합한 `YYYYMMDD-<slug>`다. 같은 ID의 세션이 있으면 임의 suffix를 만들지 말고 `resume` 또는 다른 제목을 선택받는다. 세션 산출물은 `.forum/<session-id>.md` **단일 파일 1개**다.
 
 ## 상태
 
@@ -69,7 +69,7 @@ allowed-tools:
 6. **발산과 변환.** `references/strategy-protocols.md`에 따라 Brainwriting을 항상 수행한다. 다양성이 정체되거나 개선형 주제이면 SCAMPER를 적용한다.
 7. **군집과 수렴.** 원본 아이디어를 보존한 채 군집화하고, NGT로 의뢰자 가치 기준에 맞는 후보군을 숏리스트 섹션에 만든다.
 8. **검증 계획 승인.** 후보별 핵심 가정, 비용, 중단 기준을 검증 계획 섹션에 작성한다. 의뢰자의 **검증 계획 명시적 승인** 전에는 실험을 실행하지 않는다.
-9. **검증.** 승인된 상세 리서치, 에이전트 비판, 단순 문서, 목업, 프로토타입만 `.brainstorm/**` 안에서 수행하고 실험 섹션에 결과를 기록한다.
+9. **검증.** 승인된 상세 리서치, 에이전트 비판, 단순 문서, 목업, 프로토타입만 `.forum/**` 안에서 수행하고 실험 섹션에 결과를 기록한다.
 10. **보고.** 후보군, 계보, 비교, 불확실성, 승인된 검증 결과, 다음 의사결정 질문을 최종 보고 섹션에 정리한다.
 
 ## 디스패치 규범
@@ -96,6 +96,6 @@ allowed-tools:
 
 ## 안전 경계
 
-- 승인된 검증 실험은 리서치, 에이전트 비판, 단순 문서, 목업, 프로토타입으로 제한하며 모두 `.brainstorm/**`에 기록한다.
+- 승인된 검증 실험은 리서치, 에이전트 비판, 단순 문서, 목업, 프로토타입으로 제한하며 모두 `.forum/**`에 기록한다.
 - 코드베이스, 조직 정책, 외부 시스템, 외부 상태를 변경하거나 실제 사용자에게 실험을 배포하지 않는다.
 - 민감 정보는 공개 범위 밖 Agent brief에 넣지 않는다.

@@ -4,11 +4,11 @@
 # Usage:
 #   bash measure-session.sh --selftest
 #   bash measure-session.sh --skill roundtable --record <path>
-#   bash measure-session.sh --skill brainstorm  --record <path>
+#   bash measure-session.sh --skill forum  --record <path>
 #
 # 구조화 마커 (kebab-case key: 라인 확장):
 #   roundtable: dissent-forcing-triggered, rebuttal-exchange, core-claim
-#   brainstorm:  park-recondition, elimination-reason, parent-id,
+#   forum:  park-recondition, elimination-reason, parent-id,
 #                core-fact, independent-sources
 #
 # Fail-loud 규정: 필수 마커가 누락되거나 값이 손상(corrupt)된 경우
@@ -27,8 +27,8 @@ usage() {
   cat >&2 <<'USAGE'
 Usage:
   measure-session.sh --selftest
-  measure-session.sh --skill (roundtable|brainstorm) --record <path>
-  measure-session.sh --skill (roundtable|brainstorm) --record <path> --judge
+  measure-session.sh --skill (roundtable|forum) --record <path>
+  measure-session.sh --skill (roundtable|forum) --record <path> --judge
 USAGE
   exit 1
 }
@@ -153,18 +153,18 @@ parse_roundtable() {
   echo "PARSE_CORE_CLAIM_COUNT=${core_claim_count}"
 }
 
-# ── brainstorm 파서 ───────────────────────────────────────────────────────────
+# ── forum 파서 ───────────────────────────────────────────────────────────
 # 필수 마커:
 #   - park-recondition: status:parked 아이디어 존재 시 필수
 #   - elimination-reason: status:eliminated 아이디어 존재 시 필수
 #   - core-fact: 최소 1개
 #   - independent-sources: 정수
 # 정보 마커: parent-id (필수 아님, 계보 추적용)
-parse_brainstorm() {
+parse_forum() {
   local content="$1"
   local errors=0
 
-  info "--- brainstorm 파서 실행 ---"
+  info "--- forum 파서 실행 ---"
 
   # 1. park-recondition: status가 parked인 각 아이디어 블록에 비어 있지 않은 값 필수 (블록 단위 100% 검사)
   local parked_count park_missing
@@ -226,7 +226,7 @@ parse_brainstorm() {
   fi
 
   if [[ "$errors" -gt 0 ]]; then
-    fail "brainstorm 마커 파싱 실패: ${errors}개 오류"
+    fail "forum 마커 파싱 실패: ${errors}개 오류"
   fi
 
   # 파싱 결과 출력
@@ -247,13 +247,13 @@ RT_THRESHOLD_DISSENT_FORCED="yes"           # dissent-forcing-triggered 필수�
 RT_THRESHOLD_REBUTTAL_MIN=1                 # rebuttal-exchange 최소 왕복 수     (decision-mode: 1회 충족)
 RT_THRESHOLD_CORE_CLAIM_MIN=1               # core-claim 최소 개수/세션          (decision-mode: 1회 충족)
 
-# brainstorm 절대 임계치 (threshold)
-BS_THRESHOLD_CORE_FACT_MIN=1                # core-fact 최소 개수/세션           (decision-mode: 1회 충족)
-BS_THRESHOLD_INDEPENDENT_SOURCES_MIN=2      # independent-sources 최소 수        (gate-status: shadow — 기록 전용)
+# forum 절대 임계치 (threshold)
+FORUM_THRESHOLD_CORE_FACT_MIN=1                # core-fact 최소 개수/세션           (decision-mode: 1회 충족)
+FORUM_THRESHOLD_INDEPENDENT_SOURCES_MIN=2      # independent-sources 최소 수        (gate-status: shadow — 기록 전용)
 # independent-sources는 파일럿 실측 최대값이 1~5로 분산되어 재파일럿 1회 후에도 판정이 갈려
 # shadow(기록 전용)로 강등됨 (2026-08-01 게이트 승인). 게이트를 차단하지 않고 GATE_SHADOW로 보고만 한다.
 # park-recondition 충족률 100% 및 elimination-reason 충족률 100%는
-# parse_brainstorm fail-loud 규정으로 강제 (threshold: 100%, decision-mode: 1회 충족)
+# parse_forum fail-loud 규정으로 강제 (threshold: 100%, decision-mode: 1회 충족)
 
 # ── roundtable 게이트 판정 ────────────────────────────────────────────────────
 # 파싱 결과에 절대 임계치(threshold)를 적용해 gate-status를 결정한다
@@ -310,51 +310,51 @@ judge_roundtable() {
   echo "GATE_PASS_COUNT=${gates_passed}"
 }
 
-# ── brainstorm 게이트 판정 ────────────────────────────────────────────────────
+# ── forum 게이트 판정 ────────────────────────────────────────────────────
 # 파싱 결과에 절대 임계치(threshold)를 적용해 gate-status를 결정한다
-judge_brainstorm() {
+judge_forum() {
   local content="$1"
   local gate_errors=0
   local gates_passed=0
 
-  info "--- brainstorm 게이트 판정 (threshold 적용) ---"
+  info "--- forum 게이트 판정 (threshold 적용) ---"
 
   # 파싱 먼저 수행 (fail-loud: 마커 누락·손상 시 즉시 non-zero exit)
   local parse_out
-  parse_out="$(parse_brainstorm "$content")" || return 1
+  parse_out="$(parse_forum "$content")" || return 1
 
   # 파싱 결과에서 값 추출
   local core_fact_count ind_sources
   core_fact_count="$(printf '%s\n' "$parse_out" | grep '^PARSE_CORE_FACT_COUNT='       | cut -d= -f2)"
   ind_sources="$(printf '%s\n' "$parse_out"     | grep '^PARSE_INDEPENDENT_SOURCES='   | cut -d= -f2)"
 
-  # Gate 1: core-fact (threshold: ≥BS_THRESHOLD_CORE_FACT_MIN, decision-mode: 1회 충족)
-  if [[ -n "$core_fact_count" ]] && [[ "$core_fact_count" -ge "$BS_THRESHOLD_CORE_FACT_MIN" ]] 2>/dev/null; then
-    ok "GATE_PASS: core-fact=${core_fact_count} threshold>=${BS_THRESHOLD_CORE_FACT_MIN} decision-mode=1회충족"
+  # Gate 1: core-fact (threshold: ≥FORUM_THRESHOLD_CORE_FACT_MIN, decision-mode: 1회 충족)
+  if [[ -n "$core_fact_count" ]] && [[ "$core_fact_count" -ge "$FORUM_THRESHOLD_CORE_FACT_MIN" ]] 2>/dev/null; then
+    ok "GATE_PASS: core-fact=${core_fact_count} threshold>=${FORUM_THRESHOLD_CORE_FACT_MIN} decision-mode=1회충족"
     gates_passed=$((gates_passed + 1))
   else
-    echo "GATE_FAIL: core-fact=${core_fact_count} threshold>=${BS_THRESHOLD_CORE_FACT_MIN} decision-mode=1회충족" >&2
+    echo "GATE_FAIL: core-fact=${core_fact_count} threshold>=${FORUM_THRESHOLD_CORE_FACT_MIN} decision-mode=1회충족" >&2
     gate_errors=$((gate_errors + 1))
   fi
 
-  # Shadow 지표: independent-sources (threshold: ≥BS_THRESHOLD_INDEPENDENT_SOURCES_MIN, gate-status: shadow)
+  # Shadow 지표: independent-sources (threshold: ≥FORUM_THRESHOLD_INDEPENDENT_SOURCES_MIN, gate-status: shadow)
   # 실측 분산으로 강등된 기록 전용 지표 — 게이트 판정을 차단하지 않고 관찰값만 보고한다
-  if [[ -n "$ind_sources" ]] && [[ "$ind_sources" -ge "$BS_THRESHOLD_INDEPENDENT_SOURCES_MIN" ]] 2>/dev/null; then
-    info "GATE_SHADOW: independent-sources=${ind_sources} threshold>=${BS_THRESHOLD_INDEPENDENT_SOURCES_MIN} (기록 전용 — 관찰: 충족)"
+  if [[ -n "$ind_sources" ]] && [[ "$ind_sources" -ge "$FORUM_THRESHOLD_INDEPENDENT_SOURCES_MIN" ]] 2>/dev/null; then
+    info "GATE_SHADOW: independent-sources=${ind_sources} threshold>=${FORUM_THRESHOLD_INDEPENDENT_SOURCES_MIN} (기록 전용 — 관찰: 충족)"
   else
-    info "GATE_SHADOW: independent-sources=${ind_sources} threshold>=${BS_THRESHOLD_INDEPENDENT_SOURCES_MIN} (기록 전용 — 관찰: 미충족, 게이트 비차단)"
+    info "GATE_SHADOW: independent-sources=${ind_sources} threshold>=${FORUM_THRESHOLD_INDEPENDENT_SOURCES_MIN} (기록 전용 — 관찰: 미충족, 게이트 비차단)"
   fi
 
   # park-recondition 충족률 100% 및 elimination-reason 충족률 100%는
-  # parse_brainstorm fail-loud 규정으로 이미 강제됨 (threshold: 100%, decision-mode: 1회 충족)
+  # parse_forum fail-loud 규정으로 이미 강제됨 (threshold: 100%, decision-mode: 1회 충족)
 
   if [[ "$gate_errors" -gt 0 ]]; then
-    fail "brainstorm 게이트 판정 실패: ${gate_errors}개 지표 threshold 미달"
+    fail "forum 게이트 판정 실패: ${gate_errors}개 지표 threshold 미달"
   fi
 
-  # parse_brainstorm fail-loud가 강제한 park-recondition·elimination-reason 충족률 100% 2건 포함
+  # parse_forum fail-loud가 강제한 park-recondition·elimination-reason 충족률 100% 2건 포함
   gates_passed=$((gates_passed + 2))
-  echo "GATE_SKILL=brainstorm"
+  echo "GATE_SKILL=forum"
   echo "GATE_STATUS=active"
   echo "GATE_PASS_COUNT=${gates_passed}"
 }
@@ -499,11 +499,11 @@ FIXTURE
     selftest_fail "roundtable corrupt: zero exit (fail-loud 위반)"
   fi
 
-  # ── brainstorm: 정상 케이스 ───────────────────────────────────────────────
+  # ── forum: 정상 케이스 ───────────────────────────────────────────────
   echo ""
-  echo "--- [brainstorm] 정상 케이스 ---"
-  BS_VALID="$(cat <<'FIXTURE'
-# Brainstorm Session: 20240101-test
+  echo "--- [forum] 정상 케이스 ---"
+  FORUM_VALID="$(cat <<'FIXTURE'
+# Forum Session: 20240101-test
 
 ## 상태
 - session-id: 20240101-test
@@ -527,33 +527,33 @@ FIXTURE
 FIXTURE
 )"
 
-  bs_valid_out="$(parse_brainstorm "$BS_VALID" 2>&1)" || true
-  if echo "$bs_valid_out" | grep -q "PARSE_PARKED_COUNT=1"; then
-    selftest_pass "brainstorm valid: parked=1 파싱"
+  forum_valid_out="$(parse_forum "$FORUM_VALID" 2>&1)" || true
+  if echo "$forum_valid_out" | grep -q "PARSE_PARKED_COUNT=1"; then
+    selftest_pass "forum valid: parked=1 파싱"
   else
-    selftest_fail "brainstorm valid: parked 카운트 파싱 실패"
+    selftest_fail "forum valid: parked 카운트 파싱 실패"
   fi
-  if echo "$bs_valid_out" | grep -q "PARSE_ELIMINATED_COUNT=1"; then
-    selftest_pass "brainstorm valid: eliminated=1 파싱"
+  if echo "$forum_valid_out" | grep -q "PARSE_ELIMINATED_COUNT=1"; then
+    selftest_pass "forum valid: eliminated=1 파싱"
   else
-    selftest_fail "brainstorm valid: eliminated 카운트 파싱 실패"
+    selftest_fail "forum valid: eliminated 카운트 파싱 실패"
   fi
-  if echo "$bs_valid_out" | grep -q "PARSE_CORE_FACT_COUNT=1"; then
-    selftest_pass "brainstorm valid: core-fact=1 파싱"
+  if echo "$forum_valid_out" | grep -q "PARSE_CORE_FACT_COUNT=1"; then
+    selftest_pass "forum valid: core-fact=1 파싱"
   else
-    selftest_fail "brainstorm valid: core-fact 파싱 실패"
+    selftest_fail "forum valid: core-fact 파싱 실패"
   fi
-  if echo "$bs_valid_out" | grep -q "PARSE_INDEPENDENT_SOURCES=3"; then
-    selftest_pass "brainstorm valid: independent-sources=3 파싱"
+  if echo "$forum_valid_out" | grep -q "PARSE_INDEPENDENT_SOURCES=3"; then
+    selftest_pass "forum valid: independent-sources=3 파싱"
   else
-    selftest_fail "brainstorm valid: independent-sources 파싱 실패"
+    selftest_fail "forum valid: independent-sources 파싱 실패"
   fi
 
-  # ── brainstorm: 다중 항목 집계 케이스 ─────────────────────────────────────
+  # ── forum: 다중 항목 집계 케이스 ─────────────────────────────────────
   echo ""
-  echo "--- [brainstorm] 다중 항목 집계 케이스 (independent-sources 최대값) ---"
-  BS_MULTI="$(cat <<'FIXTURE'
-# Brainstorm Session: 20240101-multi
+  echo "--- [forum] 다중 항목 집계 케이스 (independent-sources 최대값) ---"
+  FORUM_MULTI="$(cat <<'FIXTURE'
+# Forum Session: 20240101-multi
 
 ## 상태
 - session-id: 20240101-multi
@@ -581,18 +581,18 @@ FIXTURE
 FIXTURE
 )"
 
-  bs_multi_out="$(parse_brainstorm "$BS_MULTI" 2>&1)" || true
-  if echo "$bs_multi_out" | grep -q "PARSE_INDEPENDENT_SOURCES=3"; then
-    selftest_pass "brainstorm multi: independent-sources 최대값 집계 (1,3,0 → 3)"
+  forum_multi_out="$(parse_forum "$FORUM_MULTI" 2>&1)" || true
+  if echo "$forum_multi_out" | grep -q "PARSE_INDEPENDENT_SOURCES=3"; then
+    selftest_pass "forum multi: independent-sources 최대값 집계 (1,3,0 → 3)"
   else
-    selftest_fail "brainstorm multi: independent-sources 최대값 집계 실패"
+    selftest_fail "forum multi: independent-sources 최대값 집계 실패"
   fi
 
-  # ── brainstorm: 블록 단위 부분 누락 케이스 (100% 충족률 강제) ─────────────
+  # ── forum: 블록 단위 부분 누락 케이스 (100% 충족률 강제) ─────────────
   echo ""
-  echo "--- [brainstorm] 블록 단위 부분 누락 케이스 (전역 1건으로 우회 불가) ---"
-  BS_PARTIAL="$(cat <<'FIXTURE'
-# Brainstorm Session: 20240101-partial
+  echo "--- [forum] 블록 단위 부분 누락 케이스 (전역 1건으로 우회 불가) ---"
+  FORUM_PARTIAL="$(cat <<'FIXTURE'
+# Forum Session: 20240101-partial
 
 ## 상태
 - session-id: 20240101-partial
@@ -615,23 +615,23 @@ FIXTURE
 FIXTURE
 )"
 
-  bs_partial_out="$(parse_brainstorm "$BS_PARTIAL" 2>&1)" || true
-  if echo "$bs_partial_out" | grep -q "누락 블록 1/2"; then
-    selftest_pass "brainstorm partial: park-recondition 누락 블록 1/2 검출"
+  forum_partial_out="$(parse_forum "$FORUM_PARTIAL" 2>&1)" || true
+  if echo "$forum_partial_out" | grep -q "누락 블록 1/2"; then
+    selftest_pass "forum partial: park-recondition 누락 블록 1/2 검출"
   else
-    selftest_fail "brainstorm partial: 블록 단위 누락 미검출 (전역 카운트 우회 — 게이트 오판정)"
+    selftest_fail "forum partial: 블록 단위 누락 미검출 (전역 카운트 우회 — 게이트 오판정)"
   fi
-  if ! ( parse_brainstorm "$BS_PARTIAL" > /dev/null 2>&1 ); then
-    selftest_pass "brainstorm partial: non-zero exit 확인"
+  if ! ( parse_forum "$FORUM_PARTIAL" > /dev/null 2>&1 ); then
+    selftest_pass "forum partial: non-zero exit 확인"
   else
-    selftest_fail "brainstorm partial: zero exit (fail-loud 위반)"
+    selftest_fail "forum partial: zero exit (fail-loud 위반)"
   fi
 
-  # ── brainstorm: 필수 마커 누락 케이스 ────────────────────────────────────
+  # ── forum: 필수 마커 누락 케이스 ────────────────────────────────────
   echo ""
-  echo "--- [brainstorm] 필수 마커 누락 케이스 (fail-loud 검증) ---"
-  BS_MISSING="$(cat <<'FIXTURE'
-# Brainstorm Session: 20240101-missing
+  echo "--- [forum] 필수 마커 누락 케이스 (fail-loud 검증) ---"
+  FORUM_MISSING="$(cat <<'FIXTURE'
+# Forum Session: 20240101-missing
 
 ## 상태
 - session-id: 20240101-missing
@@ -647,23 +647,23 @@ FIXTURE
 )"
   # parked 존재하나 park-recondition 없음, core-fact 없음, independent-sources 없음
 
-  bs_missing_out="$(parse_brainstorm "$BS_MISSING" 2>&1)" || true
-  if echo "$bs_missing_out" | grep -q "ERROR"; then
-    selftest_pass "brainstorm missing: ERROR 메시지 포함"
+  forum_missing_out="$(parse_forum "$FORUM_MISSING" 2>&1)" || true
+  if echo "$forum_missing_out" | grep -q "ERROR"; then
+    selftest_pass "forum missing: ERROR 메시지 포함"
   else
-    selftest_fail "brainstorm missing: ERROR 메시지 미포함 (fail-loud 위반)"
+    selftest_fail "forum missing: ERROR 메시지 미포함 (fail-loud 위반)"
   fi
-  if ! ( parse_brainstorm "$BS_MISSING" > /dev/null 2>&1 ); then
-    selftest_pass "brainstorm missing: non-zero exit 확인"
+  if ! ( parse_forum "$FORUM_MISSING" > /dev/null 2>&1 ); then
+    selftest_pass "forum missing: non-zero exit 확인"
   else
-    selftest_fail "brainstorm missing: zero exit (fail-loud 위반)"
+    selftest_fail "forum missing: zero exit (fail-loud 위반)"
   fi
 
-  # ── brainstorm: 손상된 마커(corrupt) 케이스 ──────────────────────────────
+  # ── forum: 손상된 마커(corrupt) 케이스 ──────────────────────────────
   echo ""
-  echo "--- [brainstorm] 손상된 마커(corrupt value) 케이스 ---"
-  BS_CORRUPT="$(cat <<'FIXTURE'
-# Brainstorm Session: 20240101-corrupt
+  echo "--- [forum] 손상된 마커(corrupt value) 케이스 ---"
+  FORUM_CORRUPT="$(cat <<'FIXTURE'
+# Forum Session: 20240101-corrupt
 
 ## 상태
 - session-id: 20240101-corrupt
@@ -681,16 +681,16 @@ FIXTURE
 FIXTURE
 )"
 
-  bs_corrupt_out="$(parse_brainstorm "$BS_CORRUPT" 2>&1)" || true
-  if echo "$bs_corrupt_out" | grep -qi "corrupt"; then
-    selftest_pass "brainstorm corrupt: 'corrupt' 포함 오류 메시지 출력"
+  forum_corrupt_out="$(parse_forum "$FORUM_CORRUPT" 2>&1)" || true
+  if echo "$forum_corrupt_out" | grep -qi "corrupt"; then
+    selftest_pass "forum corrupt: 'corrupt' 포함 오류 메시지 출력"
   else
-    selftest_fail "brainstorm corrupt: 'corrupt' 미포함 (fail-loud 위반)"
+    selftest_fail "forum corrupt: 'corrupt' 미포함 (fail-loud 위반)"
   fi
-  if ! ( parse_brainstorm "$BS_CORRUPT" > /dev/null 2>&1 ); then
-    selftest_pass "brainstorm corrupt: non-zero exit 확인"
+  if ! ( parse_forum "$FORUM_CORRUPT" > /dev/null 2>&1 ); then
+    selftest_pass "forum corrupt: non-zero exit 확인"
   else
-    selftest_fail "brainstorm corrupt: zero exit (fail-loud 위반)"
+    selftest_fail "forum corrupt: zero exit (fail-loud 위반)"
   fi
 
   # ── 결과 집계 ─────────────────────────────────────────────────────────────
@@ -737,10 +737,10 @@ case "$SKILL" in
     else parse_roundtable "$CONTENT"
     fi
     ;;
-  brainstorm)
-    if $JUDGE; then judge_brainstorm "$CONTENT"
-    else parse_brainstorm "$CONTENT"
+  forum)
+    if $JUDGE; then judge_forum "$CONTENT"
+    else parse_forum "$CONTENT"
     fi
     ;;
-  *) fail "알 수 없는 스킬: $SKILL (roundtable|brainstorm 중 선택)" ;;
+  *) fail "알 수 없는 스킬: $SKILL (roundtable|forum 중 선택)" ;;
 esac

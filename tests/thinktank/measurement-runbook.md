@@ -2,7 +2,7 @@
 
 ## 개요
 
-이 runbook은 brainstorm·roundtable 스킬의 1.2.0 릴리스 게이트를 구성하는
+이 runbook은 forum·roundtable 스킬의 1.2.0 릴리스 게이트를 구성하는
 정량 검증 측정 절차를 기술한다. 하니스(`tests/thinktank/measure-session.sh`)와
 고정 시나리오 픽스처를 사용해 재현 가능한 게이트 판정을 수행한다.
 
@@ -14,7 +14,7 @@
 |---|---|
 | 하니스 | `tests/thinktank/measure-session.sh` |
 | roundtable 픽스처 | `tests/thinktank/fixtures/roundtable/scenario-01.md` |
-| brainstorm 픽스처 | `tests/thinktank/fixtures/brainstorm/scenario-01.md` |
+| forum 픽스처 | `tests/thinktank/fixtures/forum/scenario-01.md` |
 | 측정 기록 디렉토리 | `tests/thinktank/measurements/` |
 
 ---
@@ -40,8 +40,8 @@ bash tests/thinktank/measure-session.sh --selftest
 # roundtable 픽스처 해시
 shasum -a 256 tests/thinktank/fixtures/roundtable/scenario-01.md
 
-# brainstorm 픽스처 해시
-shasum -a 256 tests/thinktank/fixtures/brainstorm/scenario-01.md
+# forum 픽스처 해시
+shasum -a 256 tests/thinktank/fixtures/forum/scenario-01.md
 ```
 
 ### 3단계 — 측정 세션 구동
@@ -50,9 +50,9 @@ shasum -a 256 tests/thinktank/fixtures/brainstorm/scenario-01.md
 세션은 측정 시점 기본 Claude 모델로 실행한다.
 
 - roundtable: `tests/thinktank/fixtures/roundtable/scenario-01.md` 내용을 roundtable 스킬에 입력
-- brainstorm: `tests/thinktank/fixtures/brainstorm/scenario-01.md` 내용을 brainstorm 스킬에 입력
+- forum: `tests/thinktank/fixtures/forum/scenario-01.md` 내용을 forum 스킬에 입력
 
-세션 산출물(`.roundtable/*.md` 또는 `.brainstorm/*.md` 형식의 measurement record)을
+세션 산출물(`.roundtable/*.md` 또는 `.forum/*.md` 형식의 measurement record)을
 `tests/thinktank/measurements/` 경로에 저장한다.
 
 ### 4단계 — 하니스로 게이트 판정
@@ -66,10 +66,10 @@ bash tests/thinktank/measure-session.sh \
   --record tests/thinktank/measurements/roundtable-pilot-<날짜>.md \
   --judge
 
-# brainstorm 게이트 판정
+# forum 게이트 판정
 bash tests/thinktank/measure-session.sh \
-  --skill brainstorm \
-  --record tests/thinktank/measurements/brainstorm-pilot-<날짜>.md \
+  --skill forum \
+  --record tests/thinktank/measurements/forum-pilot-<날짜>.md \
   --judge
 ```
 
@@ -84,7 +84,7 @@ bash tests/thinktank/measure-session.sh \
 ```markdown
 ## 측정 메타데이터
 
-- skill: <roundtable|brainstorm>
+- skill: <roundtable|forum>
 - model-id: <사용된 Claude 모델 ID>
 - fixture-path: tests/thinktank/fixtures/<skill>/scenario-01.md
 - fixture-hash: sha256:<해시값>
@@ -113,7 +113,7 @@ bash tests/thinktank/measure-session.sh \
 | rebuttal-exchange | ≥1 왕복 | 1회 충족 | 1 / 2 / 2 |
 | core-claim | ≥1 개 | 1회 충족 | 3 / 6 / 4 |
 
-### brainstorm 임계치
+### forum 임계치
 
 | 지표 | 임계치 | gate-status | 실측 |
 |---|---|---|---|
