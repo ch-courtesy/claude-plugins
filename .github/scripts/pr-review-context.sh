@@ -103,6 +103,33 @@ collect_review_threads() {
 collect_review_threads > "$REVIEW_OUTPUT_DIR/review-threads.json" 2>/dev/null \
   || echo '[]' > "$REVIEW_OUTPUT_DIR/review-threads.json"
 
+# Merge-influx guard — when a base-sync merge commit landed inside the incremental
+# range (incremental_base..HEAD), the two-dot diff below would carry the ENTIRE
+# base delta, not just the PR's own changes. That inflated diff can exceed what a
+# review run can read, the review then skips, the success-gated marker never posts,
+# and the base never advances — a self-perpetuating skip loop. Detect the influx
+# and fall back to the PR-own merge-base so the diff is bounded by the PR's size.
+# Incremental mode switches to the existing full branch (gh pr diff — equivalent
+# to a merge-base two-dot diff); thread mode keeps its path scope and only swaps
+# the base. A merge commit authored inside the PR itself also triggers this —
+# over-falling-back to the PR-own diff is safe. The label must stay shell-word
+# safe: context-mode.env is `source`d by the workflows.
+mode_label="$mode"
+if [[ ( "$mode" == "incremental" || "$mode" == "thread" ) && -n "$incremental_base" ]]; then
+  if git rev-list --merges "${incremental_base}..${PR_HEAD_SHA}" 2>/dev/null | grep -q .; then
+    merge_fallback_base="$(git merge-base "${PR_BASE_SHA:-$incremental_base}" "$PR_HEAD_SHA" 2>/dev/null || true)"
+    if [[ -n "$merge_fallback_base" ]]; then
+      incremental_base="$merge_fallback_base"
+      if [[ "$mode" == "incremental" ]]; then
+        mode="full"
+        mode_label="full-merge-fallback"
+      else
+        mode_label="thread-merge-fallback"
+      fi
+    fi
+  fi
+fi
+
 case "$mode" in
   incremental)
     git diff --patch "$incremental_base" "$PR_HEAD_SHA" > "$REVIEW_OUTPUT_DIR/diff.patch" || {
@@ -143,6 +170,6 @@ gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch \
   || cp "$REVIEW_OUTPUT_DIR/diff.patch" "$REVIEW_OUTPUT_DIR/anchor.patch"
 
 {
-  printf 'REVIEW_CONTEXT_MODE=%s\n' "$mode"
+  printf 'REVIEW_CONTEXT_MODE=%s\n' "$mode_label"
   printf 'REVIEW_INCREMENTAL_BASE=%s\n' "$incremental_base"
 } > "$REVIEW_OUTPUT_DIR/context-mode.env"

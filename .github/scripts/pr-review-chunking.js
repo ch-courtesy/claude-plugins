@@ -33,10 +33,16 @@ const LIMITS = Object.freeze({
   maxOutputTokens: 16000,
 });
 
-// 추정 입력 토큰 = 문자수 / 4 (올림). 토크나이저 부재 휴리스틱.
+// 추정 입력 토큰 = CJK/한글 문자 1자당 ~1토큰 + 나머지 문자수/4 (올림).
+// chars/4 단일 휴리스틱은 한국어 텍스트를 ~4배 과소평가해, 토큰 밀도 높은
+// diff(한국어 CHANGELOG·문서)가 청크링 임계(maxDiffBeforeChunking) 아래로
+// 잘못 통과 → 리뷰 잡이 읽을 수 없는 크기의 단일 청크가 되는 결함이 있었다.
+// 전각 라틴/구두점(U+FF00-FFEF)은 의도적으로 제외 — CJK 가중이 부적절.
+const CJK_RE = /[ᄀ-ᇿ㄰-㆏가-힣぀-ヿ一-鿿]/g;
 function estimateTokens(text) {
   if (typeof text !== 'string' || text.length === 0) return 0;
-  return Math.ceil(text.length / 4);
+  const cjkCount = (text.match(CJK_RE) || []).length;
+  return Math.ceil(cjkCount + (text.length - cjkCount) / 4);
 }
 
 // 저우선 파일 분류. 'low' | 'normal'.
