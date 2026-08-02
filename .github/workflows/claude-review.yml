@@ -1025,8 +1025,7 @@ jobs:
             // 리뷰가 완료된 한(approve|comment) findings 0 · 미절단이면 APPROVE 한다.
             // (needs_context/unavailable 처럼 리뷰가 불완전한 verdict 는 제외 — 불완전 리뷰는 승인하지 않는다.)
             const allReviewed = chunkVerdicts.every((v) => v === 'approve' || v === 'comment');
-            // #480: may_approve 는 리뷰 verdict 에서 결정적으로 파생한다 — SKILL 하니스
-            // review.sh:180(may_approve = (verdict==approve))와 동일한 단일 출처 규칙.
+            // #480: may_approve 는 리뷰 verdict 에서 결정적으로 파생한다.
             // 모델의 automation_safety.may_approve 자가판정에 의존하지 않는다: 프롬프트가
             // 그 필드의 판정 기준을 정의하지 않아 #451 verdict:"comment"-on-0-findings 와
             // 상관해 보수적 false 를 내고, findings 0·미절단 clean 삭제류 PR 까지 spurious
