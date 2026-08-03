@@ -13,7 +13,7 @@ description: "구현 작업을 판단 전담 Advisor 에이전트의 감독 아�
 
 ## 워크플로
 
-1. **컨텍스트 패키징 + 스폰.** Agent 도구로 Advisor를 생성한다 (`subagent_type: "agent-kit:advisor"`, 동기 실행). 스폰 프롬프트에 담는다:
+1. **컨텍스트 패키징 + 스폰.** Agent 도구로 Advisor를 생성한다 (`subagent_type: "recipe:advisor"`, 동기 실행). 스폰 프롬프트에 담는다:
    - 사용자 요청 원문 (가공 없이)
    - Worker가 이미 파악한 컨텍스트: 파일 경로, 프로젝트 컨벤션, 탐색 결과, 제약
    - 알려진 완료 기준 (테스트 명령 등)

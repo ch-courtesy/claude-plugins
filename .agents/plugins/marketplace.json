@@ -5,10 +5,10 @@
   },
   "plugins": [
     {
-      "name": "agent-kit",
+      "name": "recipe",
       "source": {
         "source": "local",
-        "path": "./plugins/agent-kit"
+        "path": "./plugins/recipe"
       },
       "policy": {
         "installation": "AVAILABLE",

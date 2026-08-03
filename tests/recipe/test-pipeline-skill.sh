@@ -4,13 +4,13 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-PLUGIN_DIR="$REPO_ROOT/plugins/agent-kit"
+PLUGIN_DIR="$REPO_ROOT/plugins/recipe"
 SKILL_DIR="$PLUGIN_DIR/skills/pipeline"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REFS="$SKILL_DIR/references"
 MARKETPLACE="$REPO_ROOT/.claude-plugin/marketplace.json"
 CODEX_MARKETPLACE="$REPO_ROOT/.agents/plugins/marketplace.json"
-FIXTURES="$REPO_ROOT/tests/agent-kit/fixtures"
+FIXTURES="$REPO_ROOT/tests/recipe/fixtures"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 ok()   { echo "OK: $*"; }
@@ -24,9 +24,9 @@ for file in \
   "$REFS/compile-template.md"; do
   [[ -f "$file" ]] || fail "필수 파일 부재: $file"
 done
-jq -e '.plugins[] | select(.name == "agent-kit")' "$MARKETPLACE" >/dev/null \
-  || fail "marketplace.json에 agent-kit 미등록"
-jq -e '.name == "agent-kit"' "$PLUGIN_DIR/.claude-plugin/plugin.json" >/dev/null \
+jq -e '.plugins[] | select(.name == "recipe")' "$MARKETPLACE" >/dev/null \
+  || fail "marketplace.json에 recipe 미등록"
+jq -e '.name == "recipe"' "$PLUGIN_DIR/.claude-plugin/plugin.json" >/dev/null \
   || fail "plugin.json name 불일치"
 ok "필수 파일 존재 + 마켓플레이스 등록"
 
@@ -120,13 +120,13 @@ echo ""
 echo "=== TEST 6: Codex 어댑터 ==="
 [[ -f "$PLUGIN_DIR/.codex-plugin/plugin.json" ]] || fail ".codex-plugin/plugin.json 부재"
 [[ -f "$CODEX_MARKETPLACE" ]] || fail "Codex 마켓플레이스 매니페스트 부재"
-jq -e '.name == "agent-kit" and .skills == "./skills/"' "$PLUGIN_DIR/.codex-plugin/plugin.json" >/dev/null \
+jq -e '.name == "recipe" and .skills == "./skills/"' "$PLUGIN_DIR/.codex-plugin/plugin.json" >/dev/null \
   || fail ".codex-plugin name/skills 포인터 불일치"
 CLAUDE_VER=$(jq -r .version "$PLUGIN_DIR/.claude-plugin/plugin.json")
 CODEX_VER=$(jq -r .version "$PLUGIN_DIR/.codex-plugin/plugin.json")
 [[ "$CLAUDE_VER" == "$CODEX_VER" ]] || fail "Claude/Codex plugin.json 버전 불일치: $CLAUDE_VER vs $CODEX_VER"
-jq -e '.plugins[] | select(.name == "agent-kit") | .source.path == "./plugins/agent-kit"' "$CODEX_MARKETPLACE" >/dev/null \
-  || fail "Codex 마켓플레이스에 agent-kit 미등록"
+jq -e '.plugins[] | select(.name == "recipe") | .source.path == "./plugins/recipe"' "$CODEX_MARKETPLACE" >/dev/null \
+  || fail "Codex 마켓플레이스에 recipe 미등록"
 ok "Codex 어댑터"
 
 echo ""
