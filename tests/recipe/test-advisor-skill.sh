@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# agent-kit advisor 스킬 패키지와 프로토콜 계약 검증
+# recipe advisor 스킬 패키지와 프로토콜 계약 검증
 
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-PLUGIN_DIR="$REPO_ROOT/plugins/agent-kit"
+PLUGIN_DIR="$REPO_ROOT/plugins/recipe"
 SKILL_MD="$PLUGIN_DIR/skills/advisor/SKILL.md"
 AGENT_MD="$PLUGIN_DIR/agents/advisor.md"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
@@ -22,17 +22,17 @@ ok "필수 파일 존재"
 echo ""
 echo "=== TEST 2: 매니페스트와 버전 ==="
 PLUGIN_NAME="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$PLUGIN_JSON")"
-[[ "$PLUGIN_NAME" == "agent-kit" ]] || fail "플러그인 이름 불일치: $PLUGIN_NAME"
+[[ "$PLUGIN_NAME" == "recipe" ]] || fail "플러그인 이름 불일치: $PLUGIN_NAME"
 PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUGIN_JSON")"
-MARKET_VERSION="$(python3 -c 'import json,sys; print(next(p["version"] for p in json.load(open(sys.argv[1]))["plugins"] if p["name"]=="agent-kit"))' "$MARKETPLACE")"
+MARKET_VERSION="$(python3 -c 'import json,sys; print(next(p["version"] for p in json.load(open(sys.argv[1]))["plugins"] if p["name"]=="recipe"))' "$MARKETPLACE")"
 [[ -n "$PLUGIN_VERSION" && "$PLUGIN_VERSION" == "$MARKET_VERSION" ]] \
   || fail "플러그인/마켓플레이스 버전 불일치: plugin.json=$PLUGIN_VERSION marketplace=$MARKET_VERSION"
 # 버전 범프 회귀 가드: 릴리스 시 이 핀도 함께 올린다
-EXPECTED_VERSION="0.1.0"
+EXPECTED_VERSION="0.3.0"
 [[ "$PLUGIN_VERSION" == "$EXPECTED_VERSION" ]] \
   || fail "플러그인 버전이 현재 릴리스 핀과 다름: plugin.json=$PLUGIN_VERSION expected=$EXPECTED_VERSION (릴리스 시 핀 갱신)"
-SOURCE_PATH="$(python3 -c 'import json,sys; print(next(p["source"] for p in json.load(open(sys.argv[1]))["plugins"] if p["name"]=="agent-kit"))' "$MARKETPLACE")"
-[[ "$SOURCE_PATH" == "./plugins/agent-kit" ]] || fail "마켓플레이스 source 경로 불일치: $SOURCE_PATH"
+SOURCE_PATH="$(python3 -c 'import json,sys; print(next(p["source"] for p in json.load(open(sys.argv[1]))["plugins"] if p["name"]=="recipe"))' "$MARKETPLACE")"
+[[ "$SOURCE_PATH" == "./plugins/recipe" ]] || fail "마켓플레이스 source 경로 불일치: $SOURCE_PATH"
 ok "매니페스트·버전 동기·릴리스 핀 ($PLUGIN_VERSION)"
 
 echo ""
@@ -70,8 +70,8 @@ ok "판단 규율·브리프 템플릿 계약"
 
 echo ""
 echo "=== TEST 5: Worker 프로토콜 ==="
-grep -qF 'agent-kit:advisor' "$SKILL_MD" \
-  || fail "에이전트 참조(agent-kit:advisor) 누락"
+grep -qF 'recipe:advisor' "$SKILL_MD" \
+  || fail "에이전트 참조(recipe:advisor) 누락"
 grep -qF 'SendMessage' "$SKILL_MD" \
   || fail "SendMessage 루프 계약 누락"
 grep -qE '가공 없이' "$SKILL_MD" \

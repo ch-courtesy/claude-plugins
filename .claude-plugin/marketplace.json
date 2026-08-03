@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "예의상 채널에서 공유하는 플러그인들의 마켓플레이스",
-    "version": "0.4.0"
+    "version": "0.5.0"
   },
   "plugins": [
     {
@@ -25,10 +25,10 @@
       ]
     },
     {
-      "name": "agent-kit",
-      "source": "./plugins/agent-kit",
+      "name": "recipe",
+      "source": "./plugins/recipe",
       "description": "Advisor 감독 워크플로와 typed 스킬 기반 워크플로 정의·컴파일을 제공하는 에이전트 협업 도구 모음",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "productivity",
       "tags": [
         "advisor",
@@ -57,21 +57,6 @@
         "consensus",
         "ideation",
         "decision-making"
-      ]
-    },
-    {
-      "name": "agent-kit",
-      "source": "./plugins/agent-kit",
-      "description": "판단 전담 Advisor 에이전트가 Worker(호출 세션)를 감독하는 위임·검증 워크플로",
-      "version": "0.1.0",
-      "category": "productivity",
-      "tags": [
-        "advisor",
-        "delegation",
-        "verification",
-        "supervision",
-        "agents",
-        "workflow"
       ]
     },
     {

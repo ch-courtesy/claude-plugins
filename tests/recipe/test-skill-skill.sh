@@ -4,7 +4,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-PLUGIN_DIR="$REPO_ROOT/plugins/agent-kit"
+PLUGIN_DIR="$REPO_ROOT/plugins/recipe"
 SKILL_DIR="$PLUGIN_DIR/skills/skill"
 SKILL_MD="$SKILL_DIR/SKILL.md"
 REFS="$SKILL_DIR/references"

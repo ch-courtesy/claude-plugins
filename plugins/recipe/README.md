@@ -1,4 +1,4 @@
-# agent-kit
+# recipe
 
 에이전트 협업 도구 모음. ① 판단 전담 Advisor가 Worker(호출 세션)를 감독하는 위임·검증 워크플로, ② 입출력 계약이 있는 **typed 스킬**을 노드로 연결해 실행 흐름(파이프라인)을 만들고 독립 실행 가능한 워크플로 스킬로 컴파일하는 도구.
 
@@ -31,5 +31,3 @@ typed 스킬·컴파일 산출물은 `.agents/skills/`에 한 벌만 두고, 각
 3. `pipeline create` — 목표 인터뷰 → 그래프 구성 → validate → compile
 4. 생성된 스킬 호출 — `/<이름> [입력]`, 실패 시 `/<이름> resume <run-id>`
 5. 필요하면 그 스킬을 다른 파이프라인의 노드로 참조 (`skill: <이름>`)
-
-설계 스펙: `docs/superpowers/specs/2026-08-02-agent-kit-pipeline-node-design.md`

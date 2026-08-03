@@ -1,6 +1,6 @@
 # 컴파일 템플릿 — 생성될 워크플로 스킬의 골격
 
-산출물은 `.agents/skills/<이름>/` 아래 2파일 + `.claude/skills/<이름>` 상대 심링크(`ln -s ../../.agents/skills/<이름> .claude/skills/<이름>` — Claude Code 어댑터, 디렉토리 없으면 먼저 생성)다. 이 템플릿의 `⟨...⟩` 자리만 정의에서 채우고 나머지 골격·런타임 규약 문구는 그대로 유지한다 — 생성된 스킬은 `.pipelines/`와 agent-kit 플러그인 없이 **이 2파일만으로** 동작해야 한다.
+산출물은 `.agents/skills/<이름>/` 아래 2파일 + `.claude/skills/<이름>` 상대 심링크(`ln -s ../../.agents/skills/<이름> .claude/skills/<이름>` — Claude Code 어댑터, 디렉토리 없으면 먼저 생성)다. 이 템플릿의 `⟨...⟩` 자리만 정의에서 채우고 나머지 골격·런타임 규약 문구는 그대로 유지한다 — 생성된 스킬은 `.pipelines/`와 recipe 플러그인 없이 **이 2파일만으로** 동작해야 한다.
 
 생성된 스킬 자체가 typed(`kind: pipeline`, inputs/outputs)이므로 다른 파이프라인이 `skill: ⟨이름⟩`으로 노드처럼 참조할 수 있다.
 
