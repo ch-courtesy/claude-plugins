@@ -4,7 +4,7 @@ Claude Code와 Codex에서 함께 사용하는 로컬 플러그인 마켓플레�
 
 ## 제공 플러그인
 
-- `recipe` — 에이전트 협업 도구 모음: Advisor 감독 워크플로(위임·검증)와 typed 스킬 기반 워크플로 정의·컴파일(skill·pipeline)을 제공합니다.
+- `recipe` — 에이전트 협업 도구 모음: Advisor 감독 워크플로(위임·검증), typed 스킬 기반 워크플로 정의·컴파일(skill·pipeline), codex-review CI 시크릿 재시드(codex-auth-reseed)를 제공합니다.
 - `explain-diff` — 방금 바뀐 코드를 초심자 눈높이 설명·퀴즈·상호작용 HTML 시각화로 이해시킵니다.
 - `thinktank` — 중앙 리서치를 바탕으로 다중 관점 숙의와 추적 가능한 브레인스토밍을 진행합니다.
 
