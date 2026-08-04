@@ -1,7 +1,7 @@
 {
   "name": "recipe",
-  "version": "0.3.0",
-  "description": "에이전트 협업 도구 모음 — Advisor 감독 워크플로와 typed 스킬 기반 워크플로 정의·컴파일 제공",
+  "version": "0.4.0",
+  "description": "에이전트 협업 도구 모음 — Advisor 감독 워크플로, typed 스킬 기반 워크플로 정의·컴파일, codex-review CI 시크릿 재시드 제공",
   "author": {
     "name": "예의상",
     "email": "ch.courtesy@gmail.com"
