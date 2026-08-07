@@ -28,7 +28,7 @@ MARKET_VERSION="$(python3 -c 'import json,sys; print(next(p["version"] for p in 
 [[ -n "$PLUGIN_VERSION" && "$PLUGIN_VERSION" == "$MARKET_VERSION" ]] \
   || fail "플러그인/마켓플레이스 버전 불일치: plugin.json=$PLUGIN_VERSION marketplace=$MARKET_VERSION"
 # 버전 범프 회귀 가드: 릴리스 시 이 핀도 함께 올린다
-EXPECTED_VERSION="0.3.0"
+EXPECTED_VERSION="0.4.1"
 [[ "$PLUGIN_VERSION" == "$EXPECTED_VERSION" ]] \
   || fail "플러그인 버전이 현재 릴리스 핀과 다름: plugin.json=$PLUGIN_VERSION expected=$EXPECTED_VERSION (릴리스 시 핀 갱신)"
 SOURCE_PATH="$(python3 -c 'import json,sys; print(next(p["source"] for p in json.load(open(sys.argv[1]))["plugins"] if p["name"]=="recipe"))' "$MARKETPLACE")"
@@ -72,8 +72,15 @@ echo ""
 echo "=== TEST 5: Worker 프로토콜 ==="
 grep -qF 'recipe:advisor' "$SKILL_MD" \
   || fail "에이전트 참조(recipe:advisor) 누락"
-grep -qF 'SendMessage' "$SKILL_MD" \
-  || fail "SendMessage 루프 계약 누락"
+grep -qE '후속 메시지' "$SKILL_MD" \
+  || fail "후속 메시지 회신 계약 누락"
+grep -qF 'agents/advisor.md' "$SKILL_MD" \
+  || fail "프롬프트 주입 폴백(agents/advisor.md) 누락"
+grep -qE '감독이 불가' "$SKILL_MD" \
+  || fail "서브에이전트 기능 부재 폴백 누락"
+if grep -qE 'SendMessage|subagent_type|Agent 도구' "$SKILL_MD" "$AGENT_MD"; then
+  fail "벤더 전용 표기 잔재 존재 (SendMessage/subagent_type/Agent 도구)"
+fi
 grep -qE '가공 없이' "$SKILL_MD" \
   || fail "무가공 릴레이 계약 누락"
 grep -qE '파일을 수정하지 않는다' "$SKILL_MD" \
