@@ -73,13 +73,22 @@ EOF
 RUN_TIMEOUT=20
 POLL=0.1
 
-run() {  # stdin JSON 을 주고 stdout 을 돌려준다. 종료 코드는 RUN_CODE 로.
-  local input="$1" pid ticks=0
+# 산출물 경로. stdout·stderr 를 **파일로** 남긴다 — 변수로 받으면 명령 치환이 후행
+# 개행을 전부 잘라, 개행·바이트에 관한 단언이 구조적으로 항상 참이 된다(피검체에서
+# 고친 바로 그 결함이 하네스에 남아 있었다). 바이트를 보는 단언은 $RUN_OUT 을 본다.
+RUN_OUT=""; RUN_ERR=""
+
+run() {  # run [-d <cwd>] <입력 JSON>. stdout 은 OUT(편의용 문자열)·$RUN_OUT(원본 파일).
+  local dir="" input pid ticks=0
+  if [[ "${1:-}" == "-d" ]]; then dir="$2"; shift 2; fi
+  input="$1"
   local max=$(( RUN_TIMEOUT * 10 ))
+  RUN_OUT="$WORK/run.out"; RUN_ERR="$WORK/run.err"
   # 입력·출력을 파이프가 아니라 파일로 둔다 — 파이프라인이면 $! 가 끝 요소만 가리켜
   # 앞쪽 프로세스가 남고, 죽일 때 상속된 파이프를 붙잡아 다음 케이스를 막는다.
   printf '%s' "$input" > "$WORK/run.in"
-  PATH="$SANDBOX_PATH" bash "$SCRIPT" < "$WORK/run.in" > "$WORK/run.out" 2>/dev/null &
+  ( [[ -z "$dir" ]] || cd "$dir"
+    PATH="$SANDBOX_PATH" exec bash "$SCRIPT" ) < "$WORK/run.in" > "$RUN_OUT" 2>"$RUN_ERR" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null && (( ticks < max )); do
     sleep "$POLL"; ticks=$(( ticks + 1 ))
@@ -89,7 +98,7 @@ run() {  # stdin JSON 을 주고 stdout 을 돌려준다. 종료 코드는 RUN_C
     fail "케이스가 ${RUN_TIMEOUT}초 안에 끝나지 않음 (입력: ${input:0:40})"
   fi
   wait "$pid"; RUN_CODE=$?
-  OUT="$(cat "$WORK/run.out")"
+  OUT="$(cat "$RUN_OUT")"
 }
 
 echo "=== TEST 1: 스킬 패키지 ==="
@@ -121,10 +130,14 @@ do
   jq -e 'has("exit_code") and has("output")' >/dev/null <<< "$OUT" \
     || fail "필수 필드 누락 (입력: ${input:0:30})"
   # 줄 단위로 읽는 호출자를 위해 형태도 한 줄로 고정한다(성공·오류 경로 동일).
-  [[ "$(wc -l <<< "$OUT")" -eq 1 ]] \
+  # 변수가 아니라 파일을 센다 — 변수는 후행 개행이 이미 잘려 항상 1 이 나온다.
+  [[ "$(wc -l < "$RUN_OUT")" -eq 1 ]] \
     || fail "출력이 한 줄이 아님 (입력: ${input:0:30})"
+  # 도구 층 메시지가 stderr 로 새면 호출자가 "에이전트가 말한 것" 으로 적재한다.
+  [[ ! -s "$RUN_ERR" ]] \
+    || fail "도구 오류 경로에서 stderr 오염 (입력: ${input:0:30}): $(head -c 80 "$RUN_ERR")"
 done
-ok "모든 경로에서 한 줄짜리 JSON 객체 하나"
+ok "모든 경로에서 한 줄짜리 JSON 객체 하나 · stderr 순수"
 
 echo ""
 echo "=== TEST 3: 오류 채널 분리 ==="
@@ -232,8 +245,7 @@ run '{"prompt":"ALIAS","vendor":"antigravity"}'
 make_fake claude echo
 printf 'ROOTGUIDE' > "$WORK/guide.txt"
 printf 'WRONGGUIDE' > "$SUB/guide.txt"
-OUT="$(printf '%s' '{"prompt":"tail","cwd":"sub","system_prompt_file":"guide.txt"}' \
-  | (cd "$WORK" && PATH="$SANDBOX_PATH" bash "$SCRIPT") 2>/dev/null)"
+run -d "$WORK" '{"prompt":"tail","cwd":"sub","system_prompt_file":"guide.txt"}'
 [[ "$(jq -r .output <<< "$OUT")" == ROOTGUIDE* ]] \
   || fail "지침이 cwd 이동 후 기준으로 해석됨: $(jq -r .output <<< "$OUT" | head -c 40)"
 ok "cwd 이동·벤더별 프롬프트 전달·지침 경로 해석 순서"
@@ -312,7 +324,88 @@ printf 'S\n' > "$WORK/sys.txt"
 run "$(jq -nc --arg f "$WORK/sys.txt" '{prompt:"P\n", system_prompt_file:$f}')"
 [[ "$(jq -r .output <<< "$OUT")" == "530a0a0a500a" ]] \
   || fail "지침 병합에서 바이트가 변형됨: $(jq -r .output <<< "$OUT")"
-ok "프롬프트·지침 바이트 무결성"
+
+# NUL 보존 — 프레이밍 구조의 명시적 존재 이유다(셸 변수는 NUL 을 담지 못한다).
+# 이걸 고정하지 않으면 구조가 변수 경유로 회귀해도 나머지 테스트가 전부 통과한다.
+run "$(jq -nc '{prompt: ([97,0,98]|implode)}')"
+[[ "$(jq -r .output <<< "$OUT")" == "610062" ]] \
+  || fail "프롬프트의 NUL 이 보존되지 않음: $(jq -r .output <<< "$OUT")"
+ok "프롬프트·지침 바이트 무결성 (후행 개행·NUL)"
+
+echo ""
+echo "=== TEST 10: 계약이 열거한 손실이 실제 손실과 일치한다 ==="
+# 헤더는 output 의 손실을 후행 공백·NUL·비 UTF-8 치환 셋으로 열거한다. 열거가 코드보다
+# 좁으면 호출자가 감지 수단 없이 변조된 값을 성공 신호와 함께 받는다.
+cat > "$BIN/claude" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+printf 'ok\xffbin'
+EOF
+chmod +x "$BIN/claude"
+run '{"prompt":"x"}'
+[[ "$(jq -r .output <<< "$OUT")" == $'ok�bin' ]] \
+  || fail "비 UTF-8 처리가 계약과 다름: $(jq -r .output <<< "$OUT" | od -An -tx1 | tr -d ' \n')"
+grep -q 'U+FFFD' "$SCRIPT" || fail "헤더의 손실 목록에 UTF-8 치환이 없음"
+
+# 에이전트 출력은 신뢰 불가 데이터다 — 여기에 가하는 연산이 초선형이면 에이전트가
+# 호출자를 멈춰 세울 수 있다. 공백 30만 개는 2차 백트래킹에서 5분 가까이 걸렸다.
+cat > "$BIN/claude" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+python3 -c "import sys; sys.stdout.write(' '*300000 + 'x')"
+EOF
+chmod +x "$BIN/claude"
+T0=$(date +%s)
+run '{"prompt":"x"}'
+(( $(date +%s) - T0 < 10 )) \
+  || fail "공백 30만 개 출력 처리가 10초를 넘음 — 후행 공백 제거가 선형이 아니다"
+ok "손실 목록 일치 · 출력 처리 선형"
+
+echo ""
+echo "=== TEST 11: 검사한 대상과 실행한 대상이 같다 ==="
+# 벤더 CLI 를 cd 전에 검사하고 cd 후에 이름으로 다시 찾으면, PATH 에 '.' 이나 빈
+# 컴포넌트가 있을 때 호출자가 준 cwd 안의 파일이 이긴다 — 검사 통과라는 착시 속에
+# 무인 권한으로 임의 바이너리가 뜬다.
+SHADOW="$WORK/shadow"; mkdir -p "$SHADOW"
+make_fake claude echo
+printf '#!/usr/bin/env bash\ncat >/dev/null\nprintf CWD-SHADOW\n' > "$SHADOW/claude"
+chmod +x "$SHADOW/claude"
+OLD_SANDBOX="$SANDBOX_PATH"; SANDBOX_PATH=".:$BIN:/usr/bin:/bin"
+run "$(jq -nc --arg c "$SHADOW" '{prompt:"x", cwd:$c}')"
+SANDBOX_PATH="$OLD_SANDBOX"
+[[ "$(jq -r .output <<< "$OUT")" != "CWD-SHADOW" ]] \
+  || fail "cwd 안의 가짜 벤더가 실행됨 — 검사 대상과 실행 대상이 다르다"
+
+# 지침 파일도 같다: 경로로 -f·-s 를 보고 fd 로 읽으면 두 객체가 다를 수 있다.
+# /dev/fd/N 을 EOF 오프셋으로 넘기면 크기 검사는 통과하고 내용은 0바이트다.
+make_hexdump claude
+printf 'GUIDE' > "$WORK/g.txt"
+cat > "$WORK/fdprobe.sh" <<'SH'
+#!/usr/bin/env bash
+exec 3< "$1"
+cat <&3 > /dev/null
+printf '%s' '{"prompt":"P","system_prompt_file":"/dev/fd/3"}' | bash "$2"
+SH
+FDOUT="$(PATH="$SANDBOX_PATH" bash "$WORK/fdprobe.sh" "$WORK/g.txt" "$SCRIPT" 2>/dev/null)"
+if jq -e 'has("error")' >/dev/null 2>&1 <<< "$FDOUT"; then :
+elif [[ "$(jq -r .output <<< "$FDOUT")" == 475549444520* ]]; then :
+else
+  fail "지침이 소실됐는데 성공 보고: $(jq -r .output <<< "$FDOUT")"
+fi
+
+# exec 실패(126/127)는 에이전트 실패가 아니라 도구 오류다 — 그대로 내보내면
+# 호출자가 성공 가능성 0인 재시도를 돈다.
+printf '#!/nonexistent/interp\n' > "$BIN/claude"; chmod +x "$BIN/claude"
+run '{"prompt":"x"}'
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "벤더 실행 실패(126)가 에이전트 실패로 보고됨: $OUT"
+
+# vendor 만 제어문자 검사에서 빠지면 "agy\n" 이 문서화된 세 값이 아닌데도 통과한다.
+make_fake agy echo
+run "$(jq -nc '{prompt:"P", vendor:"agy\n"}')"
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "제어문자가 든 vendor 가 통과함: $OUT"
+ok "벤더 바이너리·지침 fd·실행 실패·vendor 정규화"
 
 echo ""
 echo "모든 oneshot 스킬 테스트 통과"
