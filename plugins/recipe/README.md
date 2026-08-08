@@ -1,6 +1,6 @@
 # recipe
 
-에이전트 협업 도구 모음. ① 판단 전담 Advisor가 Worker(호출 세션)를 감독하는 위임·검증 워크플로, ② 입출력 계약이 있는 **typed 스킬**을 노드로 연결해 실행 흐름(파이프라인)을 만들고 독립 실행 가능한 워크플로 스킬로 컴파일하는 도구, ③ 외부 에이전트 CLI를 1회 실행하는 raw 래퍼(`oneshot`), ④ codex-review CI의 `CODEX_AUTH_JSON` 시크릿을 격리 재시드하는 운영 스킬.
+에이전트 협업 도구 모음. ① 판단 전담 Advisor가 Worker(호출 세션)를 감독하는 위임·검증 워크플로, ② 입출력 계약이 있는 **typed 스킬**을 노드로 연결해 실행 흐름(파이프라인)을 만들고 독립 실행 가능한 워크플로 스킬로 컴파일하는 도구, ③ 외부 에이전트 CLI(claude·codex·antigravity)를 1회 실행하는 raw 래퍼(`oneshot`), ④ codex-review CI의 `CODEX_AUTH_JSON` 시크릿을 격리 재시드하는 운영 스킬.
 
 **층이 분리돼 있다**: `oneshot`은 실행만 하고, 격리(워크트리 준비)·커밋 여부·반복·종료 판정은 전부 호출자가 정한다 — 도구는 재료를, 흐름은 판단을.
 
@@ -14,7 +14,7 @@
 | `skill` | 단독 호출·노드 편입이 모두 가능한 typed 스킬(입출력 스키마 + 실행법) 생성·단독 테스트·목록 |
 | `pipeline` | typed 스킬들을 연결한 그래프 정의 생성, 검증, 자립형 워크플로 스킬 컴파일 |
 | `codex-auth-reseed` | codex-review CI가 인증 오류로 깨질 때 `CODEX_AUTH_JSON` 시크릿을 격리 `CODEX_HOME`에서 재시드 |
-| `oneshot` | 외부 에이전트 CLI(claude·codex)를 **1회** 실행하는 raw 래퍼(`claude -p` 수준). 격리·커밋·반복·판정은 호출자가 정한다 |
+| `oneshot` | 외부 에이전트 CLI(claude·codex·antigravity)를 **1회** 실행하는 raw 래퍼(`claude -p` 수준). 격리·커밋·반복·판정은 호출자가 정한다 |
 
 ## 사용자 프로젝트 레이아웃 (벤더 중립)
 

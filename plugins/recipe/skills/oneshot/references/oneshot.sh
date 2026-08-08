@@ -9,7 +9,7 @@
 #   prompt              (string, 필수)  에이전트에 줄 지시
 #   cwd                 (string)        실행 디렉토리 (기본: 현재 디렉토리)
 #   system_prompt_file  (string)        시스템 지침 파일 경로
-#   vendor              (string)        claude(기본) | codex
+#   vendor              (string)        claude(기본) | codex | agy(antigravity)
 #
 # 출력 (JSON 객체): {exit_code, output}  — output 은 에이전트 stdout 전문.
 
@@ -40,8 +40,18 @@ case "$VENDOR" in
       | codex exec --ephemeral --sandbox workspace-write - )"
     CODE=$?
     ;;
+  agy)
+    # antigravity CLI — 프롬프트를 stdin 이 아니라 --print 의 값으로 받고,
+    # 시스템 프롬프트 옵션이 없어 지침을 프롬프트 선두에 병합한다.
+    full="$PROMPT"
+    [[ -n "$SYSTEM_FILE" ]] && full="$(cat "$SYSTEM_FILE")
+
+$PROMPT"
+    OUTPUT="$(agy --print "$full" --dangerously-skip-permissions --add-dir .)"
+    CODE=$?
+    ;;
   *)
-    emit 1 "지원하지 않는 vendor: $VENDOR (claude, codex)"
+    emit 1 "지원하지 않는 vendor: $VENDOR (claude, codex, agy)"
     exit 1
     ;;
 esac
