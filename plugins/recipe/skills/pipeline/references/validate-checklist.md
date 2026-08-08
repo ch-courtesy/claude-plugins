@@ -9,8 +9,9 @@ compile 1단계에서 전 항목을 적용한다. 하나라도 실패하면 산�
 - [ ] 각 노드는 `skill` / `util` / `inline` 중 정확히 하나 — 단 유틸 노드의 설정 필드(foreach의 `skill:`·`items:`, transform의 `expr:` 등)는 판별자가 아니다: `util:`이 있으면 유틸 노드다
 - [ ] `skill` 참조가 `.agents/skills/<이름>/SKILL.md`로 실재하고, frontmatter가 typed 계약(kind/inputs/outputs — `kind: pipeline`이 아니면 run도)을 만족
 - [ ] `inline` 정의가 typed 계약의 kind/inputs/outputs/run을 갖춤 (`kind: pipeline` 인라인 금지)
-- [ ] `util`이 7개 값(if, switch, foreach, while, merge, transform, human-gate) 중 하나이고 해당 유틸의 필수 필드를 갖춤 — if: cond/then · switch: cases · foreach: items + (skill 또는 inline) · while: (skill 또는 inline) + until + max_iterations · transform: expr · human-gate: message. foreach·while 의 `skill:`/`inline:` 은 실행 대상 지정이지 노드 판별자가 아니다(판별자는 `util:`).
-- [ ] while의 `max_iterations`가 양의 정수(1 이상), `until`이 jq boolean 식이고 결정적(now·env 미사용)
+- [ ] `util`이 7개 값(if, switch, foreach, while, merge, transform, human-gate) 중 하나이고 해당 유틸의 필수 필드를 갖춤 — if: cond/then · switch: cases · foreach: items + (skill 또는 inline) · while: (skill 또는 inline) + until + max_iterations · transform: expr · human-gate: message
+- [ ] while의 `max_iterations`가 양의 정수(1 이상), `until`이 jq boolean 식이고 결정적(now·env 미사용). 상한이 100을 넘으면 경고하고 사용자 확인 — 반복 대상이 외부 프로세스면 그 횟수만큼 실행된다
+- [ ] while의 `until`이 참조하는 최상위 필드가 반복 대상 노드의 `outputs` 계약에 실재 (오타 하나면 조건이 영영 거짓이 되어 상한까지 조용히 반복한다 — 2장의 `$id.last.<필드>` 검사와 같은 규칙)
 
 ## 2. 참조 무결성
 

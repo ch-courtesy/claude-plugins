@@ -28,9 +28,12 @@
 # 한계가 있고(실행 전에 검사해 도구 오류로 보고한다) 실행 중 내용이 ps 에 노출된다
 # — 큰 프롬프트·지침에는 claude·codex 를 쓴다.
 #
-# 이 파일의 계약은 tests/recipe/test-oneshot-skill.sh 가 강제한다. 구조를 바꾸면
-# 그 테스트를 먼저 돌려라 — 크기 경계·오류 분류·stdout 순수성은 주석으로만 두면
-# 리팩터마다 다른 자리에서 조용히 깨진다(실제로 다섯 번 재발했다).
+# 이 파일의 계약은 tests/recipe/test-oneshot-skill.sh 가 검증한다 — 자동 실행 경로는
+# 없으니 구조를 바꾸면 직접 돌려라. 크기 경계·오류 분류·stdout 순수성은 주석으로만
+# 두면 리팩터마다 다른 자리에서 조용히 깨진다(실제로 다섯 번 재발했다).
+#
+# 시그널(SIGTERM 등)로 중단되면 stdout 이 비고 종료 코드도 규약 밖이다 — 위 계약은
+# 정상 종료 경로에만 적용된다. 회차 타임아웃을 거는 호출자는 빈 stdout 을 대비한다.
 
 set -u
 
@@ -63,7 +66,11 @@ command -v "$VENDOR" >/dev/null || fail "벤더 CLI 를 찾을 수 없음: $VEND
 # 지침으로 들어간다. 읽기 실패는 조용히 넘기지 않는다.
 FULL="$PROMPT"
 if [[ -n "$SYSTEM_FILE" ]]; then
-  SYSTEM_TEXT="$(cat "$SYSTEM_FILE")" || fail "system_prompt_file 을 읽을 수 없음: $SYSTEM_FILE"
+  # `-` 는 `--` 를 붙여도 cat 에게는 stdin 이다 — 이미 EOF 라 "빈 지침"으로 조용히
+  # 성공하고 지침 없는 실행과 구분되지 않는다. 실재하는 읽기 가능한 경로만 받는다.
+  [[ -r "$SYSTEM_FILE" && ! -d "$SYSTEM_FILE" ]] \
+    || fail "system_prompt_file 을 읽을 수 없음: $SYSTEM_FILE"
+  SYSTEM_TEXT="$(cat -- "$SYSTEM_FILE")" || fail "system_prompt_file 을 읽을 수 없음: $SYSTEM_FILE"
   [[ -z "$SYSTEM_TEXT" ]] || FULL="$SYSTEM_TEXT
 
 $PROMPT"   # 빈 지침이면 프롬프트만 — 선두 빈 줄을 만들지 않는다
@@ -71,8 +78,9 @@ fi
 
 # 이동 실패는 치명적이다 — 무시하면 호출자가 격리했다고 믿는 사이 무인 권한
 # 에이전트가 호출자의 현재 디렉토리에서 뜬다. CDPATH 는 cd 가 stdout 에 경로를
-# 찍어 출력 JSON 을 오염시키므로 끈다.
-[[ -z "$CWD" ]] || CDPATH= cd "$CWD" || fail "cwd 로 이동할 수 없음: $CWD"
+# 찍어 출력 JSON 을 오염시키므로 끈다. `--` 가 없으면 `-P` 같은 경로가 cd 옵션으로
+# 먹혀 피연산자 없이 $HOME 으로 이동한 뒤 성공으로 보고된다(격리 붕괴).
+[[ -z "$CWD" ]] || CDPATH= cd -- "$CWD" || fail "cwd 로 이동할 수 없음: $CWD"
 
 CODE=0
 case "$VENDOR" in
@@ -88,8 +96,10 @@ case "$VENDOR" in
     # 크기면 시도하지 않고 도구 오류로 보고한다. 그냥 실행하면 exec 실패(126/127)가
     # 에이전트 실패로 위장돼 호출자가 성공 가능성 없는 재시도를 돈다.
     # 한계: macOS 는 인자 총합(ARG_MAX), Linux 는 인자 하나당 128KiB(MAX_ARG_STRLEN).
+    # 커널이 세는 단위는 바이트다 — `${#FULL}` 은 UTF-8 로케일에서 문자 수라 한글
+    # 프롬프트가 실제 한계의 세 배까지 가드를 통과한다.
     if [[ "$(uname)" == Linux ]]; then limit=131072; else limit=$(( $(getconf ARG_MAX 2>/dev/null || echo 262144) / 2 )); fi
-    (( ${#FULL} < limit )) \
+    (( $(printf '%s' "$FULL" | LC_ALL=C wc -c) < limit )) \
       || fail "프롬프트가 agy 인자 한계(${limit} 바이트)를 넘음 — stdin 을 받는 claude·codex 를 쓰거나 프롬프트를 줄인다"
     OUTPUT="$(agy --print "$FULL" --dangerously-skip-permissions --add-dir .)" || CODE=$?
     ;;
@@ -98,5 +108,5 @@ esac
 # 출력은 파이프로 넘긴다 — argv(--arg)로 주면 큰 출력에서 jq 가 exec 되지 못해
 # stdout 이 통째로 비고(계약 위반) 프로세스 코드도 규약 밖 값이 된다. printf 는
 # 빌트인이라 크기 제한이 없다. -Rs 로 전체를 문자열 하나로 읽는다.
-printf '%s' "$OUTPUT" | jq -Rs --argjson c "$CODE" \
-  '{exit_code: $c, output: (. | sub("[[:space:]]+$"; ""))}'
+printf '%s' "$OUTPUT" | jq -Rsc --argjson c "$CODE" \
+  '{exit_code: $c, output: sub("[[:space:]]+$"; "")}'

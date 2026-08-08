@@ -57,10 +57,11 @@ run() {  # stdin JSON 을 주고 stdout 을 돌려준다. 종료 코드는 RUN_C
 
 echo "=== TEST 1: 스킬 패키지 ==="
 [[ -f "$SCRIPT" ]] || fail "스크립트 없음: $SCRIPT"
-[[ -x "$SCRIPT" || -r "$SCRIPT" ]] || fail "스크립트를 읽을 수 없음"
 bash -n "$SCRIPT" || fail "스크립트 문법 오류"
 grep -qE '^name: oneshot' "$SKILL_MD" || fail "SKILL.md name 누락"
-grep -q 'exit_code' "$SKILL_MD" || fail "SKILL.md 가 exit_code 계약을 설명하지 않음"
+# 계약 본문은 스크립트 헤더 한 곳에만 둔다 — SKILL.md 는 그리로 보내기만 한다.
+grep -q '단일 출처' "$SKILL_MD" || fail "SKILL.md 에 계약 단일 출처 지시 없음"
+grep -q 'exit_code' "$SCRIPT" || fail "스크립트 헤더가 exit_code 계약을 설명하지 않음"
 ok "패키지 구조와 문법"
 
 echo ""
@@ -76,12 +77,16 @@ for input in \
   '{"a":1}{"a":2}'
 do
   run "$input"
-  jq -e 'type == "object"' >/dev/null 2>&1 <<< "$OUT" \
+  # -s 로 문서 수까지 본다 — 문서별 검사는 이어붙은 객체 두 개도 통과시킨다.
+  jq -es 'length == 1 and (.[0] | type == "object")' >/dev/null 2>&1 <<< "$OUT" \
     || fail "stdout 이 JSON 객체 하나가 아님 (입력: ${input:0:30})"
   jq -e 'has("exit_code") and has("output")' >/dev/null <<< "$OUT" \
     || fail "필수 필드 누락 (입력: ${input:0:30})"
+  # 줄 단위로 읽는 호출자를 위해 형태도 한 줄로 고정한다(성공·오류 경로 동일).
+  [[ "$(wc -l <<< "$OUT")" -eq 1 ]] \
+    || fail "출력이 한 줄이 아님 (입력: ${input:0:30})"
 done
-ok "모든 경로에서 JSON 객체 하나"
+ok "모든 경로에서 한 줄짜리 JSON 객체 하나"
 
 echo ""
 echo "=== TEST 3: 오류 채널 분리 ==="
@@ -110,7 +115,11 @@ for c in "${CASES[@]}"; do
   jq -r .error <<< "$OUT" | grep -qF "${c##*|}" \
     || fail "원인이 메시지에 안 드러남: ${c%%|*} → $(jq -r .error <<< "$OUT")"
 done
-# 지원하는 벤더인데 CLI 가 없는 경우는 설치 문제로 보고해야 한다.
+# 지원하는 벤더인데 CLI 가 없는 경우만 설치 문제로 보고해야 한다 — 양방향으로 본다.
+# 있을 때도 부재로 보고하면 벤더 검사 순서가 뒤집힌 것이다.
+make_fake codex echo
+run '{"prompt":"CODEXOK","vendor":"codex"}'
+jq -e 'has("error") | not' >/dev/null <<< "$OUT" || fail "설치된 codex 가 오류로 보고됨: $(jq -r .error <<< "$OUT")"
 rm -f "$BIN/codex"
 run '{"prompt":"x","vendor":"codex"}'
 jq -r .error <<< "$OUT" | grep -q '찾을 수 없음' || fail "CLI 부재가 설치 문제로 보고되지 않음"
@@ -151,7 +160,7 @@ echo "=== TEST 6: output 은 마지막 줄 판정이 성립한다 ==="
 cat > "$BIN/claude" <<'EOF'
 #!/usr/bin/env bash
 cat >/dev/null
-printf '결과\r\n<<DONE>>  \n\n'
+printf '결과\n<<DONE>>  \r\n\r\n'
 EOF
 chmod +x "$BIN/claude"
 run '{"prompt":"x"}'
@@ -179,7 +188,47 @@ run '{"prompt":"AGYPROMPT","vendor":"agy"}'
 [[ "$(jq -r .output <<< "$OUT")" == "AGYPROMPT" ]] || fail "agy 프롬프트 전달 실패"
 run '{"prompt":"ALIAS","vendor":"antigravity"}'
 [[ "$(jq -r .output <<< "$OUT")" == "ALIAS" ]] || fail "antigravity 별칭 미지원"
-ok "cwd 이동과 벤더별 프롬프트 전달"
+
+# 지침 파일은 cwd 이동 **전** 기준으로 해석한다 — 순서가 뒤집히면 같은 상대 경로가
+# 작업 디렉토리 안의 동명 파일을 가리켜 엉뚱한 지침으로 조용히 바뀐다.
+make_fake claude echo
+printf 'ROOTGUIDE' > "$WORK/guide.txt"
+printf 'WRONGGUIDE' > "$SUB/guide.txt"
+OUT="$(printf '%s' '{"prompt":"tail","cwd":"sub","system_prompt_file":"guide.txt"}' \
+  | (cd "$WORK" && PATH="$SANDBOX_PATH" bash "$SCRIPT") 2>/dev/null)"
+[[ "$(jq -r .output <<< "$OUT")" == ROOTGUIDE* ]] \
+  || fail "지침이 cwd 이동 후 기준으로 해석됨: $(jq -r .output <<< "$OUT" | head -c 40)"
+ok "cwd 이동·벤더별 프롬프트 전달·지침 경로 해석 순서"
+
+echo ""
+echo "=== TEST 8: 적대적 모양의 입력값 ==="
+# 입력은 호출자가 만든 임의 문자열이다 — 셸 구문의 암묵 의미(옵션 해석, 문자 vs
+# 바이트)에 그대로 넘기면 계약이 가정한 것과 다른 일이 조용히 일어난다.
+make_fake claude echo
+
+# 옵션처럼 생긴 cwd 는 cd 의 옵션으로 먹혀 $HOME 으로 이동한다 — 격리 붕괴가
+# 성공으로 보고된다.
+run '{"prompt":"x","cwd":"-P"}'
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "옵션형 cwd 가 오류로 보고되지 않음 (output=$(jq -r .output <<< "$OUT" | head -c 40))"
+
+# 옵션처럼 생긴 지침 경로도 마찬가지 — cat - 은 EOF 인 stdin 을 읽어 "빈 지침"으로
+# 성공해 지침 없는 실행과 구분되지 않는다.
+run '{"prompt":"x","system_prompt_file":"-"}'
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "옵션형 system_prompt_file 이 오류로 보고되지 않음"
+
+# agy 크기 가드는 바이트로 재야 한다. 한글은 문자 하나가 3바이트라 문자 수로 재면
+# 실제 argv 한계를 세 배 넘겨도 가드를 통과하고, exec 실패(126)가 에이전트 실패로
+# 위장된다. (Linux 는 한계가 더 낮아 문자 수로도 걸리므로 이 케이스의 회귀 탐지력은
+# macOS 기준이다.)
+make_fake agy echo
+KBIG="$WORK/kbig.txt"; : > "$KBIG"
+for _ in $(seq 200); do printf '가나다라마바사아자차카타파하%.0s' $(seq 71) >> "$KBIG"; done
+run "$(jq -nc --rawfile p "$KBIG" '{prompt:$p, vendor:"agy"}')"
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "멀티바이트 프롬프트가 agy 크기 가드를 통과함 (exit_code=$(jq -r .exit_code <<< "$OUT"))"
+ok "옵션형 경로·멀티바이트 크기 가드"
 
 echo ""
 echo "모든 oneshot 스킬 테스트 통과"

@@ -80,7 +80,7 @@ ok "권한·안전 경계·벤더 중립"
 
 echo ""
 echo "=== TEST 4: 유틸 노드와 validate 계약 ==="
-for util in if switch foreach merge transform human-gate; do
+for util in if switch foreach while merge transform human-gate; do
   grep -q -- "$util" "$REFS/util-nodes.md" \
     || fail "util-nodes에 누락: $util"
 done
