@@ -1,4 +1,4 @@
-# 유틸 노드 시맨틱 (6종)
+# 유틸 노드 시맨틱 (util 값 7개 · 절 6개 — if/switch 는 한 절)
 
 유틸 노드는 `util:` 필드로 선언하며 별도 타입 파일이 없다. 공통 속성(retry/timeout/on_error)은 동일하게 적용된다(단 human-gate에는 retry 무의미).
 
@@ -54,10 +54,9 @@
   outputs: → {iterations: number, last: object}
 ```
 
-- foreach가 **map**(길이가 정해진 배열 순회)이라면 while은 **until**(끝날 때를 실행해 봐야 아는 반복)이다. 노드 **하나**를 반복하는 것은 같다.
 - 매 회차 **같은 `in` 매핑**으로 실행한다. 회차 간 값 이월은 없다 — 상태는 노드가 외부(파일·git 등)에 유지한다. 그래서 노드가 자기 자신을 참조하지 않고, 순환 검사 규칙도 그대로 적용된다.
 - `until`은 회차 출력 객체에 적용하는 jq boolean이며 결정적이어야 한다(`now`·`env` 금지). 참이면 그 회차를 마지막으로 정지한다.
-- `max_iterations`에 도달해도 `until`이 거짓이면 노드의 on_error를 따른다: `fail`(기본)이면 전체 중단, `continue`면 마지막 회차 결과를 그대로 출력하고 하류 진행.
+- `max_iterations`에 도달해도 `until`이 거짓이면 노드의 on_error를 따른다: `fail`(기본)이면 전체 중단, `continue`면 **노드를 `completed` 로 기록하고** `{iterations, last}` 를 정상 출력해 하류가 그대로 진행한다(다른 유틸의 `continue` 와 달리 하류를 skip 하지 않는다 — 반복 소진은 실패가 아니라 상한 도달이다).
 - 출력은 고정 `{iterations, last}` — `iterations`는 실행한 회차 수, `last`는 마지막 회차의 출력 객체(하류는 `$노드id.last.<필드>`로 읽는다).
 - 회차 실행 기록은 `runs/<run-id>/<노드id>/<회차>.json`에 남긴다(foreach와 같은 규약).
 

@@ -3,10 +3,7 @@ name: oneshot
 description: 외부 에이전트(claude·codex)를 격리된 환경에서 한 번 실행하고 결과를 구조화해 받고 싶을 때 사용 — 독립 스펙 작업·구현 워커·적대 리뷰의 공용 원시 도구. 반복이 필요하면 이 도구를 파이프라인 while 노드로 감싼다.
 allowed-tools:
   - Read
-  - Bash(bash * oneshot.sh)
-  - Bash(git -C * status:*)
-  - Bash(git -C * log:*)
-  - Bash(git -C * diff:*)
+  - Bash(bash *oneshot.sh:*)
 ---
 
 # oneshot
@@ -17,28 +14,32 @@ allowed-tools:
 
 ## 호출
 
-`Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/oneshot/references/oneshot.sh)` — 입력 JSON을 stdin으로, 출력 JSON을 stdout으로. 진단 메시지는 stderr로 나가므로 stdout은 항상 JSON 하나다.
+`Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/oneshot/references/oneshot.sh)` — 입력 JSON을 stdin으로, 출력 JSON을 stdout으로. **성공·실패 모두 stdout은 JSON 하나**다(실패 시 같은 형태에 `error` 필드 추가). 사람용 진단은 stderr로 따로 나간다.
 
 입출력 필드와 기본값은 스크립트 상단 주석이 단일 출처다. 요지만:
 
 - `prompt`(필수) — 에이전트에 줄 지시
 - `system_prompt_file` — 지침 파일. **규율은 호출자가 주입한다** (이 도구는 워커 규율을 소유하지 않는다)
 - `isolation` — `worktree`(기본, 쓰기 격리) · `cwd`(격리 없음, 읽기 전용 리뷰용) · `tmpdir`(저장소 밖)
-- 출력 — `exit_code` · `output` · `log_path` · `workdir` · `meta_dir` · `commits` · `dirty` · `signals`
+- 출력 — `exit_code` · `output`(로그 꼬리, 에이전트 stdout+stderr 합본) · `log_path`(전문) · `workdir` · `meta_dir` · `commits` · `dirty` · `signals`
 
 ## 격리 선택
 
 | isolation | 작업 공간 | 쓰기 | 쓰는 곳 |
 |---|---|---|---|
-| `worktree` | `<repo>/.oneshot-worktree` (로컬 HEAD 기준 전용 git 워크트리, 재실행 시 재사용) | 격리됨 | 구현 워커 |
+| `worktree` | `<repo>/.<name>-worktree` (전용 git 워크트리, 재실행 시 재사용) | 격리됨 | 구현 워커 |
 | `cwd` | 저장소 그대로 | 격리 없음 | 읽기 전용 적대 리뷰 (메타는 저장소 밖에 두어 워킹트리를 오염시키지 않음) |
-| `tmpdir` | 임시 디렉토리 | 저장소 밖 | 실험·스크래치 |
+| `tmpdir` | 저장소와 무관한 임시 디렉토리 (git 아님 — `commits`는 항상 비고 회차 간 상태도 남지 않는다) | 저장소 밖 | 실험·스크래치 |
 
-`worktree`는 동시 실행을 lock으로 거부한다(`.oneshot-lock`). 워크트리는 **로컬 HEAD 기준**이라 원격을 반영하려면 미리 pull 한다.
+- `worktree`는 동시 실행을 lock으로 거부한다(`.<name>-lock`). 워크트리는 **처음 만들 때만** 로컬 HEAD 기준이고 이후 재실행은 그것을 재사용한다 — 새 base가 필요하면 `workdir_name`을 바꾸거나 워크트리를 지운다(`git worktree remove`). 정리는 이 도구가 하지 않는다.
+- `cwd`의 "읽기 전용"은 **프롬프트 관례일 뿐 강제가 아니다** — 에이전트는 무인 권한으로 돌아 실제 저장소에 쓸 수 있고, lock도 잡지 않는다.
+- `while` 노드로 반복할 때는 회차 간 상태가 남는 `worktree`(또는 `cwd`)를 쓴다. `tmpdir`은 회차마다 새 디렉토리라 진행이 누적되지 않는다.
 
 ## 신호 규약 (선택)
 
-에이전트가 종료 의도를 표현해야 하면 `meta_dir`의 `signals/`에 파일을 만들게 하고(`.oneshot/signals/DONE` 등) 그 파일명이 `signals` 배열로 돌아온다. **도구는 이름·내용을 파싱하지 않는다** — 규약은 프롬프트를 쓰는 호출자가 정한다.
+도구가 프롬프트 말미에 작업 디렉토리와 신호 디렉토리 절대 경로를 자동으로 덧붙인다. 에이전트가 그 `signals/`에 파일을 만들면 파일명이 `signals` 배열로 돌아온다. **도구는 이름·내용을 파싱하지 않는다** — `DONE`/`BLOCKED` 같은 어휘는 프롬프트를 쓰는 호출자가 정한다.
+
+신호는 **매 실행 시작에 비운다** — 재사용 작업 공간에 남은 직전 실행 신호가 잡히면 `while`의 `until`이 첫 회차에 즉시 참이 되기 때문이다.
 
 ## 주의
 

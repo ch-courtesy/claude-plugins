@@ -11,25 +11,29 @@
 #   isolation           (string)        worktree(기본) | cwd | tmpdir
 #   repo                (string)        대상 저장소 (기본: cwd)
 #   vendor              (string)        claude(기본) | codex
-#   workdir_name        (string)        worktree/tmpdir 작업 공간 이름 (기본: oneshot)
+#   workdir_name        (string)        작업 공간·lock·메타 디렉토리 이름 ([A-Za-z0-9_-], 기본: oneshot)
 #
-# 출력 (JSON 객체): exit_code, output, log_path, workdir, commits, dirty, signals
+# 출력 (JSON 객체): exit_code, output, log_path, workdir, meta_dir, commits, dirty, signals
+#   실패 시에도 같은 형태에 error 필드를 더해 반환한다 (stdout 은 언제나 JSON 하나).
+#   output 은 로그 꼬리 최대 ONESHOT_OUTPUT_BYTES(기본 100000) 바이트를 UTF-8 정제한 것.
 
 set -euo pipefail
 
-die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+# 실패도 stdout 은 JSON 하나 — 호출자(파이프라인 while 등)가 파싱 실패 대신
+# 구조화된 결과를 받는다. 사람용 메시지는 stderr 로도 남긴다.
+die() {
+  printf 'ERROR: %s\n' "$*" >&2
+  jq -nc --arg e "$*" --arg w "${WORKDIR:-}" --arg m "${META_DIR:-}" --arg l "${LOG_PATH:-}" \
+    '{exit_code: 1, error: $e, output: "", log_path: $l, workdir: $w, meta_dir: $m,
+      commits: [], dirty: false, signals: []}' 2>/dev/null \
+    || printf '{"exit_code":1,"error":"%s","output":"","log_path":"","workdir":"","meta_dir":"","commits":[],"dirty":false,"signals":[]}\n' "$(printf '%s' "$*" | tr -d '"\\')"
+  exit 1
+}
 require_tool() { command -v "$1" >/dev/null 2>&1 || die "'$1' 명령이 필요합니다."; }
 
 # ----- 프로세스 트리 종료 (에이전트가 남긴 자손까지 완결 종료) -----
 proc_alive() { kill -0 "$1" 2>/dev/null; }
-proc_children() {
-  if command -v pgrep >/dev/null 2>&1; then
-    pgrep -P "$1" 2>/dev/null || true
-  elif command -v ps >/dev/null 2>&1; then
-    # BSD/macOS ps 는 --ppid 미지원 — 전체 목록에서 ppid 매칭.
-    ps -axo pid=,ppid= 2>/dev/null | awk -v p="$1" '$2 == p {print $1}' || true
-  fi
-}
+proc_children() { pgrep -P "$1" 2>/dev/null || true; }
 tree_pids() {
   printf '%s\n' "$1"
   local c; for c in $(proc_children "$1"); do tree_pids "$c"; done
@@ -48,9 +52,10 @@ terminate_tree() {
 # ----- 입력 파싱 -----
 require_tool jq
 require_tool git
+require_tool pgrep
 INPUT="$(cat)"
 [[ -n "$INPUT" ]] || die "stdin 으로 입력 JSON 이 필요합니다."
-jq -e . >/dev/null 2>&1 <<< "$INPUT" || die "입력이 올바른 JSON 이 아닙니다."
+jq -e 'type == "object"' >/dev/null 2>&1 <<< "$INPUT" || die "입력은 JSON 객체여야 합니다."
 
 field() { jq -r --arg k "$1" --arg d "$2" '.[$k] // $d' <<< "$INPUT"; }
 PROMPT="$(field prompt '')"
@@ -61,6 +66,8 @@ VENDOR="$(field vendor claude)"
 WORKDIR_NAME="$(field workdir_name oneshot)"
 
 [[ -n "$PROMPT" ]] || die "prompt 는 필수입니다."
+# 경로 요소로 쓰이므로 안전한 식별자만 — 상위 탈출·슬래시·공백 차단.
+[[ "$WORKDIR_NAME" =~ ^[A-Za-z0-9_-]+$ ]] || die "workdir_name 은 [A-Za-z0-9_-] 만 허용: $WORKDIR_NAME"
 case "$ISOLATION" in worktree|cwd|tmpdir) ;; *) die "지원하지 않는 isolation: $ISOLATION (worktree, cwd, tmpdir)" ;; esac
 case "$VENDOR" in claude|codex) ;; *) die "지원하지 않는 vendor: $VENDOR (claude, codex)" ;; esac
 require_tool "$VENDOR"
@@ -101,7 +108,7 @@ if [[ -n "$LOCK_FILE" ]]; then
   trap 'rm -f "$LOCK_FILE"' EXIT
 fi
 
-if [[ "$ISOLATION" != "cwd" && ! -d "$WORKDIR/.git" && ! -f "$WORKDIR/.git" ]]; then
+if [[ "$ISOLATION" == "worktree" && ! -d "$WORKDIR/.git" && ! -f "$WORKDIR/.git" ]]; then
   printf 'oneshot: 워크트리 생성 %s (로컬 HEAD 기준)\n' "$WORKDIR" >&2
   if ! git -C "$REPO" worktree add --detach "$WORKDIR" HEAD >&2; then
     # "등록됐지만 없는" 잔재가 원인일 수 있다 — prune 후 1회만 재시도.
@@ -115,64 +122,83 @@ fi
 if [[ "$ISOLATION" == "cwd" ]]; then
   META_DIR="$(mktemp -d "${TMPDIR:-/tmp}/$WORKDIR_NAME-meta.XXXXXX")"
 else
-  META_DIR="$WORKDIR/.oneshot"
+  META_DIR="$WORKDIR/.$WORKDIR_NAME"
   mkdir -p "$META_DIR"
   printf '*\n' > "$META_DIR/.gitignore"   # 실행 산출물이 에이전트 커밋에 섞이지 않게
 fi
+# 신호는 이번 실행의 것만 회수한다 — 재사용 작업 공간에 남은 직전 신호가
+# 그대로 잡히면 while 의 until 이 첫 회차에 즉시 참이 된다.
+rm -rf "$META_DIR/signals"
 mkdir -p "$META_DIR/signals"
 LOG_PATH="$META_DIR/run-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
 
 HEAD_BEFORE="$(git -C "$WORKDIR" rev-parse HEAD 2>/dev/null || echo "")"
 
 # ----- 에이전트 1회 실행 -----
+# 신호를 남길 자리를 에이전트가 알아야 한다 — 프롬프트 말미에 절대 경로로 알린다.
+FULL_PROMPT="$PROMPT
+
+---
+작업 디렉토리: $WORKDIR
+종료 의도를 표현하려면 이 디렉토리에 파일을 만든다(내용은 자유, 파일명이 곧 신호): $META_DIR/signals/"
+
 run_agent() {
   cd "$WORKDIR"
+  local sys=()
   case "$VENDOR" in
     claude)
-      if [[ -n "$SYSTEM_FILE" ]]; then
-        claude --print --no-session-persistence --dangerously-skip-permissions \
-          --system-prompt-file "$SYSTEM_FILE" --add-dir . <<< "$PROMPT"
-      else
-        claude --print --no-session-persistence --dangerously-skip-permissions \
-          --add-dir . <<< "$PROMPT"
-      fi
+      [[ -n "$SYSTEM_FILE" ]] && sys=(--system-prompt-file "$SYSTEM_FILE")
+      # bash 3.2 는 set -u 에서 빈 배열 확장을 unbound 로 본다 — ${arr[@]+"${arr[@]}"} 관용구.
+      claude --print --no-session-persistence --dangerously-skip-permissions \
+        ${sys[@]+"${sys[@]}"} --add-dir . <<< "$FULL_PROMPT"
       ;;
     codex)
-      if [[ -n "$SYSTEM_FILE" ]]; then
-        cat "$SYSTEM_FILE" - <<< "$PROMPT" | codex exec --ephemeral --sandbox workspace-write -
-      else
-        codex exec --ephemeral --sandbox workspace-write - <<< "$PROMPT"
-      fi
+      # 지침과 프롬프트 사이에 빈 줄을 보장 — 파일 끝 개행 유무에 의존하지 않는다.
+      { [[ -n "$SYSTEM_FILE" ]] && { cat "$SYSTEM_FILE"; printf '\n\n'; }; printf '%s\n' "$FULL_PROMPT"; } \
+        | codex exec --ephemeral --sandbox workspace-write -
       ;;
   esac
 }
 
 EXIT_CODE=0
-( run_agent > "$LOG_PATH" 2>&1 ) &
+run_agent > "$LOG_PATH" 2>&1 &
 AGENT_PID=$!
-trap 'terminate_tree "$AGENT_PID" >/dev/null 2>&1 || true; [[ -n "$LOCK_FILE" ]] && rm -f "$LOCK_FILE"; exit 130' INT TERM HUP QUIT
+# EXIT 트랩이 lock 을 해제하므로 여기선 트리 종료만 한다.
+trap 'terminate_tree "$AGENT_PID" >/dev/null 2>&1 || true; exit 130' INT TERM HUP QUIT
 wait "$AGENT_PID" || EXIT_CODE=$?
 
 # ----- 결과 수집 -----
 HEAD_AFTER="$(git -C "$WORKDIR" rev-parse HEAD 2>/dev/null || echo "")"
-if [[ -n "$HEAD_BEFORE" && "$HEAD_AFTER" != "$HEAD_BEFORE" ]]; then
-  COMMITS_JSON="$(git -C "$WORKDIR" log --format=%H "$HEAD_BEFORE..$HEAD_AFTER" 2>/dev/null | jq -R . | jq -sc .)"
-else
+if [[ -z "$HEAD_AFTER" || "$HEAD_AFTER" == "$HEAD_BEFORE" ]]; then
   COMMITS_JSON='[]'
+elif [[ -z "$HEAD_BEFORE" ]]; then
+  # unborn HEAD 였다면 이번 실행이 만든 커밋이 전부다.
+  COMMITS_JSON="$(git -C "$WORKDIR" log --format=%H 2>/dev/null | jq -R . | jq -sc .)"
+else
+  COMMITS_JSON="$(git -C "$WORKDIR" log --format=%H "$HEAD_BEFORE..$HEAD_AFTER" 2>/dev/null | jq -R . | jq -sc .)"
 fi
 
-# dirty 는 에이전트가 만든 변경만 본다 — oneshot 자신의 산출물(메타·다른 격리
-# 실행의 워크트리)은 제외해야 읽기 전용 실행이 오탐되지 않는다.
+# dirty 는 에이전트가 만든 변경만 본다 — oneshot 자신의 산출물(작업 공간·lock·메타)은
+# 제외해야 읽기 전용 실행이 오탐되지 않는다. porcelain 은 "XY 경로" 형식이라
+# 상태 코드 2자 + 공백을 건너뛰고 경로만 본다.
 DIRTY=false
-[[ -n "$(git -C "$WORKDIR" status --porcelain 2>/dev/null \
-         | grep -vE '(^|/)\.[A-Za-z0-9_-]+-worktree/|(^|/)\.oneshot/' || true)" ]] && DIRTY=true
+if git -C "$WORKDIR" rev-parse --git-dir >/dev/null 2>&1; then
+  changed="$(git -C "$WORKDIR" status --porcelain 2>/dev/null \
+    | sed 's/^...//' \
+    | grep -vE "^\.${WORKDIR_NAME}(-worktree/|-lock$|/)" || true)"
+  [[ -n "$changed" ]] && DIRTY=true
+fi
 
 # 신호: 에이전트가 메타 디렉토리의 signals/ 에 남긴 파일명 목록 (내용 미파싱).
 SIGNALS_JSON="$( ( cd "$META_DIR/signals" 2>/dev/null && find . -mindepth 1 -type f | sed 's|^\./||' ) | jq -R . | jq -sc .)"
 
+# 로그는 그대로 두고 output 에는 유효 UTF-8 로 정제한 꼬리만 담는다 —
+# 잘못된 바이트 하나로 결과 전체(커밋·신호)를 잃지 않게.
+OUTPUT_TEXT="$(tail -c "${ONESHOT_OUTPUT_BYTES:-100000}" "$LOG_PATH" 2>/dev/null | iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true)"
+
 jq -nc \
   --argjson exit_code "$EXIT_CODE" \
-  --arg output "$(cat "$LOG_PATH" 2>/dev/null || true)" \
+  --arg output "$OUTPUT_TEXT" \
   --arg log_path "$LOG_PATH" \
   --arg workdir "$WORKDIR" \
   --arg meta_dir "$META_DIR" \

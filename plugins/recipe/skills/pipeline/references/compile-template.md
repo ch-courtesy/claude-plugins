@@ -54,9 +54,9 @@ allowed-tools:
    `{run_id, pipeline: "⟨이름⟩", status: "running", inputs: {...}, nodes: {⟨각 id⟩: {status: "pending"}}}`
 2. **순서.** 아래 실행 계획의 단계 순서대로 진행한다. 같은 단계의 노드는 상호 의존이 없으므로 순서 무관하게 모두 실행한다.
 3. **노드 실행.** 각 노드마다: `in:` 매핑을 상류 출력 파일에서 해석 → 실행(아래 노드별 지시) → 출력을 outputs 스키마와 대조 → `runs/<run-id>/<노드id>.json` 저장 → state.json의 해당 노드를 `completed`로 갱신.
-4. **오류.** 실패 시 retry 횟수만큼 재시도. 소진하면 on_error가 `continue`면 `failed` 기록 후 진행(그 출력을 참조하는 하류는 `skipped`), `fail`이면 state.json을 `status: "failed"`로 갱신하고 중단, run-id와 resume 방법을 보고한다.
+4. **오류.** 실패 시 retry 횟수만큼 재시도. 소진하면 on_error가 `continue`면 `failed` 기록 후 진행(그 출력을 참조하는 하류는 `skipped` — 단 while 의 `max_iterations` 소진은 실패가 아니라 상한 도달이라 5-1 항을 따른다), `fail`이면 state.json을 `status: "failed"`로 갱신하고 중단, run-id와 resume 방법을 보고한다.
 5. **분기.** if/switch에서 선택되지 않은 가지의 노드는 `skipped`. 스킵 노드를 참조하는 하류도 연쇄 `skipped`.
-5-1. **반복(while).** 회차 1부터 시작해 `in` 매핑을 매번 같게 해석·실행하고, 회차 출력에 `until`(jq)을 적용한다. 참이면 정지, 거짓이면 다음 회차. 회차 출력은 `runs/<run-id>/<노드id>/<회차>.json`에, 진행 상태는 state.json의 해당 노드에 `{status: "running", iteration: n}`으로 기록한다. `max_iterations`까지 `until`이 참이 되지 않으면 on_error를 따른다(`fail`이면 중단, `continue`면 마지막 회차 결과로 진행). 노드 출력은 `{iterations, last}` — `last`는 마지막 회차 출력 객체.
+5-1. **반복(while).** 회차 1부터 시작해 `in` 매핑을 매번 같게 해석·실행하고, 회차 출력에 `until`(jq)을 적용한다. 참이면 정지, 거짓이면 다음 회차. 회차 출력은 `runs/<run-id>/<노드id>/<회차>.json`에, 진행 상태는 state.json의 해당 노드에 `{status: "running", iteration: n}`으로 기록한다. `max_iterations`까지 `until`이 참이 되지 않으면 on_error를 따른다: `fail`이면 중단, `continue`면 노드를 `completed` 로 기록하고 `{iterations, last}` 를 정상 출력해 하류를 진행시킨다(하류 skip 없음). 노드 출력은 `{iterations, last}` — `last`는 마지막 회차 출력 객체.
 6. **human-gate.** 현재 런타임의 구조화된 사용자 질문 기능(없으면 간결한 직접 질문)으로 제시. 승인 외 선택 시 `status: "aborted"`로 중단(상태 보존).
 7. **resume.** `resume <run-id>`는 state.json을 읽어 `completed` 노드의 출력 파일을 재사용하고 `pending/failed/skipped(게이트 중단 포함)`부터 재개한다. state.json이 없거나 파이프라인 이름이 다르면 추측하지 말고 보고한다.
 8. **완료.** 전 노드 종료 시 `status: "completed"`. outputs 매핑(⟨정의 outputs⟩)을 해석해 `runs/<run-id>/outputs.json`으로 저장하고 그 값을 보고한다. outputs 정의가 없으면 말단 노드 출력을 요약 보고한다.
