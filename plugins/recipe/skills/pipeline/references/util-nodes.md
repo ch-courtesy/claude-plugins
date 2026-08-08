@@ -49,7 +49,7 @@
   util: while
   skill: oneshot                      # 항목마다가 아니라 회차마다 실행할 typed 스킬 (또는 inline: 정의)
   in: {prompt: $pipeline.task, isolation: "worktree"}
-  until: '.signals | length > 0'      # jq boolean, 회차 출력 객체에 적용 — 참이면 정지
+  until: '.output | test("<<DONE>>")' # jq boolean, 회차 출력 객체에 적용 — 참이면 정지
   max_iterations: 30                  # 필수 — 무한 방지
   outputs: → {iterations: number, last: object}
 ```

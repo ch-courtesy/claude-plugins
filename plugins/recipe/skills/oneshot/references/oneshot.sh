@@ -2,8 +2,9 @@
 # oneshot.sh — 외부 에이전트를 격리 환경에서 1회 실행하고 결과를 JSON 으로 반환한다.
 #
 # 계약: stdin 으로 입력 JSON, stdout 으로 출력 JSON (진단 메시지는 전부 stderr).
-# 반복·종료 판정은 하지 않는다 — 재료(exit_code·signals·commits)만 돌려주고
-# 판정은 호출자(pipeline while 노드 등)의 몫이다.
+# 반복·종료 판정은 하지 않는다 — 재료(exit_code·output·commits·dirty)만 돌려주고
+# 판정은 호출자(pipeline while 노드 등)의 몫이다. 종료 표지가 필요하면 호출자가
+# 프롬프트에서 규약을 정하고(예: 마지막 줄에 <<DONE>>) output 으로 판정한다.
 #
 # 입력 (JSON 객체):
 #   prompt              (string, 필수)  에이전트에 줄 지시
@@ -11,9 +12,9 @@
 #   isolation           (string)        worktree(기본) | cwd | tmpdir
 #   repo                (string)        대상 저장소 (기본: cwd)
 #   vendor              (string)        claude(기본) | codex
-#   workdir_name        (string)        작업 공간·lock·메타 디렉토리 이름 ([A-Za-z0-9_-], 기본: oneshot)
+#   workdir_name        (string)        작업 공간·lock·로그 디렉토리 이름 ([A-Za-z0-9_-], 기본: oneshot)
 #
-# 출력 (JSON 객체): exit_code, output, log_path, workdir, meta_dir, commits, dirty, signals
+# 출력 (JSON 객체): exit_code, output, log_path, workdir, commits, dirty
 #   실패 시에도 같은 형태에 error 필드를 더해 반환한다 (stdout 은 언제나 JSON 하나).
 #   output 은 로그 꼬리 최대 ONESHOT_OUTPUT_BYTES(기본 100000) 바이트를 UTF-8 정제한 것.
 
@@ -23,10 +24,10 @@ set -euo pipefail
 # 구조화된 결과를 받는다. 사람용 메시지는 stderr 로도 남긴다.
 die() {
   printf 'ERROR: %s\n' "$*" >&2
-  jq -nc --arg e "$*" --arg w "${WORKDIR:-}" --arg m "${META_DIR:-}" --arg l "${LOG_PATH:-}" \
-    '{exit_code: 1, error: $e, output: "", log_path: $l, workdir: $w, meta_dir: $m,
-      commits: [], dirty: false, signals: []}' 2>/dev/null \
-    || printf '{"exit_code":1,"error":"%s","output":"","log_path":"","workdir":"","meta_dir":"","commits":[],"dirty":false,"signals":[]}\n' "$(printf '%s' "$*" | tr -d '"\\')"
+  jq -nc --arg e "$*" --arg w "${WORKDIR:-}" --arg l "${LOG_PATH:-}" \
+    '{exit_code: 1, error: $e, output: "", log_path: $l, workdir: $w,
+      commits: [], dirty: false}' 2>/dev/null \
+    || printf '{"exit_code":1,"error":"%s","output":"","log_path":"","workdir":"","commits":[],"dirty":false}\n' "$(printf '%s' "$*" | tr -d '"\\')"
   exit 1
 }
 require_tool() { command -v "$1" >/dev/null 2>&1 || die "'$1' 명령이 필요합니다."; }
@@ -117,30 +118,25 @@ if [[ "$ISOLATION" == "worktree" && ! -d "$WORKDIR/.git" && ! -f "$WORKDIR/.git"
   fi
 fi
 
-# 실행 메타(로그·신호)는 작업 공간 안에 두되, cwd 격리에서는 저장소를 오염시키지
-# 않도록 저장소 밖에 만든다 (읽기 전용 리뷰 용도라 워킹트리를 건드리면 안 된다).
+# 로그는 작업 공간 안에 두되, cwd 격리에서는 저장소를 오염시키지 않도록 밖에 만든다
+# (읽기 전용 리뷰 용도라 워킹트리를 건드리면 안 된다).
 if [[ "$ISOLATION" == "cwd" ]]; then
-  META_DIR="$(mktemp -d "${TMPDIR:-/tmp}/$WORKDIR_NAME-meta.XXXXXX")"
+  LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/$WORKDIR_NAME-log.XXXXXX")"
 else
-  META_DIR="$WORKDIR/.$WORKDIR_NAME"
-  mkdir -p "$META_DIR"
-  printf '*\n' > "$META_DIR/.gitignore"   # 실행 산출물이 에이전트 커밋에 섞이지 않게
+  LOG_DIR="$WORKDIR/.$WORKDIR_NAME"
+  mkdir -p "$LOG_DIR"
+  printf '*\n' > "$LOG_DIR/.gitignore"   # 실행 산출물이 에이전트 커밋에 섞이지 않게
 fi
-# 신호는 이번 실행의 것만 회수한다 — 재사용 작업 공간에 남은 직전 신호가
-# 그대로 잡히면 while 의 until 이 첫 회차에 즉시 참이 된다.
-rm -rf "$META_DIR/signals"
-mkdir -p "$META_DIR/signals"
-LOG_PATH="$META_DIR/run-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
+LOG_PATH="$LOG_DIR/run-$(date -u +%Y%m%dT%H%M%SZ)-$$.log"
 
 HEAD_BEFORE="$(git -C "$WORKDIR" rev-parse HEAD 2>/dev/null || echo "")"
 
 # ----- 에이전트 1회 실행 -----
-# 신호를 남길 자리를 에이전트가 알아야 한다 — 프롬프트 말미에 절대 경로로 알린다.
+# 작업 위치만 알린다 — 종료 표지 같은 규약은 호출자가 prompt 에 직접 넣는다.
 FULL_PROMPT="$PROMPT
 
 ---
-작업 디렉토리: $WORKDIR
-종료 의도를 표현하려면 이 디렉토리에 파일을 만든다(내용은 자유, 파일명이 곧 신호): $META_DIR/signals/"
+작업 디렉토리: $WORKDIR"
 
 run_agent() {
   cd "$WORKDIR"
@@ -189,9 +185,6 @@ if git -C "$WORKDIR" rev-parse --git-dir >/dev/null 2>&1; then
   [[ -n "$changed" ]] && DIRTY=true
 fi
 
-# 신호: 에이전트가 메타 디렉토리의 signals/ 에 남긴 파일명 목록 (내용 미파싱).
-SIGNALS_JSON="$( ( cd "$META_DIR/signals" 2>/dev/null && find . -mindepth 1 -type f | sed 's|^\./||' ) | jq -R . | jq -sc .)"
-
 # 로그는 그대로 두고 output 에는 유효 UTF-8 로 정제한 꼬리만 담는다 —
 # 잘못된 바이트 하나로 결과 전체(커밋·신호)를 잃지 않게.
 OUTPUT_TEXT="$(tail -c "${ONESHOT_OUTPUT_BYTES:-100000}" "$LOG_PATH" 2>/dev/null | iconv -c -f UTF-8 -t UTF-8 2>/dev/null || true)"
@@ -201,9 +194,7 @@ jq -nc \
   --arg output "$OUTPUT_TEXT" \
   --arg log_path "$LOG_PATH" \
   --arg workdir "$WORKDIR" \
-  --arg meta_dir "$META_DIR" \
   --argjson commits "$COMMITS_JSON" \
   --argjson dirty "$DIRTY" \
-  --argjson signals "$SIGNALS_JSON" \
   '{exit_code: $exit_code, output: $output, log_path: $log_path, workdir: $workdir,
-    meta_dir: $meta_dir, commits: $commits, dirty: $dirty, signals: $signals}'
+    commits: $commits, dirty: $dirty}'
