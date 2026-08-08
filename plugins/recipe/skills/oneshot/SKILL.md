@@ -28,7 +28,7 @@ allowed-tools:
 - **격리가 필요하면** 호출 전에 `git worktree add` 등으로 작업 공간을 만들고 그 경로를 `cwd`로 준다. 정리도 호출자 몫이다.
 - **커밋 여부**는 프롬프트로 지시한다 (예: "변경 후 `git add -A && git commit` 하라" / "커밋하지 마라").
 - **반복**은 파이프라인 `while` 노드로 감싼다. oneshot 은 typed 스킬이 아니므로(`kind` 없음) 노드에서는 `inline: {kind: script, run: {command: "bash …/oneshot.sh", input: stdin-json, output: stdout-json}}` 으로 참조한다.
-- **종료 표지**도 프롬프트 규약으로 정하고 판정은 호출자가 한다 — 예: 프롬프트에 "완료하면 마지막 줄에 `<<DONE>>`만 출력", `until: '.exit_code == 0 and (.output | split("\n") | last | test("<<DONE>>"))'`. 전문 매칭(`.output | test(...)`)은 에이전트가 지시를 되풀이하기만 해도 참이 되므로 마지막 줄로 좁힌다.
+- **종료 표지**도 프롬프트 규약으로 정하고 판정은 호출자가 한다 — 예: 프롬프트에 "완료하면 마지막 줄에 `<<DONE>>`만 출력", `until: '.exit_code == 0 and (.output | split("\n") | last | test("<<DONE>>"))'`. 전문 매칭(`.output | test(...)`)은 에이전트가 지시를 되풀이하기만 해도 참이 되므로 마지막 줄로 좁힌다 — `output`은 후행 개행이 제거돼 오므로 마지막 줄이 실제 마지막 출력이다.
 
 ## 주의
 
