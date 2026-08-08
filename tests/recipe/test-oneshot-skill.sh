@@ -32,27 +32,64 @@ ln -sf "$(command -v jq)" "$BIN/jq"
 SANDBOX_PATH="$BIN:/usr/bin:/bin"
 
 # 가짜 벤더 CLI — 프롬프트를 어디로 받았는지, 얼마나 받았는지 보고한다.
-# claude·codex 는 stdin, agy 는 --print 인자가 규약이다.
-make_fake() {   # $1=이름  $2=동작(echo|size|big|fail)
+# 분기는 실물 계약(agy=argv, 나머지=stdin)과 1:1 로 자기 이름을 본다. 프롬프트 모양
+# (`--` 로 시작하는지)으로 분기하면 옵션형 프롬프트에서 실물과 다르게 동작해 가짜로
+# 통과시킨다 — 실제로 그래서 agy 의 옵션 오인식을 이 테스트가 못 잡았다.
+make_fake() {   # $1=이름  $2=동작(echo|size|big|fail|bytes)
   cat > "$BIN/$1" <<EOF
 #!/usr/bin/env bash
 mode=$2
-prompt=""
-if [[ "\$1" == "--print" && -n "\${2:-}" && "\${2:0:2}" != "--" ]]; then prompt="\$2"; else prompt="\$(cat)"; fi
+if [[ "\$(basename "\$0")" == agy ]]; then
+  prompt=""
+  while (( \$# )); do [[ "\$1" == "--print" ]] && { prompt="\${2:-}"; break; }; shift; done
+else
+  prompt="\$(cat)"
+fi
 case "\$mode" in
-  echo) printf '%s' "\$prompt" ;;
-  size) printf 'BYTES=%s' "\${#prompt}" ;;
-  big)  head -c 1500000 /dev/zero | tr '\\0' 'y' ;;
-  fail) printf 'boom' >&2; exit 42 ;;
+  echo)  printf '%s' "\$prompt" ;;
+  size)  printf 'BYTES=%s' "\${#prompt}" ;;
+  big)   head -c 1500000 /dev/zero | tr '\\0' 'y' ;;
+  fail)  printf 'boom' >&2; exit 42 ;;
 esac
 EOF
   chmod +x "$BIN/$1"
 }
 
+# 바이트 무결성 전용 가짜 — 받은 stdin 을 변형 없이 16진수로 보고한다.
+# 셸 변수를 거치면 후행 개행·NUL 이 사라지므로 od 로 원본을 되돌려 판정한다.
+make_hexdump() {   # $1=이름
+  cat > "$BIN/$1" <<'EOF'
+#!/usr/bin/env bash
+od -An -tx1 -v | tr -d ' \n'
+EOF
+  chmod +x "$BIN/$1"
+}
+
+# 케이스마다 시간 상한을 건다. 상한이 없으면 멈추는 회귀(writer 없는 FIFO 를 지침
+# 파일로 여는 등)가 "실패" 가 아니라 "무한 대기" 로 나타나 판정 자체가 일어나지 않는다.
+# macOS 에 timeout(1) 이 없어 직접 센다 — 폴링이라 정상 케이스마다 최대 POLL 만큼
+# 늦어지지만(23케이스 × 0.1초 ≈ 3초), 백그라운드 킬러에 의존하지 않아 상한을 거는
+# 코드가 상한 없는 것에 기대지 않는다.
+RUN_TIMEOUT=20
+POLL=0.1
+
 run() {  # stdin JSON 을 주고 stdout 을 돌려준다. 종료 코드는 RUN_CODE 로.
-  local input="$1"
-  OUT="$(printf '%s' "$input" | PATH="$SANDBOX_PATH" bash "$SCRIPT" 2>/dev/null)"
-  RUN_CODE=$?
+  local input="$1" pid ticks=0
+  local max=$(( RUN_TIMEOUT * 10 ))
+  # 입력·출력을 파이프가 아니라 파일로 둔다 — 파이프라인이면 $! 가 끝 요소만 가리켜
+  # 앞쪽 프로세스가 남고, 죽일 때 상속된 파이프를 붙잡아 다음 케이스를 막는다.
+  printf '%s' "$input" > "$WORK/run.in"
+  PATH="$SANDBOX_PATH" bash "$SCRIPT" < "$WORK/run.in" > "$WORK/run.out" 2>/dev/null &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null && (( ticks < max )); do
+    sleep "$POLL"; ticks=$(( ticks + 1 ))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    pkill -P "$pid" 2>/dev/null; kill -9 "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+    fail "케이스가 ${RUN_TIMEOUT}초 안에 끝나지 않음 (입력: ${input:0:40})"
+  fi
+  wait "$pid"; RUN_CODE=$?
+  OUT="$(cat "$WORK/run.out")"
 }
 
 echo "=== TEST 1: 스킬 패키지 ==="
@@ -60,8 +97,9 @@ echo "=== TEST 1: 스킬 패키지 ==="
 bash -n "$SCRIPT" || fail "스크립트 문법 오류"
 grep -qE '^name: oneshot' "$SKILL_MD" || fail "SKILL.md name 누락"
 # 계약 본문은 스크립트 헤더 한 곳에만 둔다 — SKILL.md 는 그리로 보내기만 한다.
+# 주석 줄에 앵커한다. 앵커가 없으면 코드의 exit_code 를 맞혀 헤더를 통째로 지워도 통과한다.
 grep -q '단일 출처' "$SKILL_MD" || fail "SKILL.md 에 계약 단일 출처 지시 없음"
-grep -q 'exit_code' "$SCRIPT" || fail "스크립트 헤더가 exit_code 계약을 설명하지 않음"
+grep -q '^#.*exit_code' "$SCRIPT" || fail "스크립트 헤더가 exit_code 계약을 설명하지 않음"
 ok "패키지 구조와 문법"
 
 echo ""
@@ -224,11 +262,57 @@ jq -e 'has("error")' >/dev/null <<< "$OUT" \
 # macOS 기준이다.)
 make_fake agy echo
 KBIG="$WORK/kbig.txt"; : > "$KBIG"
-for _ in $(seq 200); do printf '가나다라마바사아자차카타파하%.0s' $(seq 71) >> "$KBIG"; done
+for _ in $(seq 400); do printf '가나다라마바사아자차카타파하%.0s' $(seq 71) >> "$KBIG"; done
+# 약 39.8만 자 = 119만 바이트. 문자 수로 재면 한계 아래라 통과하지만 바이트로는 초과다
+# — 이 간극이 정확히 회귀 탐지 지점이다.
 run "$(jq -nc --rawfile p "$KBIG" '{prompt:$p, vendor:"agy"}')"
 jq -e 'has("error")' >/dev/null <<< "$OUT" \
   || fail "멀티바이트 프롬프트가 agy 크기 가드를 통과함 (exit_code=$(jq -r .exit_code <<< "$OUT"))"
-ok "옵션형 경로·멀티바이트 크기 가드"
+
+# 실물 agy 는 전역 플래그(--version·--help)를 위치와 무관하게 선스캔한다 — `--` 를
+# 붙이거나 순서를 바꿔도 프롬프트 자리의 그 문자열이 플래그로 가로챈다(실측). 그러면
+# 에이전트가 뜬 적 없는데 {"exit_code":0} 성공으로 보고된다. argv 로는 못 막으므로
+# 도구가 먼저 거부한다.
+run '{"prompt":"--version","vendor":"agy"}'
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "agy 옵션형 프롬프트가 거부되지 않음 (output=$(jq -r .output <<< "$OUT" | head -c 40))"
+
+# 제어문자가 든 경로는 명령 치환이 후행 개행을 잘라 다른 경로로 정규화한다 —
+# 요청과 다른 디렉토리에서 무인 에이전트가 뜨고 성공으로 보고된다.
+run "$(jq -nc '{prompt:"x", cwd:"/tmp/\n"}')"
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "제어문자가 든 cwd 가 거부되지 않음"
+
+# 문서화된 타입을 강제하지 않으면 {"prompt":7} 이 "7" 로, {"vendor":false} 가 기본
+# 벤더로 조용히 흘러 "전제가 깨지면 중단한다" 는 계약이 거짓이 된다.
+for bad in '{"prompt":7}' '{"vendor":false,"prompt":"x"}' '{"prompt":"x","cwd":3}'; do
+  run "$bad"
+  jq -e 'has("error")' >/dev/null <<< "$OUT" \
+    || fail "타입 위반이 통과함: $bad"
+done
+
+# FIFO·장치 파일은 -r 과 ! -d 를 통과한 뒤 cat 이 끝나지 않아 프로세스가 영원히 멈춘다.
+FIFO="$WORK/fifo"; mkfifo "$FIFO"
+run "$(jq -nc --arg f "$FIFO" '{prompt:"x", system_prompt_file:$f}')"
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "FIFO 가 지침 파일로 통과함 (정규 파일 검사 부재)"
+ok "옵션형 경로·멀티바이트 크기 가드·타입·비정규 파일"
+
+echo ""
+echo "=== TEST 9: 프롬프트 바이트열이 변형 없이 벤더에 도달한다 ==="
+# 셸 변수를 거치면 명령 치환이 후행 개행을 전부 자른다(POSIX 규정). 계약은 프롬프트·
+# 지침의 바이트열을 보존한다고 선언하므로, 도착 바이트를 16진수로 되돌려 판정한다.
+make_hexdump claude
+run "$(jq -nc '{prompt:"a\n\n\n"}')"
+[[ "$(jq -r .output <<< "$OUT")" == "610a0a0a" ]] \
+  || fail "프롬프트 후행 개행이 소실됨: $(jq -r .output <<< "$OUT")"
+
+# 지침 병합도 같은 경로다 — 지침 + 빈 줄 + 프롬프트가 바이트 그대로여야 한다.
+printf 'S\n' > "$WORK/sys.txt"
+run "$(jq -nc --arg f "$WORK/sys.txt" '{prompt:"P\n", system_prompt_file:$f}')"
+[[ "$(jq -r .output <<< "$OUT")" == "530a0a0a500a" ]] \
+  || fail "지침 병합에서 바이트가 변형됨: $(jq -r .output <<< "$OUT")"
+ok "프롬프트·지침 바이트 무결성"
 
 echo ""
 echo "모든 oneshot 스킬 테스트 통과"

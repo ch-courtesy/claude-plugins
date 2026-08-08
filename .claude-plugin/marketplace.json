@@ -47,8 +47,7 @@
         "auth",
         "secrets",
         "oneshot",
-        "isolation",
-        "agent"
+        "isolation"
       ]
     },
     {
