@@ -9,12 +9,13 @@ compile 1단계에서 전 항목을 적용한다. 하나라도 실패하면 산�
 - [ ] 각 노드는 `skill` / `util` / `inline` 중 정확히 하나 — 단 유틸 노드의 설정 필드(foreach의 `skill:`·`items:`, transform의 `expr:` 등)는 판별자가 아니다: `util:`이 있으면 유틸 노드다
 - [ ] `skill` 참조가 `.agents/skills/<이름>/SKILL.md`로 실재하고, frontmatter가 typed 계약(kind/inputs/outputs — `kind: pipeline`이 아니면 run도)을 만족
 - [ ] `inline` 정의가 typed 계약의 kind/inputs/outputs/run을 갖춤 (`kind: pipeline` 인라인 금지)
-- [ ] `util`이 5종(if, switch, foreach, merge, transform, human-gate 중 if·switch는 각각) 중 하나이고 해당 유틸의 필수 필드(cond/then, cases, items/skill, expr, message)를 갖춤
+- [ ] `util`이 6종(if, switch, foreach, while, merge, transform, human-gate 중 if·switch는 각각) 중 하나이고 해당 유틸의 필수 필드(cond/then, cases, items/skill, skill·until·max_iterations, expr, message)를 갖춤
+- [ ] while의 `max_iterations`가 양의 정수(1 이상), `until`이 jq boolean 식이고 결정적(now·env 미사용)
 
 ## 2. 참조 무결성
 
-- [ ] 모든 `$참조`가 해석 가능: `$pipeline.<입력>`은 inputs에, `$<노드id>.<출력>`은 그 노드의 outputs에 실재 (최상위 `outputs:` 매핑의 참조 포함). 유틸 노드의 출력 필드: foreach=`results`, merge=`in`의 키, transform=`expr` 결과 객체의 최상위 키(정적 파싱), human-gate=`choice`
-- [ ] `$item`은 foreach의 `in:` 안에서만 사용
+- [ ] 모든 `$참조`가 해석 가능: `$pipeline.<입력>`은 inputs에, `$<노드id>.<출력>`은 그 노드의 outputs에 실재 (최상위 `outputs:` 매핑의 참조 포함). 유틸 노드의 출력 필드: foreach=`results`, while=`iterations`·`last`, merge=`in`의 키, transform=`expr` 결과 객체의 최상위 키(정적 파싱), human-gate=`choice`
+- [ ] `$item`은 foreach의 `in:` 안에서만 사용 (while은 회차 간 값 이월이 없어 자기 참조를 쓰지 않는다)
 - [ ] `needs:`의 노드 id가 실재
 - [ ] if/switch의 `then/else/run/default`에 나열된 id가 실재하고, 두 가지 이상에 중복되지 않음
 

@@ -1,4 +1,4 @@
-# 유틸 노드 시맨틱 (v1: 5종)
+# 유틸 노드 시맨틱 (6종)
 
 유틸 노드는 `util:` 필드로 선언하며 별도 타입 파일이 없다. 공통 속성(retry/timeout/on_error)은 동일하게 적용된다(단 human-gate에는 retry 무의미).
 
@@ -41,6 +41,25 @@
 - v1은 노드 **하나**를 map한다. 여러 단계를 순회하려면 그 단계들을 파이프라인으로 묶어 컴파일한 뒤 그 `kind: pipeline` 스킬을 `skill:`로 참조한다.
 - 항목 하나가 실패하면 노드의 on_error를 따른다: `fail`이면 전체 중단, `continue`면 해당 항목 결과를 `{error: ...}`로 기록하고 계속.
 - 항목 실행 기록은 `runs/<run-id>/<노드id>/<인덱스>.json`에 남긴다.
+
+## while — 조건 충족까지 반복 (until)
+
+```yaml
+- id: ralph
+  util: while
+  skill: oneshot                      # 항목마다가 아니라 회차마다 실행할 typed 스킬 (또는 inline: 정의)
+  in: {prompt: $pipeline.task, isolation: "worktree"}
+  until: '.signals | length > 0'      # jq boolean, 회차 출력 객체에 적용 — 참이면 정지
+  max_iterations: 30                  # 필수 — 무한 방지
+  outputs: → {iterations: number, last: object}
+```
+
+- foreach가 **map**(길이가 정해진 배열 순회)이라면 while은 **until**(끝날 때를 실행해 봐야 아는 반복)이다. 노드 **하나**를 반복하는 것은 같다.
+- 매 회차 **같은 `in` 매핑**으로 실행한다. 회차 간 값 이월은 없다 — 상태는 노드가 외부(파일·git 등)에 유지한다. 그래서 노드가 자기 자신을 참조하지 않고, 순환 검사 규칙도 그대로 적용된다.
+- `until`은 회차 출력 객체에 적용하는 jq boolean이며 결정적이어야 한다(`now`·`env` 금지). 참이면 그 회차를 마지막으로 정지한다.
+- `max_iterations`에 도달해도 `until`이 거짓이면 노드의 on_error를 따른다: `fail`(기본)이면 전체 중단, `continue`면 마지막 회차 결과를 그대로 출력하고 하류 진행.
+- 출력은 고정 `{iterations, last}` — `iterations`는 실행한 회차 수, `last`는 마지막 회차의 출력 객체(하류는 `$노드id.last.<필드>`로 읽는다).
+- 회차 실행 기록은 `runs/<run-id>/<노드id>/<회차>.json`에 남긴다(foreach와 같은 규약).
 
 ## merge — 팬인 합류
 
