@@ -27,8 +27,8 @@
     {
       "name": "recipe",
       "source": "./plugins/recipe",
-      "description": "Advisor 감독 워크플로, typed 스킬 기반 워크플로 정의·컴파일, codex-review CI 시크릿 재시드를 제공하는 에이전트 협업 도구 모음",
-      "version": "0.4.1",
+      "description": "Advisor 감독 워크플로, typed 스킬 기반 워크플로 정의·컴파일, 외부 격리 에이전트 1회 실행(oneshot), codex-review CI 시크릿 재시드를 제공하는 에이전트 협업 도구 모음",
+      "version": "0.5.0",
       "category": "productivity",
       "tags": [
         "advisor",
@@ -45,7 +45,10 @@
         "codex",
         "ci",
         "auth",
-        "secrets"
+        "secrets",
+        "oneshot",
+        "isolation",
+        "agent"
       ]
     },
     {
