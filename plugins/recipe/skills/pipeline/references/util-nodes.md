@@ -53,7 +53,9 @@
     outputs: {exit_code: {type: number}, output: {type: string}, error: {type: string}}
     run: {command: "bash <경로>/oneshot.sh", input: stdin-json, output: stdout-json}
   in: {prompt: $pipeline.task, cwd: $pipeline.workdir}
-  until: '.exit_code == 0 and (.output | split("\n") | last | test("<<DONE>>"))'
+  # 펜스·빈 줄을 걸러낸 마지막 유의미 줄로 판정 — 에이전트가 답을 ``` 로 감싸면
+  # 단순 last 는 영영 매칭되지 않아 상한까지 재기동한다.
+  until: '.exit_code == 0 and (.output | split("\n") | map(select(test("^\\s*(```.*)?\\s*$") | not)) | last // "" | test("<<DONE>>"))'
   max_iterations: 30                  # 필수 — 무한 방지
   outputs: → {iterations: number, last: object}
 ```
@@ -64,7 +66,8 @@
 - 출력은 고정 `{iterations, last}` — `iterations`는 실행한 회차 수, `last`는 마지막 회차의 출력 객체(하류는 `$노드id.last.<필드>`로 읽는다).
 - 회차 실행 기록은 `runs/<run-id>/<노드id>/<회차>.json`에 남긴다(foreach와 같은 규약).
 - 반복 대상이 외부 프로세스를 부르는 노드라면 `until`이 **성공 여부까지** 보게 한다 — 위 예시처럼 프로세스가 0으로 끝나도 내부 실패를 출력 필드로 알리는 계약이면, 그 필드를 조건에 넣지 않는 한 실패가 상한까지 반복된다.
-- 텍스트로 종료를 판정할 때는 그 문자열이 **실제로 만들어질 수 있는지** 확인한다. 예컨대 출력이 개행으로 끝나면 `split("\n") | last`는 항상 빈 문자열이라 조건이 영영 참이 되지 않는다 — 상한까지 반복하고 `on_error: continue` 면 그 소진이 정상 완료로 기록된다.
+- 텍스트로 종료를 판정할 때는 그 문자열이 **실제로 만들어질 수 있는지** 확인한다. 출력이 개행으로 끝나거나 에이전트가 답을 코드펜스로 감싸면 `split("\n") | last`는 표지가 아닌 것(빈 문자열·```)을 보게 되어 조건이 영영 참이 되지 않는다 — 상한까지 반복하고 `on_error: continue` 면 그 소진이 정상 완료로 기록된다. 프롬프트에 "코드블록으로 감싸지 마라"를 넣는 것은 보조일 뿐 판정의 방어선이 아니다(에이전트가 지킬 때만 작동한다).
+- 반대로 전문 매칭(`.output | test("표지")`)으로 완화하지 않는다 — 에이전트가 계획을 서술하며 표지를 언급만 해도 미완료를 완료로 조용히 오판한다. 판정식이 빗나갈 때는 **재기동(상한이 막아줌) 쪽으로 실패하게** 두는 편이 안전하다.
 
 ## merge — 팬인 합류
 
