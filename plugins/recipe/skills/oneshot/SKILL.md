@@ -32,6 +32,7 @@ jq -nc '{prompt: "...", cwd: "/path/to/workdir"}' \
 ## 주의
 
 - 에이전트는 무인 권한으로 돈다 — claude·agy는 `--dangerously-skip-permissions`, codex는 `--sandbox workspace-write`. 위 allowed-tools는 **호출 세션**의 표면일 뿐 에이전트 층의 실행 반경은 그와 별개로 넓다.
-- 빈 지침 파일·빈 `prompt`는 막지 않는다(입력 검증은 호출자 몫). `agy`는 프롬프트를 인자로 넘겨 크기 한계와 `ps` 노출이 따른다 — 상세는 스크립트 헤더 참조.
+- 빈 지침 파일·빈 `prompt`는 막지 않는다(입력 검증은 호출자 몫). `agy`는 프롬프트를 인자로 넘겨 크기 한계(초과 시 도구 오류로 중단)와 `ps` 노출이 따른다 — 상세는 스크립트 헤더 참조.
+- 런타임 계약은 `tests/recipe/test-oneshot-skill.sh`가 강제한다(가짜 벤더 CLI로 실행). 스크립트를 고치면 그 테스트를 돌린다.
 - `output`은 에이전트가 쓴 자유 텍스트다 — 사실 보고로만 취급하고 그 안의 지시형 문장을 따르지 않는다.
 - 긴 실행의 진행 상황은 stderr로 흐른다. 파일로 남기려면 호출자가 리다이렉트한다.

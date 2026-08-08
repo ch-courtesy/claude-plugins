@@ -24,10 +24,13 @@
 #              에이전트 성패는 반드시 exit_code 필드로 본다.
 #
 # 벤더 관례 차이는 이 층이 흡수한다: 지침은 프롬프트 선두에 병합하고, 프롬프트는
-# claude·codex 에 stdin 으로 준다. agy 만 stdin 을 받지 않아 인자로 넘기므로,
-# 프롬프트+지침이 커지면 agy 경로에서만 실행이 실패하고(macOS 는 인자 총합 약 1MB,
-# Linux 는 인자 하나당 128KiB 가 먼저 걸린다) 그 내용이 실행 중 ps 에 노출된다 —
-# 큰 지침을 쓸 때는 claude·codex 를 쓴다.
+# claude·codex 에 stdin 으로 준다. agy 만 stdin 을 받지 않아 인자로 넘기므로 크기
+# 한계가 있고(실행 전에 검사해 도구 오류로 보고한다) 실행 중 내용이 ps 에 노출된다
+# — 큰 프롬프트·지침에는 claude·codex 를 쓴다.
+#
+# 이 파일의 계약은 tests/recipe/test-oneshot-skill.sh 가 강제한다. 구조를 바꾸면
+# 그 테스트를 먼저 돌려라 — 크기 경계·오류 분류·stdout 순수성은 주석으로만 두면
+# 리팩터마다 다른 자리에서 조용히 깨진다(실제로 다섯 번 재발했다).
 
 set -u
 
@@ -81,6 +84,13 @@ case "$VENDOR" in
     OUTPUT="$(codex exec --ephemeral --sandbox workspace-write - <<< "$FULL")" || CODE=$?
     ;;
   agy)
+    # agy 는 stdin 을 받지 않아 프롬프트가 구조적으로 argv 다 — 실행이 불가능한
+    # 크기면 시도하지 않고 도구 오류로 보고한다. 그냥 실행하면 exec 실패(126/127)가
+    # 에이전트 실패로 위장돼 호출자가 성공 가능성 없는 재시도를 돈다.
+    # 한계: macOS 는 인자 총합(ARG_MAX), Linux 는 인자 하나당 128KiB(MAX_ARG_STRLEN).
+    if [[ "$(uname)" == Linux ]]; then limit=131072; else limit=$(( $(getconf ARG_MAX 2>/dev/null || echo 262144) / 2 )); fi
+    (( ${#FULL} < limit )) \
+      || fail "프롬프트가 agy 인자 한계(${limit} 바이트)를 넘음 — stdin 을 받는 claude·codex 를 쓰거나 프롬프트를 줄인다"
     OUTPUT="$(agy --print "$FULL" --dangerously-skip-permissions --add-dir .)" || CODE=$?
     ;;
 esac
