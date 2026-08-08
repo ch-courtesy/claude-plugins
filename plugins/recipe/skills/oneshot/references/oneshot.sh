@@ -25,12 +25,13 @@
 #
 # 벤더 관례 차이는 이 층이 흡수한다: 지침은 프롬프트 선두에 병합하고, 프롬프트는
 # claude·codex 에 stdin 으로 준다. agy 만 stdin 을 받지 않아 인자로 넘기므로,
-# 프롬프트+지침이 ARG_MAX(약 1MB)를 넘으면 agy 경로에서만 실행이 실패하고 그 내용이
-# 실행 중 ps 에 노출된다 — 큰 지침을 쓸 때는 claude·codex 를 쓴다.
+# 프롬프트+지침이 커지면 agy 경로에서만 실행이 실패하고(macOS 는 인자 총합 약 1MB,
+# Linux 는 인자 하나당 128KiB 가 먼저 걸린다) 그 내용이 실행 중 ps 에 노출된다 —
+# 큰 지침을 쓸 때는 claude·codex 를 쓴다.
 
 set -u
 
-command -v jq >/dev/null 2>&1 \
+command -v jq >/dev/null \
   || { printf '{"exit_code":1,"output":"","error":"jq 가 필요합니다."}\n'; exit 1; }
 
 fail() { jq -nc --arg e "$1" '{exit_code: 1, output: "", error: $e}'; exit 1; }
@@ -53,7 +54,7 @@ case "$VENDOR" in
   agy|antigravity) VENDOR=agy ;;
   *) fail "지원하지 않는 vendor: $VENDOR (claude, codex, agy)" ;;
 esac
-command -v "$VENDOR" >/dev/null 2>&1 || fail "벤더 CLI 를 찾을 수 없음: $VENDOR"
+command -v "$VENDOR" >/dev/null || fail "벤더 CLI 를 찾을 수 없음: $VENDOR"
 
 # 지침 파일은 cwd 이동 전에 읽는다 — 이동 후 상대 경로 해석이 바뀌면 엉뚱한 파일이
 # 지침으로 들어간다. 읽기 실패는 조용히 넘기지 않는다.
@@ -62,7 +63,7 @@ if [[ -n "$SYSTEM_FILE" ]]; then
   SYSTEM_TEXT="$(cat "$SYSTEM_FILE")" || fail "system_prompt_file 을 읽을 수 없음: $SYSTEM_FILE"
   [[ -z "$SYSTEM_TEXT" ]] || FULL="$SYSTEM_TEXT
 
-$PROMPT"
+$PROMPT"   # 빈 지침이면 프롬프트만 — 선두 빈 줄을 만들지 않는다
 fi
 
 # 이동 실패는 치명적이다 — 무시하면 호출자가 격리했다고 믿는 사이 무인 권한
@@ -70,8 +71,6 @@ fi
 # 찍어 출력 JSON 을 오염시키므로 끈다.
 [[ -z "$CWD" ]] || CDPATH= cd "$CWD" || fail "cwd 로 이동할 수 없음: $CWD"
 
-# 출력은 명령 치환으로 받는다 — 후행 개행이 여기서 제거돼 마지막 줄 기준 판정이
-# 성립하고, 임시 파일·정리 트랩이 필요 없다.
 CODE=0
 case "$VENDOR" in
   claude)
@@ -86,6 +85,8 @@ case "$VENDOR" in
     ;;
 esac
 
-# 후행 공백·CR 까지 털어 "마지막 줄 = 실제 마지막 내용" 을 보장한다.
-jq -nc --argjson c "$CODE" --arg o "$OUTPUT" \
-  '{exit_code: $c, output: ($o | sub("[[:space:]]+$"; ""))}'
+# 출력은 파이프로 넘긴다 — argv(--arg)로 주면 큰 출력에서 jq 가 exec 되지 못해
+# stdout 이 통째로 비고(계약 위반) 프로세스 코드도 규약 밖 값이 된다. printf 는
+# 빌트인이라 크기 제한이 없다. -Rs 로 전체를 문자열 하나로 읽는다.
+printf '%s' "$OUTPUT" | jq -Rs --argjson c "$CODE" \
+  '{exit_code: $c, output: (. | sub("[[:space:]]+$"; ""))}'
