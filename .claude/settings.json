@@ -4,11 +4,18 @@
     "ENABLE_PROMPT_CACHING_1H": "1",
     "BASH_MAX_OUTPUT_LENGTH": "10000"
   },
+  "enabledPlugins": {},
+  "extraKnownMarketplaces": {
+    "courtesy-claude-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "ch-courtesy/claude-plugins"
+      }
+    }
+  },
   "permissions": {
     "allow": [
       "Bash(git fetch *)"
     ]
-  },
-  "enabledPlugins": {},
-  "extraKnownMarketplaces": {}
+  }
 }
