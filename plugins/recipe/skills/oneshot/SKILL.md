@@ -18,14 +18,17 @@ allowed-tools:
 
 입출력은 스크립트 상단 주석이 단일 출처다. 요지:
 
-- 입력 — `prompt`(필수) · `cwd`(실행 디렉토리) · `system_prompt_file`(시스템 지침 — 옵션이 없는 벤더는 프롬프트 선두에 병합) · `vendor`(`claude` 기본 / `codex` / `agy`)
-- 출력 — `{exit_code, output}` (`output` = 에이전트 stdout 전문)
+- 입력 — `prompt`(필수) · `cwd`(실행 디렉토리) · `system_prompt_file`(시스템 지침 — 옵션이 없는 벤더는 프롬프트 선두에 병합) · `vendor`(`claude` 기본 / `codex` / `agy`, `antigravity`도 같은 값으로 받는다)
+- 출력 — `{exit_code, output}`. **에이전트 성패는 `exit_code` 필드로만 판정한다** — 프로세스 종료 코드는 도구 자체 오류일 때만 1이다(그때는 `error` 필드가 붙고 `output`은 빈 문자열).
+
+**전제가 깨지면 중단한다** — `cwd`로 이동할 수 없거나 `system_prompt_file`을 읽을 수 없으면 에이전트를 띄우지 않고 `error`로 실패한다. 격리를 믿는 호출자가 엉뚱한 디렉토리나 지침 없는 실행에 속지 않게 하기 위한 최소 보장이다(그 외 입력 검증은 하지 않는다).
 
 ## 조합
 
 - **격리가 필요하면** 호출 전에 `git worktree add` 등으로 작업 공간을 만들고 그 경로를 `cwd`로 준다. 정리도 호출자 몫이다.
 - **커밋 여부**는 프롬프트로 지시한다 (예: "변경 후 `git add -A && git commit` 하라" / "커밋하지 마라").
-- **반복**은 파이프라인 `while` 노드로 감싼다. 종료 표지도 프롬프트 규약으로 정하고 `output`으로 판정한다 — 예: 프롬프트에 "완료하면 마지막 줄에 `<<DONE>>`만 출력", `until: '.output | test("<<DONE>>")'`.
+- **반복**은 파이프라인 `while` 노드로 감싼다. oneshot 은 typed 스킬이 아니므로(`kind` 없음) 노드에서는 `inline: {kind: script, run: {command: "bash …/oneshot.sh", input: stdin-json, output: stdout-json}}` 으로 참조한다.
+- **종료 표지**도 프롬프트 규약으로 정하고 판정은 호출자가 한다 — 예: 프롬프트에 "완료하면 마지막 줄에 `<<DONE>>`만 출력", `until: '.exit_code == 0 and (.output | split("\n") | last | test("<<DONE>>"))'`. 전문 매칭(`.output | test(...)`)은 에이전트가 지시를 되풀이하기만 해도 참이 되므로 마지막 줄로 좁힌다.
 
 ## 주의
 

@@ -47,9 +47,13 @@
 ```yaml
 - id: ralph
   util: while
-  skill: run-agent                    # 항목마다가 아니라 회차마다 실행할 typed 스킬 (또는 inline: 정의)
+  inline:                             # 회차마다 실행할 노드 (typed 스킬 참조도 가능: skill: <이름>)
+    kind: script
+    inputs: {prompt: {type: string, required: true}, cwd: {type: string}}
+    outputs: {exit_code: {type: number}, output: {type: string}}
+    run: {command: "bash <경로>/oneshot.sh", input: stdin-json, output: stdout-json}
   in: {prompt: $pipeline.task, cwd: $pipeline.workdir}
-  until: '.output | test("<<DONE>>")' # jq boolean, 회차 출력 객체에 적용 — 참이면 정지
+  until: '.exit_code == 0 and (.output | split("\n") | last | test("<<DONE>>"))'
   max_iterations: 30                  # 필수 — 무한 방지
   outputs: → {iterations: number, last: object}
 ```
@@ -59,6 +63,7 @@
 - `max_iterations`에 도달해도 `until`이 거짓이면 노드의 on_error를 따른다: `fail`(기본)이면 전체 중단, `continue`면 **노드를 `completed` 로 기록하고** `{iterations, last}` 를 정상 출력해 하류가 그대로 진행한다(다른 유틸의 `continue` 와 달리 하류를 skip 하지 않는다 — 반복 소진은 실패가 아니라 상한 도달이다).
 - 출력은 고정 `{iterations, last}` — `iterations`는 실행한 회차 수, `last`는 마지막 회차의 출력 객체(하류는 `$노드id.last.<필드>`로 읽는다).
 - 회차 실행 기록은 `runs/<run-id>/<노드id>/<회차>.json`에 남긴다(foreach와 같은 규약).
+- 반복 대상이 외부 프로세스를 부르는 노드라면 `until`이 **성공 여부까지** 보게 한다 — 위 예시처럼 프로세스가 0으로 끝나도 내부 실패를 출력 필드로 알리는 계약이면, 그 필드를 조건에 넣지 않는 한 실패가 상한까지 반복된다.
 
 ## merge — 팬인 합류
 

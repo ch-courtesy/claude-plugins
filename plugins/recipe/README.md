@@ -14,7 +14,7 @@
 | `skill` | 단독 호출·노드 편입이 모두 가능한 typed 스킬(입출력 스키마 + 실행법) 생성·단독 테스트·목록 |
 | `pipeline` | typed 스킬들을 연결한 그래프 정의 생성, 검증, 자립형 워크플로 스킬 컴파일 |
 | `codex-auth-reseed` | codex-review CI가 인증 오류로 깨질 때 `CODEX_AUTH_JSON` 시크릿을 격리 `CODEX_HOME`에서 재시드 |
-| `oneshot` | 외부 에이전트 CLI(claude·codex·antigravity)를 **1회** 실행하는 raw 래퍼(`claude -p` 수준). 격리·커밋·반복·판정은 호출자가 정한다 |
+| `oneshot` | 외부 에이전트 CLI를 **1회** 실행하는 raw 래퍼(`claude -p` 수준) — `vendor`: `claude`·`codex`·`agy`(antigravity). 격리·커밋·반복·판정은 호출자가 정한다 |
 
 ## 사용자 프로젝트 레이아웃 (벤더 중립)
 
