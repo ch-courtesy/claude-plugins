@@ -1,4 +1,4 @@
-# 유틸 노드 시맨틱 (util 값 7개 · 절 6개 — if/switch 는 한 절)
+# 유틸 노드 시맨틱 (v1: 5종)
 
 유틸 노드는 `util:` 필드로 선언하며 별도 타입 파일이 없다. 공통 속성(retry/timeout/on_error)은 동일하게 적용된다(단 human-gate에는 retry 무의미).
 
@@ -35,39 +35,12 @@
   items: $fetch.issues        # 배열 참조
   skill: summarize            # 항목마다 실행할 typed 스킬 (또는 inline: 정의)
   in: {text: $item.body}      # $item = 현재 항목
-  # 출력은 고정 {results: array} — 항목별 출력 객체의 배열, 입력 순서 보존 (선언하지 않는다)
+  outputs: → results          # 고정: {results: array} — 항목별 출력 객체의 배열, 입력 순서 보존
 ```
 
 - v1은 노드 **하나**를 map한다. 여러 단계를 순회하려면 그 단계들을 파이프라인으로 묶어 컴파일한 뒤 그 `kind: pipeline` 스킬을 `skill:`로 참조한다.
 - 항목 하나가 실패하면 노드의 on_error를 따른다: `fail`이면 전체 중단, `continue`면 해당 항목 결과를 `{error: ...}`로 기록하고 계속.
 - 항목 실행 기록은 `runs/<run-id>/<노드id>/<인덱스>.json`에 남긴다.
-
-## while — 조건 충족까지 반복 (until)
-
-```yaml
-- id: ralph
-  util: while
-  inline:                             # 회차마다 실행할 노드 (typed 스킬 참조도 가능: skill: <이름>)
-    kind: script
-    inputs: {prompt: {type: string, required: true}, cwd: {type: string}}
-    outputs: {exit_code: {type: number}, output: {type: string}}
-    run: {command: "bash <경로>/oneshot.sh", input: stdin-json, output: stdout-json}
-  in: {prompt: $pipeline.task, cwd: $pipeline.workdir}
-  # 펜스(```·~~~)·빈 줄을 걸러낸 마지막 유의미 줄이 표지 하나로만 이뤄졌는지 본다
-  until: '.exit_code == 0 and (.output | split("\n") | map(select(test("^\\s*((```|~~~).*)?$") | not)) | last // "" | test("^\\s*<<DONE>>\\s*$"))'
-  max_iterations: 30                  # 필수 — 무한 방지
-  # 출력은 고정 {iterations, last} — 선언하지 않는다(아래 참조)
-```
-
-- 매 회차 **같은 `in` 매핑**으로 실행한다. 회차 간 값 이월은 없다 — 상태는 노드가 외부(파일·git 등)에 유지한다. 그래서 노드가 자기 자신을 참조하지 않고, 순환 검사 규칙도 그대로 적용된다.
-- `until`은 회차 출력 객체에 적용하는 jq boolean이며 결정적이어야 한다(`now`·`env` 금지). 참이면 그 회차를 마지막으로 정지한다.
-- `max_iterations`에 도달해도 `until`이 거짓이면 노드의 on_error를 따른다: `fail`(기본)이면 전체 중단, `continue`면 **노드를 `completed` 로 기록하고** `{iterations, last}` 를 정상 출력해 하류가 그대로 진행한다(다른 유틸의 `continue` 와 달리 하류를 skip 하지 않는다 — 반복 소진은 실패가 아니라 상한 도달이다).
-- 출력은 고정 `{iterations, last}` — `iterations`는 실행한 회차 수, `last`는 마지막 회차의 출력 객체(하류는 `$노드id.last.<필드>`로 읽는다).
-- 회차 실행 기록은 `runs/<run-id>/<노드id>/<회차>.json`에 남긴다(foreach와 같은 규약).
-- 반복 대상이 외부 프로세스를 부르는 노드라면 `until`이 **성공 여부까지** 보게 한다 — 위 예시처럼 프로세스가 0으로 끝나도 내부 실패를 출력 필드로 알리는 계약이면, 그 필드를 조건에 넣지 않는 한 실패가 상한까지 반복된다.
-- 회차 자체가 실패하면(반복 대상 노드가 비-0 종료·스키마 위반) 노드의 `retry` 후 `on_error`를 따른다. `fail`이면 전체 중단, `continue`면 그 회차를 실패로 기록하고 **반복을 멈춘 뒤**(foreach 처럼 순회를 이어가지 않는다) 위 상한 도달과 같은 처리를 한다 — 노드를 `completed` 로 기록하고 `{iterations, last}` 를 정상 출력해 하류를 진행시킨다(실패한 회차가 `last` 가 되므로 하류가 `$노드id.last.exit_code` 로 판별할 수 있다). 다만 반복 대상이 **결정적 실패만 비-0으로 내는** 계약이면(예: 잘못된 입력·없는 경로) `retry`는 성공 가능성 없는 재시도만 태우므로 0으로 둔다.
-- 텍스트로 종료를 판정할 때는 그 문자열이 **실제로 만들어질 수 있는지** 확인한다. 에이전트가 답을 코드펜스로 감싸면 `split("\n") | last`는 표지가 아닌 것(```)을 보게 되어 조건이 영영 참이 되지 않는다 — 상한까지 반복하고 `on_error: continue` 면 그 소진이 정상 완료로 기록된다. 프롬프트에 "코드블록으로 감싸지 마라"를 넣는 것은 보조일 뿐 판정의 방어선이 아니다(에이전트가 지킬 때만 작동한다).
-- 판정은 **줄 전체 앵커**로 건다. 전문 매칭(`.output | test("표지")`)은 물론이고 앵커 없는 줄 매칭도 `아직 <<DONE>> 아님` 같은 문장에 걸려 미완료를 완료로 오판한다. 판정식이 빗나갈 때는 **재기동(상한이 막아줌) 쪽으로 실패하게** 두는 편이 안전하다.
 
 ## merge — 팬인 합류
 
@@ -100,7 +73,7 @@
   message: "{{count}}건 발행할까요?"   # $참조 대신 in으로 받은 값을 {{}}로 치환
   in: {count: $combine.total}
   options: [발행, 보류]               # 생략 시 승인/거부
-  # 출력은 고정 {choice: string}
+  outputs: → {choice: string}
 ```
 
 - 현재 런타임의 구조화된 사용자 질문 기능(없으면 간결한 직접 질문)으로 message와 options를 제시한다. `{{}}` 치환 값은 스칼라만 — 배열·객체는 transform으로 스칼라화(건수 등) 후 매핑한다.

@@ -34,7 +34,7 @@ allowed-tools:
 - 파일: `.pipelines/<이름>.yaml` **단일 파일 1개**. 스키마는 `references/pipeline-schema.md`를 따른다.
 - 노드 인스턴스는 typed 스킬 참조(`skill:`), 유틸(`util:`), 일회용 인라인(`inline:`) 셋 중 하나다. `skill:` 참조의 계약은 `.agents/skills/<이름>/SKILL.md` frontmatter에서 읽는다.
 - edge는 따로 선언하지 않는다 — `$노드id.출력` 참조에서 의존성을 자동 도출한다. 의존이 없는 노드끼리는 자동 병렬 대상이다.
-- 유틸 노드 6종(if/switch, foreach, while, merge, transform, human-gate)의 시맨틱은 `references/util-nodes.md`를 따른다.
+- 유틸 노드 5종(if/switch, foreach, merge, transform, human-gate)의 시맨틱은 `references/util-nodes.md`를 따른다.
 - 공통 속성: `retry`(기본 0), `timeout`(초), `on_error: fail(기본) | continue`.
 - 최상위 `outputs:` 매핑(선택)이 컴파일된 스킬의 출력 계약이 된다 — 다른 파이프라인에 노드로 편입하려면 필수.
 
@@ -42,7 +42,7 @@ allowed-tools:
 
 1. **목표 인터뷰.** 파이프라인의 목적, 트리거 시점의 입력, 최종 산출물을 현재 런타임의 구조화된 사용자 질문 기능(없으면 간결한 직접 질문)으로 한 주제씩 확정한다.
 2. **노드 도출.** 목표를 단계로 분해하고 각 단계를 노드에 대응시킨다. `.agents/skills/`의 기존 typed 스킬(컴파일된 파이프라인 포함)을 먼저 매칭하고, 없는 노드는 `skill` 스킬의 create 워크플로를 이 자리에서 수행해 만든다. 한 번 쓰고 말 간단한 노드는 인라인으로 정의한다.
-3. **그래프 구성.** 노드 인스턴스와 입력 매핑(`in:`)을 작성한다. 분기·순회·반복·합류·재성형·승인이 필요한 지점에 유틸 노드를 배치한다. 합성 대상이면 최상위 `outputs:`를 정의한다.
+3. **그래프 구성.** 노드 인스턴스와 입력 매핑(`in:`)을 작성한다. 분기·순회·합류·재성형·승인이 필요한 지점에 유틸 노드를 배치한다. 합성 대상이면 최상위 `outputs:`를 정의한다.
 4. **정의 제시.** 완성한 YAML 전문을 사용자에게 보여주고 승인받은 뒤 `.pipelines/<이름>.yaml`로 저장한다.
 5. **컴파일.** 승인 직후 compile 워크플로를 이어서 수행한다. 사용자 프로젝트 `.gitignore`에 `.pipelines/runs/`가 없으면 추가를 제안한다.
 
