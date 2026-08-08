@@ -50,7 +50,7 @@
   inline:                             # 회차마다 실행할 노드 (typed 스킬 참조도 가능: skill: <이름>)
     kind: script
     inputs: {prompt: {type: string, required: true}, cwd: {type: string}}
-    outputs: {exit_code: {type: number}, output: {type: string}}
+    outputs: {exit_code: {type: number}, output: {type: string}, error: {type: string}}
     run: {command: "bash <경로>/oneshot.sh", input: stdin-json, output: stdout-json}
   in: {prompt: $pipeline.task, cwd: $pipeline.workdir}
   until: '.exit_code == 0 and (.output | split("\n") | last | test("<<DONE>>"))'
