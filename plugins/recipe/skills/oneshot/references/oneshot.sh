@@ -15,6 +15,8 @@
 #   system_prompt_file  시스템 지침 파일 — 정규 파일만, 호출 시점 디렉토리 기준으로 해석
 #                       (내용이 비어 있으면 지침 없이 실행)
 #   vendor              claude(기본) | codex | agy (별칭: antigravity)
+#   model               벤더의 모델 이름 (생략하면 벤더 기본값 — 플래그를 넣지 않는다).
+#                       쿼터 소진 시 다른 모델로 넘기는 것은 판단이므로 호출자가 정한다.
 #
 # 출력 (JSON 객체): {exit_code, output}
 #   output     에이전트 stdout. 손실은 정확히 셋이다 — (1) 후행 공백·개행(CR 포함)을
@@ -71,11 +73,13 @@ VALIDATE='
     elif ($o|has("cwd"))                and ($o.cwd|type)                != "string" then "cwd 는 문자열이어야 합니다"
     elif ($o|has("system_prompt_file")) and ($o.system_prompt_file|type) != "string" then "system_prompt_file 은 문자열이어야 합니다"
     elif ($o|has("vendor"))             and ($o.vendor|type)             != "string" then "vendor 는 문자열이어야 합니다"
+    elif ($o|has("model"))              and ($o.model|type)              != "string" then "model 은 문자열이어야 합니다"
     elif (($o.cwd // "") | ctl)                then "cwd 에 제어문자가 들어 있습니다"
     elif (($o.system_prompt_file // "") | ctl) then "system_prompt_file 에 제어문자가 들어 있습니다"
     elif (($o.vendor // "") | ctl)             then "vendor 에 제어문자가 들어 있습니다"
-    elif (($o | keys) - ["prompt","cwd","system_prompt_file","vendor"] | length > 0)
-      then "알 수 없는 필드: " + (($o | keys) - ["prompt","cwd","system_prompt_file","vendor"] | join(", "))
+    elif (($o.model // "") | ctl)              then "model 에 제어문자가 들어 있습니다"
+    elif (($o | keys) - ["prompt","cwd","system_prompt_file","vendor","model"] | length > 0)
+      then "알 수 없는 필드: " + (($o | keys) - ["prompt","cwd","system_prompt_file","vendor","model"] | join(", "))
     else "" end;
   if length != 1 or (.[0]|type) != "object" then
     {error: "입력이 JSON 객체 하나가 아닙니다 (stdin 으로 {prompt: ...} 전달)"}
@@ -83,7 +87,7 @@ VALIDATE='
     .[0] as $o | (bad($o)) as $e |
     if $e != "" then {error: $e}
     else {cwd: ($o.cwd // ""), spf: ($o.system_prompt_file // ""),
-          vendor: ($o.vendor // "claude")}
+          vendor: ($o.vendor // "claude"), model: ($o.model // "")}
     end
   end'
 
@@ -110,6 +114,10 @@ IN="$TMPROOT/in"; PROMPT="$TMPROOT/prompt"; SYS_SNAP="$TMPROOT/sys"
   CWD="$(jq -r '.cwd' <<< "$META")"
   SYSTEM_FILE="$(jq -r '.spf' <<< "$META")"
   VENDOR="$(jq -r '.vendor' <<< "$META")"
+  MODEL="$(jq -r '.model' <<< "$META")"
+  # 빈 값이면 플래그 자체를 넣지 않는다 — `--model ""` 은 벤더가 "빈 모델 이름" 으로
+  # 읽거나 다음 인자를 값으로 삼는다. 배열로 두면 set -u 에서도 안전하게 펼쳐진다.
+  MODEL_ARG=(); [[ -z "$MODEL" ]] || MODEL_ARG=(--model "$MODEL")
 
   # 지원 여부를 CLI 존재 검사보다 먼저 본다 — 순서가 반대면 오타·미지원 벤더가
   # "설치하라"로 오보고된다.
@@ -182,10 +190,11 @@ IN="$TMPROOT/in"; PROMPT="$TMPROOT/prompt"; SYS_SNAP="$TMPROOT/sys"
   case "$VENDOR" in
     claude)
       OUTPUT="$(feed | vendor_run "$VENDOR_BIN" --print --no-session-persistence \
-        --dangerously-skip-permissions --add-dir .)" || CODE=$?
+        --dangerously-skip-permissions --add-dir . ${MODEL_ARG[@]+"${MODEL_ARG[@]}"})" || CODE=$?
       ;;
     codex)
-      OUTPUT="$(feed | vendor_run "$VENDOR_BIN" exec --ephemeral --sandbox workspace-write -)" || CODE=$?
+      OUTPUT="$(feed | vendor_run "$VENDOR_BIN" exec --ephemeral --sandbox workspace-write \
+        ${MODEL_ARG[@]+"${MODEL_ARG[@]}"} -)" || CODE=$?
       ;;
     agy)
       # 여기서만 변수를 경유한다 — argv 가 구조적 요구라 피할 수 없다.
@@ -203,7 +212,8 @@ IN="$TMPROOT/in"; PROMPT="$TMPROOT/prompt"; SYS_SNAP="$TMPROOT/sys"
       fi
       (( $(printf '%s' "$FULL" | LC_ALL=C wc -c) < limit )) \
         || fail "프롬프트가 agy 인자 한계(${limit} 바이트)를 넘음 — stdin 을 받는 claude·codex 를 쓰거나 프롬프트를 줄인다"
-      OUTPUT="$(vendor_run "$VENDOR_BIN" --dangerously-skip-permissions --add-dir . --print "$FULL")" || CODE=$?
+      OUTPUT="$(vendor_run "$VENDOR_BIN" --dangerously-skip-permissions --add-dir . \
+        ${MODEL_ARG[@]+"${MODEL_ARG[@]}"} --print "$FULL")" || CODE=$?
       ;;
   esac
 

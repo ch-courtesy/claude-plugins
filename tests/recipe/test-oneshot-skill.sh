@@ -272,6 +272,17 @@ argv_is codex exec --ephemeral --sandbox workspace-write -
 run '{"prompt":"x","vendor":"agy"}'
 argv_is agy --dangerously-skip-permissions --add-dir . --print x
 
+# model 은 있으면 전달하고 없으면 플래그 자체를 넣지 않는다 — 빈 값을 넘기면 벤더가
+# "빈 모델 이름" 으로 읽거나 다음 인자를 값으로 삼는다. 세 벤더 모두 --model 을 쓴다.
+run '{"prompt":"x","model":"m1"}'
+argv_is claude --print --no-session-persistence --dangerously-skip-permissions --add-dir . --model m1
+run '{"prompt":"x","vendor":"codex","model":"m2"}'
+argv_is codex exec --ephemeral --sandbox workspace-write --model m2 -
+run '{"prompt":"x","vendor":"agy","model":"m3"}'
+argv_is agy --dangerously-skip-permissions --add-dir . --model m3 --print x
+run "$(jq -nc '{prompt:"x", model:"m\n"}')"
+jq -e 'has("error")' >/dev/null <<< "$OUT" || fail "제어문자가 든 model 이 통과함"
+
 # 지침 파일은 cwd 이동 **전** 기준으로 해석한다 — 순서가 뒤집히면 같은 상대 경로가
 # 작업 디렉토리 안의 동명 파일을 가리켜 엉뚱한 지침으로 조용히 바뀐다.
 make_fake claude echo
