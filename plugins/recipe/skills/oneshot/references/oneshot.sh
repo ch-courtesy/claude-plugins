@@ -12,7 +12,7 @@
 # 입력 (JSON 객체, 필드는 전부 문자열):
 #   prompt              에이전트에 줄 지시 (비어 있어도 막지 않는다)
 #   cwd                 실행 디렉토리 (기본: 현재 디렉토리, 제어문자 불가)
-#   system_prompt_file  시스템 지침 파일 — 정규 파일만, cwd 이동 전 기준으로 해석
+#   system_prompt_file  시스템 지침 파일 — 정규 파일만, 호출 시점 디렉토리 기준으로 해석
 #                       (내용이 비어 있으면 지침 없이 실행)
 #   vendor              claude(기본) | codex | agy (별칭: antigravity)
 #
@@ -25,6 +25,10 @@
 #              이고 프로세스도 1 이다 — 에이전트가 몇으로 죽든 프로세스는 0 이므로
 #              에이전트 성패는 반드시 exit_code 필드로 본다. 단 126·127 은 "실행하지
 #              못했다"는 신호라 에이전트 실패가 아니라 도구 오류로 올린다.
+#
+# 실행 환경: 호출자가 준 값은 데이터로만 흐른다. 래퍼 자신의 cwd·PATH·TMPDIR 은 호출
+# 시점 그대로 유지되고, `cwd` 로는 벤더 프로세스만 서브셸에서 이동한다 — 래퍼가 이동하면
+# 이후 모든 이름 해석이 호출자가 통제하는 디렉토리 기준으로 재해석된다.
 #
 # 바이트 무결성: prompt 와 지침 파일 내용은 변형 없이 벤더에 도달한다. 그래서 입력을
 # 한 스트림으로 프레이밍한다 — 첫 줄이 메타(JSON), 나머지가 프롬프트 바이트열이고,
@@ -67,6 +71,8 @@ FRAME='
     elif (($o.cwd // "") | ctl)                then "cwd 에 제어문자가 들어 있습니다"
     elif (($o.system_prompt_file // "") | ctl) then "system_prompt_file 에 제어문자가 들어 있습니다"
     elif (($o.vendor // "") | ctl)             then "vendor 에 제어문자가 들어 있습니다"
+    elif (($o | keys) - ["prompt","cwd","system_prompt_file","vendor"] | length > 0)
+      then "알 수 없는 필드: " + (($o | keys) - ["prompt","cwd","system_prompt_file","vendor"] | join(", "))
     else "" end;
   if length != 1 or (.[0]|type) != "object" then
     ({error: "입력이 JSON 객체 하나가 아닙니다 (stdin 으로 {prompt: ...} 전달)"} | tojson), "\n"
@@ -95,11 +101,12 @@ FRAME='
     agy|antigravity) VENDOR=agy ;;
     *) fail "지원하지 않는 vendor: $VENDOR (claude, codex, agy)" ;;
   esac
-  # 여기서 한 번만 해석하고 그 절대 경로를 실행한다. 이름으로 검사하고 cd 이후에
-  # 이름을 다시 찾으면, PATH 에 `.` 이나 빈 컴포넌트가 있을 때 호출자가 준 cwd 안의
-  # 동명 파일이 이긴다 — 검사 통과라는 착시 속에 무인 권한으로 임의 바이너리가 뜬다.
+  # 여기서 한 번만 해석하고 절대 경로로 고정한다. `command -v` 는 PATH 에 `.` 이나
+  # 빈 컴포넌트가 있으면 상대 경로(`./claude`)를 돌려주므로 결과를 그냥 믿으면 안 된다.
+  # 아직 이동하지 않았으니 $PWD 가 호출 시점 디렉토리다.
   VENDOR_BIN="$(command -v "$VENDOR")" \
     || fail "벤더 CLI 를 찾을 수 없음: $VENDOR"
+  case "$VENDOR_BIN" in /*) ;; *) VENDOR_BIN="$PWD/$VENDOR_BIN" ;; esac
 
   # 정규 파일만 받는다. `-r && ! -d` 는 FIFO·/dev/zero 를 통과시켜 cat 이 끝나지 않고
   # 프로세스가 영원히 멈춘다. `-` 도 `--` 를 붙이면 파일로 해석되지만 실재하지 않아
@@ -116,35 +123,54 @@ FRAME='
     trap 'rm -f "$SYS_SNAP"' EXIT
     cat -- "$SYSTEM_FILE" > "$SYS_SNAP" 2>/dev/null \
       || fail "system_prompt_file 을 읽을 수 없음: $SYSTEM_FILE"
-    # 경로가 비어 있지 않다고 하는데 실제로 읽은 게 0바이트면 두 대상이 다른 것이다
-    # (`/dev/fd/N` 을 EOF 오프셋으로 넘긴 경우 등). 조용히 "지침 없음" 으로 진행하면
-    # 호출자는 지침이 들어갔다고 믿는다.
-    [[ ! -s "$SYSTEM_FILE" || -s "$SYS_SNAP" ]] \
-      || fail "system_prompt_file 의 크기와 실제 읽은 내용이 다름: $SYSTEM_FILE"
+    # 경로가 말하는 크기와 실제로 읽은 바이트 수가 같아야 한다. "둘 다 0 아님" 만
+    # 보면 부분 소실이 통과한다 — `/dev/fd/N` 을 중간 오프셋으로 넘기면 그럴듯한
+    # 지침 일부가 도착하고, 전량 소실보다 발견이 어렵다.
+    DECL="$(stat -f%z "$SYSTEM_FILE" 2>/dev/null || stat -c%s "$SYSTEM_FILE" 2>/dev/null || echo -1)"
+    SNAP="$(wc -c < "$SYS_SNAP")"
+    (( DECL == SNAP )) \
+      || fail "system_prompt_file 의 크기(${DECL})와 실제 읽은 바이트(${SNAP})가 다름: $SYSTEM_FILE"
     [[ ! -s "$SYS_SNAP" ]] || HAVE_SYS=1
   fi
 
-  # 이동 실패는 치명적이다 — 무시하면 호출자가 격리했다고 믿는 사이 무인 권한
-  # 에이전트가 호출자의 현재 디렉토리에서 뜬다. CDPATH 는 cd 가 stdout 에 경로를
-  # 찍어 출력 JSON 을 오염시키므로 끈다. `--` 가 없으면 `-P` 같은 경로가 cd 옵션으로
-  # 먹혀 피연산자 없이 $HOME 으로 이동한 뒤 성공으로 보고된다(격리 붕괴).
-  [[ -z "$CWD" ]] || CDPATH= cd -- "$CWD" 2>/dev/null || fail "cwd 로 이동할 수 없음: $CWD"
+  # 래퍼 자신은 이동하지 않는다. cwd 는 호출자가 준 신뢰 불가 입력이고, 그걸 래퍼의
+  # 실행 환경으로 삼는 순간 이후 모든 이름 해석(PATH·상대 경로·TMPDIR)이 그 디렉토리
+  # 기준으로 재해석된다 — 네 라운드에 걸쳐 여섯 번 그 자리에서 뚫렸다. 벤더 프로세스만
+  # 서브셸에서 이동시킨다. 여기서는 갈 수 있는지만 확인한다(CDPATH 는 cd 가 stdout 에
+  # 경로를 찍어 출력 JSON 을 오염시키므로 끄고, `--` 가 없으면 `-P` 같은 경로가 cd
+  # 옵션으로 먹혀 $HOME 으로 이동한 뒤 성공으로 보고된다).
+  # 확인과 실제 이동 사이에 창이 있지만, 그 창을 쓰려면 공격자가 이미 그 디렉토리에
+  # 쓸 수 있어야 하고 그 경우 무인 권한 에이전트가 거기서 뜨는 더 쉬운 길이 열려 있다.
+  if [[ -n "$CWD" ]]; then
+    ( CDPATH= cd -- "$CWD" ) 2>/dev/null || fail "cwd 로 이동할 수 없음: $CWD"
+  fi
 
   # 지침 스냅샷 + 빈 줄 + 남은 fd(프롬프트). 전부 스트림 연결이라 변수 경유가 없다.
-  # 지침이 비어 있으면 선두 빈 줄을 만들지 않는다.
+  # 지침이 비어 있으면 선두 빈 줄을 만들지 않는다. 이 함수는 이동하지 않은 래퍼에서
+  # 돌기 때문에 `cat` 도 호출 시점 PATH 로 해석된다.
+  # stderr 를 닫는 이유: printf 는 빌트인이라 EPIPE 에서 시그널사하지 않고 bash 가
+  # "write error: Broken pipe" 를 찍는다 — 벤더가 stdin 을 다 읽지 않고 끝나면 그 도구
+  # 층 문구가 "에이전트 stderr" 채널로 샌다.
   feed() {
-    (( HAVE_SYS == 0 )) || { cat -- "$SYS_SNAP"; printf '\n\n'; }
-    cat
+    {
+      (( HAVE_SYS == 0 )) || { cat -- "$SYS_SNAP"; printf '\n\n'; }
+      cat
+    } 2>/dev/null
   }
+
+  # 벤더만 대상 디렉토리에서 실행한다. `exec` 를 쓰지 않는 이유: bash 3.2 는 exec
+  # 실패를 126 이 아니라 1 로 보고해(실측) 아래 126·127 분류가 무력화된다. 프로세스
+  # 하나를 더 쓰는 대신 셸의 표준 코드를 그대로 받는다.
+  vendor_run() { ( [[ -z "$CWD" ]] || { CDPATH= cd -- "$CWD" || exit 127; }; "$@" ); }
 
   CODE=0
   case "$VENDOR" in
     claude)
-      OUTPUT="$(feed | "$VENDOR_BIN" --print --no-session-persistence \
+      OUTPUT="$(feed | vendor_run "$VENDOR_BIN" --print --no-session-persistence \
         --dangerously-skip-permissions --add-dir .)" || CODE=$?
       ;;
     codex)
-      OUTPUT="$(feed | "$VENDOR_BIN" exec --ephemeral --sandbox workspace-write -)" || CODE=$?
+      OUTPUT="$(feed | vendor_run "$VENDOR_BIN" exec --ephemeral --sandbox workspace-write -)" || CODE=$?
       ;;
     agy)
       # 여기서만 변수를 경유한다 — argv 가 구조적 요구라 피할 수 없다.
@@ -162,7 +188,7 @@ FRAME='
       fi
       (( $(printf '%s' "$FULL" | LC_ALL=C wc -c) < limit )) \
         || fail "프롬프트가 agy 인자 한계(${limit} 바이트)를 넘음 — stdin 을 받는 claude·codex 를 쓰거나 프롬프트를 줄인다"
-      OUTPUT="$("$VENDOR_BIN" --dangerously-skip-permissions --add-dir . --print "$FULL")" || CODE=$?
+      OUTPUT="$(vendor_run "$VENDOR_BIN" --dangerously-skip-permissions --add-dir . --print "$FULL")" || CODE=$?
       ;;
   esac
 

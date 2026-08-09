@@ -35,7 +35,7 @@ SANDBOX_PATH="$BIN:/usr/bin:/bin"
 # 분기는 실물 계약(agy=argv, 나머지=stdin)과 1:1 로 자기 이름을 본다. 프롬프트 모양
 # (`--` 로 시작하는지)으로 분기하면 옵션형 프롬프트에서 실물과 다르게 동작해 가짜로
 # 통과시킨다 — 실제로 그래서 agy 의 옵션 오인식을 이 테스트가 못 잡았다.
-make_fake() {   # $1=이름  $2=동작(echo|size|big|fail|bytes)
+make_fake() {   # $1=이름  $2=동작(echo|size|big|fail)
   cat > "$BIN/$1" <<EOF
 #!/usr/bin/env bash
 mode=$2
@@ -149,6 +149,10 @@ jq -e 'has("error")' >/dev/null <<< "$OUT" || fail "도구 오류에 error 필�
 make_fake claude fail
 run '{"prompt":"x"}'
 [[ $RUN_CODE -eq 0 ]] || fail "에이전트 실패인데 프로세스 코드가 $RUN_CODE (0 이어야 호출자가 파싱한다)"
+# 에이전트 stderr 는 가로채지 않고 통과시킨다는 계약 — 단언이 없으면 벤더 호출에
+# 2>/dev/null 을 붙이는 리팩터로 계약이 깨져도 전 그룹이 초록이다.
+grep -q boom "$RUN_ERR" || fail "에이전트 stderr 가 통과되지 않음"
+grep -q "$SCRIPT" "$RUN_ERR" && fail "에이전트 stderr 에 도구 층 문구가 섞임: $(head -c 80 "$RUN_ERR")"
 [[ "$(jq -r .exit_code <<< "$OUT")" == "42" ]] || fail "에이전트 종료 코드가 exit_code 로 전달되지 않음"
 jq -e 'has("error") | not' >/dev/null <<< "$OUT" || fail "에이전트 실패에 error 필드가 붙음 (도구 오류와 혼동)"
 ok "도구 오류와 에이전트 실패가 구분됨"
@@ -352,7 +356,7 @@ grep -q 'U+FFFD' "$SCRIPT" || fail "헤더의 손실 목록에 UTF-8 치환이 �
 cat > "$BIN/claude" <<'EOF'
 #!/usr/bin/env bash
 cat >/dev/null
-python3 -c "import sys; sys.stdout.write(' '*300000 + 'x')"
+head -c 300000 /dev/zero | tr '\\0' ' '; printf x
 EOF
 chmod +x "$BIN/claude"
 T0=$(date +%s)
@@ -366,15 +370,37 @@ echo "=== TEST 11: 검사한 대상과 실행한 대상이 같다 ==="
 # 벤더 CLI 를 cd 전에 검사하고 cd 후에 이름으로 다시 찾으면, PATH 에 '.' 이나 빈
 # 컴포넌트가 있을 때 호출자가 준 cwd 안의 파일이 이긴다 — 검사 통과라는 착시 속에
 # 무인 권한으로 임의 바이너리가 뜬다.
+# 클래스 검증: 호출자가 준 값은 데이터로만 흘러야 하고, 래퍼의 실행 환경(cwd·PATH·
+# TMPDIR)은 호출 시점 그대로여야 한다. 지점을 하나씩 막는 방식은 네 라운드 동안
+# 여섯 번 뚫렸다 — cd 후 이름이 재해석되는 자리를 전부 한 케이스로 본다.
 SHADOW="$WORK/shadow"; mkdir -p "$SHADOW"
-make_fake claude echo
-printf '#!/usr/bin/env bash\ncat >/dev/null\nprintf CWD-SHADOW\n' > "$SHADOW/claude"
-chmod +x "$SHADOW/claude"
-OLD_SANDBOX="$SANDBOX_PATH"; SANDBOX_PATH=".:$BIN:/usr/bin:/bin"
-run "$(jq -nc --arg c "$SHADOW" '{prompt:"x", cwd:$c}')"
+# 정당한 가짜를 **래퍼의 cwd** 에 둔다. PATH 선두가 `.` 이므로 command -v 가 절대
+# 경로가 아니라 `./claude` 를 돌려주는 조건이 만들어진다 — 그걸 그대로 믿고 벤더를
+# $CWD 에서 실행하면 그림자가 이긴다. 절대 경로가 아닌 $BIN 에 두면 이 조건이 안 생겨
+# 방어가 검사되지 않는다(뮤테이션으로 확인함).
+# 절대 경로 유틸리티만 쓴다 — 벤더는 $CWD 에서 도는 게 정상이라, 상대 해석으로
+# 그림자를 집으면 래퍼 결함과 구분되지 않는다.
+printf '#!/usr/bin/env bash\nprintf "%%s" "$(/bin/cat)"\n' > "$WORK/claude"
+chmod +x "$WORK/claude"
+# 그림자는 외부 명령을 부르지 않는다 — `cat` 그림자가 `cat` 을 부르면 자기 자신으로
+# 해석돼 무한 재귀한다(하네스가 멈추지 제품 결함이 아니다).
+for name in claude cat jq mktemp stat wc head; do
+  printf '#!/usr/bin/env bash\nprintf CWD-SHADOW\n' > "$SHADOW/$name"
+  chmod +x "$SHADOW/$name"
+done
+OLD_SANDBOX="$SANDBOX_PATH"
+# PATH 선두의 `.` 과 상대 TMPDIR — 둘 다 cd 이후 의미가 바뀌는 자리다.
+SANDBOX_PATH=".:$BIN:/usr/bin:/bin"
+printf 'REALGUIDE' > "$WORK/cls-guide.txt"
+run -d "$WORK" "$(jq -nc --arg c "$SHADOW" --arg g "$WORK/cls-guide.txt" \
+  '{prompt:"x", cwd:$c, system_prompt_file:$g}')"
 SANDBOX_PATH="$OLD_SANDBOX"
-[[ "$(jq -r .output <<< "$OUT")" != "CWD-SHADOW" ]] \
-  || fail "cwd 안의 가짜 벤더가 실행됨 — 검사 대상과 실행 대상이 다르다"
+# 양성 단언: 정당한 가짜(echo)가 실제로 실행돼 지침+프롬프트를 받았어야 한다.
+# 음성 단언만 두면 스크립트가 아무 이유로든 일찍 죽어도 통과한다.
+[[ "$(jq -r .output <<< "$OUT")" == "REALGUIDE"*"x" ]] \
+  || fail "cwd 가 이름 해석을 오염시켰다 (output=$(jq -r '.output // .error' <<< "$OUT" | head -c 60))"
+jq -e 'has("error") | not' >/dev/null <<< "$OUT" \
+  || fail "클래스 케이스가 도구 오류로 떨어짐: $(jq -r .error <<< "$OUT")"
 
 # 지침 파일도 같다: 경로로 -f·-s 를 보고 fd 로 읽으면 두 객체가 다를 수 있다.
 # /dev/fd/N 을 EOF 오프셋으로 넘기면 크기 검사는 통과하고 내용은 0바이트다.
@@ -392,6 +418,39 @@ elif [[ "$(jq -r .output <<< "$FDOUT")" == 475549444520* ]]; then :
 else
   fail "지침이 소실됐는데 성공 보고: $(jq -r .output <<< "$FDOUT")"
 fi
+
+# 부분 소실도 같은 계열이다 — 전량 소실보다 발견이 어렵다(그럴듯한 지침이 도착한다).
+# 크기 가드가 "둘 다 0 아님" 이 아니라 등식이어야 잡힌다.
+printf 'AAAAABBBBBCCCCC' > "$WORK/g15.txt"
+cat > "$WORK/fdpart.sh" <<'SH'
+#!/usr/bin/env bash
+exec 3< "$1"
+head -c 10 <&3 >/dev/null
+printf '%s' '{"prompt":"P","system_prompt_file":"/dev/fd/3"}' | bash "$2"
+SH
+PARTOUT="$(PATH="$SANDBOX_PATH" bash "$WORK/fdpart.sh" "$WORK/g15.txt" "$SCRIPT" 2>/dev/null)"
+jq -e 'has("error")' >/dev/null 2>&1 <<< "$PARTOUT" \
+  || fail "지침 부분 소실이 성공으로 보고됨: $(jq -r .output <<< "$PARTOUT")"
+
+# 벤더가 stdin 을 다 읽지 않고 끝나면 feed 의 printf 가 EPIPE 를 만난다. printf 는
+# 빌트인이라 SIGPIPE 로 조용히 죽지 않고 bash 가 "write error: Broken pipe" 를 찍는다
+# — 그 도구 층 문구가 "에이전트 stderr" 채널로 샌다. 지침이 파이프 버퍼보다 커야
+# 재현되므로 200KB 로 만든다.
+printf '#!/usr/bin/env bash\nprintf EARLY >&2\nexit 3\n' > "$BIN/claude"
+chmod +x "$BIN/claude"
+BIGSYS="$WORK/bigsys.txt"; head -c 200000 /dev/zero | tr '\0' 'S' > "$BIGSYS"
+run "$(jq -nc --rawfile p "$BIG" --arg f "$BIGSYS" '{prompt:$p, system_prompt_file:$f}')"
+grep -q 'Broken pipe\|write error' "$RUN_ERR" \
+  && fail "도구 층 파이프 오류가 에이전트 stderr 로 샘: $(head -c 80 "$RUN_ERR")"
+grep -q EARLY "$RUN_ERR" || fail "에이전트 stderr 가 통과되지 않음(조기 종료 경로)"
+
+# 알 수 없는 키는 조용히 무시하면 안 된다. system_prompt_file 오타 하나면 지침 없이
+# 실행되고, vendor 오타면 실행 반경 자체가 바뀌는데 둘 다 성공으로 보고된다.
+for typo in '{"prompt":"P","system_prompt_fil":"/tmp"}' '{"prompt":"P","vendorr":"codex"}'; do
+  run "$typo"
+  jq -e 'has("error")' >/dev/null <<< "$OUT" \
+    || fail "알 수 없는 키가 통과함: $typo"
+done
 
 # exec 실패(126/127)는 에이전트 실패가 아니라 도구 오류다 — 그대로 내보내면
 # 호출자가 성공 가능성 0인 재시도를 돈다.

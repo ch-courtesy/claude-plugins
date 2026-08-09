@@ -21,7 +21,7 @@ allowed-tools:
 
 ```bash
 jq -nc '{prompt: "...", cwd: "/path/to/workdir"}' \
-  | bash ${CLAUDE_PLUGIN_ROOT}/skills/oneshot/references/oneshot.sh
+  | bash "${CLAUDE_PLUGIN_ROOT}/skills/oneshot/references/oneshot.sh"
 ```
 
 **입출력 필드와 계약 전문은 스크립트 상단 주석이 단일 출처다** — 여기에 옮겨 적지 않는다.
