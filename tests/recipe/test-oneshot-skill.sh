@@ -39,6 +39,10 @@ make_fake() {   # $1=이름  $2=동작(echo|size|big|fail)
   cat > "$BIN/$1" <<EOF
 #!/usr/bin/env bash
 mode=$2
+# 받은 argv 를 그대로 남긴다. 이 래퍼의 존재 이유가 벤더별 호출 관례 흡수인데,
+# 가짜가 argv 를 무시하면 그 관례를 검사하는 곳이 어디에도 없다 — 플래그가 빠지거나
+# 오타여도 스위트가 초록이다.
+printf '%s\n' "\$@" > "$WORK/argv.\$(basename "\$0")"
 if [[ "\$(basename "\$0")" == agy ]]; then
   prompt=""
   while (( \$# )); do [[ "\$1" == "--print" ]] && { prompt="\${2:-}"; break; }; shift; done
@@ -79,8 +83,14 @@ POLL=0.1
 RUN_OUT=""; RUN_ERR=""
 
 run() {  # run [-d <cwd>] <입력 JSON>. stdout 은 OUT(편의용 문자열)·$RUN_OUT(원본 파일).
-  local dir="" input pid ticks=0
-  if [[ "${1:-}" == "-d" ]]; then dir="$2"; shift 2; fi
+  local dir="" tmp="" input pid ticks=0
+  while :; do
+    case "${1:-}" in
+      -d) dir="$2"; shift 2 ;;
+      -t) tmp="$2"; shift 2 ;;   # TMPDIR 주입 — 준비 단계 실패를 재현한다
+      *)  break ;;
+    esac
+  done
   input="$1"
   local max=$(( RUN_TIMEOUT * 10 ))
   RUN_OUT="$WORK/run.out"; RUN_ERR="$WORK/run.err"
@@ -88,6 +98,7 @@ run() {  # run [-d <cwd>] <입력 JSON>. stdout 은 OUT(편의용 문자열)·$R
   # 앞쪽 프로세스가 남고, 죽일 때 상속된 파이프를 붙잡아 다음 케이스를 막는다.
   printf '%s' "$input" > "$WORK/run.in"
   ( [[ -z "$dir" ]] || cd "$dir"
+    [[ -z "$tmp" ]] || export TMPDIR="$tmp"
     PATH="$SANDBOX_PATH" exec bash "$SCRIPT" ) < "$WORK/run.in" > "$RUN_OUT" 2>"$RUN_ERR" &
   pid=$!
   while kill -0 "$pid" 2>/dev/null && (( ticks < max )); do
@@ -243,6 +254,23 @@ run '{"prompt":"AGYPROMPT","vendor":"agy"}'
 [[ "$(jq -r .output <<< "$OUT")" == "AGYPROMPT" ]] || fail "agy 프롬프트 전달 실패"
 run '{"prompt":"ALIAS","vendor":"antigravity"}'
 [[ "$(jq -r .output <<< "$OUT")" == "ALIAS" ]] || fail "antigravity 별칭 미지원"
+
+# 벤더별 argv 를 등식으로 고정한다. 이 플래그들은 실행 반경을 정의하는 값이라
+# "있다/없다" 가 아니라 "정확히 이것" 이어야 한다 — `--dangerously-skip-permissions`
+# 가 빠지면 에이전트가 권한 프롬프트에서 영원히 멈추고, `--sandbox` 오타면 codex 의
+# 쓰기 반경이 바뀐다. agy 는 `--print` 다음 인자가 프롬프트라 순서까지 의미가 있다.
+argv_is() {  # $1=벤더  나머지=기대 argv
+  local v="$1"; shift
+  diff <(printf '%s\n' "$@") "$WORK/argv.$v" >/dev/null \
+    || fail "$v 호출 규약이 바뀜: $(tr '\n' ' ' < "$WORK/argv.$v")"
+}
+make_fake claude echo; make_fake codex echo; make_fake agy echo
+run '{"prompt":"x"}'
+argv_is claude --print --no-session-persistence --dangerously-skip-permissions --add-dir .
+run '{"prompt":"x","vendor":"codex"}'
+argv_is codex exec --ephemeral --sandbox workspace-write -
+run '{"prompt":"x","vendor":"agy"}'
+argv_is agy --dangerously-skip-permissions --add-dir . --print x
 
 # 지침 파일은 cwd 이동 **전** 기준으로 해석한다 — 순서가 뒤집히면 같은 상대 경로가
 # 작업 디렉토리 안의 동명 파일을 가리켜 엉뚱한 지침으로 조용히 바뀐다.
@@ -443,6 +471,38 @@ run "$(jq -nc --rawfile p "$BIG" --arg f "$BIGSYS" '{prompt:$p, system_prompt_fi
 grep -q 'Broken pipe\|write error' "$RUN_ERR" \
   && fail "도구 층 파이프 오류가 에이전트 stderr 로 샘: $(head -c 80 "$RUN_ERR")"
 grep -q EARLY "$RUN_ERR" || fail "에이전트 stderr 가 통과되지 않음(조기 종료 경로)"
+
+# 프롬프트 준비가 실패하면 에이전트를 띄우면 안 된다. 스트림 구조에서는 EOF 가 "끝" 과
+# "생산자 사망" 을 구분하지 못해 잘린 프롬프트로 에이전트가 돌고 exit_code:0 이 나왔다
+# (실측). 쓰기 불가한 TMPDIR 로 준비 단계를 실패시키고, argv 기록이 없는지로 벤더
+# 미실행을 확인한다.
+make_fake claude echo
+rm -f "$WORK/argv.claude"
+RO="$WORK/ro"; mkdir -p "$RO"; chmod 500 "$RO"
+run -t "$RO" '{"prompt":"x"}'
+chmod 700 "$RO"
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "임시 디렉토리 생성 실패가 도구 오류로 보고되지 않음: $OUT"
+[[ ! -e "$WORK/argv.claude" ]] \
+  || fail "임시 디렉토리 생성이 실패했는데 에이전트가 실행됨"
+
+# 프롬프트 추출 단계만 실패시킨다 — 검증은 통과하고 그 다음에 깨지는 경로다.
+# 여기가 정확히 스트림 구조에서 감지 불가였던 자리다.
+REALJQ="$(command -v jq)"
+rm -f "$BIN/jq"    # 심링크를 통해 쓰면 실제 jq 를 덮어쓰려 한다
+cat > "$BIN/jq" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do [[ "\$a" == *'.[0].prompt'* ]] && exit 9; done
+exec "$REALJQ" "\$@"
+EOF
+chmod +x "$BIN/jq"
+rm -f "$WORK/argv.claude"
+run '{"prompt":"x"}'
+ln -sf "$REALJQ" "$BIN/jq"
+jq -e 'has("error")' >/dev/null <<< "$OUT" \
+  || fail "프롬프트 준비 실패가 도구 오류로 보고되지 않음: $OUT"
+[[ ! -e "$WORK/argv.claude" ]] \
+  || fail "프롬프트 준비가 실패했는데 에이전트가 실행됨 — 잘린 프롬프트로 돌 수 있다"
 
 # 알 수 없는 키는 조용히 무시하면 안 된다. system_prompt_file 오타 하나면 지침 없이
 # 실행되고, vendor 오타면 실행 반경 자체가 바뀌는데 둘 다 성공으로 보고된다.

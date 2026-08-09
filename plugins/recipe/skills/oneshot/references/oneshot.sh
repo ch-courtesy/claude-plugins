@@ -30,11 +30,14 @@
 # 시점 그대로 유지되고, `cwd` 로는 벤더 프로세스만 서브셸에서 이동한다 — 래퍼가 이동하면
 # 이후 모든 이름 해석이 호출자가 통제하는 디렉토리 기준으로 재해석된다.
 #
-# 바이트 무결성: prompt 와 지침 파일 내용은 변형 없이 벤더에 도달한다. 그래서 입력을
-# 한 스트림으로 프레이밍한다 — 첫 줄이 메타(JSON), 나머지가 프롬프트 바이트열이고,
-# 프롬프트는 셸 변수를 한 번도 거치지 않는다. 명령 치환 `$(...)` 은 후행 개행을 전부
+# 바이트 무결성: prompt 와 지침 파일 내용은 변형 없이 벤더에 도달한다. 그래서 둘 다
+# 셸 변수를 거치지 않고 임시 파일로만 흐른다 — 명령 치환 `$(...)` 은 후행 개행을 전부
 # 자르고 셸 변수는 NUL 을 담지 못하므로, 변수를 경유하는 순간 계약이 깨진다.
 # 예외는 agy 뿐이다(아래).
+#
+# 준비를 끝낸 뒤에 벤더를 띄운다. 프롬프트를 스트림으로 흘리면 EOF 가 "끝" 과 "생산자
+# 사망" 을 구분하지 못해 잘린 프롬프트로 에이전트가 돌고 exit_code:0 이 나온다 —
+# 파일이면 각 단계의 종료 상태를 보고 크기를 확정한 뒤 실행한다.
 #
 # 벤더 관례 차이는 이 층이 흡수한다: 지침은 프롬프트 선두에 병합하고, 프롬프트는
 # claude·codex 에 stdin 으로 준다. agy 만 stdin 을 받지 않아 argv 로 넘기므로 그
@@ -58,10 +61,10 @@ command -v jq >/dev/null \
 
 fail() { jq -nc --arg e "$1" '{exit_code: 1, output: "", error: $e}'; exit 1; }
 
-# 입력 프레이밍. 스키마 위반은 jq 안에서 판정해 첫 줄에 {error} 로 싣는다 — 셸이
-# 필드를 하나씩 꺼내 검사하면 그때마다 명령 치환을 타야 하고, 거기서 값이 변형된다.
-# 입력이 JSON 이 아니면 jq 가 실패해 stdout 이 비고, 그걸 빈 첫 줄로 감지한다.
-FRAME='
+# 스키마 위반은 jq 안에서 판정해 {error} 로 싣는다 — 셸이 필드를 하나씩 꺼내 검사하면
+# 그때마다 명령 치환을 타야 하고 거기서 값이 변형된다. 입력이 JSON 이 아니면 jq 가
+# 실패해 출력이 비고, 그걸 빈 결과로 감지한다.
+VALIDATE='
   def ctl: explode | any(. < 32);
   def bad($o):
     if   ($o|has("prompt"))             and ($o.prompt|type)             != "string" then "prompt 는 문자열이어야 합니다"
@@ -75,20 +78,34 @@ FRAME='
       then "알 수 없는 필드: " + (($o | keys) - ["prompt","cwd","system_prompt_file","vendor"] | join(", "))
     else "" end;
   if length != 1 or (.[0]|type) != "object" then
-    ({error: "입력이 JSON 객체 하나가 아닙니다 (stdin 으로 {prompt: ...} 전달)"} | tojson), "\n"
+    {error: "입력이 JSON 객체 하나가 아닙니다 (stdin 으로 {prompt: ...} 전달)"}
   else
     .[0] as $o | (bad($o)) as $e |
-    if $e != "" then ({error: $e} | tojson), "\n"
-    else ({cwd: ($o.cwd // ""), spf: ($o.system_prompt_file // ""),
-           vendor: ($o.vendor // "claude")} | tojson), "\n", ($o.prompt // "")
+    if $e != "" then {error: $e}
+    else {cwd: ($o.cwd // ""), spf: ($o.system_prompt_file // ""),
+          vendor: ($o.vendor // "claude")}
     end
   end'
 
+# 프롬프트를 실체화한 뒤 벤더를 띄운다. 스트림으로 흘리면 EOF 가 "프롬프트 끝" 과
+# "생산자 사망" 을 구분하지 못해(실측) 잘린 프롬프트로 에이전트가 돌고 exit_code:0 이
+# 나온다 — "전제가 깨지면 에이전트를 띄우지 않는다" 는 계약이 거기서 깨진다. 파일로
+# 두면 각 단계의 종료 상태를 볼 수 있고 실행 전에 크기가 확정된다. 셸 변수를 안 거치는
+# 것은 그대로다(파일도 바이트를 보존한다).
+# 템플릿을 명시한다 — macOS mktemp 는 템플릿 없이는 TMPDIR 을 무시한다.
+TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/oneshot.XXXXXX" 2>/dev/null)" \
+  || fail "임시 디렉토리를 만들 수 없음"
+trap 'rm -rf "$TMPROOT"' EXIT
+IN="$TMPROOT/in"; PROMPT="$TMPROOT/prompt"; SYS_SNAP="$TMPROOT/sys"
+
 {
-  IFS= read -r META || META=""
-  [[ -n "$META" ]] || fail "입력이 JSON 객체 하나가 아닙니다 (stdin 으로 {prompt: ...} 전달)"
+  cat > "$IN" || fail "입력을 읽을 수 없음"
+  META="$(jq -sc "$VALIDATE" "$IN" 2>/dev/null)" \
+    || fail "입력이 JSON 객체 하나가 아닙니다 (stdin 으로 {prompt: ...} 전달)"
   ERR="$(jq -r '.error // empty' <<< "$META")"
   [[ -z "$ERR" ]] || fail "$ERR"
+  jq -sj '.[0].prompt // ""' "$IN" > "$PROMPT" 2>/dev/null \
+    || fail "프롬프트를 준비하지 못했습니다"
 
   CWD="$(jq -r '.cwd' <<< "$META")"
   SYSTEM_FILE="$(jq -r '.spf' <<< "$META")"
@@ -119,8 +136,6 @@ FRAME='
   if [[ -n "$SYSTEM_FILE" ]]; then
     [[ -f "$SYSTEM_FILE" && -r "$SYSTEM_FILE" ]] \
       || fail "system_prompt_file 을 읽을 수 없음: $SYSTEM_FILE"
-    SYS_SNAP="$(mktemp 2>/dev/null)" || fail "임시 파일을 만들 수 없음"
-    trap 'rm -f "$SYS_SNAP"' EXIT
     cat -- "$SYSTEM_FILE" > "$SYS_SNAP" 2>/dev/null \
       || fail "system_prompt_file 을 읽을 수 없음: $SYSTEM_FILE"
     # 경로가 말하는 크기와 실제로 읽은 바이트 수가 같아야 한다. "둘 다 0 아님" 만
@@ -154,7 +169,7 @@ FRAME='
   feed() {
     {
       (( HAVE_SYS == 0 )) || { cat -- "$SYS_SNAP"; printf '\n\n'; }
-      cat
+      cat -- "$PROMPT"
     } 2>/dev/null
   }
 
@@ -210,5 +225,5 @@ FRAME='
   printf '%s' "$OUTPUT" | jq -Rsc --argjson c "$CODE" \
     '{exit_code: $c, output: (capture("(?s)^(?<h>.*[^[:space:]])[[:space:]]*$").h // "")}'
 
-} < <(jq -sj "$FRAME" - 2>/dev/null)   # 파서 오류 문구가 "에이전트 stderr" 채널을 오염시킨다
+}
 
