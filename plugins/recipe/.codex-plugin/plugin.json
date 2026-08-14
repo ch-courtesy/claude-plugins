@@ -1,7 +1,7 @@
 {
   "name": "recipe",
-  "version": "0.4.1",
-  "description": "에이전트 협업 도구 모음 — Advisor 감독 워크플로, typed 스킬 기반 워크플로 정의·컴파일, codex-review CI 시크릿 재시드 제공",
+  "version": "0.5.0",
+  "description": "에이전트 협업 도구 모음 — Advisor 감독 워크플로, typed 스킬 기반 워크플로 정의·컴파일, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드 제공",
   "author": {
     "name": "예의상",
     "email": "ch.courtesy@gmail.com"
@@ -18,13 +18,15 @@
     "node",
     "orchestration",
     "compiler",
-    "automation"
+    "automation",
+    "oneshot",
+    "codex-auth-reseed"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Recipe",
-    "shortDescription": "typed 스킬을 노드로 연결한 워크플로를 정의하고 자립 실행형 스킬로 컴파일합니다.",
-    "longDescription": "A local Codex plugin providing agent collaboration tools: an Advisor-supervised delegation/verification workflow, and a pipeline compiler that wires typed skills (machine-readable input/output contracts) into self-contained workflow skills.",
+    "shortDescription": "Advisor 감독 워크플로, typed 스킬 워크플로 정의·컴파일, 외부 에이전트 CLI 원샷 실행 래퍼, codex-review CI 시크릿 재시드를 제공합니다.",
+    "longDescription": "A local Codex plugin providing agent collaboration tools: an Advisor-supervised delegation/verification workflow, a pipeline compiler that wires typed skills (machine-readable input/output contracts) into self-contained workflow skills, a vendor-neutral one-shot wrapper for external agent CLIs (claude/codex/agy), and an isolated reseed operation for the codex-review CI auth secret.",
     "developerName": "예의상",
     "category": "Productivity",
     "capabilities": [
@@ -33,7 +35,8 @@
     ],
     "defaultPrompt": [
       "typed 스킬을 하나 만들어줘.",
-      "파이프라인을 정의하고 컴파일해줘."
+      "파이프라인을 정의하고 컴파일해줘.",
+      "외부 에이전트로 이 프롬프트를 한 번 실행해줘."
     ],
     "brandColor": "#0F766E"
   }
