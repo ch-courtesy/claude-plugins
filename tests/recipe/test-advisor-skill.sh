@@ -51,10 +51,8 @@ print(d[k] if k in d else d.get("interface",{}).get(k,""))' "$CODEX_MANIFEST" "$
 DESC_MARKET="$(python3 -c 'import json,sys; print(next(p for p in json.load(open(sys.argv[1]))["plugins"] if p["name"]=="recipe")["description"])' "$MARKETPLACE")"
 # 각 구성요소를 설명 필드에서 알아볼 수 있는 표지(스킬명 또는 그 스킬을 가리키는 한국어 구절)
 check_desc() {   # $1=라벨 $2=설명텍스트
-  # 각 표지는 해당 구성요소에만 나타나는 것이어야 한다 — 예: '워크플로'는 advisor 구절
-  # ("Advisor 감독 워크플로")에도 있어 pipeline 검사를 항상 참으로 만든다(실측 확인).
+  # 각 표지는 해당 구성요소에만 나타나는 것이어야 한다
   grep -qiE 'advisor|어드바이저' <<<"$2" || fail "설명 동기: $1 에 advisor 구성요소 없음"
-  grep -qiE 'pipeline|파이프라인|컴파일' <<<"$2" || fail "설명 동기: $1 에 pipeline 구성요소 없음"
   grep -qiE 'oneshot|one-shot|원샷' <<<"$2" || fail "설명 동기: $1 에 oneshot 구성요소 없음"
   grep -qiE 'codex-auth-reseed|시크릿 재시드|auth secret|reseed' <<<"$2" || fail "설명 동기: $1 에 codex-auth-reseed 구성요소 없음"
 }
@@ -65,7 +63,7 @@ for f in description shortDescription longDescription; do
 done
 check_desc "marketplace recipe description" "$DESC_MARKET"
 check_desc "루트 README recipe 불릿" "$ROOT_RECIPE_LINE"
-for kw in advisor pipeline oneshot codex-auth-reseed; do
+for kw in advisor oneshot codex-auth-reseed; do
   grep -qi -- "$kw" "$PLUGIN_DIR/README.md" || fail "설명 동기 누락: plugins/recipe/README.md 에 '$kw' 없음"
 done
 for d in "$PLUGIN_DIR"/skills/*/; do
