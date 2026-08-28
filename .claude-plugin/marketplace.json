@@ -27,10 +27,15 @@
     {
       "name": "recipe",
       "source": "./plugins/recipe",
-      "description": "Advisor 감독 워크플로, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드 제공를 제공하는 에이전트 협업 도구 모음",
+      "description": "다단계 작업의 워크플로 스킬 컴파일(pipeline·skill)과 정적 검증(pipecheck), Advisor 감독 워크플로, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드를 제공하는 에이전트 협업 도구 모음",
       "version": "1.0.0",
       "category": "productivity",
       "tags": [
+        "pipeline",
+        "skill-compiler",
+        "graph",
+        "cel",
+        "pipecheck",
         "advisor",
         "delegation",
         "verification",

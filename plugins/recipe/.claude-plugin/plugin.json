@@ -1,13 +1,18 @@
 {
   "name": "recipe",
   "version": "1.0.0",
-  "description": "에이전트 협업 도구 모음 — Advisor 감독 워크플로, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드 제공",
+  "description": "에이전트 협업 도구 모음 — 다단계 작업의 워크플로 스킬 컴파일(pipeline·skill)과 정적 검증(pipecheck), Advisor 감독 워크플로, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드 제공",
   "author": {
     "name": "예의상",
     "email": "ch.courtesy@gmail.com"
   },
   "license": "MIT",
   "keywords": [
+    "pipeline",
+    "skill-compiler",
+    "graph",
+    "cel",
+    "pipecheck",
     "advisor",
     "delegation",
     "verification",
