@@ -27,7 +27,7 @@
     {
       "name": "recipe",
       "source": "./plugins/recipe",
-      "description": "Advisor 감독 워크플로, typed 스킬 기반 워크플로 정의·컴파일, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드를 제공하는 에이전트 협업 도구 모음",
+      "description": "Advisor 감독 워크플로, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드 제공를 제공하는 에이전트 협업 도구 모음",
       "version": "0.5.0",
       "category": "productivity",
       "tags": [
@@ -37,17 +37,13 @@
         "supervision",
         "agents",
         "workflow",
-        "pipeline",
-        "node",
-        "orchestration",
-        "compiler",
         "automation",
-        "codex",
+        "oneshot",
+        "codex-auth-reseed",
         "ci",
         "auth",
         "secrets",
-        "oneshot",
-        "codex-auth-reseed"
+        "codex"
       ]
     },
     {
