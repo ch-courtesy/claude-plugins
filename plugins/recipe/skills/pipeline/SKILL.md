@@ -1,74 +1,78 @@
 ---
 name: pipeline
-description: "typed 스킬들을 노드로 연결한 워크플로 그래프를 정의하고 자립 실행형 워크플로 스킬로 컴파일할 때 사용. 사용자가 파이프라인 생성, 워크플로 자동화 구성, 노드 연결, 파이프라인 컴파일·목록을 요청할 때 활성화."
+description: 여러 단계 작업을 실행 가능한 워크플로 스킬로 컴파일하고 싶을 때 사용. 신호 — 워크플로 만들어 줘, 파이프라인 구성, 그래프 수정, 재컴파일, 여러 스킬을 이어 붙이기.
 allowed-tools:
-  - AskUserQuestion
   - Read
-  - Write(.pipelines/**)
-  - Write(.agents/skills/**)
-  - Glob
-  - Grep
-  - Bash(ls:*)
-  - Bash(find:*)
-  - Bash(mkdir -p .pipelines/**)
-  - Bash(mkdir -p .agents/skills/**)
-  - Bash(mkdir -p .claude/skills)
-  - Bash(ln:*)
-  - Bash(shasum:*)
-  - Bash(jq:*)
-  - Bash(date:*)
+  - Write
+  - Edit
+  - Bash
+  - AskUserQuestion
+  - Skill
 ---
 
-# pipeline
+# pipeline — 그래프 생산
 
-입출력 계약이 있는 typed 스킬들을 노드로 연결해 실행 흐름을 정의하고, 그 정의를 **자립 실행형 워크플로 스킬**로 컴파일한다.
+사용자가 원하는 워크플로를 그래프(`graph.json`)로 설계하고, 재료를 재사용하거나 만들어, 실행 가능한 워크플로 스킬로 컴파일한다. 구조 판정은 전부 `pipecheck`에 위임한다 — 직접 판정하지 않는다.
 
-**핵심 원칙: 정의 = 소스, 생성된 스킬 = 바이너리.** 정의는 `.pipelines/<이름>.yaml`, 컴파일 결과는 `.agents/skills/<이름>/`(런타임 중립 위치, Claude Code용 `.claude/skills/<이름>` 심링크 병설). 정의를 수정하면 재컴파일한다. 실행은 컴파일된 스킬이 담당하며 이 스킬에 run 서브커맨드는 없다. 컴파일된 스킬 자체도 typed(frontmatter에 inputs/outputs, `kind: pipeline`)이므로 다른 파이프라인이 노드로 참조할 수 있다 — 파이프라인 합성.
+## 판정 도구
 
-## 호출
+판정 도구 명령은 프로젝트 루트에서 실행한다.
 
-`pipeline create` / `pipeline compile <이름>` / `pipeline list` — 인자가 없으면 `create`로 간주한다. 파이프라인 이름은 kebab-case, 같은 이름 정의가 있으면 덮어쓰지 말고 다른 이름 또는 갱신 여부를 선택받는다.
+```bash
+BIN="<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/dist/pipecheck-$(uname -s | tr A-Z a-z)-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
+```
 
-## 정의 계약
+- 그래프 검사: `"$BIN" check-graph -file <임시 위치>/<이름>/graph.json -project .claude/skills -user ~/.claude/skills -self-name <이름> -self-scope <scope> -overlay <임시 위치>` — `-overlay`는 임시 위치 루트다: 승인 전 신규·수정 재료를 설치본보다 먼저 찾게 한다
+- 표현식 단건: `echo '{"expr":"...","in":{...}}' | "$BIN" check-expr` — transform·until 식을 초안·수정할 때 그 식만 먼저 확인하고, 불통과면 그 출력대로 식을 고쳐 다시 확인한다. 3회 안에 못 고치면 불통과 출력과 의도를 AskUserQuestion으로 묻고, 답대로 고쳐 다시 확인한다 — 그래도 불통과면 같은 문답을 반복한다. 물리면 최초 패스 중에는 실행을 그만두는 처리와 같고, 승인 화면의 수정 요청이 촉발한 재검사 중에는 그 수정을 되돌리고 화면을 유지한다
+- 해시·파급: `/skill`과 같은 `hash`·`ripple`
 
-- 파일: `.pipelines/<이름>.yaml` **단일 파일 1개**. 스키마는 `references/pipeline-schema.md`를 따른다.
-- 노드 인스턴스는 typed 스킬 참조(`skill:`), 유틸(`util:`), 일회용 인라인(`inline:`) 셋 중 하나다. `skill:` 참조의 계약은 `.agents/skills/<이름>/SKILL.md` frontmatter에서 읽는다.
-- edge는 따로 선언하지 않는다 — `$노드id.출력` 참조에서 의존성을 자동 도출한다. 의존이 없는 노드끼리는 자동 병렬 대상이다.
-- 유틸 노드 5종(if/switch, foreach, merge, transform, human-gate)의 시맨틱은 `references/util-nodes.md`를 따른다.
-- 공통 속성: `retry`(기본 0), `timeout`(초), `on_error: fail(기본) | continue`.
-- 최상위 `outputs:` 매핑(선택)이 컴파일된 스킬의 출력 계약이 된다 — 다른 파이프라인에 노드로 편입하려면 필수.
+출력은 한 줄 JSON, 불통과는 exit 1. exit 2는 호출 오류 — 명령을 고쳐 같은 호출을 다시 부르는 연속 시도를 3회까지 하고, 그래도 exit 2면 그 출력과 시도한 명령을 보고하고 오류로 끝낸다. 통과하거나 다른 호출로 넘어가면 시도 횟수는 남지 않는다. 바이너리가 없거나 pipecheck 소스가 바이너리보다 새로우면 `<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/build.sh`를 먼저 실행해 만든다. 빌드가 실패하면 그 출력을 보고한다 — 승인 화면이 열려 있으면 그 화면으로 돌아가고, 아니면 실행을 끝낸다.
 
-## create 워크플로
+## 절차 체크리스트 (§7.1)
 
-1. **목표 인터뷰.** 파이프라인의 목적, 트리거 시점의 입력, 최종 산출물을 현재 런타임의 구조화된 사용자 질문 기능(없으면 간결한 직접 질문)으로 한 주제씩 확정한다.
-2. **노드 도출.** 목표를 단계로 분해하고 각 단계를 노드에 대응시킨다. `.agents/skills/`의 기존 typed 스킬(컴파일된 파이프라인 포함)을 먼저 매칭하고, 없는 노드는 `skill` 스킬의 create 워크플로를 이 자리에서 수행해 만든다. 한 번 쓰고 말 간단한 노드는 인라인으로 정의한다.
-3. **그래프 구성.** 노드 인스턴스와 입력 매핑(`in:`)을 작성한다. 분기·순회·합류·재성형·승인이 필요한 지점에 유틸 노드를 배치한다. 합성 대상이면 최상위 `outputs:`를 정의한다.
-4. **정의 제시.** 완성한 YAML 전문을 사용자에게 보여주고 승인받은 뒤 `.pipelines/<이름>.yaml`로 저장한다.
-5. **컴파일.** 승인 직후 compile 워크플로를 이어서 수행한다. 사용자 프로젝트 `.gitignore`에 `.pipelines/runs/`가 없으면 추가를 제안한다.
+```
+- [ ] 1. 워크플로 서술 받기
+- [ ] 2. 그래프로 분해 (references/decompose.md)
+- [ ] 3. 노드마다 재료 탐색·확보 (references/candidates.md)
+- [ ] 4. 경계 포트·배선 확정
+- [ ] 5. check-graph 검사 (실패 처리는 references/failure.md)
+- [ ] 6. 그림 + 승인 화면 (references/diagram.md, references/approval.md)
+- [ ] 7. 컴파일·설치 (references/compile.md)
+```
 
-## compile 워크플로
+앞 단계가 확정되기 전에 다음 단계 산출물을 만들지 않는다. 작업 공간은 임시 위치(`mktemp -d`) — 산출물은 스킬·워크플로 구분 없이 `<임시 위치>/<이름>/`에 놓고, 워크플로는 그 안에 `graph.json`·`SKILL.md`를 둔다. 이름이 바뀌면 디렉터리를 새 이름으로 옮기고 옛 디렉터리를 지우며, 워크플로면 `graph.json`과 경계 계약 `SKILL.md`의 `name`도 새 이름으로 고친다. 이름·위치가 바뀐 산출물을 재료로 쓰는 이 실행의 그래프들도 함께 고친다 — `materials`의 `name`·`scope`와 노드·컨테이너의 `skill` 참조를 새 값으로. 이름은 본문 해시 범위라(§5.8) 바뀐 산출물의 해시를 `hash`로 다시 계산하고, 그것을 기록한 이 실행 그래프들의 `materials` 해시와 그것을 감싸는 임시 어댑터 작업본의 `wraps`(`name`·`scope`·`contract`·`body`)에 새 값을 쓴다. `wraps`가 바뀐 어댑터도 본문 해시가 바뀌므로 같은 갱신을 더 늘지 않을 때까지 반복한다. 같은 실행에 동명 산출물은 하나다 — 동명의 project·user 재료를 함께 수정하려 하면 그 요청을 거부하고 직전 화면을 유지하며 따로 실행하게 안내한다. 이름 변경으로 이 실행의 다른 산출물과 동명이 되는 경우도 같은 규칙으로 거부한다. 임시 산출물과 동명이지만 설치 예정 scope가 다른 설치본을 같은 실행의 재료·`wraps` 대상으로 함께 쓰는 것도 같은 규칙으로 거부한다 — `-overlay`가 이름으로 해소하기 때문에 동명은 임시 산출물 하나여야 한다. 승인 전에는 아무것도 설치하지 않는다. 사용자가 실행 전체를 그만두면 어느 단계든 임시 위치를 지우고 진행 상태를 보고하며 끝낸다 — 승인 화면의 수정 요청·문답 취소는 전이 표대로 화면을 유지한다. 오류로 끝나는 모든 경로도 같다 — 단독 실행이면 임시 위치를 지우고, 위임·재귀 호출이면 실패를 상위에 반환하며 임시 위치는 상위가 지운다.
 
-1. **validate.** `references/validate-checklist.md`의 전 항목을 정의에 적용한다. 하나라도 실패하면 산출물을 만들지 않고 위반 목록(노드 id, 항목, 수정 방법)을 보고한다.
-2. **스냅샷.** 정의 + 참조된 모든 typed 스킬의 frontmatter 계약을 병합해 `.agents/skills/<이름>/graph.yaml`로 저장한다. 인라인·유틸 노드도 포함해 **이 파일만으로 그래프 전체가 재구성 가능**해야 한다.
-3. **스킬 생성.** `references/compile-template.md`의 골격대로 `.agents/skills/<이름>/SKILL.md`를 작성하고 `.claude/skills/<이름>` 상대 심링크(`ln -s ../../.agents/skills/<이름> .claude/skills/<이름>`, 디렉토리 없으면 먼저 생성)를 만든다. frontmatter는 `kind: pipeline` + 정의의 inputs/outputs + `compiled-from: .pipelines/<이름>.yaml @<정의 파일 shasum-256 앞 12자리>`.
-4. **보고.** 산출 경로, 노드 수, 사용 kind 목록, 호출법(`/<이름> [입력]`)을 보고한다.
+## 1. 서술
 
-## list 워크플로
+무엇을 입력으로 받아 무엇을 내는 워크플로인지, 중간에 어떤 판단·반복이 있는지 받는다. 워크플로 이름·설치 위치 초안도 여기서 정한다(위치 초안은 `project`) — 임시 디렉터리와 검사의 `-self-name`·`-self-scope`에 쓰기 위해서다. 이름 규칙은 재료와 같고, 확정은 승인 화면의 7.7이 한다.
 
-`.pipelines/*.yaml`을 읽어 이름, 설명, 노드 수를 표로 보고한다. 각 항목에 대해 `.agents/skills/<이름>/SKILL.md`의 `compiled-from` 해시와 현재 정의의 shasum을 대조해 `미컴파일 | 최신 | 재컴파일 필요`를 표시한다. 파일을 생성·수정하지 않는다.
+**기존 워크플로 수정·재컴파일이면 진입이 다르다**: 대상 워크플로(name+scope)를 지정받아 `graph.json`을 초안으로 읽는다 — 이 실행의 임시 위치에 그 워크플로의 것이 있으면 그것, 없으면 설치본을 `<임시 위치>/<이름>/graph.json`으로 복사해 그것을 작업본으로 쓴다. 같은 이름 유지가 수정이며 충돌이 아니고, 이름을 바꾸는 경우는 7.7 규칙(두 선택지 — 다른 이름/변경 취소)을 따른다. 진입 뒤 도는 범위는 세 갈래다:
+- 사용자가 직접 부른 최상위 수정 — 무엇을 어떻게 바꿀지 서술을 함께 받고 2~7 전부를 돈다
+- 상위 `/pipeline`이 분해·수정 중에 부른 재귀 호출 — 1~5만. 신규 하위면 1의 서술과 이름·위치 초안을 상위가 분해에서 정해 넘기고, 기존 하위의 수정이면 위 진입 규칙대로 초안 `graph.json`을 읽는다 — 이 진입 정보(서술·이름·위치 초안)는 어느 쪽도 사용자에게 다시 묻지 않는다. 승인·컴파일·설치는 최상위가 한다
+- `/skill`이 넘긴 "그 자리 재컴파일"(파급 문답의 예 답) — 구성 변경 없이 바뀐 재료의 `materials` 항목을 갱신하고 — 이름·위치가 바뀐 재료면 `name`·`scope`와 노드·컨테이너의 `skill` 참조도 새 값으로 — 승인이 `/skill` 화면에 이미 합쳐져 있으므로 5(check-graph)와 7(컴파일·설치)만 돈다. 5가 불통과면 재료·배선을 고치지 않고 그 보고를 부른 `/skill`에 실패로 반환한다 — 복구는 `/skill` 승인 절차가 맡는다. `/skill`이 수정 스킬을 이미 설치한 뒤 부르므로 그 산출물은 다시 옮기지 않고, 이 재컴파일이 낡게 하는 어댑터의 연쇄 재기록과 후속 문답은 부른 `/skill`의 승인 절차가 맡는다 — 이 경로는 보고만 한다. 임시 위치도 부른 `/skill`이 넘긴 것을 쓴다 — 새로 만들지 않고, 지우지도 않는다
 
-## 참조 파일
+## 2. 분해
 
-| 파일 | 읽는 시점 |
-|---|---|
-| `references/pipeline-schema.md` | 정의 YAML 작성·해석 |
-| `references/util-nodes.md` | 유틸 노드 배치와 시맨틱 확인 |
-| `references/validate-checklist.md` | compile 1단계 검증 |
-| `references/compile-template.md` | 컴파일 산출물 작성 |
+[references/decompose.md](references/decompose.md)의 기준으로 노드·transform·컨테이너를 가른다. 값 가공은 transform 식으로, 도구 실행·판단은 노드로, 반복은 컨테이너로.
 
-## 안전 경계
+## 3. 재료
 
-- 쓰기는 `.pipelines/**`와 `.agents/skills/**` 안으로 제한한다. `.claude/skills/`에는 심링크 생성만 한다.
-- 이 스킬은 파이프라인을 실행하지 않는다 — 노드의 command·API를 호출하는 것은 컴파일된 스킬(사용자가 별도 호출)의 몫이다.
-- validate를 통과하지 못한 정의로 산출물을 만들지 않는다.
-- 기존 `.agents/skills/<이름>/`을 덮어쓸 때는 compiled-from이 같은 정의를 가리킬 때만 조용히 갱신하고, 다른 스킬이면 사용자 확인을 받는다. typed가 아닌 일반 스킬을 덮어쓰지 않는다.
+[references/candidates.md](references/candidates.md)의 절차로 노드마다 후보를 찾는다. 맞는 것이 없으면 `/skill`을 불러 이 실행의 임시 위치를 넘겨 그 안에 만든다 — `/skill`은 검증까지만 수행하고 승인은 이 화면에 합쳐진다.
+
+**분해 결과가 그래프인 단계도 먼저 candidates.md의 절차로 재사용·감쌀 후보를 찾고, 맞는 것이 없으면 `/pipeline`을 재귀로 불러 하위 워크플로를 같은 임시 위치에 만든다** — 하위 호출은 1~5단계만 돌고 자기 승인·설치·컴파일을 갖지 않는다. 하위 호출이 끝나면 — 신규 생성이든 기존 하위의 수정이든 — `graph.json` 곁에 경계 계약(`node:` 블록)을 담은 `SKILL.md`를 임시 위치에 생성한다 — 상위 검사의 `-overlay`가 하위 계약을 해소하기 위해서다. 본문 세 절은 최상위의 7 컴파일이 완성한다. 승인·컴파일·설치는 전부 최상위가 한다. 이 실행에서 만드는 중인 워크플로 — 최상위와 중간 전부, `name`+`scope`로 판정 — 를 하위에서 다시 만들려 하면 재료 이름·설치 위치·실행 경로를 보고하며 오류로 끝낸다.
+
+## 4. 배선
+
+경계 포트를 정하고 data·order 엣지를 적는다. 형식·규칙은 [references/graph-format.md](references/graph-format.md).
+
+## 5. 검사
+
+`check-graph`를 돌린다. 실패 처리·보고 형식은 [references/failure.md](references/failure.md) — 어긋난 재료를 바꾸거나 배선을 고치고 다시 돈다. `/skill` 위임 재컴파일이면 고치지 않고 부른 `/skill`에 실패로 반환한다.
+
+## 6. 승인
+
+그림([references/diagram.md](references/diagram.md))과 승인 화면([references/approval.md](references/approval.md))을 보여주고 3택+자유 서술로 받는다. 수정 요청 해석·전이는 approval.md의 표가 정한다.
+
+## 7. 컴파일·설치
+
+승인되면 [references/compile.md](references/compile.md)대로 — 하위 워크플로부터, 전이 닫힘의 산출물 전부를 설치하고, 실패하면 전부 되돌린다. `/skill` 위임 재컴파일이면 자기 산출물만 되돌리고 실패를 부른 `/skill`에 반환한다.
