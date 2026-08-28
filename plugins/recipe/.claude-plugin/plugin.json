@@ -1,6 +1,6 @@
 {
   "name": "recipe",
-  "version": "0.5.0",
+  "version": "1.0.0",
   "description": "에이전트 협업 도구 모음 — Advisor 감독 워크플로, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드 제공",
   "author": {
     "name": "예의상",
