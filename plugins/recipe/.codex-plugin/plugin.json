@@ -27,7 +27,7 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Recipe",
-    "shortDescription": "아이디어를 intent.md 프로토-스펙으로 캡처하고, 다단계 작업을 워크플로 스킬로 컴파일·검증하고, Advisor 감독 워크플로와 외부 에이전트 CLI 원샷 실행, codex-review CI 시크릿 재시드를 제공합니다.",
+    "shortDescription": "아이디어를 intent.md 프로토-스펙으로 캡처하고, 다단계 작업을 워크플로 스킬로 컴파일·검증(pipeline·skill·pipecheck)하고, Advisor 감독 워크플로와 외부 에이전트 CLI 원샷 실행, codex-review CI 시크릿 재시드를 제공합니다.",
     "longDescription": "A local Codex plugin providing agent collaboration tools: capturing ideas as intent.md proto-specs (intent), compiling multi-step work into executable workflow skills (pipeline/skill) backed by the pipecheck static verifier, an Advisor-supervised delegation/verification workflow, a vendor-neutral one-shot wrapper for external agent CLIs (claude/codex/agy), and an isolated reseed operation for the codex-review CI auth secret.",
     "developerName": "예의상",
     "category": "Productivity",
