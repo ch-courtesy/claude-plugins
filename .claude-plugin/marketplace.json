@@ -28,7 +28,7 @@
       "name": "recipe",
       "source": "./plugins/recipe",
       "description": "아이디어의 intent.md 프로토-스펙 캡처(intent), 다단계 작업의 워크플로 스킬 컴파일(pipeline·skill)과 정적 검증(pipecheck), Advisor 감독 워크플로, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드를 제공하는 에이전트 협업 도구 모음",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "category": "productivity",
       "tags": [
         "intent",
