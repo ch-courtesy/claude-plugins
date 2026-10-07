@@ -19,14 +19,16 @@ allowed-tools:
 판정 도구 명령은 프로젝트 루트에서 실행한다.
 
 ```bash
-BIN="<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/dist/pipecheck-$(uname -s | tr A-Z a-z)-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
+OS=$(uname -s | tr A-Z a-z); EXT=""
+case "$OS" in mingw*|msys*|cygwin*) OS=windows; EXT=".exe" ;; esac  # Windows Git Bash 는 uname -s 가 MINGW64_NT-… 등
+BIN="<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/dist/pipecheck-$OS-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')$EXT"
 ```
 
 - 그래프 검사: `"$BIN" check-graph -file <임시 위치>/<이름>/graph.json -project .claude/skills -user ~/.claude/skills -self-name <이름> -self-scope <scope> -overlay <임시 위치>` — `-overlay`는 임시 위치 루트다: 승인 전 신규·수정 재료를 설치본보다 먼저 찾게 한다
 - 표현식 단건: `echo '{"expr":"...","in":{...}}' | "$BIN" check-expr` — transform·until 식을 초안·수정할 때 그 식만 먼저 확인하고, 불통과면 그 출력대로 식을 고쳐 다시 확인한다. 3회 안에 못 고치면 불통과 출력과 의도를 AskUserQuestion으로 묻고, 답대로 고쳐 다시 확인한다 — 그래도 불통과면 같은 문답을 반복한다. 물리면 최초 패스 중에는 실행을 그만두는 처리와 같고, 승인 화면의 수정 요청이 촉발한 재검사 중에는 그 수정을 되돌리고 화면을 유지한다
 - 해시·파급: `/skill`과 같은 `hash`·`ripple`
 
-출력은 한 줄 JSON, 불통과는 exit 1. exit 2는 호출 오류 — 명령을 고쳐 같은 호출을 다시 부르는 연속 시도를 3회까지 하고, 그래도 exit 2면 그 출력과 시도한 명령을 보고하고 오류로 끝낸다. 통과하거나 다른 호출로 넘어가면 시도 횟수는 남지 않는다. 바이너리가 없거나 pipecheck 소스가 바이너리보다 새로우면 `<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/build.sh`를 먼저 실행해 만든다. 빌드가 실패하면 그 출력을 보고한다 — 승인 화면이 열려 있으면 그 화면으로 돌아가고, 아니면 실행을 끝낸다.
+출력은 한 줄 JSON, 불통과는 exit 1. exit 2는 호출 오류 — 명령을 고쳐 같은 호출을 다시 부르는 연속 시도를 3회까지 하고, 그래도 exit 2면 그 출력과 시도한 명령을 보고하고 오류로 끝낸다. 통과하거나 다른 호출로 넘어가면 시도 횟수는 남지 않는다. 바이너리가 없으면 `<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/build.sh`를 먼저 실행해 만든다 — 파일 시각은 설치·체크아웃 때 새로 찍혀 소스 변경 판단에 쓰지 않는다(pipecheck 소스를 고친 쪽이 커밋 전에 build.sh 로 dist 를 갱신한다). 빌드가 실패하면 그 출력을 보고한다 — 승인 화면이 열려 있으면 그 화면으로 돌아가고, 아니면 실행을 끝낸다.
 
 ## 절차 체크리스트 (§7.1)
 

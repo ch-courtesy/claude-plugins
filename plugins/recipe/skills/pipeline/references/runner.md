@@ -21,8 +21,8 @@ SKILLS_PROJECT="<컴파일 시점의 프로젝트 .claude/skills 절대 경로>"
 SKILLS_USER="$HOME/.claude/skills"
 BUILD="<컴파일 시점에 확정한 pipecheck build.sh 절대 경로>"
 ```
-`$BIN`이 없거나 pipecheck 소스가 바이너리보다 새로우면 `"$BUILD"`를 먼저
-실행해 만든다. 빌드가 실패하면 — `$BUILD`가 없는 경우도 같다 — 그 출력을
+`$BIN`이 없으면 `"$BUILD"`를 먼저 실행해 만든다(파일 시각은 설치·체크아웃 때
+새로 찍혀 소스 변경 판단에 쓰지 않는다). 빌드가 실패하면 — `$BUILD`가 없는 경우도 같다 — 그 출력을
 보고하고 오류로 끝내며 `/pipeline` 재컴파일을 안내한다.
 pipecheck 출력은 한 줄 JSON, 불통과는 exit 1. exit 2는 호출 오류 —
 명령을 고쳐 같은 호출을 다시 부르는 연속 시도를 3회까지 하고, 그래도

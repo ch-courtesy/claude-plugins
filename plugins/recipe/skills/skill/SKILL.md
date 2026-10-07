@@ -17,7 +17,9 @@ allowed-tools:
 ## 판정 도구
 
 ```bash
-BIN="<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/dist/pipecheck-$(uname -s | tr A-Z a-z)-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')"
+OS=$(uname -s | tr A-Z a-z); EXT=""
+case "$OS" in mingw*|msys*|cygwin*) OS=windows; EXT=".exe" ;; esac  # Windows Git Bash 는 uname -s 가 MINGW64_NT-… 등
+BIN="<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/dist/pipecheck-$OS-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')$EXT"
 ```
 
 판정 도구 명령은 프로젝트 루트에서 실행한다. `-project`·`-user`는 현재 프로젝트의 `.claude/skills`와 `~/.claude/skills` 경로를 준다. 없는 쪽은 아래 예시에서 그 플래그를 뺀다.
@@ -26,7 +28,7 @@ BIN="<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/dist/pipecheck-
 - 해시: `"$BIN" hash -file <임시 위치>/<이름>/SKILL.md` (워크플로 재료면 `-graph <임시 위치>/<이름>/graph.json`)
 - 파급: `"$BIN" ripple -name <이름> -scope <project|user> -contract <새 계약 해시> -body <새 본문 해시> -project .claude/skills -user ~/.claude/skills` — 이름·위치를 바꿨으면 소비자가 기록한 식별자로 대조하기 위해서 `-name`·`-scope`에 수정 전 원본 설치본의 값을 넣는다
 
-출력은 한 줄 JSON, 불통과는 exit 1. exit 2는 호출 오류 — 명령을 고쳐 같은 호출을 다시 부르는 연속 시도를 3회까지 하고, 그래도 exit 2면 그 출력과 시도한 명령을 보고하고 오류로 끝낸다. 통과하거나 다른 호출로 넘어가면 시도 횟수는 남지 않는다. 바이너리가 없거나 pipecheck 소스가 바이너리보다 새로우면 `<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/build.sh`를 먼저 실행해 만든다. 빌드가 실패하면 그 출력을 보고한다 — 승인 화면이 열려 있으면 그 화면으로 돌아가고, 아니면 실행을 끝낸다.
+출력은 한 줄 JSON, 불통과는 exit 1. exit 2는 호출 오류 — 명령을 고쳐 같은 호출을 다시 부르는 연속 시도를 3회까지 하고, 그래도 exit 2면 그 출력과 시도한 명령을 보고하고 오류로 끝낸다. 통과하거나 다른 호출로 넘어가면 시도 횟수는 남지 않는다. 바이너리가 없으면 `<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/build.sh`를 먼저 실행해 만든다 — 파일 시각은 설치·체크아웃 때 새로 찍혀 소스 변경 판단에 쓰지 않는다(pipecheck 소스를 고친 쪽이 커밋 전에 build.sh 로 dist 를 갱신한다). 빌드가 실패하면 그 출력을 보고한다 — 승인 화면이 열려 있으면 그 화면으로 돌아가고, 아니면 실행을 끝낸다.
 
 사용자가 실행을 그만두면 어느 단계든 임시 위치를 지우고 진행 상태를 보고하며 끝낸다 — 수정 경로면 원본은 그대로다. 오류로 끝나는 모든 경로도 같다. `/pipeline`이 불렀으면 취소·실패를 상위에 반환하고 임시 위치는 상위가 지운다.
 
