@@ -1,0 +1,2 @@
+# 스킬 문서는 pipecheck가 원시 `## ` 줄로 절을 가르므로 Windows(core.autocrlf=true)에서도 LF로 둔다
+*.md text eol=lf
