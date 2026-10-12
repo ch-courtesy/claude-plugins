@@ -20,8 +20,18 @@ BIN="<컴파일 시점에 확정한 pipecheck 바이너리 절대 경로>"
 SKILLS_PROJECT="<컴파일 시점의 프로젝트 .claude/skills 절대 경로>"
 SKILLS_USER="$HOME/.claude/skills"
 BUILD="<컴파일 시점에 확정한 pipecheck build.sh 절대 경로>"
+if [ ! -e "$BIN" ]; then   # 플러그인 업데이트로 버전 디렉터리가 바뀐 경우
+  BASE="${BIN%/tools/pipecheck/dist/*}"; NAME="${BIN##*/}"
+  while IFS= read -r D; do
+    if [ -e "${D}tools/pipecheck/build.sh" ]; then
+      BIN="${D}tools/pipecheck/dist/$NAME"; BUILD="${D}tools/pipecheck/build.sh"; break
+    fi
+  done < <(ls -d "${BASE%/*}"/*/ 2>/dev/null | sort -V -r)
+fi
 ```
-`$BIN`이 없으면 `"$BUILD"`를 먼저 실행해 만든다(파일 시각은 설치·체크아웃 때
+기록한 `$BIN`이 없으면 위 블록이 기록 경로의 버전 디렉터리를 형제 중 가장 높은 버전으로
+바꿔 다시 찾는다 — 플러그인 캐시는 버전별 디렉터리라 업데이트하면 옛 경로가 사라진다.
+그래도 `$BIN`이 없으면 `"$BUILD"`를 먼저 실행해 만든다(파일 시각은 설치·체크아웃 때
 새로 찍혀 소스 변경 판단에 쓰지 않는다). 빌드가 실패하면 — `$BUILD`가 없는 경우도 같다 — 그 출력을
 보고하고 오류로 끝내며 `/pipeline` 재컴파일을 안내한다.
 pipecheck 출력은 한 줄 JSON, 불통과는 exit 1. exit 2는 호출 오류 —
