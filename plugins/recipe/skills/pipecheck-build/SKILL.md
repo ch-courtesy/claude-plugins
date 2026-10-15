@@ -1,6 +1,6 @@
 ---
 name: pipecheck-build
-description: recipe 플러그인의 pipecheck Go 바이너리를 6타깃(darwin·linux·windows × amd64·arm64)으로 다시 빌드하고 테스트·dist 변경을 보고한다. Go가 없으면 OS별 설치까지 안내·실행한다. pipecheck 소스(tools/pipecheck의 cmd·internal·go.mod)를 고친 뒤 커밋 전에 dist를 갱신할 때, dist에 현재 플랫폼 바이너리가 없거나 깨졌을 때, "pipecheck 빌드", "pipecheck 다시 빌드", "dist 갱신", "build.sh 돌려 줘", "pipecheck 바이너리 못 찾음", "pipecheck 빌드 환경 구성" 같은 요청에서 사용한다. macOS·Linux·Windows(PowerShell·Git Bash)에서 동작한다.
+description: recipe 플러그인의 pipecheck Go 바이너리를 6타깃(darwin·linux·windows × amd64·arm64)으로 다시 빌드하고 테스트·dist 변경을 보고한다. Go가 없으면 OS별 설치까지 안내·실행한다. pipecheck 소스(tools/pipecheck의 cmd·internal)나 의존성(go.mod·go.sum)을 고친 뒤 커밋 전에 dist를 갱신하거나 갱신이 필요한지 물을 때, dist에 현재 플랫폼 바이너리가 없거나 깨졌을 때, pipecheck 빌드나 go test가 깨져 원인을 찾을 때, PowerShell만 있는 Windows 등 특정 OS에서 빌드하는 방법을 물을 때, "pipecheck 빌드", "pipecheck 다시 빌드", "dist 갱신", "build.sh 돌려 줘", "pipecheck 바이너리 못 찾음", "pipecheck 빌드 환경 구성" 같은 요청에서 사용한다. macOS·Linux·Windows(PowerShell·Git Bash)에서 동작한다.
 allowed-tools:
   - AskUserQuestion
   - Read
