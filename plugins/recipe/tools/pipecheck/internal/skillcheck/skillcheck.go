@@ -11,6 +11,7 @@ import (
 
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/hash"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/portrules"
+	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/textnorm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -347,7 +348,7 @@ func checkWraps(v *yaml.Node, selfName string, opts Options, fails *[]string) {
 			}
 			target = filepath.Join(rootDir, cur.Name, "SKILL.md")
 		}
-		md, err := os.ReadFile(target)
+		md, err := textnorm.ReadFile(target)
 		if err != nil {
 			fail("wraps: target %s does not exist", key)
 			return

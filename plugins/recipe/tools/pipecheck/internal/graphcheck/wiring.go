@@ -5,12 +5,12 @@ package graphcheck
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/celcheck"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/portrules"
+	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/textnorm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,7 +33,7 @@ func loadContract(opts Options, m material) (map[string]portrules.Port, map[stri
 	if err != nil {
 		return nil, nil, err
 	}
-	md, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	md, err := textnorm.ReadFile(filepath.Join(dir, "SKILL.md"))
 	if err != nil {
 		return nil, nil, fmt.Errorf("material %s(%s) does not exist", m.Name, m.Scope)
 	}
