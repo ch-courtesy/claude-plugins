@@ -275,13 +275,17 @@ grep -q 'name: Post Claude review comment' "$WORKFLOW" \
 if grep -qF '<!-- claude-api-pr-review -->' "$WORKFLOW"; then
   fail "관리형 이슈 코멘트 마커(<!-- claude-api-pr-review -->) 잔존 (AC6)"
 fi
-[[ "$(count 'issues.createComment' "$WORKFLOW")" -eq 1 ]] \
-  || fail "리뷰 skip 사유 외 issues.createComment 경로가 존재함 — finding 이슈 코멘트 게시 금지 (AC6)"
-[[ "$(count 'issues.updateComment' "$WORKFLOW")" -eq 1 ]] \
-  || fail "리뷰 skip 사유 외 issues.updateComment 경로가 존재함 — finding 이슈 코멘트 게시 금지 (AC6)"
+# 허용된 issue comment 경로는 둘 — 리뷰 skip 사유(${prefix}-skipped)와
+# 불완전 verdict 사유(${prefix}-incomplete, 38c7754). finding 은 inline 으로만.
+[[ "$(count 'issues.createComment' "$WORKFLOW")" -eq 2 ]] \
+  || fail "skip·불완전 사유 외 issues.createComment 경로가 존재함 — finding 이슈 코멘트 게시 금지 (AC6)"
+[[ "$(count 'issues.updateComment' "$WORKFLOW")" -eq 2 ]] \
+  || fail "skip·불완전 사유 외 issues.updateComment 경로가 존재함 — finding 이슈 코멘트 게시 금지 (AC6)"
 grep -qF '${prefix}-skipped' "$WORKFLOW" \
   || fail "허용된 issue comment 경로가 리뷰 skip 사유 마커로 제한되지 않음"
-ok "check 7: finding 이슈 코멘트 게시 경로 부재 + skip 사유 코멘트만 허용"
+grep -qF '${prefix}-incomplete' "$WORKFLOW" \
+  || fail "허용된 issue comment 경로가 불완전 verdict 사유 마커로 제한되지 않음"
+ok "check 7: finding 이슈 코멘트 게시 경로 부재 + skip·불완전 사유 코멘트만 허용"
 
 echo ""
 echo "=== check 7b: 인라인 리뷰 코멘트 게시 경로 존재 (AC1/AC2) ==="
