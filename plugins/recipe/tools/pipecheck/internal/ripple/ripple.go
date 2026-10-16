@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/textnorm"
+
 	"gopkg.in/yaml.v3"
 )
 
@@ -82,7 +84,7 @@ func scan(opts Options) (map[string]entry, []string, error) {
 			}
 			name := d.Name()
 			mdPath := filepath.Join(root, name, "SKILL.md")
-			md, err := os.ReadFile(mdPath)
+			md, err := textnorm.ReadFile(mdPath)
 			if err != nil {
 				continue // SKILL.md 없는 디렉터리는 산출물이 아니다
 			}
@@ -92,7 +94,7 @@ func scan(opts Options) (map[string]entry, []string, error) {
 				errs = append(errs, fmt.Sprintf("%s(%s): graph.json unreadable: %v", name, scope, err))
 				continue
 			}
-			if gb, err := os.ReadFile(filepath.Join(root, name, "graph.json")); err == nil {
+			if gb, err := textnorm.ReadFile(filepath.Join(root, name, "graph.json")); err == nil {
 				hasGraph = true
 				if err := json.Unmarshal(gb, &g); err != nil {
 					errs = append(errs, fmt.Sprintf("%s(%s): graph.json: %v", name, scope, err))

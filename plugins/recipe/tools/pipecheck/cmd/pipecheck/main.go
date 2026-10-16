@@ -19,6 +19,7 @@ import (
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/ripple"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/runcheck"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/skillcheck"
+	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/textnorm"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/verify"
 )
 
@@ -61,7 +62,7 @@ func main() {
 		if *file == "" {
 			usage()
 		}
-		md, err := os.ReadFile(*file)
+		md, err := textnorm.ReadFile(*file)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -81,14 +82,14 @@ func main() {
 		if *file == "" {
 			usage()
 		}
-		md, err := os.ReadFile(*file)
+		md, err := textnorm.ReadFile(*file)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 		var g []byte
 		if *graph != "" {
-			g, err = os.ReadFile(*graph)
+			g, err = textnorm.ReadFile(*graph)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(2)
@@ -113,7 +114,7 @@ func main() {
 		if *file == "" {
 			usage()
 		}
-		raw, err := os.ReadFile(*file)
+		raw, err := textnorm.ReadFile(*file)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -157,7 +158,7 @@ func main() {
 		if *file == "" {
 			usage()
 		}
-		raw, err := os.ReadFile(*file)
+		raw, err := textnorm.ReadFile(*file)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)

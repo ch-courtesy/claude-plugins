@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/hash"
+	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/textnorm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -76,14 +77,14 @@ func Run(topGraph []byte, opts Options) (Result, error) {
 				continue
 			}
 			dir := filepath.Join(root, m.Name)
-			md, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+			md, err := textnorm.ReadFile(filepath.Join(dir, "SKILL.md"))
 			if err != nil {
 				fail("%s(%s): material does not exist — 경로 %s", m.Name, m.Scope, p)
 				continue
 			}
 			var g []byte
 			hasGraph := false
-			if gb, err := os.ReadFile(filepath.Join(dir, "graph.json")); err == nil {
+			if gb, err := textnorm.ReadFile(filepath.Join(dir, "graph.json")); err == nil {
 				g = gb
 				hasGraph = true
 			} else if !os.IsNotExist(err) {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/portrules"
+	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/textnorm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -151,7 +152,7 @@ func resolveMaterial(opts Options, m material) (resolved, error) {
 	if err != nil {
 		return resolved{}, err
 	}
-	md, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+	md, err := textnorm.ReadFile(filepath.Join(dir, "SKILL.md"))
 	if err != nil {
 		return resolved{}, fmt.Errorf("material %s(%s) does not exist", m.Name, m.Scope)
 	}
@@ -159,7 +160,7 @@ func resolveMaterial(opts Options, m material) (resolved, error) {
 	if _, err := os.Stat(filepath.Join(dir, "graph.json")); err != nil && !os.IsNotExist(err) {
 		return resolved{}, fmt.Errorf("material %s(%s): graph.json unreadable: %v", m.Name, m.Scope, err)
 	}
-	if gb, err := os.ReadFile(filepath.Join(dir, "graph.json")); err == nil {
+	if gb, err := textnorm.ReadFile(filepath.Join(dir, "graph.json")); err == nil {
 		var g struct {
 			Materials []material `json:"materials"`
 		}
