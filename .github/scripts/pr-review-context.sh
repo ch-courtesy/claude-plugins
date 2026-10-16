@@ -170,11 +170,16 @@ esac
 # in-diff: a file absent in the previous-reviewed SHA (the incremental base) shows
 # as fully-added, so its unchanged-vs-base lines pass the off-diff filter and then
 # get 422 "Line could not be resolved" from createReview — which the inline-only
-# false-green guard turns into a failed job. `gh pr diff` is exactly the diff
-# GitHub resolves anchors against, so validate against it in every mode.
-gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch \
-  > "$REVIEW_OUTPUT_DIR/anchor.patch" \
-  || cp "$REVIEW_OUTPUT_DIR/diff.patch" "$REVIEW_OUTPUT_DIR/anchor.patch"
+# false-green guard turns into a failed job. The PR-own merge-base..head diff is
+# exactly the diff GitHub resolves anchors against, so validate against it in
+# every mode. Built locally for the same reason as full mode (large binaries →
+# gh pr diff --patch 422); gh pr diff, then diff.patch, remain the fallbacks.
+anchor_base="$(git merge-base "${PR_BASE_SHA:-}" "$PR_HEAD_SHA" 2>/dev/null || true)"
+if [[ -z "$anchor_base" ]] || ! git diff --patch "$anchor_base" "$PR_HEAD_SHA" > "$REVIEW_OUTPUT_DIR/anchor.patch"; then
+  gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch \
+    > "$REVIEW_OUTPUT_DIR/anchor.patch" \
+    || cp "$REVIEW_OUTPUT_DIR/diff.patch" "$REVIEW_OUTPUT_DIR/anchor.patch"
+fi
 
 {
   printf 'REVIEW_CONTEXT_MODE=%s\n' "$mode_label"
