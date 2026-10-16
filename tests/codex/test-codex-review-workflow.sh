@@ -58,11 +58,16 @@ fi
 ok "check 2: codex CLI 직접 호출·설치 스텝 부재"
 
 echo ""
-echo "=== check 3: codex CLI 버전이 action 버전 입력으로 고정된다 (제약) ==="
-codex_version_count="$(count "codex-version: '0.132.0'" "$WORKFLOW")"
+echo "=== check 3: codex CLI 버전·모델이 action 입력으로 고정된다 (제약) ==="
+codex_version_count="$(count "codex-version: '0.163.0'" "$WORKFLOW")"
 [[ "$codex_version_count" == "3" ]] \
-  || fail "codex-version 입력이 1차/2차/auth-refresh action 호출 3곳에 0.132.0 으로 고정되지 않음 (현재 $codex_version_count)"
-ok "check 3: codex-version 입력으로 codex CLI 0.132.0 고정"
+  || fail "codex-version 입력이 1차/2차/auth-refresh action 호출 3곳에 0.163.0 으로 고정되지 않음 (현재 $codex_version_count)"
+# 모델을 비우면 CLI 내장 기본값을 쓴다 — 0.132.0 의 기본값 gpt-5.5 가 ChatGPT
+# 계정에서 400 으로 거절돼 리뷰가 죽었다. 세 호출 모두 모델을 명시한다.
+codex_model_count="$(count "model: 'gpt-6.1-sol'" "$WORKFLOW")"
+[[ "$codex_model_count" == "3" ]] \
+  || fail "model 입력이 1차/2차/auth-refresh action 호출 3곳에 gpt-6.1-sol 로 고정되지 않음 (현재 $codex_model_count)"
+ok "check 3: codex-version 입력으로 codex CLI 0.163.0·모델 gpt-6.1-sol 고정"
 
 echo ""
 echo "=== check 4: ChatGPT auth.json codex-home 부트스트랩 (AC2/제약) ==="

@@ -401,7 +401,8 @@ jobs:
         continue-on-error: true
         uses: openai/codex-action@e0fdf01220eb9a88167c4898839d273e3f2609d1
         with:
-          codex-version: '0.132.0'
+          codex-version: '0.163.0'
+          model: 'gpt-6.1-sol'
           codex-home: ${{ env.CODEX_HOME_DIR }}
           sandbox: read-only
           effort: low
@@ -502,7 +503,8 @@ jobs:
       - name: Run Codex review
         uses: openai/codex-action@e0fdf01220eb9a88167c4898839d273e3f2609d1
         with:
-          codex-version: '0.132.0'
+          codex-version: '0.163.0'
+          model: 'gpt-6.1-sol'
           codex-home: ${{ env.CODEX_HOME_DIR }}
           sandbox: read-only
           effort: medium
@@ -573,7 +575,8 @@ jobs:
         if: steps.prepare-codex-follow-up.outputs.has_extra_context == 'true'
         uses: openai/codex-action@e0fdf01220eb9a88167c4898839d273e3f2609d1
         with:
-          codex-version: '0.132.0'
+          codex-version: '0.163.0'
+          model: 'gpt-6.1-sol'
           codex-home: ${{ env.CODEX_HOME_DIR }}
           sandbox: read-only
           effort: medium
