@@ -122,14 +122,17 @@ grep -q '+incremental' "$out/diff.patch" \
   || fail "incremental mode should use marker..head diff"
 ok "synchronize event uses incremental diff"
 
-# Regression: anchor.patch must be the canonical PR-vs-base diff (gh pr diff,
-# here '+full') even in incremental mode — NOT the incremental diff.patch.
-# Validating anchors against the incremental diff mis-marks base-merged lines
-# as in-diff → createReview 422 + false-green job failure.
+# Regression: anchor.patch must be the canonical PR-vs-base diff (local PR-own
+# merge-base diff, here '+pr-diff') even in incremental mode — NOT the
+# incremental diff.patch. Validating anchors against the incremental diff
+# mis-marks base-merged lines as in-diff → createReview 422 + false-green job
+# failure.
 [[ -f "$out/anchor.patch" ]] \
   || fail "anchor.patch must always be produced for createReview anchor validation"
+grep -q '+pr-diff' "$out/anchor.patch" \
+  || fail "incremental mode anchor.patch must be the local PR-own merge-base diff, not the incremental diff"
 grep -q '+full' "$out/anchor.patch" \
-  || fail "incremental mode anchor.patch must be canonical gh pr diff, not the incremental diff"
+  && fail "anchor.patch must not call gh pr diff when the local diff succeeds (large binary PR → GitHub 422)"
 grep -q '+incremental' "$out/anchor.patch" \
   && fail "anchor.patch must NOT be the incremental diff (would 422 on base-merged lines)"
 ok "incremental mode anchor.patch = canonical PR-vs-base diff (createReview-safe)"
@@ -255,6 +258,8 @@ grep -q '^REVIEW_CONTEXT_MODE=full$' "$out/context-mode.env" \
   || fail "opened event with failing git diff should still use full mode"
 grep -q '+full' "$out/diff.patch" \
   || fail "full mode git diff failure should fallback to gh pr diff"
-ok "full mode git diff failure falls back to gh pr diff"
+grep -q '+full' "$out/anchor.patch" \
+  || fail "anchor.patch local diff failure should fallback to gh pr diff"
+ok "full mode git diff failure falls back to gh pr diff (diff.patch and anchor.patch)"
 
 echo "ALL CHECKS PASSED"
