@@ -109,8 +109,8 @@ collect_review_threads > "$REVIEW_OUTPUT_DIR/review-threads.json" 2>/dev/null \
 # review run can read, the review then skips, the success-gated marker never posts,
 # and the base never advances — a self-perpetuating skip loop. Detect the influx
 # and fall back to the PR-own merge-base so the diff is bounded by the PR's size.
-# Incremental mode switches to the existing full branch (gh pr diff — equivalent
-# to a merge-base two-dot diff); thread mode keeps its path scope and only swaps
+# Incremental mode switches to the existing full branch (a local diff from that
+# PR-own merge-base); thread mode keeps its path scope and only swaps
 # the base. A merge commit authored inside the PR itself also triggers this —
 # over-falling-back to the PR-own diff is safe. The label must stay shell-word
 # safe: context-mode.env is `source`d by the workflows.
@@ -148,7 +148,14 @@ case "$mode" in
     }
     ;;
   full)
-    gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch > "$REVIEW_OUTPUT_DIR/diff.patch"
+    # PR-own merge-base..head two-dot diff, built locally. `gh pr diff --patch`
+    # embeds every changed binary as a full literal (old + new), so a PR touching
+    # large binaries makes GitHub answer 422 "The patch is taking too long to
+    # generate". gh pr diff stays as the fallback when the local diff fails.
+    full_base="${incremental_base:-$(git merge-base "${PR_BASE_SHA:-}" "$PR_HEAD_SHA" 2>/dev/null || true)}"
+    if [[ -z "$full_base" ]] || ! git diff --patch "$full_base" "$PR_HEAD_SHA" > "$REVIEW_OUTPUT_DIR/diff.patch"; then
+      gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --patch > "$REVIEW_OUTPUT_DIR/diff.patch"
+    fi
     ;;
   *)
     echo "unknown review context mode: $mode" >&2
