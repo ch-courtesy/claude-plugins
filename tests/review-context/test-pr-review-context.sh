@@ -65,6 +65,12 @@ case "$*" in
   'diff --patch mergebaseM2 head456 -- src/thread.js')
     printf 'diff --git a/src/thread.js b/src/thread.js\n+thread-fallback\n'
     ;;
+  'diff --patch mergebaseM1 head456')
+    printf 'diff --git a/src/pr.js b/src/pr.js\n+pr-diff\n'
+    ;;
+  'diff --patch mergebaseM2 head456')
+    exit 1
+    ;;
   'merge-base --is-ancestor beefa123 head456' \
   | 'merge-base --is-ancestor deadb123 head456' \
   | 'merge-base --is-ancestor cafeb001 head456')
@@ -169,8 +175,8 @@ REVIEW_OUTPUT_DIR="$out" \
 
 grep -q '^REVIEW_CONTEXT_MODE=full-merge-fallback$' "$out/context-mode.env" \
   || fail "merge commit in incremental range should switch to full-merge-fallback"
-grep -q '+full' "$out/diff.patch" \
-  || fail "merge-fallback diff.patch should be the canonical PR-vs-base diff"
+grep -q '+pr-diff' "$out/diff.patch" \
+  || fail "merge-fallback diff.patch should be the local PR-own merge-base diff"
 grep -q '+incremental' "$out/diff.patch" \
   && fail "merge-fallback diff.patch must not contain the polluted incremental range"
 ok "merge commit influx falls back to canonical PR-vs-base diff"
@@ -227,8 +233,28 @@ REVIEW_OUTPUT_DIR="$out" \
 
 grep -q '^REVIEW_CONTEXT_MODE=full$' "$out/context-mode.env" \
   || fail "opened pull_request event should use full mode"
+grep -q '+pr-diff' "$out/diff.patch" \
+  || fail "full mode should use local merge-base..head git diff"
 grep -q '+full' "$out/diff.patch" \
-  || fail "full mode should use gh pr diff fallback"
-ok "opened pull_request event uses full context"
+  && fail "full mode must not call gh pr diff when git diff succeeds (large binary PR → GitHub 422)"
+ok "opened pull_request event uses full context from local git diff"
+
+# full 모드에서 로컬 git diff 가 실패하면(객체 부재 등) gh pr diff 로 내려간다.
+out="$tmp/full-fallback-out"
+mkdir -p "$out"
+GITHUB_EVENT_NAME=pull_request \
+GITHUB_EVENT_PATH="$FIXTURES/opened-event.json" \
+GITHUB_REPOSITORY=owner/repo \
+PR_NUMBER=12 \
+PR_BASE_SHA=baseM2 \
+PR_HEAD_SHA=head456 \
+REVIEW_OUTPUT_DIR="$out" \
+"$SCRIPT"
+
+grep -q '^REVIEW_CONTEXT_MODE=full$' "$out/context-mode.env" \
+  || fail "opened event with failing git diff should still use full mode"
+grep -q '+full' "$out/diff.patch" \
+  || fail "full mode git diff failure should fallback to gh pr diff"
+ok "full mode git diff failure falls back to gh pr diff"
 
 echo "ALL CHECKS PASSED"
