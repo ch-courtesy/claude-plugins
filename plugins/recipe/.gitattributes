@@ -1,2 +1,2 @@
-# 스킬 문서는 pipecheck가 원시 `## ` 줄로 절을 가르므로 Windows(core.autocrlf=true)에서도 LF로 둔다
+# 스킬 문서는 Windows(core.autocrlf=true)에서도 LF로 둔다 — pipecheck는 1.1.4부터 CRLF를 LF로 읽지만, 그 전 바이너리와 원시 `## ` 줄로 절을 가르는 다른 도구는 `\r`이 남으면 절을 놓친다
 *.md text eol=lf
