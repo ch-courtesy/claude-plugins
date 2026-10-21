@@ -21,12 +21,12 @@ SKILLS_PROJECT="<컴파일 시점의 프로젝트 .claude/skills 절대 경로>"
 SKILLS_USER="$HOME/.claude/skills"
 BUILD="<컴파일 시점에 확정한 pipecheck build.sh 절대 경로>"
 if [ ! -e "$BIN" ]; then   # 플러그인 업데이트로 버전 디렉터리가 바뀐 경우
-  BASE="${BIN%/tools/pipecheck/dist/*}"; NAME="${BIN##*/}"
-  while IFS= read -r D; do
-    if [ -e "${D}tools/pipecheck/build.sh" ]; then
-      BIN="${D}tools/pipecheck/dist/$NAME"; BUILD="${D}tools/pipecheck/build.sh"; break
+  BASE="${BIN%/tools/pipecheck/dist/*}"; NAME="${BIN##*/}"; P="${BASE%/*}"
+  while IFS= read -r V; do   # sort -V 는 POSIX 가 아니어서 점 구분 숫자 정렬로 높은 버전부터
+    if [ -e "$P/$V/tools/pipecheck/build.sh" ]; then
+      BIN="$P/$V/tools/pipecheck/dist/$NAME"; BUILD="$P/$V/tools/pipecheck/build.sh"; break
     fi
-  done < <(ls -d "${BASE%/*}"/*/ 2>/dev/null | sort -V -r)
+  done < <(ls "$P" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr)
 fi
 ```
 기록한 `$BIN`이 없으면 위 블록이 기록 경로의 버전 디렉터리를 형제 중 가장 높은 버전으로
