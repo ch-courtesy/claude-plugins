@@ -68,7 +68,7 @@ BIN="<이 SKILL.md가 있는 디렉터리>/../../tools/pipecheck/dist/pipecheck-
 
 ## 2. 분해
 
-[references/decompose.md](references/decompose.md)의 기준으로 노드·transform·컨테이너를 가른다. 값 가공은 transform 식으로, 도구 실행·판단은 노드로, 반복은 컨테이너로.
+[references/decompose.md](references/decompose.md)의 기준으로 노드·transform·컨테이너를 가른다. 값 가공은 transform 식으로, 도구 실행·판단은 노드로, 반복은 컨테이너로, 사람의 응답·바깥 완료를 기다리는 자리는 wait로.
 
 ## 3. 재료
 
