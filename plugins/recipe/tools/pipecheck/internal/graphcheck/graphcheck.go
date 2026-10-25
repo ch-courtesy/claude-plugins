@@ -46,6 +46,8 @@ type component struct {
 	Kind  string `json:"kind"`
 	Rule  string `json:"rule"`
 	Skill string `json:"skill"`
+	By    string `json:"by"`
+	Mode  string `json:"mode"`
 	raw   map[string]json.RawMessage
 }
 
@@ -215,6 +217,8 @@ var fieldClosure = map[string]map[string]bool{
 	"transform": {"id": true, "kind": true, "out": true},
 	"items":     {"id": true, "kind": true, "rule": true, "skill": true, "split": true, "expose": true, "combine": true, "const": true},
 	"condition": {"id": true, "kind": true, "rule": true, "skill": true, "expose": true, "until": true, "max": true, "carry": true, "const": true},
+	"human":     {"id": true, "kind": true, "by": true, "mode": true, "prompt": true, "answer": true},
+	"check":     {"id": true, "kind": true, "by": true, "skill": true, "const": true},
 }
 
 func Check(raw []byte, opts Options) (Result, error) {
@@ -327,8 +331,15 @@ func Check(raw []byte, opts Options) (Result, error) {
 			} else {
 				closureKey = c.Rule
 			}
+		} else if c.Kind == "wait" {
+			if c.By != "human" && c.By != "check" {
+				fail("nodes[%d]: by %q is not human|check", i, c.By)
+				closureKey = ""
+			} else {
+				closureKey = c.By
+			}
 		} else if c.Kind != "node" && c.Kind != "transform" {
-			fail("nodes[%d]: kind %q is not node·transform·container", i, c.Kind)
+			fail("nodes[%d]: kind %q is not node·transform·container·wait", i, c.Kind)
 			closureKey = ""
 		}
 		if allowed, ok := fieldClosure[closureKey]; ok {
@@ -346,7 +357,7 @@ func Check(raw []byte, opts Options) (Result, error) {
 	used := map[string]bool{}
 	for _, id := range order {
 		c := comps[id]
-		if c.Kind == "node" || c.Kind == "container" {
+		if c.Kind == "node" || c.Kind == "container" || (c.Kind == "wait" && c.By == "check") {
 			if c.Skill == "" {
 				fail("%s: skill reference missing", id)
 				continue

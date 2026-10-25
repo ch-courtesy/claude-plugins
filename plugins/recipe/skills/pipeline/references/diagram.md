@@ -66,6 +66,22 @@ graph.in.repo (text)
     └─ rest (json, list:1) ─► [report]
 ```
 
+**wait은 `{이름}`으로 그리고 옆에 `by·mode`를, 아래에 `prompt`를 적는다.** check는 `by` 옆에 `→ 재료`를 적는다. 출력은 다른 상자처럼 포트마다 적는다.
+
+```
+ [plan]
+    │ draft (text) → gate.in.draft
+    ▼
+ {gate}  human·approve
+   "이 수정안으로 진행할까요?"
+    ├─ approved (bool) ─► < route >
+    └─ note (text) ─► [apply]
+
+ {ci}  check → ci-status   branch='main'
+    │ url (text)
+    ▼
+```
+
 **order 엣지는 상자 종류와 무관하게 아래 변 가운데에서 나가 다음 상자의 위 변 가운데로 들어간다.** 데이터 화살표는 `▼`이고 order는 `╎`이며, **order 선에는 포트 이름을 적지 않는다.**
 
 **워크플로를 노드로 쓴 상자는 `[[이름]]`으로 그리고 컨테이너 깊이를 옆에 적는다.** 깊이는 1 이상일 때만 적고 0이면 생략하며, 세는 규칙은 7.5의 컨테이너 깊이 규칙과 같다.

@@ -3,12 +3,14 @@
 //	pipecheck check-expr  < {"expr": "...", "in": {...}}      §4 표현식 체크
 //	pipecheck check-skill -file SKILL.md [-project DIR] [-user DIR]   §6.4 스킬 검증
 //	pipecheck hash        -file SKILL.md [-graph graph.json]  §5.8 계약·본문 해시
+//	pipecheck run <init|start|wait|record|end|show|resume|cancel|status> -dir RUNS ...  실행 상태
 //
 // 출력은 전부 stdout 한 줄 JSON. 검사 불통과는 exit 1, 사용 오류는 exit 2.
 package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -18,13 +20,14 @@ import (
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/hash"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/ripple"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/runcheck"
+	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/runstate"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/skillcheck"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/textnorm"
 	"github.com/courtesy/claude-plugins/recipe/pipecheck/internal/verify"
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: pipecheck <check-expr|check-skill|check-graph|check-values|verify-materials|hash|ripple> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: pipecheck <check-expr|check-skill|check-graph|check-values|verify-materials|hash|ripple|run> [flags]")
 	os.Exit(2)
 }
 
@@ -191,6 +194,101 @@ func main() {
 		}
 		emit(rep, true)
 
+	case "run":
+		runCmd(os.Args[2:])
+
+	default:
+		usage()
+	}
+}
+
+// runCmd — 실행 상태 하위 명령. 상태와 맞지 않는 요청(없는 run, 끝난 run, 끝난 구성 요소)은
+// 불통과(exit 1)로 {"pass":false,"failures":[...]}를 낸다.
+func runCmd(args []string) {
+	if len(args) < 1 {
+		usage()
+	}
+	sub := args[0]
+	fs := flag.NewFlagSet("run "+sub, flag.ExitOnError)
+	dir := fs.String("dir", "", "runs directory (.pipelines/runs)")
+	run := fs.String("run", "", "run id")
+	id := fs.String("id", "", "component path id")
+	graph := fs.String("graph", "", "graph.json path")
+	status := fs.String("status", "", "end status (waiting|done|failed)")
+	workflow := fs.String("workflow", "", "status filter: workflow name")
+	_ = fs.Parse(args[1:])
+	if *dir == "" {
+		usage()
+	}
+	readGraph := func() []byte {
+		if *graph == "" {
+			usage()
+		}
+		g, err := textnorm.ReadFile(*graph)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		return g
+	}
+	readStdin := func() json.RawMessage {
+		var v json.RawMessage
+		if err := json.NewDecoder(os.Stdin).Decode(&v); err != nil {
+			fmt.Fprintln(os.Stderr, "input:", err)
+			os.Exit(2)
+		}
+		return v
+	}
+	need := func(vals ...string) {
+		for _, v := range vals {
+			if v == "" {
+				usage()
+			}
+		}
+	}
+	finish := func(v any, err error) {
+		var r runstate.Refusal
+		if errors.As(err, &r) {
+			emit(map[string]any{"pass": false, "failures": []string{r.Msg}}, false)
+			return
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		emit(v, true)
+	}
+	ok := map[string]bool{"pass": true}
+	switch sub {
+	case "init":
+		m, err := runstate.Init(*dir, readGraph(), readStdin())
+		finish(map[string]any{"pass": true, "run": m.Run}, err)
+	case "start":
+		need(*run, *id)
+		finish(ok, runstate.Start(*dir, *run, *id))
+	case "wait":
+		need(*run, *id)
+		finish(ok, runstate.Wait(*dir, *run, *id, readStdin()))
+	case "record":
+		need(*run, *id)
+		finish(ok, runstate.Record(*dir, *run, *id, readStdin()))
+	case "end":
+		need(*run, *status)
+		finish(ok, runstate.End(*dir, *run, *status))
+	case "show":
+		need(*run)
+		st, err := runstate.Show(*dir, *run)
+		finish(st, err)
+	case "resume":
+		need(*run)
+		rep, err := runstate.Resume(*dir, *run, readGraph())
+		finish(rep, err)
+	case "cancel":
+		need(*run)
+		finish(ok, runstate.Cancel(*dir, *run))
+	case "status":
+		runs, err := runstate.Status(*dir, *run, *workflow)
+		finish(map[string]any{"pass": true, "runs": runs}, err)
 	default:
 		usage()
 	}

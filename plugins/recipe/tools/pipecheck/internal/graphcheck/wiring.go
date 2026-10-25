@@ -314,6 +314,12 @@ func checkWiring(comps map[string]*component, order []string, edges []edge,
 				compIn[id], compOut[id] = ci, co
 			}
 		}
+		if c.Kind == "wait" && c.By == "check" {
+			if ct, ok := contracts[c.Skill]; ok {
+				checkWaitContract(c, ct[1], fails)
+				compIn[id], compOut[id] = ct[0], ct[1]
+			}
+		}
 	}
 
 	// 수신 인덱스
@@ -394,6 +400,30 @@ func checkWiring(comps map[string]*component, order []string, edges []edge,
 
 	for _, id := range topo {
 		c := comps[id]
+		if c.Kind == "wait" && c.By == "human" {
+			// 입력은 들어오는 엣지마다 첫 상류 포트를 그대로 받는다 — 사람에게 보일 값이다.
+			inMap := map[string]portrules.Port{}
+			prefix := id + ".in."
+			for key, refs := range inboundRefs {
+				if !strings.HasPrefix(key, prefix) {
+					continue
+				}
+				name := strings.TrimPrefix(key, prefix)
+				if !portrules.PortNameRe.MatchString(name) {
+					fail("%s.in.%s: port name must be non-empty, [a-z0-9_], no leading digit (3.1)", id, name)
+					continue
+				}
+				fp, ok := resolveFrom(refs[0])
+				if !ok {
+					fail("%s.in.%s: upstream port %s.%s does not exist", id, name, refs[0].comp, refs[0].port)
+					continue
+				}
+				fp.Aligned, fp.AlignedSet = "", false
+				inMap[name] = fp
+			}
+			compIn[id], compOut[id] = inMap, humanWaitPorts(c, inMap, fails)
+			continue
+		}
 		if c.Kind != "transform" {
 			continue
 		}
