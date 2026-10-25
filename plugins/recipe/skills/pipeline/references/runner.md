@@ -1,6 +1,6 @@
 # 런너 지시서 템플릿 (§7.7·§9)
 
-컴파일이 워크플로 `SKILL.md`의 `## 실행` 절에 찍는 내용이다. 컴파일본의 `## 실행`은 이 템플릿의 사본이라, 템플릿을 고쳐도 이미 찍힌 사본은 옛 절차대로 돈다. 옛 절차의 뜻을 바꾸거나 옛 절차가 틀리게 되는 수정이면 두 스킬 디렉터리(`.claude/skills`, `~/.claude/skills`) 전부에서 `graph.json`을 가진 스킬을 찾아 하나씩 `/pipeline` 재컴파일 경로(수정 진입·승인·복구 규칙 그대로)로 다시 찍는다. 옛 절차를 그대로 두고 새 기능만 더하는 수정이면 다시 찍지 않는다 — 그 기능을 쓰려는 워크플로만 재컴파일하면 된다. 어느 쪽이든 옛 사본이 부르는 pipecheck 명령의 입력·출력은 바꾸지 않는다 — 옛 사본도 형제 버전 재탐색으로 새 바이너리를 부른다. 템플릿 헤딩은 이미 한 단계 내린 `###`이다 — 그대로 쓴다. `<...>` 자리만 그래프에 맞춰 채우고 절차 문장은 그대로 쓴다.
+컴파일이 워크플로 `SKILL.md`의 `## 실행` 절에 찍는 내용이다. 컴파일본의 `## 실행`은 이 템플릿의 사본이라, 템플릿을 고쳐도 이미 찍힌 사본은 옛 절차대로 돈다. 옛 절차의 뜻을 바꾸거나 옛 절차가 틀리게 되는 수정이면 두 스킬 디렉터리(`.claude/skills`, `~/.claude/skills`) 전부에서 `graph.json`을 가진 스킬을 찾아 하나씩 `/pipeline` 재컴파일 경로(수정 진입·승인·복구 규칙 그대로)로 다시 찍는다. 옛 절차를 그대로 두고 새 기능만 더하는 수정이면 다시 찍지 않는다 — 그 기능을 쓰려는 워크플로만 재컴파일하면 된다. 어느 쪽이든 옛 사본이 부르는 pipecheck 명령의 입력·출력은 바꾸지 않는다 — 옛 사본도 새 바이너리를 부른다(1.2.0까지의 사본은 기록 경로의 형제 버전 재탐색으로, 그 뒤 사본은 플러그인 캐시 탐색으로). 템플릿 헤딩은 이미 한 단계 내린 `###`이다 — 그대로 쓴다. `<...>` 자리만 그래프에 맞춰 채우고 절차 문장은 그대로 쓴다.
 
 ````markdown
 ### 그래프
@@ -16,24 +16,40 @@
 모든 명령은 이 SKILL.md가 있는 디렉터리에서 실행한다 — graph.json은 그 디렉터리의 것이다.
 
 ```bash
-BIN="<컴파일 시점에 확정한 pipecheck 바이너리 절대 경로>"
-SKILLS_PROJECT="<컴파일 시점의 프로젝트 .claude/skills 절대 경로>"
+OS=$(uname -s | tr A-Z a-z); EXT=""
+case "$OS" in mingw*|msys*|cygwin*) OS=windows; EXT=".exe" ;; esac  # Windows Git Bash 는 uname -s 가 MINGW64_NT-… 등
+WORKDIR="${WORKDIR:?이 워크플로를 부른 세션의 작업 디렉터리 절대 경로를 먼저 넣는다}"
+SKILLS_PROJECT="<project 범위면 $(cd .. && pwd), user 범위면 $WORKDIR/.claude/skills>"
 SKILLS_USER="$HOME/.claude/skills"
-BUILD="<컴파일 시점에 확정한 pipecheck build.sh 절대 경로>"
-if [ ! -e "$BIN" ]; then   # 플러그인 업데이트로 버전 디렉터리가 바뀐 경우
-  BASE="${BIN%/tools/pipecheck/dist/*}"; NAME="${BIN##*/}"; P="${BASE%/*}"
-  while IFS= read -r V; do   # sort -V 는 POSIX 가 아니어서 점 구분 숫자 정렬로 높은 버전부터
-    if [ -e "$P/$V/tools/pipecheck/build.sh" ]; then
-      BIN="$P/$V/tools/pipecheck/dist/$NAME"; BUILD="$P/$V/tools/pipecheck/build.sh"; break
-    fi
-  done < <(ls "$P" 2>/dev/null | sort -t. -k1,1nr -k2,2nr -k3,3nr)
+if [ "$OS" = windows ]; then   # Windows 실행 파일은 /c/… 꼴을 못 읽는다 — MSYS_NO_PATHCONV 면 Git Bash 도 바꿔 주지 않는다
+  WORKDIR=$(cygpath -m "$WORKDIR"); SKILLS_PROJECT=$(cygpath -m "$SKILLS_PROJECT"); SKILLS_USER=$(cygpath -m "$SKILLS_USER")
 fi
+NEED="<컴파일한 recipe 버전>"   # 이 절차가 쓰는 pipecheck 명령이 다 들어 있는 가장 낮은 recipe 버전
+NAME="pipecheck-$OS-$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')$EXT"
+BIN="${PIPECHECK_BIN:-}"
+if [ -z "$BIN" ]; then   # 플러그인 캐시 <설정 디렉터리>/plugins/cache/<마켓>/recipe/<버전>/ 에서 NEED 이상인 가장 높은 버전
+  while read -r V D; do   # sort -V 는 POSIX 가 아니어서 점 구분 숫자 정렬로 높은 버전부터
+    if [ "$(printf '%s\n%s\n' "$NEED" "$V" | sort -t. -k1,1n -k2,2n -k3,3n | head -n 1)" = "$NEED" ]; then
+      BIN="$D/tools/pipecheck/dist/$NAME"
+    fi
+    break
+  done < <(for C in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache" "${CODEX_HOME:-$HOME/.codex}/plugins/cache"; do
+             for D in "$C"/*/recipe/*/; do
+               [ -e "${D}tools/pipecheck/build.sh" ] && printf '%s %s\n' "$(basename "$D")" "${D%/}"
+             done
+           done | sort -t. -k1,1nr -k2,2nr -k3,3nr)
+fi
+BUILD="${BIN%/dist/*}/build.sh"
 ```
-기록한 `$BIN`이 없으면 위 블록이 기록 경로의 버전 디렉터리를 형제 중 가장 높은 버전으로
-바꿔 다시 찾는다 — 플러그인 캐시는 버전별 디렉터리라 업데이트하면 옛 경로가 사라진다.
-그래도 `$BIN`이 없으면 `"$BUILD"`를 먼저 실행해 만든다(파일 시각은 설치·체크아웃 때
+`WORKDIR`는 이 워크플로를 부른 세션의 작업 디렉터리다 — 이 SKILL.md 디렉터리가 아니므로
+블록을 돌리기 전에 넣는다. 컴파일본에는 PC마다 다른 절대 경로를 적지 않는다 — pipecheck는
+실행할 때 `PIPECHECK_BIN` 환경 변수, 없으면 Claude Code·Codex의 플러그인 캐시에서 찾는다.
+캐시에서 가장 높은 recipe가 `NEED`보다 낮으면 고르지 않는다 — 옛 pipecheck에는 이 절차가
+쓰는 명령이 없다. `$BIN`이 비었으면 그 사실과 함께 recipe `NEED` 이상을 설치하거나
+`PIPECHECK_BIN`에 pipecheck 실행 파일 경로를 넣으라고 안내하고 오류로 끝낸다.
+`$BIN`이 비지 않았는데 파일이 없으면 `"$BUILD"`를 먼저 실행해 만든다(파일 시각은 설치·체크아웃 때
 새로 찍혀 소스 변경 판단에 쓰지 않는다). 빌드가 실패하면 — `$BUILD`가 없는 경우도 같다 — 그 출력을
-보고하고 오류로 끝내며 `/pipeline` 재컴파일을 안내한다.
+보고하고 오류로 끝낸다.
 pipecheck 출력은 한 줄 JSON, 불통과는 exit 1. exit 2는 호출 오류 —
 명령을 고쳐 같은 호출을 다시 부르는 연속 시도를 3회까지 하고, 그래도
 exit 2면 그 출력과 시도한 명령을 담아 절차 8의 오류 보고 형식으로
@@ -51,9 +67,8 @@ exit 2면 그 출력과 시도한 명령을 담아 절차 8의 오류 보고 형
 
 실행 상태는 `$RUNS/<run-id>/`에 남는다 — 구성 요소가 끝날 때마다 출력을 적어 두어,
 세션이 끊기거나 사람의 응답을 기다리느라 멈춰도 같은 실행을 이어 간다. `RUNS`는
-실행 시점에 정한다 — 상위 런너가 넘겼으면 그 경로를 그대로 쓰고, 아니면 이 워크플로를
-부른 세션의 작업 디렉터리(이 SKILL.md 디렉터리가 아니다) 절대 경로에 `/.pipelines/runs`를
-붙인다. 상태는 워크플로가 아니라 그 작업에 딸리기 때문이다 — `resume`·`status`·`cancel`도
+실행 시점에 정한다 — 상위 런너가 넘겼으면 그 경로를 그대로 쓰고, 아니면
+`$WORKDIR/.pipelines/runs`다. 상태는 워크플로가 아니라 그 작업에 딸리기 때문이다 — `resume`·`status`·`cancel`도
 같은 작업 디렉터리에서 불러야 그 실행을 찾는다. 상태는
 pipecheck `run` 하위 명령으로만 읽고 쓴다 — 파일을 직접 고치지 않는다.
 
@@ -257,4 +272,4 @@ id를 자기 대기 신호에 더해 위로 올린다. 안쪽의 human 대기에
 실행 수단에서 고른다.
 ````
 
-채울 자리: 그래프 설명·그림. 절차 4의 문단 가운데 `kind:`로 시작하는 다섯이 kind 문단이고, "재료가 워크플로면"·"어댑터면" 문단은 그 재료가 그래프에 없으면 함께 지운다. 그래프에 없는 kind 문단은 kind별로 따로 지운다(예: 항목 컨테이너만 있으면 condition 문단을 지운다) — 단 컨테이너가 있으면 회차 실행이 참조하는 node 문단을 남기고, 조건 컨테이너가 있으면 until 평가가 쓰는 transform 문단을, by: check wait이 있으면 재료 실행이 참조하는 node 문단을 남긴다. wait 문단은 그래프에 wait이 없어도 워크플로·어댑터 재료가 있으면 남긴다 — "안쪽 대기"가 그 human 규칙을 쓴다. "실행 상태"·"안쪽 대기"·"재개" 절과 절차 0은 그래프와 무관하게 남긴다. 절차 번호와 문장은 유지한다 — 5·6·7·8에 남는 kind·어댑터·대기 언급은 일반 규칙이라 해당 구성 요소가 없으면 적용되지 않을 뿐이므로 지우지 않는다.
+채울 자리: 그래프 설명·그림, `SKILLS_PROJECT`(워크플로의 설치 위치가 `project`면 `$(cd .. && pwd)`, `user`면 `$WORKDIR/.claude/skills`를 따옴표 안에 그대로), `NEED`(컴파일하는 recipe의 버전 — `/pipeline` SKILL.md 디렉터리의 `../../.claude-plugin/plugin.json` `version`). 절대 경로는 어디에도 채우지 않는다. 절차 4의 문단 가운데 `kind:`로 시작하는 다섯이 kind 문단이고, "재료가 워크플로면"·"어댑터면" 문단은 그 재료가 그래프에 없으면 함께 지운다. 그래프에 없는 kind 문단은 kind별로 따로 지운다(예: 항목 컨테이너만 있으면 condition 문단을 지운다) — 단 컨테이너가 있으면 회차 실행이 참조하는 node 문단을 남기고, 조건 컨테이너가 있으면 until 평가가 쓰는 transform 문단을, by: check wait이 있으면 재료 실행이 참조하는 node 문단을 남긴다. wait 문단은 그래프에 wait이 없어도 워크플로·어댑터 재료가 있으면 남긴다 — "안쪽 대기"가 그 human 규칙을 쓴다. "실행 상태"·"안쪽 대기"·"재개" 절과 절차 0은 그래프와 무관하게 남긴다. 절차 번호와 문장은 유지한다 — 5·6·7·8에 남는 kind·어댑터·대기 언급은 일반 규칙이라 해당 구성 요소가 없으면 적용되지 않을 뿐이므로 지우지 않는다.
