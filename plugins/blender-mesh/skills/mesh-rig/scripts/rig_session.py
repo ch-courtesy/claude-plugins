@@ -457,12 +457,12 @@ for pose in SPEC["poses"]:
           f"folds {s['fold_share'] * 100:.2f}% ({s['fold_part']}), gap {s['gap_open_cm']:+.1f} cm ({wg})")
 R["worst"] = worst
 set_pose([])
-with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
-    json.dump(R, fh, ensure_ascii=False, indent=1)
 sc.render.engine = "CYCLES"
 for o in (cam,):
     bpy.data.objects.remove(o, do_unlink=True)
 bpy.context.preferences.filepaths.save_version = 0
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, "rig.blend"))
+with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:   # last: a report means the run finished
+    json.dump(R, fh, ensure_ascii=False, indent=1)
 print(f"[rig] {len(BONES)} bones, {len(pieces)} pieces, unweighted {unweighted}, max influences {influences}, "
       f"symmetry {sym:.3f}, rest error {rest_err:.4f} mm")

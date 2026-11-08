@@ -129,7 +129,9 @@ model, Cycles; keeps the modifier stack (mirror, subdivision) of the current ste
 `mesh.py <session> finish` takes `--tier`, `--res`, `--samples`, `--exposure`, and `--asymmetric` for a model
 with no left-right symmetry. A `run` that stops leaves `stopped.txt` in the session, and every gate refuses
 to score until a run finishes. Build scripts pipe into `grep`, which hides the exit code, so this is what
-stops a half-built model from scoring.
+stops a half-built model from scoring. The stage commands (`fidelity`, `rig`, `uv`, `texture`, `glb`,
+`animate`, `propcheck`) remove their old report before they run and exit 1 when the run leaves none, and
+each stage writes its report after the files it saves, so a failed run never leaves an old score behind.
 
 `selftest` writes into `mesh_selftest_tmp` in the working folder unless given `--keep DIR`. `compare` needs each
 step's saved file, so it cannot read a session built with `--no-snap`.

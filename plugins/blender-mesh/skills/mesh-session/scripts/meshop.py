@@ -1062,7 +1062,7 @@ def run_step(op, args, label=""):
     bm.free()
     ev.to_mesh_clear()
     entry = {"n": n, "op": op, "label": label, "args": args, "info": info, "stats": stats, "file": rel, "active": active,
-             "checks": list(CHECKS)}
+             "state": session_state.state_of(S), "checks": list(CHECKS)}
     S["steps"].append(entry)
     S["current"] = rel
     save_session()

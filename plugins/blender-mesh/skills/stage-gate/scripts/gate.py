@@ -5,7 +5,8 @@
 
 Reads the stage's measurement files inside SESSION, prints every criterion with its value and
 margin, appends the result to SESSION/scores.jsonl and exits 0 when all criteria pass. A
-measurement file older than the session's model counts as missing, so a stale report cannot pass.
+measurement file counts as missing when it is stale: when the file it measures, or anything that file
+was made from up to the model, is newer than what was made from it (see out_of_order).
 A criterion: {"name", "file", "path", "min" | "max"}. `path` is dotted ("views.front.iou");
 "count": true sums the lengths of the lists found at path (a dict of lists, or a list).
 """
@@ -87,35 +88,60 @@ if os.path.exists(stopped):
                              "note": "build stopped: " + why, "scores": {}}, ensure_ascii=False) + "\n")
     sys.exit(1)
 
-UPSTREAM = (("export/unreal/", ("export/model.glb",)),     # a report is stale when any file its stage
-            ("export/", ("texture/texture.blend", "motions/library.blend")),   # was made from is newer
-            ("texture/", ("uv/uv.blend",)), ("uv/", ("rig/rig.blend",)))
+SAVED = {"rig/rig.blend": ("session.json",),                 # each file a stage saves, and the files it is
+         "uv/uv.blend": ("rig/rig.blend", "session.json"),   # made from (a prop has no rig: its UV comes
+         "texture/texture.blend": ("uv/uv.blend",),          # from the model itself)
+         "motions/library.blend": ("texture/texture.blend",),
+         "export/model.glb": ("texture/texture.blend", "motions/library.blend")}
+MEASURES = (("export/", "export/model.glb"), ("texture/", "texture/texture.blend"),   # the file a stage's
+            ("uv/", "uv/uv.blend"), ("rig/", "rig/rig.blend"))                       # reports measure
 
 
-def sources_of(name):
-    """The files a report was made from, besides the model itself."""
-    if anim and name.startswith("anim/"):
-        files = [os.path.join(session, "texture", "texture.blend")]
-        if name.startswith(("anim/prop/", "anim/check/")):
-            files.append(os.path.join(session, anim, "motion.blend"))
-        return files
-    for prefix, files in UPSTREAM:
-        if name.startswith(prefix):
-            return [os.path.join(session, f) for f in files]
-    return []
+def inputs_of(rel):
+    """The session files that `rel` (a path inside the session) is made from, one stage up."""
+    if rel in SAVED:
+        return SAVED[rel]
+    parts = rel.split("/")
+    if parts[0] == "motions" and len(parts) > 2:     # a motion's bake, and its reports, which measure the bake
+        bake = f"motions/{parts[1]}/motion.blend"
+        return ("texture/texture.blend",) if rel == bake else (bake,)
+    for prefix, measured in MEASURES:
+        if rel.startswith(prefix):
+            return (measured,)
+    return () if rel == "session.json" else ("session.json",)   # anything else measures the model
 
 
-model_time = os.path.getmtime(os.path.join(session, "session.json"))
+def out_of_order(rel):
+    """Why `rel` is stale, or None: every file in the chain it was made from, up to the model, must be
+    no newer than what was made from it. A stage redone at any depth, a stage run on an old input, or a
+    file saved again without being measured again all break the chain."""
+    t = os.path.getmtime(os.path.join(session, rel))
+    for f in inputs_of(rel):
+        fp = os.path.join(session, f)
+        if not os.path.exists(fp):
+            continue                                 # a stage this asset does not have
+        if os.path.getmtime(fp) > t:
+            return f"{rel} is older than {f}"
+        why = out_of_order(f)
+        if why:
+            return why
+    return None
+
+
 cache, rows, failed = {}, [], 0
 for c in G[stage]:
-    fp = os.path.join(session, c["file"].replace("anim/", anim + "/", 1) if anim else c["file"])
+    rel = c["file"].replace("anim/", anim.strip("/\\").replace("\\", "/") + "/", 1) if anim else c["file"]
+    fp = os.path.join(session, rel)
     if fp not in cache:
         cache[fp] = read_json(fp, encoding="utf-8") if os.path.exists(fp) else None
-        sources = sources_of(c["file"]) + ([cache[fp].get("prop")] if isinstance(cache[fp], dict) else [])
-        made_from = max([model_time] + [os.path.getmtime(x) for x in sources if x and os.path.exists(x)])
-        if cache[fp] is not None and os.path.getmtime(fp) < made_from:
-            print(f"[gate] {c['file']} is older than what it measures: measure again")
-            cache[fp] = None
+        if cache[fp] is not None:
+            why = out_of_order(rel)
+            prop = cache[fp].get("prop") if isinstance(cache[fp], dict) else None   # a carried prop's own file
+            if not why and prop and os.path.exists(prop) and os.path.getmtime(prop) > os.path.getmtime(fp):
+                why = f"{rel} is older than {prop}"
+            if why:
+                print(f"[gate] {why}: measure again")
+                cache[fp] = None
     try:
         if cache[fp] is None:
             raise KeyError(c["file"])

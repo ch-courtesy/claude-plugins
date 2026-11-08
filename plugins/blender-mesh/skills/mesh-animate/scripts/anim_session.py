@@ -466,16 +466,16 @@ R = {"name": NAME, "kind": KIND, "frames": N, "fps": sc.render.fps, "speed_m_s":
      "ik_out_of_reach": clamped[0], "foot_slide_mm": slide * 1000, "ground_penetration_mm": penetration * 1000,
      "stance_float_mm": floating * 1000, "cycle_closure_mm": closure * 1000, "pop_mm_per_frame2": accel * 1000,
      "pop_at": pop_at, "quality": Q}
-with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
-    json.dump(R, fh, indent=1)
-every = max(1, N // W.get("check_frames", 8))
-with open(os.path.join(out, "poses.json"), "w", encoding="utf-8") as fh:
-    json.dump([{"name": f"f{x['frame']:02d}", "rot": [], "basis": x["basis"]} for x in frames[:N:every]],
-              fh)
 sc.frame_set(1)
 bpy.context.preferences.filepaths.save_version = 0
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, "motion.blend"))
 bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath(a.library))
+every = max(1, N // W.get("check_frames", 8))     # the reports last: they mean the bake and its files are saved
+with open(os.path.join(out, "poses.json"), "w", encoding="utf-8") as fh:
+    json.dump([{"name": f"f{x['frame']:02d}", "rot": [], "basis": x["basis"]} for x in frames[:N:every]],
+              fh)
+with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
+    json.dump(R, fh, indent=1)
 print(f"[anim] {NAME}: {N} frames; slide {R['foot_slide_mm']:.1f}, under {R['ground_penetration_mm']:.1f}, float "
       f"{R['stance_float_mm']:.1f}, closure {R['cycle_closure_mm']:.2f}, pop {R['pop_mm_per_frame2']:.1f} "
       f"({pop_at['material']} f{pop_at['frame']}), out of reach {clamped[0]}")

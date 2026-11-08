@@ -41,8 +41,12 @@ without the criteria that cannot apply. Worked pipelines: `box-modeling/referenc
 `lantern_pipeline.sh`, with their `*_build.sh` and plans. They were written for sessions `work/lampkeeper` and
 `work/lantern` beside concept folders, so read the paths as an example; each rebuilt everything in minutes.
 
-A new stage gets its thresholds in `gates.json` before its first measurement. Measurement files
-older than the model count as missing, so a stale report cannot pass.
+A new stage gets its thresholds in `gates.json` before its first measurement. A stale measurement
+file counts as missing: every file in the chain a report was made from (model → rig → UV → texture →
+motions → GLB) must be no newer than what was made from it, so redoing any earlier stage, running a
+stage on an old input, or saving a file again without measuring it again all ask for a new
+measurement. Each stage writes its report last and `mesh.py` removes the old one before the stage
+runs, so a run that fails leaves nothing to pass. `scripts/test_gate_stale.py` checks these cases.
 
 An animation passes both its common `animation` mechanics gate and its motion-specific gate.
 Run `mesh.py S controls rig.json --carry carry.json` to prove that the animation and contact criteria

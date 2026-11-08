@@ -211,6 +211,23 @@ def cmd_report(sdir, extra):
     return r.returncode == 0
 
 
+def clear_reports(sdir, *rels):
+    """A stage's old reports go before it runs again, so a run that fails leaves nothing old to pass a gate.
+    Every stage writes its report last, after the files it saves."""
+    for rel in rels:
+        fp = os.path.join(sdir, rel)
+        if os.path.exists(fp):
+            os.remove(fp)
+
+
+def made(sdir, rel):
+    """Whether a stage's report is there after its run, said aloud when it is not."""
+    ok = os.path.exists(os.path.join(sdir, rel))
+    if not ok:
+        print(f"[mesh] the run failed: no {rel}")
+    return ok
+
+
 def opt(argv, name, default=None, cast=str):
     if name in argv:
         i = argv.index(name)
@@ -226,6 +243,7 @@ def cmd_finish(sdir, argv):
     exposure = opt(argv, "--exposure", "0")
     declared = ["--asymmetric"] if "--asymmetric" in argv else []
     S = load_session(sdir)
+    clear_reports(sdir, os.path.join("review", "report.json"))
     out = os.path.join(sdir, "render.png")
     blender_run(["--python", os.path.join(HERE, "render_session.py"), "--", sdir, out, "--res", res,
                  "--samples", samples, "--exposure", exposure])
@@ -245,6 +263,7 @@ def cmd_fidelity(sdir, argv):
         sys.exit("[mesh] concept-fidelity is not installed next to this skill")
     S = load_session(sdir)
     out = os.path.join(sdir, "fidelity")
+    clear_reports(sdir, os.path.join("fidelity", "compare.json"))
     maps = []
     while "--map" in argv:
         i = argv.index("--map")
@@ -259,6 +278,7 @@ def cmd_fidelity(sdir, argv):
     r = subprocess.run(py + ["-I", os.path.join(scripts, "compare_sheet.py"), out], capture_output=True, text=True,
                        encoding="utf-8", errors="replace")
     print((r.stdout or "") + (r.stderr or ""), end="")
+    return made(sdir, os.path.join("fidelity", "compare.json"))
 
 
 def cmd_rig(sdir, argv):
@@ -266,6 +286,7 @@ def cmd_rig(sdir, argv):
     scripts = os.path.join(SKILLS, "mesh-rig", "scripts")
     S = load_session(sdir)
     out = os.path.join(sdir, "rig")
+    clear_reports(sdir, os.path.join("rig", "report.json"))
     blender_run([os.path.join(sdir, S["current"]), "--python", os.path.join(scripts, "rig_session.py"), "--",
                  "--spec", os.path.abspath(argv[0]), "--out", out, "--object", S["object"]])
     py = pillow_python(sdir)
@@ -273,6 +294,7 @@ def cmd_rig(sdir, argv):
         r = subprocess.run(py + ["-I", os.path.join(scripts, "pose_sheet.py"), out], capture_output=True, text=True,
                            encoding="utf-8", errors="replace")
         print((r.stdout or "") + (r.stderr or ""), end="")
+    return made(sdir, os.path.join("rig", "report.json"))
 
 
 def cmd_uv(sdir, argv):
@@ -280,8 +302,10 @@ def cmd_uv(sdir, argv):
     S = load_session(sdir)
     rigged = os.path.join(sdir, "rig", "rig.blend")
     src = rigged if os.path.exists(rigged) else os.path.join(sdir, S["current"])
+    clear_reports(sdir, os.path.join("uv", "report.json"))
     blender_run([src, "--python", os.path.join(SKILLS, "mesh-uv", "scripts", "uv_session.py"), "--",
                  "--out", os.path.join(sdir, "uv"), "--object", S["object"]] + argv)
+    return made(sdir, os.path.join("uv", "report.json"))
 
 
 def cmd_texture(sdir, argv):
@@ -293,10 +317,12 @@ def cmd_texture(sdir, argv):
         maps.append(argv[i + 1])
         del argv[i:i + 2]
     extra = ["--map"] + maps if maps else []
+    clear_reports(sdir, os.path.join("texture", "report.json"))
     blender_run([os.path.join(sdir, "uv", "uv.blend"), "--python",
                  os.path.join(SKILLS, "mesh-texture", "scripts", "texture_session.py"), "--",
                  "--concept", os.path.abspath(argv[0]), "--out", os.path.join(sdir, "texture"),
                  "--object", S["object"]] + extra + argv[1:])
+    return made(sdir, os.path.join("texture", "report.json"))
 
 
 def cmd_glb(sdir, argv):
@@ -321,9 +347,15 @@ def cmd_glb(sdir, argv):
     if library_is_stale(sdir):
         sys.exit("[mesh] motions/library.blend is older than the texture: bake the motions again before exporting")
     src = library if os.path.exists(library) else os.path.join(sdir, "texture", "texture.blend")
+    clear_reports(sdir, os.path.join("export", "report.json"), os.path.join("export", "fidelity", "compare.json"))
+    glb = os.path.join(out, "model.glb")
+    old_glb = os.path.getmtime(glb) if os.path.exists(glb) else None
     blender_run([src, "--python",
                  os.path.join(SKILLS, "mesh-export", "scripts", "export_session.py"), "--",
                  "--out", out, "--object", S["object"]] + extra)
+    if not os.path.exists(glb) or os.path.getmtime(glb) == old_glb:
+        print("[mesh] the export failed: no new export/model.glb")       # checking the old file would pass it
+        return False
     blender_run(["--python", os.path.join(SKILLS, "mesh-export", "scripts", "check_glb.py"), "--",
                  os.path.join(out, "model.glb"), os.path.join(out, "report.json")])
     if concept:
@@ -341,6 +373,7 @@ def cmd_glb(sdir, argv):
         with open(rp, "w", encoding="utf-8") as fh_:
             json.dump(R, fh_, ensure_ascii=False, indent=1)
         print(f"[export] silhouette IoU drop after the round trip: {drop:.4f}")
+    return made(sdir, os.path.join("export", "report.json"))
 
 
 def library_is_stale(sdir):
@@ -555,20 +588,15 @@ def main():
         cmd_finish(sdir, rest)
         return 0
     if op == "fidelity":
-        cmd_fidelity(sdir, rest)
-        return 0
+        return 0 if cmd_fidelity(sdir, rest) else 1
     if op == "rig":
-        cmd_rig(sdir, rest)
-        return 0
+        return 0 if cmd_rig(sdir, rest) else 1
     if op == "uv":
-        cmd_uv(sdir, rest)
-        return 0
+        return 0 if cmd_uv(sdir, rest) else 1
     if op == "texture":
-        cmd_texture(sdir, rest)
-        return 0
+        return 0 if cmd_texture(sdir, rest) else 1
     if op == "glb":
-        cmd_glb(sdir, rest)
-        return 0
+        return 0 if cmd_glb(sdir, rest) else 1
     if op == "animate":
         return 0 if cmd_animate(sdir, rest) else 1
     if op == "controls":

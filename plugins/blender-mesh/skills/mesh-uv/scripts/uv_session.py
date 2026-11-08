@@ -136,8 +136,6 @@ cover = cov["count"]
 R_ = {"tris": t, "islands_margin": a.margin, "texel_density_cv": cv, "stretch_p50": float(np.percentile(stretch, 50)),
       "stretch_p95": float(np.percentile(stretch, 95)), "stretch_p95_area": stretch_area, "overlap_fraction": cov["overlap_any"],
       "utilisation": cov["utilisation"], "out_of_bounds": float(((Q < 0) | (Q > 1)).any(axis=(1, 2)).mean()), "stretch_p95_by_material": by_material}
-with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
-    json.dump(R_, fh, indent=1)
 
 img = bpy.data.images.new("layout", R, R, alpha=True)
 rgb = np.zeros((R, R, 4), np.float32)
@@ -151,6 +149,8 @@ if arm:
     arm.show_viewport = True
 bpy.context.preferences.filepaths.save_version = 0
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, "uv.blend"))
+with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:   # last: a report means the run finished
+    json.dump(R_, fh, indent=1)
 print(f"[uv] density CV {cv:.3f}, stretch p95 {R_['stretch_p95']:.2f} (by area {stretch_area:.2f}), overlap {R_['overlap_fraction'] * 100:.2f}%, "
       f"utilisation {R_['utilisation'] * 100:.0f}%, out of bounds {R_['out_of_bounds'] * 100:.1f}%")
 print("[uv] stretch p95 by material:", by_material)
