@@ -14,6 +14,25 @@ import os
 import sys
 import time
 
+
+def read_file(*args, **kwargs):
+    """The whole of a file, closed again."""
+    with open(*args, **kwargs) as fh:
+        return fh.read()
+
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
+def read_lines(*args, **kwargs):
+    """A file's lines, closed again."""
+    with open(*args, **kwargs) as fh:
+        return fh.readlines()
+
+
 for s in (sys.stdout, sys.stderr):
     try:
         s.reconfigure(encoding="utf-8", errors="replace")
@@ -40,7 +59,7 @@ log = os.path.join(session, "scores.jsonl")
 
 if "--history" in argv:
     want = argv[argv.index("--history") + 1] if len(argv) > argv.index("--history") + 1 else None
-    rows = [json.loads(x) for x in open(log, encoding="utf-8")] if os.path.exists(log) else []
+    rows = [json.loads(x) for x in read_lines(log, encoding="utf-8")] if os.path.exists(log) else []
     for r in rows:
         if want in (None, r["stage"]):
             state = "PASS" if r["passed"] else f"{r['failed']} failing"
@@ -48,7 +67,7 @@ if "--history" in argv:
     sys.exit(0)
 
 stage = argv[1]
-G = json.load(open(gates_path, encoding="utf-8"))
+G = read_json(gates_path, encoding="utf-8")
 if stage not in G:
     sys.exit(f"[gate] no stage '{stage}' in {gates_path}: {', '.join(k for k in G if not k.startswith('_'))}")
 
@@ -61,20 +80,29 @@ def lookup(data, path):
 
 stopped = os.path.join(session, "stopped.txt")
 if os.path.exists(stopped):
-    why = open(stopped, encoding="utf-8").read().strip()
+    why = read_file(stopped, encoding="utf-8").strip()
     print(f"[gate] {stage}: the build did not finish, nothing is scored: {why}")
     with open(log, "a", encoding="utf-8") as fh:
         fh.write(json.dumps({"time": time.strftime("%Y-%m-%d %H:%M:%S"), "stage": stage, "passed": False, "failed": 1,
                              "note": "build stopped: " + why, "scores": {}}, ensure_ascii=False) + "\n")
     sys.exit(1)
 
-def source_of(name):
-    """The file a report was made from, when that is newer than the model."""
-    if anim and name.startswith(("anim/prop/", "anim/check/")):
-        return os.path.join(session, anim, "motion.blend")
-    if name.startswith("export/unreal/"):
-        return os.path.join(session, "export", "model.glb")
-    return None
+UPSTREAM = (("export/unreal/", ("export/model.glb",)),     # a report is stale when any file its stage
+            ("export/", ("texture/texture.blend", "motions/library.blend")),   # was made from is newer
+            ("texture/", ("uv/uv.blend",)), ("uv/", ("rig/rig.blend",)))
+
+
+def sources_of(name):
+    """The files a report was made from, besides the model itself."""
+    if anim and name.startswith("anim/"):
+        files = [os.path.join(session, "texture", "texture.blend")]
+        if name.startswith(("anim/prop/", "anim/check/")):
+            files.append(os.path.join(session, anim, "motion.blend"))
+        return files
+    for prefix, files in UPSTREAM:
+        if name.startswith(prefix):
+            return [os.path.join(session, f) for f in files]
+    return []
 
 
 model_time = os.path.getmtime(os.path.join(session, "session.json"))
@@ -82,8 +110,8 @@ cache, rows, failed = {}, [], 0
 for c in G[stage]:
     fp = os.path.join(session, c["file"].replace("anim/", anim + "/", 1) if anim else c["file"])
     if fp not in cache:
-        cache[fp] = json.load(open(fp, encoding="utf-8")) if os.path.exists(fp) else None
-        sources = [source_of(c["file"])] + ([cache[fp].get("prop")] if isinstance(cache[fp], dict) else [])
+        cache[fp] = read_json(fp, encoding="utf-8") if os.path.exists(fp) else None
+        sources = sources_of(c["file"]) + ([cache[fp].get("prop")] if isinstance(cache[fp], dict) else [])
         made_from = max([model_time] + [os.path.getmtime(x) for x in sources if x and os.path.exists(x)])
         if cache[fp] is not None and os.path.getmtime(fp) < made_from:
             print(f"[gate] {c['file']} is older than what it measures: measure again")

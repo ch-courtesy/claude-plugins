@@ -16,6 +16,13 @@ import json
 import os
 from PIL import Image
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("session")
 ap.add_argument("--pick", type=int, default=9)
@@ -26,7 +33,7 @@ a = ap.parse_args()
 sdir = os.path.abspath(a.session)
 out = os.path.abspath(a.out or os.path.join(sdir, "report"))
 os.makedirs(out, exist_ok=True)
-S = json.load(open(os.path.join(sdir, "session.json"), encoding="utf-8"))
+S = read_json(os.path.join(sdir, "session.json"), encoding="utf-8")
 steps = S["steps"]
 STRUCT = {"primitive", "mirror", "extrude", "inset", "loopcut", "bevel", "subsurf", "transform"}
 
@@ -75,7 +82,7 @@ for s in steps:
         materials.append(s["args"].get("name"))
 review = None
 for cand in sorted(glob.glob(os.path.join(sdir, "review*", "report.json")), key=os.path.getmtime, reverse=True):
-    review = (os.path.relpath(cand, sdir), json.load(open(cand, encoding="utf-8")))
+    review = (os.path.relpath(cand, sdir), read_json(cand, encoding="utf-8"))
     break
 renders = sorted(glob.glob(os.path.join(sdir, "render*.png")), key=os.path.getmtime)
 missing = []
@@ -119,7 +126,8 @@ for s in steps:
     ROWS.append([f"{s['n']:03d}", s["op"], s.get("label", ""), info, str(s["stats"]["faces"]),
                  str(s["stats"]["tris_eval"]), chk])
     L.append("| " + " | ".join(ROWS[-1]) + " |")
-open(os.path.join(out, "report.md"), "w", encoding="utf-8").write("\n".join(L) + "\n")
+with open(os.path.join(out, "report.md"), "w", encoding="utf-8") as fh:
+    fh.write("\n".join(L) + "\n")
 
 
 # ---- report.html (self-contained)
@@ -148,7 +156,8 @@ table{{border-collapse:collapse;font-size:12px}} td{{border-top:1px solid var(--
 </style></head><body><h3>{H.escape(os.path.basename(sdir))}</h3><ul>{facts}</ul>
 <h3>Construction</h3><div class="g">{figs}</div>{'<h3>Renders</h3><div class="g">' + rfig + '</div>' if rfig else ''}
 <details><summary>All steps</summary><table>{rows}</table></details></body></html>"""
-    open(os.path.join(out, "report.html"), "w", encoding="utf-8").write(page)
+    with open(os.path.join(out, "report.html"), "w", encoding="utf-8") as fh:
+        fh.write(page)
 
 print(f"[report] {len(steps)} steps, {last['faces']} faces, {last['tris_eval']} eval tris, "
       f"{len(warned)} check warnings; wrote {os.path.relpath(out)}{os.sep}report.md"

@@ -22,6 +22,13 @@ from mathutils import Matrix, Vector
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from motion_metrics import overlap_metrics
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--spec", required=True)
 ap.add_argument("--rig", required=True)
@@ -31,8 +38,8 @@ ap.add_argument("--object", default="Model")
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
-W = json.load(open(a.spec, encoding="utf-8"))
-RIG = json.load(open(a.rig, encoding="utf-8"))
+W = read_json(a.spec, encoding="utf-8")
+RIG = read_json(a.rig, encoding="utf-8")
 NAME = W.get("name", "motion")
 KIND = W.get("type", "walk")
 FOLLOW = {b["follows"]: (b["name"], b.get("share", 0.5)) for b in RIG["bones"] if b.get("follows")}
@@ -459,10 +466,12 @@ R = {"name": NAME, "kind": KIND, "frames": N, "fps": sc.render.fps, "speed_m_s":
      "ik_out_of_reach": clamped[0], "foot_slide_mm": slide * 1000, "ground_penetration_mm": penetration * 1000,
      "stance_float_mm": floating * 1000, "cycle_closure_mm": closure * 1000, "pop_mm_per_frame2": accel * 1000,
      "pop_at": pop_at, "quality": Q}
-json.dump(R, open(os.path.join(out, "report.json"), "w", encoding="utf-8"), indent=1)
+with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
+    json.dump(R, fh, indent=1)
 every = max(1, N // W.get("check_frames", 8))
-json.dump([{"name": f"f{x['frame']:02d}", "rot": [], "basis": x["basis"]} for x in frames[:N:every]],
-          open(os.path.join(out, "poses.json"), "w", encoding="utf-8"))
+with open(os.path.join(out, "poses.json"), "w", encoding="utf-8") as fh:
+    json.dump([{"name": f"f{x['frame']:02d}", "rot": [], "basis": x["basis"]} for x in frames[:N:every]],
+              fh)
 sc.frame_set(1)
 bpy.context.preferences.filepaths.save_version = 0
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, "motion.blend"))

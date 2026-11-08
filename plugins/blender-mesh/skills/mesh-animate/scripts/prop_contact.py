@@ -20,6 +20,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from prop_attach import prop_matrix  # noqa: E402
 from shell_depth import shell_depth, shells_of  # noqa: E402
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--prop", required=True)
 ap.add_argument("--report", required=True)
@@ -37,7 +44,7 @@ a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 sc = bpy.context.scene
 ob = bpy.data.objects[a.object]
 rig = next(o for o in bpy.data.objects if o.type == "ARMATURE")
-N = json.load(open(a.report, encoding="utf-8"))["frames"]
+N = read_json(a.report, encoding="utf-8")["frames"]
 with bpy.data.libraries.load(os.path.abspath(a.prop), link=False) as (src, dst):
     dst.objects = list(src.objects)
 prop = next(o for o in dst.objects if o and o.type == "MESH")
@@ -115,7 +122,8 @@ R = {"prop": os.path.abspath(a.prop), "bone": a.bone, "drop": a.drop, "swing": a
      "worst": worst, "contact_frames": contact, "pairs": dict(sorted(pairs.items(), key=lambda kv: -kv[1]["depth_mm"])),
      "by_frame_mm": by_frame, "grip_depth_mm": round(grip_depth * 1000, 2), "frames_not_held": len(not_held), "not_held": not_held[:20]}
 os.makedirs(a.out, exist_ok=True)
-json.dump(R, open(os.path.join(a.out, "report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+with open(os.path.join(a.out, "report.json"), "w", encoding="utf-8") as fh:
+    json.dump(R, fh, ensure_ascii=False, indent=1)
 top = f"{worst['pair']} on frame {worst['frame']}" if worst else "nothing touches"
 print(f"[prop] {checked}/{N} frames; deepest {R['max_depth_mm']} mm ({top}); grip {R['grip_depth_mm']} mm; "
       f"not held on {len(not_held)} frames; open shells {open_shells}")

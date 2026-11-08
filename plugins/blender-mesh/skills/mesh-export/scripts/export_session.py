@@ -20,6 +20,13 @@ import numpy as np
 from mathutils import Matrix, Vector
 from mathutils.kdtree import KDTree
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--out", required=True)
 ap.add_argument("--object", default="Model")
@@ -29,7 +36,7 @@ a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
 glb = os.path.join(out, "model.glb")
-SPEC = json.load(open(a.spec, encoding="utf-8")) if a.spec else {"poses": []}
+SPEC = read_json(a.spec, encoding="utf-8") if a.spec else {"poses": []}
 ob = bpy.data.objects[a.object]
 rig = bpy.data.objects.get("Rig")
 bpy.context.view_layer.objects.active = ob
@@ -185,7 +192,8 @@ if arms:
     R["pose_motion_mm"] = min(min(x["source_motion_mm"], x["file_motion_mm"]) for x in err.values())
     R["pose_error_p99_mm"] = max(x["p99_mm"] for x in err.values())
     set_pose(arm, [], order2)
-json.dump(R, open(os.path.join(out, "report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh_:
+    json.dump(R, fh_, ensure_ascii=False, indent=1)
 back.name = a.object
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, "check.blend"))
 print(f"[export] {R['file_mb']:.1f} MB, tris {tris} (source {src_tris}), joints {R['joints']}/{R['source_bones']}, "

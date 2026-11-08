@@ -12,8 +12,15 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 src, out = sys.argv[1], sys.argv[2]
-D = json.load(open(src))
+D = read_json(src)
 P, HEAD = 420, 44
 
 

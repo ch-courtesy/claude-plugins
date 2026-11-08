@@ -20,8 +20,15 @@ import sys
 import bpy
 import numpy as np
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 cfg_path = os.path.abspath(sys.argv[sys.argv.index("--") + 1])
-C = json.load(open(cfg_path, encoding="utf-8"))
+C = read_json(cfg_path, encoding="utf-8")
 base = os.path.dirname(cfg_path)
 out_dir = os.path.join(base, C["out_dir"])
 os.makedirs(out_dir, exist_ok=True)
@@ -217,6 +224,7 @@ for name, (lab, x0) in views.items():
 meta = {"size": round(float(S * pix_m), 5), "res": S, "frames": frames,
         "parts": {str(k): {"name": v["name"], "rgb": v["rgb"]} for k, v in C["palette"].items()},
         "source": C.get("source", ""), "height_m": C["height_m"]}
-json.dump(meta, open(os.path.join(out_dir, "concept.json"), "w", encoding="utf-8"),
-          ensure_ascii=False, indent=1)
+with open(os.path.join(out_dir, "concept.json"), "w", encoding="utf-8") as fh:
+    json.dump(meta, fh,
+              ensure_ascii=False, indent=1)
 print(f"[segment] pix {pix_m * 100:.3f} cm, frames {frames}")

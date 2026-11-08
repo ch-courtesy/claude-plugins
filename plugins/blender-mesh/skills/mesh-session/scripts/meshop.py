@@ -26,7 +26,23 @@ import traceback
 import bmesh
 import bpy
 from mathutils import Euler, Vector
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import session_state  # noqa: E402
 from mathutils.kdtree import KDTree
+
+
+def read_file(*args, **kwargs):
+    """The whole of a file, closed again."""
+    with open(*args, **kwargs) as fh:
+        return fh.read()
+
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 argv = sys.argv[sys.argv.index("--") + 1:]
@@ -34,7 +50,7 @@ SDIR = os.path.abspath(argv[0])
 SFILE = os.path.join(SDIR, "session.json")
 os.makedirs(os.path.join(SDIR, "steps"), exist_ok=True)
 os.makedirs(os.path.join(SDIR, "snaps"), exist_ok=True)
-S = json.load(open(SFILE, encoding="utf-8")) if os.path.exists(SFILE) else \
+S = read_json(SFILE, encoding="utf-8") if os.path.exists(SFILE) else \
     {"object": "Model", "steps": [], "current": None, "active": None, "mirror": None}
 DOM = {"face": "faces", "edge": "edges", "vert": "verts"}
 ATTR_DOM = {"face": "FACE", "edge": "EDGE", "vert": "POINT"}
@@ -68,15 +84,8 @@ def save_session():
 def do_undo():
     if len(S["steps"]) < 2:
         fail("nothing to undo")
-    gone = S["steps"].pop()                       # drop the undone step's files so the folder = history
-    stale = [os.path.join(SDIR, gone["file"]), os.path.join(SDIR, gone["file"]) + "1"]
-    stale += [os.path.join(SDIR, "snaps", f"{gone['n']:03d}.{e}") for e in ("png", "json")]
     finish_snapshots()                            # a snapshot may still be writing the undone step
-    for fp in stale:
-        if os.path.exists(fp):
-            os.remove(fp)
-    S["current"] = S["steps"][-1]["file"]
-    S["active"] = S["steps"][-1].get("active")
+    session_state.undo(S, SDIR)                   # files go, and mirror and tier return to that step's
     save_session()
     LOADED[0] = False                             # memory holds the undone state: reopen next time
     print(f"[meshop] undo -> {S['current']}", flush=True)
@@ -893,7 +902,7 @@ def tier_budget():
     if not tier:
         return None
     try:
-        tiers = json.load(open(os.path.join(HERE, "..", "..", "3d-asset-review", "assets", "tiers.json")))
+        tiers = read_json(os.path.join(HERE, "..", "..", "3d-asset-review", "assets", "tiers.json"))
         return tiers.get(tier, {}).get("lod0_tris_max")
     except (OSError, ValueError):
         return {"mobile": 10000, "pc": 50000}.get(tier)
@@ -1072,7 +1081,7 @@ def run_step(op, args, label=""):
 
 # ----------------------------------------------------------------------- entry points
 def read_steps(path):
-    txt = open(path, encoding="utf-8").read()
+    txt = read_file(path, encoding="utf-8")
     if txt.lstrip().startswith("["):
         return json.loads(txt)
     return [json.loads(x) for x in txt.splitlines() if x.strip() and not x.lstrip().startswith(("#", "//"))]

@@ -12,6 +12,13 @@ import sys
 
 from PIL import Image
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 for s in (sys.stdout,):
     try:
         s.reconfigure(encoding="utf-8", errors="replace")
@@ -28,7 +35,7 @@ def opt(name, default):
 step = float(opt("--step", 0.05))
 views = opt("--views", "front,side").split(",")
 half = "--half-front" in argv
-c = json.load(open(os.path.join(cdir, "concept.json"), encoding="utf-8"))
+c = read_json(os.path.join(cdir, "concept.json"), encoding="utf-8")
 names = {int(k): v["name"] for k, v in c["parts"].items()}
 pix = c["size"] / c["res"]
 img = {v: Image.open(os.path.join(cdir, f"labels_{v}.png")).convert("L") for v in views}

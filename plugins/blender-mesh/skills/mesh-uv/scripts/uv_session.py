@@ -19,6 +19,9 @@ import sys
 import bpy
 import numpy as np
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from uv_raster import coverage  # noqa: E402
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--out", required=True)
 ap.add_argument("--object", default="Model")
@@ -122,32 +125,19 @@ order_ = np.argsort(stretch)
 area_cum = np.cumsum(a3[ok][order_]) / a3[ok].sum()
 stretch_area = float(stretch[order_][np.searchsorted(area_cum, 0.95)])   # 95% of the surface is below this
 slots = tri_slot[ok]
-by_material = {ob.material_slots[i].name: round(float(np.percentile(stretch[slots == i], 95)), 2)
+names = [s.name for s in ob.material_slots]
+by_material = {(names[i] if i < len(names) else "(no material)"): round(float(np.percentile(stretch[slots == i], 95)), 2)
                for i in np.unique(slots)}
 
 # overlap and utilisation on a raster
 R = a.res
-cover = np.zeros((R, R), np.int32)
-for tri in Q * R:
-    x0, y0 = np.floor(tri.min(0)).astype(int)
-    x1b, y1b = np.ceil(tri.max(0)).astype(int)
-    x0, y0, x1b, y1b = max(x0, 0), max(y0, 0), min(x1b, R), min(y1b, R)
-    if x1b <= x0 or y1b <= y0:
-        continue
-    gx, gy = np.meshgrid(np.arange(x0, x1b) + 0.5, np.arange(y0, y1b) + 0.5)
-    (ax, ay), (bx, by), (cx, cy) = tri
-    den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
-    if abs(den) < 1e-12:
-        continue
-    u = ((by - cy) * (gx - cx) + (cx - bx) * (gy - cy)) / den
-    v = ((cy - ay) * (gx - cx) + (ax - cx) * (gy - cy)) / den
-    inside = (u >= 0) & (v >= 0) & (u + v <= 1)
-    cover[y0:y1b, x0:x1b] += inside
-covered = int((cover > 0).sum())
+cov = coverage(Q, np.zeros(len(Q), int), R)
+cover = cov["count"]
 R_ = {"tris": t, "islands_margin": a.margin, "texel_density_cv": cv, "stretch_p50": float(np.percentile(stretch, 50)),
-      "stretch_p95": float(np.percentile(stretch, 95)), "stretch_p95_area": stretch_area, "overlap_fraction": float((cover > 1).sum() / max(covered, 1)),
-      "utilisation": covered / (R * R), "out_of_bounds": float(((Q < 0) | (Q > 1)).any(axis=(1, 2)).mean()), "stretch_p95_by_material": by_material}
-json.dump(R_, open(os.path.join(out, "report.json"), "w", encoding="utf-8"), indent=1)
+      "stretch_p95": float(np.percentile(stretch, 95)), "stretch_p95_area": stretch_area, "overlap_fraction": cov["overlap_any"],
+      "utilisation": cov["utilisation"], "out_of_bounds": float(((Q < 0) | (Q > 1)).any(axis=(1, 2)).mean()), "stretch_p95_by_material": by_material}
+with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
+    json.dump(R_, fh, indent=1)
 
 img = bpy.data.images.new("layout", R, R, alpha=True)
 rgb = np.zeros((R, R, 4), np.float32)

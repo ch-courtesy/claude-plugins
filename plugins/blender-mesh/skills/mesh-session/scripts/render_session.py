@@ -11,6 +11,13 @@ import sys
 import bpy
 from mathutils import Matrix, Vector
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("session")
 ap.add_argument("out")
@@ -30,7 +37,7 @@ ap.add_argument("--view", default="", choices=["", "front", "side", "back"],
                 help="orthographic turnaround view on a plain background, as on a model sheet")
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 sdir = os.path.abspath(a.session)
-S = json.load(open(os.path.join(sdir, "session.json"), encoding="utf-8"))
+S = read_json(os.path.join(sdir, "session.json"), encoding="utf-8")
 bpy.ops.wm.open_mainfile(filepath=os.path.abspath(a.blend) if a.blend else os.path.join(sdir, S["current"]))
 sc = bpy.context.scene
 ob = bpy.data.objects[S["object"]]

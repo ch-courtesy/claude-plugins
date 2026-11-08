@@ -21,6 +21,13 @@ import numpy as np
 from mathutils import Matrix, Vector
 from mathutils.kdtree import KDTree
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--spec", required=True)
 ap.add_argument("--out", required=True)
@@ -29,7 +36,7 @@ ap.add_argument("--res", type=int, default=420)
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
-SPEC = json.load(open(a.spec, encoding="utf-8"))
+SPEC = read_json(a.spec, encoding="utf-8")
 ob = bpy.data.objects[a.object]
 sc = bpy.context.scene
 if ob.modifiers.get("Mirror"):
@@ -450,7 +457,8 @@ for pose in SPEC["poses"]:
           f"folds {s['fold_share'] * 100:.2f}% ({s['fold_part']}), gap {s['gap_open_cm']:+.1f} cm ({wg})")
 R["worst"] = worst
 set_pose([])
-json.dump(R, open(os.path.join(out, "report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
+    json.dump(R, fh, ensure_ascii=False, indent=1)
 sc.render.engine = "CYCLES"
 for o in (cam,):
     bpy.data.objects.remove(o, do_unlink=True)

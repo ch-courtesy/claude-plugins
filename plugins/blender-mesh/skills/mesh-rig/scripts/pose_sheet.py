@@ -8,8 +8,15 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 d = sys.argv[1]
-R = json.load(open(os.path.join(d, "report.json"), encoding="utf-8"))
+R = read_json(os.path.join(d, "report.json"), encoding="utf-8")
 
 
 def font(size):

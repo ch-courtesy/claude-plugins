@@ -7,19 +7,21 @@ import json
 import os
 import sys
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fid.fonts import font  # noqa: E402
+
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
 
 d = sys.argv[1]
 out = sys.argv[2] if len(sys.argv) > 2 else os.path.join(d, "sheet.png")
-R = json.load(open(os.path.join(d, "compare.json"), encoding="utf-8"))
-
-
-def font(size):
-    for f in ("C:/Windows/Fonts/malgun.ttf", "C:/Windows/Fonts/arial.ttf",
-              "/System/Library/Fonts/AppleSDGothicNeo.ttc", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
-        if os.path.exists(f):
-            return ImageFont.truetype(f, size)
-    return ImageFont.load_default()
+R = read_json(os.path.join(d, "compare.json"), encoding="utf-8")
 
 
 views = list(R["views"])

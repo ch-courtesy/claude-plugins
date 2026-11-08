@@ -7,11 +7,18 @@ import json
 import math
 import struct
 
+
+def read_file(*args, **kwargs):
+    """The whole of a file, closed again."""
+    with open(*args, **kwargs) as fh:
+        return fh.read()
+
+
 SIZES = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT4": 16}
 
 
 def load(path):
-    data = open(path, "rb").read()
+    data = read_file(path, "rb")
     n = struct.unpack_from("<I", data, 12)[0]
     G = json.loads(data[20:20 + n])
     start = 20 + n
@@ -130,7 +137,7 @@ def repeated_textures(G):
 def merge_textures(path):
     """Blender writes one texture entry per material even when they share an image, and an engine
     imports one copy for each entry. Points every material at one entry. Returns how many went."""
-    data = open(path, "rb").read()
+    data = read_file(path, "rb")
     magic, version, _ = struct.unpack_from("<4sII", data, 0)
     n, kind = struct.unpack_from("<I4s", data, 12)
     G = json.loads(data[20:20 + n])
@@ -161,5 +168,6 @@ def merge_textures(path):
     text += b" " * (-len(text) % 4)
     rest = data[20 + n:]
     head = struct.pack("<4sII", magic, version, 20 + len(text) + len(rest)) + struct.pack("<I4s", len(text), kind)
-    open(path, "wb").write(head + text + rest)
+    with open(path, "wb") as fh:
+        fh.write(head + text + rest)
     return gone

@@ -18,6 +18,13 @@ from mathutils import Vector
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from prop_attach import prop_matrix  # noqa: E402
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--out", required=True)
 ap.add_argument("--report", required=True)
@@ -33,13 +40,13 @@ ap.add_argument("--prop-handle", type=float, default=None)
 ap.add_argument("--carry", default="", help="a carry file; fills the prop options above")
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 if a.carry:
-    carry = json.load(open(a.carry, encoding="utf-8"))
+    carry = read_json(a.carry, encoding="utf-8")
     a.prop, a.prop_bone, a.prop_drop = carry["prop"], carry["bone"], carry["drop"]
     a.prop_swing, a.prop_handle, a.prop_light = carry["swing"], carry.get("handle"), carry.get("light", 0.0)
     a.prop_offset = carry.get("offset")
 out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
-R = json.load(open(a.report, encoding="utf-8"))
+R = read_json(a.report, encoding="utf-8")
 N, S = R["frames"], R["stride_m"]
 sc = bpy.context.scene
 ob = bpy.data.objects[a.object]

@@ -14,6 +14,19 @@ import sys
 
 import numpy as np
 
+
+def read_file(*args, **kwargs):
+    """The whole of a file, closed again."""
+    with open(*args, **kwargs) as fh:
+        return fh.read()
+
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 SIZE = {5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4}
 DTYPE = {5120: np.int8, 5121: np.uint8, 5122: np.int16, 5123: np.uint16, 5125: np.uint32, 5126: np.float32}
 COMPONENTS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9, "MAT4": 16}
@@ -21,7 +34,7 @@ COMPONENTS = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9
 
 def check(path):
     errors, checked = [], 0
-    data = open(path, "rb").read()
+    data = read_file(path, "rb")
     magic, version, length = struct.unpack("<4sII", data[:12])
     if magic != b"glTF" or version != 2 or length != len(data):
         errors.append(f"header: magic {magic}, version {version}, length {length} of {len(data)}")
@@ -131,6 +144,7 @@ if __name__ == "__main__":
         print("[check_glb]", e)
     print(f"[export] structure: {checked} checks, {len(errors)} errors")
     if len(argv) > 1:
-        R = json.load(open(argv[1], encoding="utf-8"))
+        R = read_json(argv[1], encoding="utf-8")
         R["structure_errors"], R["structure_checked"] = len(errors), checked
-        json.dump(R, open(argv[1], "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        with open(argv[1], "w", encoding="utf-8") as fh:
+            json.dump(R, fh, ensure_ascii=False, indent=1)

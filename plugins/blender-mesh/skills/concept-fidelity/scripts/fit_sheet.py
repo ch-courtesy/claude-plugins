@@ -7,18 +7,20 @@ import json
 import os
 import sys
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fid.fonts import font  # noqa: E402
+
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
 
 run, ov, out = sys.argv[1:4]
-R = json.load(open(os.path.join(run, "fit.json"), encoding="utf-8"))
-
-
-def font(size):
-    for f in ("C:/Windows/Fonts/malgun.ttf", "C:/Windows/Fonts/arial.ttf",
-              "/System/Library/Fonts/AppleSDGothicNeo.ttc", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
-        if os.path.exists(f):
-            return ImageFont.truetype(f, size)
-    return ImageFont.load_default()
+R = read_json(os.path.join(run, "fit.json"), encoding="utf-8")
 
 
 views = [v for v in ("front", "side", "back", "top") if os.path.exists(os.path.join(ov, f"target_{v}.png"))]

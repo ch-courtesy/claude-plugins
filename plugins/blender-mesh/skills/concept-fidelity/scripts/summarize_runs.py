@@ -7,8 +7,15 @@ import os
 import statistics as st
 import sys
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 sys.stdout.reconfigure(encoding="utf-8")
-runs = [json.load(open(os.path.join(d, "fit.json"), encoding="utf-8")) for d in sys.argv[1:]]
+runs = [read_json(os.path.join(d, "fit.json"), encoding="utf-8") for d in sys.argv[1:]]
 views = list(runs[0]["fit"]["scores"])
 held = set(runs[0].get("held_out", []))
 print(f"{len(runs)} runs (seeds {[r.get('seed') for r in runs]})")

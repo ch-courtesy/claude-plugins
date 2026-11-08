@@ -28,6 +28,13 @@ import numpy as np  # noqa: E402
 from fid import metrics  # noqa: E402
 from fid.raster import Canvas, Frame  # noqa: E402
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--concept", required=True)
 ap.add_argument("--out", required=True)
@@ -38,7 +45,7 @@ ap.add_argument("--see-through", nargs="*", default=[], help="materials shown on
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 cdir, out = os.path.abspath(a.concept), os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
-cfg = json.load(open(os.path.join(cdir, "concept.json"), encoding="utf-8"))
+cfg = read_json(os.path.join(cdir, "concept.json"), encoding="utf-8")
 PART = {int(k): v["name"] for k, v in cfg["parts"].items()}
 BY_NAME = {v.lower(): k for k, v in PART.items()}
 PAL = {int(k): tuple(v["rgb"]) for k, v in cfg["parts"].items()}
@@ -159,7 +166,8 @@ for v in views:
           f"contour {sc['contour_mean_cm']:.1f} cm (max {sc['contour_max_cm']:.1f})")
 ob.evaluated_get(dg).to_mesh_clear()
 R["gaps"].sort(key=lambda g: -1e9 if g["delta_cm"] is None else -abs(g["delta_cm"]))
-json.dump(R, open(os.path.join(out, "compare.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+with open(os.path.join(out, "compare.json"), "w", encoding="utf-8") as fh:
+    json.dump(R, fh, ensure_ascii=False, indent=1)
 
 # ---- compare.md
 L = [f"# Model vs concept: {ob.name}", "", "| view | IoU | part IoU | contour mean cm | contour max cm |", "|---|---|---|---|---|"]
@@ -174,7 +182,8 @@ for g in R["gaps"][:24]:
         L.append(f"| {g['part']} | {g['view']} | {g['edge']} | | | |")
     else:
         L.append(f"| {g['part']} | {g['view']} | {g['edge']} | {g['concept']:.3f} | {g['model']:.3f} | {g['delta_cm']:+.1f} |")
-open(os.path.join(out, "compare.md"), "w", encoding="utf-8").write("\n".join(L) + "\n")
+with open(os.path.join(out, "compare.md"), "w", encoding="utf-8") as fh:
+    fh.write("\n".join(L) + "\n")
 print("[compare] wrote", out)
 
 if a.export:

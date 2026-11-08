@@ -13,11 +13,18 @@ import math
 import os
 import sys
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 a, b = sys.argv[1], sys.argv[2]
 EXACT = "--exact" in sys.argv
 TOL = 1e-4
-A = json.load(open(os.path.join(a, "session.json"), encoding="utf-8"))
-B = json.load(open(os.path.join(b, "session.json"), encoding="utf-8"))
+A = read_json(os.path.join(a, "session.json"), encoding="utf-8")
+B = read_json(os.path.join(b, "session.json"), encoding="utf-8")
 if len(A["steps"]) != len(B["steps"]):
     sys.exit(f"different step counts: {len(A['steps'])} vs {len(B['steps'])}")
 R = 4  # 0.1 mm
@@ -72,8 +79,8 @@ for sa, sb in zip(A["steps"], B["steps"]):
         if x != y:
             print(f"{n:03d} {k}: {x} != {y}")
             diffs += 1
-    ja = json.load(open(os.path.join(a, "snaps", f"{n:03d}.json")))
-    jb = json.load(open(os.path.join(b, "snaps", f"{n:03d}.json")))
+    ja = read_json(os.path.join(a, "snaps", f"{n:03d}.json"))
+    jb = read_json(os.path.join(b, "snaps", f"{n:03d}.json"))
     if faces(ja) != faces(jb):
         print(f"{n:03d} cage faces differ")
         diffs += 1

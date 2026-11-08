@@ -26,6 +26,13 @@ from fid import metrics  # noqa: E402
 from fid.cmaes import CMAES  # noqa: E402
 from fid.raster import Frame  # noqa: E402
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--model", required=True)
 ap.add_argument("--concept", required=True)
@@ -44,7 +51,7 @@ spec = importlib.util.spec_from_file_location("concept_model", model_path)
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
-cfg = json.load(open(os.path.join(cdir, "concept.json"), encoding="utf-8"))
+cfg = read_json(os.path.join(cdir, "concept.json"), encoding="utf-8")
 ALL = [v for v in ("front", "side", "back", "top") if os.path.exists(os.path.join(cdir, f"labels_{v}.png"))]
 FIT = [v for v in a.fit_views.split(",") if v in ALL]
 FR = {v: Frame(*cfg["frames"][v], cfg["size"], cfg["res"]) for v in ALL}
@@ -63,7 +70,7 @@ model = m.Model()
 span = m.HI - m.LO
 u0 = (m.GUESS - m.LO) / span
 if a.warm:
-    prev = json.load(open(a.warm, encoding="utf-8"))["params_fit"]
+    prev = read_json(a.warm, encoding="utf-8")["params_fit"]
     u0 = (np.array([prev.get(n, g) for n, g in zip(m.NAMES, m.GUESS)]) - m.LO) / span
 
 
@@ -108,7 +115,8 @@ res = {"model": model_path, "concept": cdir, "fit_views": FIT, "held_out": [v fo
        "start": {"scores": start_sc}, "fit": {"scores": fit_sc},
        "params_guess": dict(zip(m.NAMES, map(float, m.GUESS))),
        "params_fit": dict(zip(m.NAMES, map(float, vec(best_u)))), "history": hist}
-json.dump(res, open(os.path.join(out, "fit.json"), "w", encoding="utf-8"), indent=1)
+with open(os.path.join(out, "fit.json"), "w", encoding="utf-8") as fh:
+    json.dump(res, fh, indent=1)
 np.savez_compressed(os.path.join(out, "fit.npz"), **{f"target_{v}": target[v] for v in ALL},
                     **{f"start_{v}": start_imgs[v] for v in ALL}, **{f"fit_{v}": fit_imgs[v] for v in ALL})
 for v in ALL:

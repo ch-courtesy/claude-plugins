@@ -24,6 +24,13 @@ import bpy
 from mathutils import Vector
 from mathutils.kdtree import KDTree
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ap = argparse.ArgumentParser()
 ap.add_argument("out_dir")
@@ -34,7 +41,7 @@ ap.add_argument("--asymmetric", action="store_true", help="the design is not sym
 args = ap.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
 out_dir = os.path.abspath(args.out_dir)
 os.makedirs(out_dir, exist_ok=True)
-TIERS = json.load(open(args.tiers, encoding="utf-8"))
+TIERS = read_json(args.tiers, encoding="utf-8")
 TIER, CHK = TIERS[args.tier], TIERS["checks"]
 scene = bpy.context.scene
 
@@ -186,17 +193,8 @@ for mat in mats:
         report["materials"][mat.name] = m
 
 # ---------------------------------------------------------------- UV metrics
-SUB = []                                   # interior sample points of a triangle, per k
-
-
-def interior(k):
-    pts = []
-    for i in range(k):
-        for j in range(k - i):
-            pts.append(((i + 1 / 3) / k, (j + 1 / 3) / k))
-            if i + j <= k - 2:
-                pts.append(((i + 2 / 3) / k, (j + 2 / 3) / k))
-    return pts
+sys.path.insert(0, os.path.join(HERE, "..", "..", "mesh-uv", "scripts"))
+from uv_raster import coverage  # noqa: E402  the UV stage's own raster, so both read a layout alike
 
 
 def uses_image_texture(ob):
@@ -245,8 +243,7 @@ for ob in textured:
                 par[x] = y
     island = [f2(f.index) for f in bm.faces]
     bm.free()
-    dens, areas, owner = [], [], {}
-    overlap_px, covered = 0, set()
+    dens, areas, tris_uv, tri_island = [], [], [], []
     for t in me.loop_triangles:
         P = [scale @ me.vertices[v].co for v in t.vertices]
         Q = [uv[l].uv.copy() for l in t.loops]
@@ -256,20 +253,11 @@ for ob in textured:
             continue
         dens.append(a2 / a3)
         areas.append(a3)
-        span = max((Q[1] - Q[0]).length, (Q[2] - Q[0]).length, (Q[2] - Q[1]).length) * RES
-        k = max(1, min(24, int(math.ceil(span * 1.5))))
-        isl = island[t.polygon_index]
-        for u, v in interior(k):
-            q = Q[0] * (1 - u - v) + Q[1] * u + Q[2] * v
-            px = (int(q.x % 1.0 * RES), int(q.y % 1.0 * RES))
-            prev = owner.get(px)
-            if prev is None:
-                owner[px] = isl
-            elif prev != isl and prev != -1:
-                owner[px] = -1
-                overlap_px += 1
+        tris_uv.append([(q.x, q.y) for q in Q])
+        tri_island.append(island[t.polygon_index])
     if not dens:
         continue
+    cov = coverage(tris_uv, tri_island, RES)
     W = sum(areas)
     mean_d = sum(d * a for d, a in zip(dens, areas)) / W
     td = [math.sqrt(d / mean_d) for d in dens]            # relative texel density
@@ -279,8 +267,8 @@ for ob in textured:
         "islands": len(set(island)),
         "texel_density_px_per_m": round(math.sqrt(mean_d) * TIER["texture_res"], 1),
         "texel_density_cv": round(sd / mu, 3),
-        "utilisation": round(len(owner) / RES ** 2, 3),
-        "overlap_fraction": round(overlap_px / max(1, len(owner)), 4),
+        "utilisation": round(cov["utilisation"], 3),
+        "overlap_fraction": round(cov["overlap_islands"], 4),
     }
 
 # ---------------------------------------------------------------- ground contact
@@ -369,7 +357,8 @@ for (disc, kind), objs in groups.items():
     warn[disc].append(f"{kind}: {len(objs)}x - {', '.join(objs[:3])}{more}")
 report["warnings"] = warn
 report["warnings_detail"] = [dict(zip(("discipline", "kind", "object", "detail"), r)) for r in raw]
-json.dump(report, open(os.path.join(out_dir, "report.json"), "w", encoding="utf-8"), indent=2)
+with open(os.path.join(out_dir, "report.json"), "w", encoding="utf-8") as fh:
+    json.dump(report, fh, indent=2)
 n_warn = sum(len(v) for v in warn.values())
 print(f"[inspect] {n_warn} warnings:", {k: len(v) for k, v in warn.items()})
 for k, v in warn.items():

@@ -19,6 +19,19 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import gltf_pose  # noqa: E402
 
+
+def read_file(*args, **kwargs):
+    """The whole of a file, closed again."""
+    with open(*args, **kwargs) as fh:
+        return fh.read()
+
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 argv = sys.argv[1:]
 
 
@@ -35,7 +48,7 @@ def find_engine():
     manifest = os.path.join(os.environ.get("PROGRAMDATA", r"C:\ProgramData"), "Epic", "UnrealEngineLauncher",
                             "LauncherInstalled.dat")
     if os.path.exists(manifest):
-        rows = json.load(open(manifest, encoding="utf-8"))["InstallationList"]
+        rows = read_json(manifest, encoding="utf-8")["InstallationList"]
         dirs = sorted({r["InstallLocation"] for r in rows if re.fullmatch(r"UE_\d+\.\d+", r["AppName"])}, reverse=True)
         for d in dirs:
             if os.path.exists(os.path.join(d, "Engine", "Binaries", "Win64", "UnrealEditor-Cmd.exe")):
@@ -55,10 +68,11 @@ os.makedirs(ddc, exist_ok=True)
 for old in glob.glob(os.path.join(out, "*.png")) + glob.glob(os.path.join(out, "*.json")):
     os.remove(old)
 project = os.path.join(project_dir, "Check.uproject")
-json.dump({"FileVersion": 3, "Description": "Scratch project for testing exported GLB files.",
-           "Plugins": [{"Name": n, "Enabled": True} for n in
-                       ("PythonScriptPlugin", "EditorScriptingUtilities", "Interchange", "InterchangeEditor", "InterchangeAssets")]},
-          open(project, "w", encoding="utf-8"), indent=1)
+with open(project, "w", encoding="utf-8") as fh:
+    json.dump({"FileVersion": 3, "Description": "Scratch project for testing exported GLB files.",
+               "Plugins": [{"Name": n, "Enabled": True} for n in
+                           ("PythonScriptPlugin", "EditorScriptingUtilities", "Interchange", "InterchangeEditor", "InterchangeAssets")]},
+              fh, indent=1)
 shutil.copy(os.path.join(HERE, "ue_check.py"), os.path.join(project_dir, "ue_check.py"))
 script = os.path.join(project_dir, "ue_check.py").replace("\\", "/")
 
@@ -74,15 +88,16 @@ config = os.path.join(out, "config.json")
 
 
 def run(phase, exe, args, log):
-    json.dump({"phase": phase, "glb": glb, "dest": "/Game/Check", "out": out, "parents": parents, "times": times,
-               "play": play, "track": TRACK, "warm_seconds": warm}, open(config, "w", encoding="utf-8"))
+    with open(config, "w", encoding="utf-8") as fh:
+        json.dump({"phase": phase, "glb": glb, "dest": "/Game/Check", "out": out, "parents": parents, "times": times,
+                   "play": play, "track": TRACK, "warm_seconds": warm}, fh)
     env = dict(os.environ, MESH_UE_CONFIG=config)
     env["UE-LocalDataCachePath"] = ddc
     cmd = [os.path.join(engine, "Engine", "Binaries", "Win64", exe), project, "-unattended", "-nosplash", "-nop4", "-nosound",
            "-NoZenAutoLaunch", "-ddc=InstalledNoZenLocalFallback", f"-LocalDataCachePath={ddc}", f"-log={log}"] + args
     r = subprocess.run(cmd, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=1200)
     path = os.path.join(project_dir, "Saved", "Logs", log)
-    text = open(path, encoding="utf-8", errors="replace").read() if os.path.exists(path) else r.stdout
+    text = read_file(path, encoding="utf-8", errors="replace") if os.path.exists(path) else r.stdout
     if "Critical error" in text:
         print(text[text.index("Critical error") - 200:][:900])
     return text
@@ -92,8 +107,8 @@ log1 = run("all", "UnrealEditor.exe", [f"-ExecCmds=py {script}", "-RenderOffscre
 if not os.path.exists(os.path.join(out, "import.json")):
     print(log1[-1500:])
     sys.exit("[unreal] the import step left no result")
-info = json.load(open(os.path.join(out, "import.json"), encoding="utf-8"))
-played = json.load(open(os.path.join(out, "played.json"), encoding="utf-8")) if os.path.exists(os.path.join(out, "played.json")) else {}
+info = read_json(os.path.join(out, "import.json"), encoding="utf-8")
+played = read_json(os.path.join(out, "played.json"), encoding="utf-8") if os.path.exists(os.path.join(out, "played.json")) else {}
 if "error" in played:
     print(played["error"])
 
@@ -184,7 +199,7 @@ if os.path.exists(ue_flat) and os.path.exists(blender_flat):
         rows.sort()
         colour = rows[len(rows) // 2] if rows else None
 
-expected = json.load(open(os.path.join(session, "export", "report.json"), encoding="utf-8"))
+expected = read_json(os.path.join(session, "export", "report.json"), encoding="utf-8")
 images = len(G.get("images", []))
 R = {"engine": info["engine"], "engine_dir": engine, "import_errors": len(errors), "import_warnings": len(warnings),
      "errors": errors, "warnings": warnings, "skeletal_meshes": info["skeletal_meshes"],
@@ -195,7 +210,8 @@ R = {"engine": info["engine"], "engine_dir": engine, "import_errors": len(errors
      "height_m": info.get("height_m"), "height_error_m": abs(info.get("height_m", 0) - expected["height"]),
      "materials": info["materials"], "materials_untextured": info["materials_untextured"], "textures": info["textures"],
      "texture_copies": max(0, info["textures"] - images), "albedo_delta_e_median": colour}
-json.dump(R, open(os.path.join(out, "report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
+    json.dump(R, fh, ensure_ascii=False, indent=1)
 print(f"[unreal] {R['engine']}: {R['skeletal_meshes']} mesh, {len(info['actions'])}/{len(actions)} actions, joints off by "
       f"{worst:.4f} mm (a wrong moment gives {power:.0f}), played {R['played_motion_mm']:.0f} mm, textures {info['textures']}, colour dE {colour}, "
       f"errors {len(errors)}, warnings {len(warnings)}")

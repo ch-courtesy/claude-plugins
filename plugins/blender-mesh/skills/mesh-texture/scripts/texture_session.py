@@ -29,6 +29,13 @@ from mathutils import Matrix, Vector  # noqa: E402
 
 from fid.raster import BASIS, Frame, VIEWS  # noqa: E402
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 ap = argparse.ArgumentParser()
 ap.add_argument("--concept", required=True)
 ap.add_argument("--out", required=True)
@@ -54,7 +61,7 @@ ap.add_argument("--facing", type=float, default=0.05, help="smallest cosine betw
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 cdir, out = os.path.abspath(a.concept), os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
-cfg = json.load(open(os.path.join(cdir, "concept.json"), encoding="utf-8"))
+cfg = read_json(os.path.join(cdir, "concept.json"), encoding="utf-8")
 PART = {int(k): v["name"] for k, v in cfg["parts"].items()}
 BY_NAME = {v.lower(): k for k, v in PART.items()}
 RENAME = {k.lower(): v.lower() for k, v in (x.split("=", 1) for x in a.map)}
@@ -515,7 +522,8 @@ cam.data.type = "ORTHO"
 cam.data.ortho_scale = cfg["size"]
 R_ = {"painted_fraction": float(painted.mean()), "seen_fraction": float(seen.mean()),
       "painted_of_seen": float(painted[seen].mean()), "ink": ink_ratio,
-      "ink_ratio_worst": max(x["ratio"] for x in ink_ratio.values()), "views": {},
+      "ink_ratio_worst": max((x["ratio"] for x in ink_ratio.values()), default=0.0), "ink_parts": len(ink_ratio),
+      "views": {},
       "seam": seam, "seam_delta_e": max((x["median"] for x in seam.values()), default=0.0), "filled": not a.no_fill,
       "mixed_disagreement": float(mixed[painted].mean()) if painted.any() else 0.0,
       "mixed_by_part": {PART.get(int(k), str(int(k))): round(float(mixed[painted & (parts == k)].mean()), 4)
@@ -561,7 +569,8 @@ for name, away in (("back", (0, 1, 0)), ("left", (-1, 0, 0))):    # sides no sco
     cam.rotation_euler = (centre - cam.location).to_track_quat("-Z", "Y").to_euler()
     sc.render.filepath = os.path.join(out, f"unseen_{name}.png")
     bpy.ops.render.render(write_still=True)
-json.dump(R_, open(os.path.join(out, "report.json"), "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
+    json.dump(R_, fh, ensure_ascii=False, indent=1)
 print("[texture] ink, model / drawing:", {k: f"{x['model'] * 100:.1f}% / {x['drawing'] * 100:.1f}%" for k, x in ink_ratio.items()})
 print(f"[texture] seen from a view: {seen.mean() * 100:.0f}% of the texels; painted: {painted[seen].mean() * 100:.0f}% of those")
 print(f"[texture] seam, worst part: median dE {R_['seam_delta_e']:.1f}", {k: round(x["median"], 1) for k, x in seam.items()})

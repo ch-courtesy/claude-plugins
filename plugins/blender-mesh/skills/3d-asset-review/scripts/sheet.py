@@ -9,6 +9,13 @@ import sys
 
 from PIL import Image, ImageDraw, ImageFont
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 src, out = sys.argv[1], sys.argv[2]
 beauty = sys.argv[3] if len(sys.argv) > 3 else None
 TILE = 480
@@ -22,7 +29,7 @@ def font(size):
     return ImageFont.load_default()
 
 
-R = json.load(open(os.path.join(src, "report.json"), encoding="utf-8"))
+R = read_json(os.path.join(src, "report.json"), encoding="utf-8")
 tiles = [("FRONT", "front.png"), ("SIDE", "side.png"), ("BACK", "back.png"),
          ("TOP", "top.png"), ("WIRE (base cage)", "wire.png")]
 if beauty:

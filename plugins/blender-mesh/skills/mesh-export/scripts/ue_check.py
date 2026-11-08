@@ -13,7 +13,14 @@ import traceback
 
 import unreal
 
-C = json.load(open(os.environ["MESH_UE_CONFIG"], encoding="utf-8"))
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
+C = read_json(os.environ["MESH_UE_CONFIG"], encoding="utf-8")
 OUT, DEST = C["out"], C["dest"]
 eal = unreal.EditorAssetLibrary
 
@@ -72,7 +79,8 @@ def import_phase():
             poses.append({b: [get(b).translation.x, get(b).translation.y, get(b).translation.z] for b in parents})
         R["actions"][name] = {"asset": anim.get_path_name(), "length": anim.get_play_length(),
                               "frames": unreal.AnimationLibrary.get_num_frames(anim), "poses": poses}
-    json.dump(R, open(os.path.join(OUT, "import.json"), "w", encoding="utf-8"), indent=1)
+    with open(os.path.join(OUT, "import.json"), "w", encoding="utf-8") as fh:
+        json.dump(R, fh, indent=1)
     print("UEC import done", R["skeletal_meshes"], "mesh,", len(R["actions"]), "actions,", R["textures"], "textures")
 
 
@@ -86,7 +94,7 @@ def world():
 
 
 def setup():
-    info = json.load(open(os.path.join(OUT, "import.json"), encoding="utf-8"))
+    info = read_json(os.path.join(OUT, "import.json"), encoding="utf-8")
     actors = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
     actor = actors.spawn_actor_from_class(unreal.SkeletalMeshActor, unreal.Vector(0, 0, 0))
     comp = actor.skeletal_mesh_component
@@ -166,7 +174,8 @@ def read_bones():
 
 
 def finish():
-    json.dump(S["played"], open(os.path.join(OUT, "played.json"), "w", encoding="utf-8"), indent=1)
+    with open(os.path.join(OUT, "played.json"), "w", encoding="utf-8") as fh:
+        json.dump(S["played"], fh, indent=1)
     print("UEC play done")
     unreal.get_editor_subsystem(unreal.LevelEditorSubsystem).editor_request_end_play()
     unreal.unregister_slate_post_tick_callback(S["handle"])
@@ -211,7 +220,8 @@ def tick(_):
             S["stage"] = "next"
     except Exception:  # noqa: BLE001 - a failure must close the editor and leave a trace
         print("UEC EXCEPTION", traceback.format_exc())
-        json.dump({"error": traceback.format_exc()}, open(os.path.join(OUT, "played.json"), "w", encoding="utf-8"))
+        with open(os.path.join(OUT, "played.json"), "w", encoding="utf-8") as fh:
+            json.dump({"error": traceback.format_exc()}, fh)
         unreal.unregister_slate_post_tick_callback(S["handle"])
         unreal.SystemLibrary.quit_editor()
 

@@ -13,9 +13,16 @@ import sys
 import bpy
 import numpy as np
 
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 npz, out_dir, cjson = (os.path.abspath(x) for x in sys.argv[sys.argv.index("--") + 1:][:3])
 os.makedirs(out_dir, exist_ok=True)
-PAL = {int(k): tuple(v["rgb"]) for k, v in json.load(open(cjson, encoding="utf-8"))["parts"].items()}
+PAL = {int(k): tuple(v["rgb"]) for k, v in read_json(cjson, encoding="utf-8")["parts"].items()}
 PAL = {k: (200, 205, 225) if min(c) > 235 else c for k, c in PAL.items()}   # keep white parts visible
 
 

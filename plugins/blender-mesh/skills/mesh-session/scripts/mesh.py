@@ -49,6 +49,16 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import session_state  # noqa: E402
+
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
+
 SKILLS = os.path.dirname(os.path.dirname(HERE))
 MESHOP = os.path.join(HERE, "meshop.py")
 for s in (sys.stdout, sys.stderr):
@@ -106,7 +116,7 @@ def load_session(sdir):
     p = os.path.join(sdir, "session.json")
     if not os.path.exists(p):
         sys.exit(f"[mesh] no session at {sdir}")
-    return json.load(open(p, encoding="utf-8"))
+    return read_json(p, encoding="utf-8")
 
 
 def cmd_run(sdir, path, strict=False, nosnap=False, start=1):
@@ -126,7 +136,8 @@ def cmd_run(sdir, path, strict=False, nosnap=False, start=1):
             os.remove(mark)
     else:
         why = [x for x in out.splitlines() if "stopped at" in x or "ERROR" in x]
-        open(mark, "w", encoding="utf-8").write((why[-1] if why else "the run did not finish") + "\n")
+        with open(mark, "w", encoding="utf-8") as fh_:
+            fh_.write((why[-1] if why else "the run did not finish") + "\n")
     return ok
 
 
@@ -136,16 +147,10 @@ def cmd_undo(sdir, count=1):
         if len(S["steps"]) < 2:
             print("[mesh] nothing more to undo")
             break
-        gone = S["steps"].pop()
-        stale = [os.path.join(sdir, gone["file"]), os.path.join(sdir, gone["file"]) + "1"]
-        stale += [os.path.join(sdir, "snaps", f"{gone['n']:03d}.{e}") for e in ("png", "json")]
-        for fp in stale:
-            if os.path.exists(fp):
-                os.remove(fp)
+        gone = session_state.undo(S, sdir)
         print(f"[mesh] undone {gone['n']:03d} {gone['op']} {gone.get('label', '')}")
-    S["current"] = S["steps"][-1]["file"]
-    S["active"] = S["steps"][-1].get("active")
-    json.dump(S, open(os.path.join(sdir, "session.json"), "w", encoding="utf-8"), indent=1)
+    with open(os.path.join(sdir, "session.json"), "w", encoding="utf-8") as fh_:
+        json.dump(S, fh_, indent=1)
     print(f"[mesh] current -> {S['current']}")
 
 
@@ -327,13 +332,14 @@ def cmd_glb(sdir, argv):
                      "--concept", os.path.abspath(concept), "--out", os.path.join(out, "fidelity"),
                      "--object", S["object"]] + (["--map"] + maps if maps else [])
                     + (["--see-through"] + clear if clear else []))
-        before = json.load(open(os.path.join(sdir, "fidelity", "compare.json"), encoding="utf-8"))
-        after = json.load(open(os.path.join(out, "fidelity", "compare.json"), encoding="utf-8"))
+        before = read_json(os.path.join(sdir, "fidelity", "compare.json"), encoding="utf-8")
+        after = read_json(os.path.join(out, "fidelity", "compare.json"), encoding="utf-8")
         drop = max(before["views"][v]["iou"] - after["views"][v]["iou"] for v in after["views"])
         rp = os.path.join(out, "report.json")
-        R = json.load(open(rp, encoding="utf-8"))
+        R = read_json(rp, encoding="utf-8")
         R["iou_drop"] = drop
-        json.dump(R, open(rp, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        with open(rp, "w", encoding="utf-8") as fh_:
+            json.dump(R, fh_, ensure_ascii=False, indent=1)
         print(f"[export] silhouette IoU drop after the round trip: {drop:.4f}")
 
 
@@ -356,7 +362,7 @@ def cmd_animate(sdir, argv):
     Motions collect in SESSION/motions/library.blend; each has its own folder for reports."""
     S = load_session(sdir)
     spec_path, rig = os.path.abspath(argv[0]), os.path.abspath(argv[1])
-    spec_json = json.load(open(spec_path, encoding="utf-8"))
+    spec_json = read_json(spec_path, encoding="utf-8")
     name = spec_json.get("name", "motion")
     root = os.path.join(sdir, "motions")
     out = os.path.join(root, name)
@@ -375,10 +381,11 @@ def cmd_animate(sdir, argv):
     if not os.path.exists(os.path.join(out, "poses.json")):
         print(f"[mesh] the bake of {name} failed: no report")
         return False
-    spec = json.load(open(rig, encoding="utf-8"))
-    spec["poses"] = json.load(open(os.path.join(out, "poses.json"), encoding="utf-8"))
+    spec = read_json(rig, encoding="utf-8")
+    spec["poses"] = read_json(os.path.join(out, "poses.json"), encoding="utf-8")
     check = os.path.join(out, "check_spec.json")
-    json.dump(spec, open(check, "w", encoding="utf-8"))
+    with open(check, "w", encoding="utf-8") as fh_:
+        json.dump(spec, fh_)
     blender_run([os.path.join(sdir, S["current"]), "--python", os.path.join(SKILLS, "mesh-rig", "scripts", "rig_session.py"),
                  "--", "--spec", check, "--out", os.path.join(out, "check"), "--object", S["object"], "--res", "240"])
     return True
@@ -400,7 +407,7 @@ def cmd_propcheck(sdir, argv):
     second argument is a carry file: prop, bone, drop, swing, handle, grip."""
     S = load_session(sdir)
     folder = os.path.join(sdir, argv[0])
-    carry = json.load(open(argv[1], encoding="utf-8"))
+    carry = read_json(argv[1], encoding="utf-8")
     if os.path.exists(os.path.join(folder, "prop", "report.json")):
         os.remove(os.path.join(folder, "prop", "report.json"))       # a failed measure leaves nothing to pass
     code, _ = blender_run([os.path.join(folder, "motion.blend"), "--python",
@@ -412,11 +419,11 @@ def cmd_propcheck(sdir, argv):
 
 def prop_controls(sdir, carry_path):
     """Placements made wrong on purpose must fail the contact gate, or it detects nothing."""
-    carry = json.load(open(carry_path, encoding="utf-8"))
+    carry = read_json(carry_path, encoding="utf-8")
     gate = os.path.join(SKILLS, "stage-gate", "scripts", "gate.py")
     ok = True
     spec = os.path.join(SKILLS, "mesh-animate", "assets", "controls_prop", "placements.json")
-    for c in json.load(open(spec, encoding="utf-8")) + carry.get("controls", []):
+    for c in read_json(spec, encoding="utf-8") + carry.get("controls", []):
         name = "control_prop_" + c["name"]
         folder = os.path.join(sdir, "motions", name)
         os.makedirs(folder, exist_ok=True)
@@ -426,7 +433,8 @@ def prop_controls(sdir, carry_path):
         change = dict(c.get("change", {}))
         if "drop_scale" in c:
             change["drop"] = carry["drop"] * c["drop_scale"]
-        json.dump(dict(carry, **change), open(trial, "w", encoding="utf-8"))
+        with open(trial, "w", encoding="utf-8") as fh_:
+            json.dump(dict(carry, **change), fh_)
         cmd_propcheck(sdir, ["motions/" + name, trial])
         r = subprocess.run([sys.executable, "-I", gate, sdir, "prop_contact", "--anim", "motions/" + name, "--note", "negative control"],
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -449,15 +457,31 @@ def cmd_controls(sdir, argv):
     folder = os.path.join(SKILLS, "mesh-animate", "assets", "controls")
     library = os.path.join(sdir, "motions", "library.blend")
     saved = library + ".keep"
-    if os.path.exists(library):
-        shutil.copy(library, saved)
+    had = os.path.exists(library)
+    if had:
+        shutil.copy2(library, saved)                   # copy2 keeps its date, which later gates compare
+    try:
+        ok = run_controls(sdir, rig, folder)
+    finally:
+        if had:
+            shutil.move(saved, library)
+        elif os.path.exists(library):                  # made by the controls: it holds only broken motions
+            os.remove(library)
+    if "--carry" in argv:
+        ok = prop_controls(sdir, argv[argv.index("--carry") + 1]) and ok
+    print("[controls] " + ("every control was caught" if ok else "some controls were NOT caught"))
+    return ok
+
+
+def run_controls(sdir, rig, folder):
     gate = os.path.join(SKILLS, "stage-gate", "scripts", "gate.py")
     ok = True
-    names = json.load(open(rig, encoding="utf-8")).get("control_names", {})
+    names = read_json(rig, encoding="utf-8").get("control_names", {})
     for path in sorted(glob.glob(os.path.join(folder, "*.json"))):
-        spec = renamed(json.load(open(path, encoding="utf-8")), names)
+        spec = renamed(read_json(path, encoding="utf-8"), names)
         path = os.path.join(sdir, "motions", spec["name"] + ".json")
-        json.dump(spec, open(path, "w", encoding="utf-8"), ensure_ascii=False)
+        with open(path, "w", encoding="utf-8") as fh_:
+            json.dump(spec, fh_, ensure_ascii=False)
         if not cmd_animate(sdir, [path, rig]):
             print(f"[controls] {spec['name']}: the bake failed, so nothing was tested")
             ok = False
@@ -469,11 +493,6 @@ def cmd_controls(sdir, argv):
             hit = any(want in x for x in failing)
             ok = ok and hit
             print(f"[controls] {spec['name']}: '{want}' {'failed as it should' if hit else 'PASSED: it detects nothing'}")
-    if os.path.exists(saved):
-        shutil.move(saved, library)
-    if "--carry" in argv:
-        ok = prop_controls(sdir, argv[argv.index("--carry") + 1]) and ok
-    print("[controls] " + ("every control was caught" if ok else "some controls were NOT caught"))
     return ok
 
 

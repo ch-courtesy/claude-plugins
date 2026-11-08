@@ -13,12 +13,22 @@ import json
 import os
 import sys
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fid.fonts import font  # noqa: E402
+
+
+def read_json(*args, **kwargs):
+    """json.load that closes its file."""
+    with open(*args, **kwargs) as fh:
+        return json.load(fh)
+
 
 cdir = sys.argv[1]
 fdir = sys.argv[2] if len(sys.argv) > 2 else None
 TOL = float(sys.argv[3]) if len(sys.argv) > 3 else 1.5
-cfg = json.load(open(os.path.join(cdir, "concept.json"), encoding="utf-8"))
+cfg = read_json(os.path.join(cdir, "concept.json"), encoding="utf-8")
 SIZE, RES = cfg["size"], cfg["res"]
 PIX = SIZE / RES
 VIEWS = ["front", "side"]
@@ -60,9 +70,9 @@ findings.sort(key=lambda f: -abs(f["gap_cm"]))
 cost = {}
 if fdir and all(os.path.exists(os.path.join(fdir, p)) for p in
                 ("fit.json", "front_only/fit.json", "side_only/fit.json")):
-    J = json.load(open(os.path.join(fdir, "fit.json")))["fit"]["scores"]
+    J = read_json(os.path.join(fdir, "fit.json"))["fit"]["scores"]
     for v in VIEWS:
-        C = json.load(open(os.path.join(fdir, f"{v}_only", "fit.json")))["fit"]["scores"][v]
+        C = read_json(os.path.join(fdir, f"{v}_only", "fit.json"))["fit"]["scores"][v]
         for k in cfg["parts"]:
             cost.setdefault(k, {})[v] = round(C["part_iou"].get(k, 0) - J[v]["part_iou"].get(k, 0), 3)
 
@@ -97,11 +107,11 @@ for k, part in cfg["parts"].items():
         umin, vmax = cu - SIZE / 2, cv + SIZE / 2
         md.append(f"| {part['name']} | {v} | {umin + box[0] * PIX:+.3f} | {umin + box[2] * PIX:+.3f} | "
                   f"{vmax - box[3] * PIX:.3f} | {vmax - box[1] * PIX:.3f} |")
-open(os.path.join(cdir, "feedback.md"), "w", encoding="utf-8").write("\n".join(md) + "\n")
+with open(os.path.join(cdir, "feedback.md"), "w", encoding="utf-8") as fh:
+    fh.write("\n".join(md) + "\n")
 
 # ---------------------------------------------------------------- annotated image
-F = lambda s, bold=False: ImageFont.truetype(  # noqa: E731
-    "C:/Windows/Fonts/malgunbd.ttf" if bold else "C:/Windows/Fonts/malgun.ttf", s)
+F = font
 SC, GAP = 2, 150
 panel = RES * SC
 img = Image.new("RGB", (panel * 2 + GAP + 40, panel + 120), (250, 249, 246))
