@@ -1,0 +1,26 @@
+{
+  "_comment": "Example config for segment_turnaround.py. Paths are relative to this file. Measure edge pixels before changing thresholds (references/segmentation.md).",
+  "image": "sheet.png",
+  "out_dir": "concept",
+  "source": "<author, title, licence, URL>",
+  "row": [400, 700],
+  "views": {"front": 150, "side": 520, "back": 880},
+  "reference_view": "front",
+  "height_m": 1.2,
+  "background": [253, 249, 230],
+  "light_lum": 200,
+  "bg_max_chroma": 45,
+  "dark_lum": 90,
+  "outline_lum": 150,
+  "outline_r": 2,
+  "dark_label": 3,
+  "peel_halo": {"lum": 185, "chroma": 256, "max_layers": 3},
+  "open_labels": {},
+  "palette": {
+    "1": {"name": "main colour", "rgb": [230, 170, 60]},
+    "2": {"name": "light colour", "rgb": [245, 222, 185]},
+    "3": {"name": "dark clothing", "rgb": [40, 25, 20]},
+    "4": {"name": "accent", "rgb": [250, 215, 35]},
+    "5": {"name": "white", "rgb": [252, 251, 250]}
+  }
+}

@@ -1,0 +1,5 @@
+[
+ {"name": "into_chest", "change": {"bone": "spine"}, "must_fail": ["prop into the body", "not held"]},
+ {"name": "dropped", "drop_scale": 2.0, "must_fail": ["not held"]},
+ {"name": "too_high", "drop_scale": 0.5, "must_fail_any": ["prop into the body", "not held"]}
+]

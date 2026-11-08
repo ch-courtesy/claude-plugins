@@ -1,0 +1,17 @@
+{
+  "_note": "Starting points only. Published budgets disagree widely (mobile hero ~1.5k-10k tris, PC/console hero ~15k-80k tris); set the tier per project. See references/rubric.md.",
+  "mobile": {"lod0_tris_max": 10000, "max_bone_influences": 4, "texture_res": 1024},
+  "pc": {"lod0_tris_max": 50000, "max_bone_influences": 8, "texture_res": 2048},
+  "film": {"lod0_tris_max": null, "max_bone_influences": null, "texture_res": 4096},
+  "checks": {
+    "ground_tolerance_m": 0.01,
+    "symmetry_max_m": 0.01,
+    "metalness_tolerance": 0.05,
+    "roughness_range": [0.1, 0.9],
+    "albedo_srgb_range": [0.03, 0.95],
+    "metal_albedo_srgb_min": 0.70,
+    "texel_density_cv_max": 0.25,
+    "uv_overlap_max": 0.01,
+    "uv_utilisation_min": 0.5
+  }
+}

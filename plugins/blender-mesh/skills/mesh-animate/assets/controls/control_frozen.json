@@ -1,0 +1,149 @@
+{
+ "type": "keys",
+ "fps": 24,
+ "loop": true,
+ "sole_material": "Sole",
+ "check_frames": 8,
+ "follow": [],
+ "track": [
+  "hand.R",
+  "hand.L",
+  "head",
+  "tail3"
+ ],
+ "overlap": {
+  "driver": "head",
+  "follower": "tail3"
+ },
+ "name": "control_frozen",
+ "frames": 72,
+ "gate": "motion_idle",
+ "poses": {
+  "in": {
+   "hips": [
+    0.006,
+    0,
+    -0.008
+   ],
+   "rot": [
+    {
+     "bone": "spine",
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "deg": 1.0
+    },
+    {
+     "bone": "chest",
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "deg": -1.5
+    },
+    {
+     "bone": "head",
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "deg": 1.0
+    },
+    {
+     "bone": "head",
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "deg": 2
+    },
+    {
+     "bone": "forearm.L",
+     "axis": [
+      0.643,
+      0,
+      0.766
+     ],
+     "deg": -14
+    }
+   ]
+  },
+  "out": {
+   "hips": [
+    0.006,
+    0,
+    -0.008
+   ],
+   "rot": [
+    {
+     "bone": "spine",
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "deg": 1.0
+    },
+    {
+     "bone": "chest",
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "deg": -1.5
+    },
+    {
+     "bone": "head",
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "deg": 1.0
+    },
+    {
+     "bone": "head",
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "deg": 2
+    },
+    {
+     "bone": "forearm.L",
+     "axis": [
+      0.643,
+      0,
+      0.766
+     ],
+     "deg": -14
+    }
+   ]
+  }
+ },
+ "keys": [
+  {
+   "frame": 0,
+   "pose": "in"
+  },
+  {
+   "frame": 36,
+   "pose": "out"
+  },
+  {
+   "frame": 72,
+   "pose": "in"
+  }
+ ],
+ "delay": {},
+ "must_fail": [
+  "idle moves at least"
+ ]
+}

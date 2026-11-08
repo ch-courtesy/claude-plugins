@@ -1,0 +1,21 @@
+{
+ "prop": "work/lantern/texture/texture.blend",
+ "bone": "hand.L",
+ "drop": 0.315,
+ "swing": 7,
+ "handle": -45,
+ "grip": "Bail",
+ "light": 1.5,
+ "controls": [
+  {
+   "name": "old_grip",
+   "change": {
+    "drop": 0.3,
+    "handle": null
+   },
+   "must_fail": [
+    "prop into the body"
+   ]
+  }
+ ]
+}

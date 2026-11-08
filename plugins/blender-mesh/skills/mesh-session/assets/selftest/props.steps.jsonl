@@ -1,0 +1,23 @@
+# selftest "props": the techniques the chest does not use — coordinate-only loop cuts, inset,
+# edge bevel, individual extrude, taper, material selection, crease, mirror apply
+{"op": "primitive", "args": {"type": "cube", "size": [0.4, 0.3, 0.12], "location": [0, 0, 0.06], "tier": "mobile"}, "label": "base", "expect": {"faces": 6, "non_manifold": 0}}
+{"op": "mirror", "args": {"axis": "x"}, "label": "", "expect": {"faces": 5, "non_manifold": 0}}
+{"op": "loopcut", "args": {"at": {"axis": "z", "value": [0.03, 0.09]}, "result": "belts"}, "label": "belts", "expect": {"faces": 11, "non_manifold": 0}}
+{"op": "select", "args": {"name": "top", "where": {"normal": [0, 0, 1]}}, "label": "top", "expect": {"faces": 11, "non_manifold": 0}}
+{"op": "inset", "args": {"sel": "top", "thickness": 0.03, "result": "panel"}, "label": "panel", "expect": {"faces": 14, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "panel", "distance": -0.015, "result": "recess"}, "label": "recess", "expect": {"faces": 17, "non_manifold": 0}}
+{"op": "inset", "args": {"sel": "recess", "thickness": 0.04, "result": "btn"}, "label": "btn", "expect": {"faces": 20, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "btn", "distance": 0.03, "result": "button"}, "label": "button", "expect": {"faces": 23, "non_manifold": 0}}
+{"op": "select", "args": {"name": "btn_top", "domain": "vert", "where": {"in": "button"}}, "label": "btn_top", "expect": {"faces": 23, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "btn_top", "scale": [0.8, 0.8, 1]}, "label": "taper", "expect": {"faces": 23, "non_manifold": 0}}
+{"op": "select", "args": {"name": "rim_e", "domain": "edge", "where": {"sharp": 30, "min": [null, null, 0.119], "not_in": ["recess_sides", "button", "button_sides"]}}, "label": "rim_e", "expect": {"faces": 23, "non_manifold": 0}}
+{"op": "bevel", "args": {"sel": "rim_e", "offset": 0.01, "segments": 2, "result": "rim_bevel"}, "label": "rim_bevel", "expect": {"faces": 29, "non_manifold": 0}}
+{"op": "select", "args": {"name": "side", "where": {"normal": [1, 0, 0], "max": [null, null, 0.09]}}, "label": "side", "expect": {"faces": 29, "non_manifold": 0}}
+{"op": "inset", "args": {"sel": "side", "thickness": 0.006, "individual": true, "result": "pad"}, "label": "pad_inset", "expect": {"faces": 37, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "pad", "distance": 0.008, "individual": true, "result": "pads"}, "label": "pads", "expect": {"faces": 45, "non_manifold": 0}}
+{"op": "material", "args": {"name": "Body", "color": [0.2, 0.35, 0.6], "roughness": 0.5}, "label": "body", "expect": {"faces": 45, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "button", "name": "Cap", "color": [0.8, 0.2, 0.1], "roughness": 0.4}, "label": "cap", "expect": {"faces": 45, "non_manifold": 0}}
+{"op": "select", "args": {"name": "cap_faces", "where": {"material": "Cap"}}, "label": "cap_sel", "expect": {"faces": 45, "non_manifold": 0}}
+{"op": "subsurf", "args": {"levels": 2, "crease": {"sel": "pads_sides", "value": 1.0}}, "label": "smooth", "expect": {"faces": 45, "non_manifold": 0}}
+{"op": "cleanup", "args": {}, "label": "clean", "expect": {"faces": 45, "non_manifold": 0}}
+{"op": "mirror", "args": {"axis": "x", "mode": "apply"}, "label": "apply", "expect": {"verts": 92, "faces": 90, "quads": 90, "tris": 0, "ngons": 0, "non_manifold": 0, "tris_eval": 2880}}

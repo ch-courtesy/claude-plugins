@@ -1,0 +1,50 @@
+{
+  "height": 1.30,
+  "preserve_volume": false,
+  "bones": [
+    {"name": "hips", "head": [0, 0, 0.30], "tail": [0, 0, 0.40]},
+    {"name": "spine", "head": [0, 0, 0.40], "tail": [0, 0, 0.50], "parent": "hips"},
+    {"name": "chest", "head": [0, 0, 0.50], "tail": [0, 0, 0.62], "parent": "spine"},
+    {"name": "head", "head": [0, 0, 0.62], "tail": [0, 0.17, 1.21], "parent": "chest"},
+    {"name": "tail1", "head": [0, 0.17, 1.21], "tail": [0, 0.30, 1.19], "parent": "head"},
+    {"name": "tail2", "head": [0, 0.30, 1.19], "tail": [0, 0.39, 1.12], "parent": "tail1"},
+    {"name": "tail3", "head": [0, 0.39, 1.12], "tail": [0, 0.46, 1.02], "parent": "tail2"},
+    {"name": "upper_arm", "head": [0.165, 0, 0.585], "tail": [0.238, 0, 0.524], "parent": "chest", "mirror": true},
+    {"name": "forearm", "head": [0.238, 0, 0.524], "tail": [0.31, 0, 0.463], "parent": "upper_arm", "mirror": true},
+    {"name": "elbow", "head": [0.238, 0, 0.524], "tail": [0.246, 0, 0.517], "parent": "upper_arm", "mirror": true, "follows": "forearm", "share": 0.5},
+    {"name": "hand", "head": [0.31, 0, 0.463], "tail": [0.42, 0, 0.37], "parent": "forearm", "mirror": true},
+    {"name": "thigh", "head": [0.115, 0, 0.32], "tail": [0.12, 0, 0.20], "parent": "hips", "mirror": true},
+    {"name": "shin", "head": [0.12, 0, 0.20], "tail": [0.12, 0.005, 0.09], "parent": "thigh", "mirror": true},
+    {"name": "knee", "head": [0.12, 0, 0.20], "tail": [0.12, 0, 0.19], "parent": "thigh", "mirror": true, "follows": "shin", "share": 0.5},
+    {"name": "ankle", "head": [0.12, 0.005, 0.09], "tail": [0.12, -0.005, 0.085], "parent": "shin", "mirror": true, "follows": "foot", "share": 0.5},
+    {"name": "foot", "head": [0.12, 0.005, 0.09], "tail": [0.12, -0.20, 0.03], "parent": "shin", "mirror": true}
+  ],
+  "parts": [
+    {"part": "tunic", "chain": ["hips", "spine", "chest"], "blend": 0.3},
+    {"part": "buckle", "bone": "spine"},
+    {"part": "hood", "chain": ["chest", "head", "tail1", "tail2", "tail3"], "blend": 0.34},
+    {"part": "rim", "bone": "head"},
+    {"part": "head", "bone": "head"},
+    {"part": "nose", "bone": "head"},
+    {"part": "eye", "bone": "head"},
+    {"part": "sleeve", "chain": ["upper_arm", "forearm"], "blend": 0.19, "helper": "elbow"},
+    {"part": "mitten", "bone": "hand"},
+    {"part": "thumb", "bone": "hand"},
+    {"part": "leg", "chain": ["thigh", "shin"], "blend": 0.16, "helper": "knee"},
+    {"part": "boot", "split": {"low": "foot", "high": "shin", "at": 0.125, "width": 0.14, "helper": "ankle", "fade": [1, -0.20, -0.06]}}
+  ],
+  "attach": [["sleeve", "mitten"], ["sleeve", "tunic"], ["leg", "boot"], ["leg", "tunic"], ["head", "hood"], ["thumb", "mitten"]],
+  "poses": [
+    {"name": "elbows", "rot": [{"bone": "forearm.L", "axis": [0.643, 0, 0.766], "deg": -85}]},
+    {"name": "arms_up", "rot": [{"bone": "upper_arm.L", "axis": [0, 1, 0], "deg": -70}]},
+    {"name": "knees", "rot": [{"bone": "thigh.L", "axis": [1, 0, 0], "deg": -55}, {"bone": "shin.L", "axis": [1, 0, 0], "deg": 80}]},
+    {"name": "head_turn", "rot": [{"bone": "head", "axis": [0, 0, 1], "deg": 35}, {"bone": "head", "axis": [1, 0, 0], "deg": 12}]},
+    {"name": "bow", "rot": [{"bone": "spine", "axis": [1, 0, 0], "deg": 18}, {"bone": "chest", "axis": [1, 0, 0], "deg": 15}]},
+    {"name": "hood_flop", "rot": [{"bone": "tail1", "axis": [1, 0, 0], "deg": -25}, {"bone": "tail2", "axis": [1, 0, 0], "deg": -35}]},
+    {"name": "stride", "rot": [
+      {"bone": "thigh.L", "axis": [1, 0, 0], "deg": -35, "mirror": false}, {"bone": "shin.L", "axis": [1, 0, 0], "deg": 25, "mirror": false},
+      {"bone": "thigh.R", "axis": [1, 0, 0], "deg": 30, "mirror": false}, {"bone": "shin.R", "axis": [1, 0, 0], "deg": 45, "mirror": false},
+      {"bone": "upper_arm.L", "axis": [0.643, 0, 0.766], "deg": 35, "mirror": false},
+      {"bone": "upper_arm.R", "axis": [-0.643, 0, 0.766], "deg": 35, "mirror": false}]}
+  ]
+}

@@ -1,0 +1,40 @@
+# selftest "chest": the verified 39-step treasure chest (box-modeling/references/plan-treasure-chest.md)
+{"op": "primitive", "args": {"type": "cube", "size": [1.0, 0.6, 0.45], "location": [0, 0, 0.225]}, "label": "body", "expect": {"faces": 6, "non_manifold": 0}}
+{"op": "mirror", "args": {"axis": "x"}, "label": "", "expect": {"faces": 5, "non_manifold": 0}}
+{"op": "select", "args": {"name": "top", "domain": "face", "where": {"normal": [0, 0, 1]}}, "label": "", "expect": {"faces": 5, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "top", "distance": 0.25, "result": "lid"}, "label": "lid", "expect": {"faces": 8, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "z", "nearest": [0.5, -0.3, 0.2]}, "at": {"axis": "z", "value": 0.42}, "result": "lip_low"}, "label": "lip_low", "expect": {"faces": 11, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "z", "nearest": [0.5, -0.3, 0.6]}, "at": {"axis": "z", "value": 0.48}, "result": "lip_high"}, "label": "lip_high", "expect": {"faces": 14, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "y", "nearest": [0.5, 0.0, 0.7]}, "cuts": 3, "result": "arch_loops"}, "label": "arch_loops", "expect": {"faces": 32, "non_manifold": 0}}
+{"op": "select", "args": {"name": "arch_rows", "domain": "vert", "where": {"min": [null, -0.16, 0.69], "max": [null, 0.16, null]}}, "label": "arch_rows", "expect": {"faces": 32, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "arch_rows", "translate": [0, 0, 0.093]}, "label": "arch_lift", "expect": {"faces": 32, "non_manifold": 0}}
+{"op": "select", "args": {"name": "arch_crown", "domain": "vert", "where": {"min": [null, -0.01, 0.69], "max": [null, 0.01, null]}}, "label": "arch_crown", "expect": {"faces": 32, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "arch_crown", "translate": [0, 0, 0.027]}, "label": "arch_crown", "expect": {"faces": 32, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "x", "nearest": [0.25, -0.3, 0.0]}, "at": {"axis": "x", "value": 0.4}, "result": "band_a"}, "label": "band_a", "expect": {"faces": 48, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "x", "nearest": [0.2, -0.3, 0.0]}, "at": {"axis": "x", "value": 0.3}, "result": "band_b"}, "label": "band_b", "expect": {"faces": 64, "non_manifold": 0}}
+{"op": "select", "args": {"name": "band", "domain": "face", "where": {"min": [0.3, null, null], "max": [0.4, null, null]}}, "label": "band", "expect": {"faces": 64, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "band", "distance": 0.012, "along": "normals", "result": "band_top"}, "label": "band_raise", "expect": {"faces": 96, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "x", "nearest": [0.1, -0.3, 0.0]}, "at": {"axis": "x", "value": 0.07}, "result": "lock_x"}, "label": "lock_x", "expect": {"faces": 112, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "z", "nearest": [0.2, -0.3, 0.2]}, "at": {"axis": "z", "value": 0.3}, "result": "lock_z"}, "label": "lock_z", "expect": {"faces": 128, "non_manifold": 0}}
+{"op": "select", "args": {"name": "lock", "domain": "face", "where": {"normal": [0, -1, 0], "max": [0.07, null, 0.48], "min": [null, null, 0.3]}}, "label": "lock", "expect": {"faces": 128, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "lock", "distance": 0.02, "result": "lock_plate"}, "label": "lock_plate", "expect": {"faces": 133, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "x", "nearest": [0.46, -0.3, 0.0]}, "at": {"axis": "x", "value": 0.48}, "result": "sup_side"}, "label": "sup_side", "expect": {"faces": 151, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "y", "nearest": [0.5, -0.22, 0.0]}, "at": {"axis": "y", "value": -0.28}, "result": "sup_front"}, "label": "sup_front", "expect": {"faces": 170, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "y", "nearest": [0.5, 0.22, 0.0]}, "at": {"axis": "y", "value": 0.28}, "result": "sup_back"}, "label": "sup_back", "expect": {"faces": 189, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "z", "nearest": [0.5, -0.3, 0.15]}, "at": {"axis": "z", "value": 0.02}, "result": "sup_bottom"}, "label": "sup_bottom", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "subsurf", "args": {"levels": 2}, "label": "preview", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "cleanup", "args": {}, "label": "clean", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "material", "args": {"name": "Wood", "color": [0.33, 0.17, 0.07], "metallic": 0, "roughness": 0.62}, "label": "wood", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "band_top", "name": "Iron", "color": [0.56, 0.55, 0.53], "metallic": 1, "roughness": 0.42}, "label": "iron_band_top", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "band_top_sides", "name": "Iron", "color": [0.56, 0.55, 0.53], "metallic": 1, "roughness": 0.42}, "label": "iron_band_top_sides", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "lock_plate", "name": "Iron", "color": [0.56, 0.55, 0.53], "metallic": 1, "roughness": 0.42}, "label": "iron_lock_plate", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "lock_plate_sides", "name": "Iron", "color": [0.56, 0.55, 0.53], "metallic": 1, "roughness": 0.42}, "label": "iron_lock_plate_sides", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "subsurf", "args": {"levels": 2, "crease": {"sel": "band_top_sides", "value": 0.85}}, "label": "crease_bands", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "subsurf", "args": {"levels": 2, "crease": {"sel": "lock_plate_sides", "value": 0.85}}, "label": "crease_lock", "expect": {"faces": 209, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "z", "nearest": [0.5, -0.3, 0.435]}, "at": {"axis": "z", "value": 0.44}, "result": "groove_lo"}, "label": "groove_lo", "expect": {"faces": 230, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "z", "nearest": [0.5, -0.3, 0.465]}, "at": {"axis": "z", "value": 0.46}, "result": "groove_hi"}, "label": "groove_hi", "expect": {"faces": 251, "non_manifold": 0}}
+{"op": "select", "args": {"name": "groove", "domain": "face", "where": {"min": [null, null, 0.44], "max": [null, null, 0.46], "material": "Wood"}}, "label": "groove", "expect": {"faces": 251, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "groove", "distance": -0.008, "along": "normals", "result": "groove_in"}, "label": "groove_cut", "expect": {"faces": 287, "non_manifold": 0}}
+{"op": "material", "args": {"name": "Wood", "color": [0.15, 0.065, 0.025], "roughness": 0.62}, "label": "wood_darker", "expect": {"faces": 287, "non_manifold": 0}}
+{"op": "material", "args": {"name": "Iron", "color": [0.36, 0.35, 0.34], "roughness": 0.45}, "label": "iron_darker", "expect": {"faces": 287, "non_manifold": 0}}
+{"op": "material", "args": {"name": "Iron", "color": [0.53, 0.51, 0.49], "roughness": 0.55}, "label": "iron_pbr", "expect": {"verts": 304, "faces": 287, "quads": 287, "tris": 0, "ngons": 0, "non_manifold": 0, "tris_eval": 18368}}

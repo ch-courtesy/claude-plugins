@@ -1,0 +1,17 @@
+# selftest "parts": added parts must leave the rest of the model alone, and rings must take an
+# outline. The first version of `add` moved every existing vertex and no count showed it, so
+# after each add the earlier parts are checked by position (selection counts inside a box).
+{"op":"primitive","args":{"type":"cube","size":[0.4,0.3,0.2],"location":[0,0,0.1]},"label":"base"}
+{"op":"mirror","args":{"axis":"x"}}
+{"op":"primitive","args":{"add":true,"type":"ball","size":[0.3,0.3,0.3],"location":[0,0,0.4],"result":"head"},"label":"head","expect":{"faces":53,"tris":0,"ngons":0,"non_manifold":0,"warnings":0}}
+{"op":"select","args":{"name":"still_base","domain":"vert","where":{"max":[null,null,0.21]}},"label":"still_base","expect":{"selected":8}}
+{"op":"primitive","args":{"add":true,"type":"ball","size":[0.1,0.1,0.1],"location":[0.15,0,0.5],"rotate":[0,30,0],"result":"ear"},"label":"ear","expect":{"faces":149,"non_manifold":0,"warnings":0}}
+{"op":"select","args":{"name":"still_head","domain":"vert","where":{"in":"head","min":[null,null,0.249],"max":[0.151,null,0.551]}},"label":"still_head","expect":{"selected":57}}
+{"op":"select","args":{"name":"seam","domain":"vert","where":{"max":[0.0001,null,null]}},"label":"seam","expect":{"selected":20}}
+{"op":"primitive","args":{"add":true,"type":"cube","size":[0.2,0.2,0.02],"location":[0,0,0.6],"result":"hat"},"label":"hat","expect":{"non_manifold":0,"warnings":0}}
+{"op":"loopcut","args":{"at":{"axis":"x","value":0.05},"within":{"in":"hat"},"result":"hx"},"label":"hx","expect":{"rings":1,"warnings":0}}
+{"op":"loopcut","args":{"at":{"axis":"y","value":[-0.05,0.05]},"within":{"in":"hat"},"result":"hy"},"label":"hy","expect":{"rings":2,"warnings":0}}
+{"op":"select","args":{"name":"hat_top","where":{"in":"hat","normal":[0,0,1]}},"label":"hat_top","expect":{"selected":6}}
+{"op":"extrude","args":{"sel":"hat_top","vector":[0,0,0.05],"result":"cap"},"label":"cap","expect":{"top_faces":6,"warnings":0}}
+{"op":"transform","args":{"sel":"cap","outline":[[0,-0.2,0.7],[0.1,-0.2,0.72],[0.2,-0.18,0.74],[0.22,-0.05,0.76],[0.22,0.05,0.76],[0.2,0.18,0.74],[0.1,0.2,0.72],[0,0.2,0.7]]},"label":"cap_shape","expect":{"moved":12,"warnings":0}}
+{"op":"select","args":{"name":"ring_front","domain":"vert","where":{"in":"cap","min":[0.09,-0.21,0.71],"max":[0.11,-0.19,0.73]}},"label":"ring_front","expect":{"selected":1}}
