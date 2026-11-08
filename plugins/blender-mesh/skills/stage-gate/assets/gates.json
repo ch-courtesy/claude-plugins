@@ -1,0 +1,707 @@
+{
+  "_note": "Fixed before measuring. Changing a limit to get a pass defeats the gate: tell the user instead.",
+  "modeling": [
+    {
+      "name": "silhouette IoU, front",
+      "file": "fidelity/compare.json",
+      "path": "views.front.iou",
+      "min": 0.95
+    },
+    {
+      "name": "silhouette IoU, side",
+      "file": "fidelity/compare.json",
+      "path": "views.side.iou",
+      "min": 0.95
+    },
+    {
+      "name": "part IoU, front",
+      "file": "fidelity/compare.json",
+      "path": "views.front.part_iou_mean",
+      "min": 0.8
+    },
+    {
+      "name": "part IoU, side",
+      "file": "fidelity/compare.json",
+      "path": "views.side.part_iou_mean",
+      "min": 0.8
+    },
+    {
+      "name": "contour mean cm, front",
+      "file": "fidelity/compare.json",
+      "path": "views.front.contour_mean_cm",
+      "max": 1.0
+    },
+    {
+      "name": "contour mean cm, side",
+      "file": "fidelity/compare.json",
+      "path": "views.side.contour_mean_cm",
+      "max": 1.0
+    },
+    {
+      "name": "review warnings",
+      "file": "review/report.json",
+      "path": "warnings",
+      "count": true,
+      "max": 0
+    }
+  ],
+  "rigging": [
+    {
+      "name": "unweighted vertices",
+      "file": "rig/report.json",
+      "path": "unweighted",
+      "max": 0
+    },
+    {
+      "name": "pieces without a part",
+      "file": "rig/report.json",
+      "path": "unmatched_pieces",
+      "max": 0
+    },
+    {
+      "name": "max bone influences",
+      "file": "rig/report.json",
+      "path": "max_influences",
+      "max": 4
+    },
+    {
+      "name": "rest pose error mm",
+      "file": "rig/report.json",
+      "path": "rest_error_mm",
+      "max": 0.01
+    },
+    {
+      "name": "left/right weight error",
+      "file": "rig/report.json",
+      "path": "symmetry_error",
+      "max": 0.01
+    },
+    {
+      "name": "worst part volume change",
+      "file": "rig/report.json",
+      "path": "worst.volume_change",
+      "max": 0.1
+    },
+    {
+      "name": "worst gap opened, cm",
+      "file": "rig/report.json",
+      "path": "worst.gap_open_cm",
+      "max": 1.0
+    },
+    {
+      "name": "stretch against the physical bound (1 = allowed)",
+      "file": "rig/report.json",
+      "path": "worst.stretch_excess",
+      "max": 1.0
+    },
+    {
+      "name": "folded edges, worst part",
+      "file": "rig/report.json",
+      "path": "worst.fold_share",
+      "max": 0.01
+    }
+  ],
+  "uv": [
+    {
+      "name": "texel density spread (CV)",
+      "file": "uv/report.json",
+      "path": "texel_density_cv",
+      "max": 0.25
+    },
+    {
+      "name": "overlap",
+      "file": "uv/report.json",
+      "path": "overlap_fraction",
+      "max": 0.01
+    },
+    {
+      "name": "utilisation",
+      "file": "uv/report.json",
+      "path": "utilisation",
+      "min": 0.6
+    },
+    {
+      "name": "stretch p95",
+      "file": "uv/report.json",
+      "path": "stretch_p95",
+      "max": 1.6
+    },
+    {
+      "name": "outside 0-1",
+      "file": "uv/report.json",
+      "path": "out_of_bounds",
+      "max": 0.0
+    }
+  ],
+  "texture": [
+    {
+      "name": "worst part colour dE, front",
+      "file": "texture/report.json",
+      "path": "views.front.worst_part_delta_e",
+      "max": 6
+    },
+    {
+      "name": "worst part colour dE, side",
+      "file": "texture/report.json",
+      "path": "views.side.worst_part_delta_e",
+      "max": 6
+    },
+    {
+      "name": "median pixel dE, front",
+      "file": "texture/report.json",
+      "path": "views.front.delta_e_median",
+      "max": 8
+    },
+    {
+      "name": "median pixel dE, side",
+      "file": "texture/report.json",
+      "path": "views.side.delta_e_median",
+      "max": 8
+    },
+    {
+      "name": "face detail correlation",
+      "file": "texture/report.json",
+      "path": "views.front.skin_correlation",
+      "min": 0.6
+    },
+    {
+      "name": "visible texels painted from the concept",
+      "file": "texture/report.json",
+      "path": "painted_of_seen",
+      "min": 0.6
+    },
+    {
+      "name": "ink on the model against the drawing",
+      "file": "texture/report.json",
+      "path": "ink_ratio_worst",
+      "max": 1.2
+    },
+    {
+      "name": "seam between painted and filled texels on the surface, median dE, worst part",
+      "file": "texture/report.json",
+      "path": "seam_delta_e",
+      "max": 6
+    },
+    {
+      "name": "painted texels mixing two panels that disagree, share",
+      "file": "texture/report.json",
+      "path": "mixed_disagreement",
+      "max": 0.05
+    }
+  ],
+  "_changes": [
+    "2026-11-05, agreed with the user after measuring: stretch limit 35% became max(35%, 1.2 x r.theta/L); face squash by area became folded edges <= 1%; painted share is of visible texels, limit unchanged.",
+    "2026-11-05, agreed with the user on 2026-11-06: the overlap measure changed from the absolute position of the hood tip to rest-relative rotation, after the position measure had failed at 0-1 frames. Limit unchanged (2 frames). Rotation lag is 7-12 frames; position lag on the main axis is still about 1 frame. Stiff-hood control fails under the new measure.",
+    "2026-11-06, agreed with the user: the overlap gates also need hood rotation range >= 1.2 x the head's. The limit was chosen after seeing the values (motions 1.46-5.49, stiff control 1.0) and the user was told.",
+    "2026-11-06, agreed with the user: prop_contact stage, prop into the body <= 5 mm on every frame of every motion. Fixed before measuring, our reading: the bail inside the hand that holds it is the grip, not a collision. It is reported as grip_depth_mm and the prop must stay held on every frame; all other pairs count, including the rest of the lantern against that hand.",
+    "2026-11-06, agreed with the user: engine_unreal stage. Their test was: opens without errors, the actions play, the texture shows. Fixed before measuring as the items of that stage: joint distances compared with the file, motion read from the running component, median colour against Blender's flat render. duplicate_textures added to export after Unreal showed one image imported 11 times.",
+    "2026-11-06, agreed with the user: the skills count as stable, and may move to the plugin, when a new concept's character and prop pass every gate with no change to skill code and every selftest passes.",
+    "2026-11-07, agreed with the user: the bail inside the hand that holds it stays outside the 5 mm limit as the grip, while the mitten is a solid model. The alternative, reshaping the hand to wrap the bail, was declined.",
+    "2026-11-07, agreed with the user: a new texture criterion, because a prop passed with torn patches on sides no panel shows. Measured on the saved albedo.png: colour either side of the border between painted and filled texels of a part, averaged over a few texels so painted detail does not count. Limit 6, the same as the worst part colour error, fixed before the fix was measured.",
+    "2026-11-07, agreed with the user: a lag at the search limit (a quarter cycle) still passes the overlap gates and is only flagged, as overlap_at_limit in the report.",
+    "2026-11-07, agreed with the user after measuring: the seam criterion changed from p95 in the UV image to the median on the surface (painted against filled texels in one small cube, facing the same way). Limit unchanged at 6. The old measure failed all four models at 12.9-32.9 with clean pictures, because p95 picks up strong contrast the drawing really has. Without the fill the new measure reads 10.5-77 and fails all four; p95 stays in the report.",
+    "2026-11-07, known failure, limit kept: the lantern's seam reads 8.1 against 6. Cause found: the strip emptied around the drawing's outline lies between a bright gold edge and painted shading on the cap's eave, and half the measured cubes sit on that band. Nothing shows in the flat render. The user chose to investigate; the fill was improved from 10.3 and the measure was not changed again.",
+    "2026-11-07, agreed with the user after measuring: a uv_wire stage for props made mostly of thin bars or wire, with utilisation 0.5 instead of 0.6 and everything else unchanged. A birdcage reached .517 and no more in about 200 runs, with packing already rotating and using concave shapes. Utilisation measures wasted texture space, and that cage's texture passed. The ordinary uv stage keeps 0.6.",
+    "2026-11-08, agreed with the user: a texture criterion for marks shown twice, after a robot and a bucket passed every gate with doubled rivets and a stepped patch. A painted texel counts when its two strongest panels each give 30% or more and their colours differ by dE 10 or more. Limit 5% of painted texels, fixed before the fix was measured: averaging by facing squared mixes about 45 +/- 12 degrees on a cylinder, sharpening to the 8th power about 45 +/- 3."
+  ],
+  "export": [
+    {
+      "name": "valid GLB header",
+      "file": "export/report.json",
+      "path": "valid_header",
+      "min": 1
+    },
+    {
+      "name": "silhouette IoU lost in the round trip",
+      "file": "export/report.json",
+      "path": "iou_drop",
+      "max": 0.005
+    },
+    {
+      "name": "triangle count difference",
+      "file": "export/report.json",
+      "path": "tris_diff",
+      "max": 0.01
+    },
+    {
+      "name": "joints missing",
+      "file": "export/report.json",
+      "path": "joints_missing",
+      "max": 0
+    },
+    {
+      "name": "max influences per vertex",
+      "file": "export/report.json",
+      "path": "max_influences",
+      "max": 4
+    },
+    {
+      "name": "unweighted vertices",
+      "file": "export/report.json",
+      "path": "unweighted",
+      "max": 0
+    },
+    {
+      "name": "height error m",
+      "file": "export/report.json",
+      "path": "height_error",
+      "max": 0.01
+    },
+    {
+      "name": "pose error p99 mm",
+      "file": "export/report.json",
+      "path": "pose_error_p99_mm",
+      "max": 5.0
+    },
+    {
+      "name": "embedded images",
+      "file": "export/report.json",
+      "path": "embedded_images",
+      "min": 1
+    },
+    {
+      "name": "animations",
+      "file": "export/report.json",
+      "path": "animations",
+      "min": 1
+    },
+    {
+      "name": "file size MB",
+      "file": "export/report.json",
+      "path": "file_mb",
+      "max": 20
+    },
+    {
+      "name": "structure errors in the file",
+      "file": "export/report.json",
+      "path": "structure_errors",
+      "max": 0
+    },
+    {
+      "name": "smallest pose motion mm (the pose test is real)",
+      "file": "export/report.json",
+      "path": "pose_motion_mm",
+      "min": 10
+    },
+    {
+      "name": "texture entries repeating an image",
+      "file": "export/report.json",
+      "path": "duplicate_textures",
+      "max": 0
+    }
+  ],
+  "export_prop": [
+    {
+      "name": "valid GLB header",
+      "file": "export/report.json",
+      "path": "valid_header",
+      "min": 1
+    },
+    {
+      "name": "silhouette IoU lost in the round trip",
+      "file": "export/report.json",
+      "path": "iou_drop",
+      "max": 0.005
+    },
+    {
+      "name": "triangle count difference",
+      "file": "export/report.json",
+      "path": "tris_diff",
+      "max": 0.01
+    },
+    {
+      "name": "height error m",
+      "file": "export/report.json",
+      "path": "height_error",
+      "max": 0.01
+    },
+    {
+      "name": "embedded images",
+      "file": "export/report.json",
+      "path": "embedded_images",
+      "min": 1
+    },
+    {
+      "name": "file size MB",
+      "file": "export/report.json",
+      "path": "file_mb",
+      "max": 20
+    },
+    {
+      "name": "structure errors in the file",
+      "file": "export/report.json",
+      "path": "structure_errors",
+      "max": 0
+    },
+    {
+      "name": "texture entries repeating an image",
+      "file": "export/report.json",
+      "path": "duplicate_textures",
+      "max": 0
+    }
+  ],
+  "texture_prop": [
+    {
+      "name": "worst part colour dE, front",
+      "file": "texture/report.json",
+      "path": "views.front.worst_part_delta_e",
+      "max": 6
+    },
+    {
+      "name": "worst part colour dE, side",
+      "file": "texture/report.json",
+      "path": "views.side.worst_part_delta_e",
+      "max": 6
+    },
+    {
+      "name": "median pixel dE, front",
+      "file": "texture/report.json",
+      "path": "views.front.delta_e_median",
+      "max": 8
+    },
+    {
+      "name": "median pixel dE, side",
+      "file": "texture/report.json",
+      "path": "views.side.delta_e_median",
+      "max": 8
+    },
+    {
+      "name": "visible texels painted from the concept",
+      "file": "texture/report.json",
+      "path": "painted_of_seen",
+      "min": 0.6
+    },
+    {
+      "name": "ink on the model against the drawing",
+      "file": "texture/report.json",
+      "path": "ink_ratio_worst",
+      "max": 1.2
+    },
+    {
+      "name": "seam between painted and filled texels on the surface, median dE, worst part",
+      "file": "texture/report.json",
+      "path": "seam_delta_e",
+      "max": 6
+    },
+    {
+      "name": "painted texels mixing two panels that disagree, share",
+      "file": "texture/report.json",
+      "path": "mixed_disagreement",
+      "max": 0.05
+    }
+  ],
+  "animation": [
+    {
+      "name": "foot slide on the ground, mm",
+      "file": "anim/report.json",
+      "path": "foot_slide_mm",
+      "max": 5
+    },
+    {
+      "name": "foot under the ground, mm",
+      "file": "anim/report.json",
+      "path": "ground_penetration_mm",
+      "max": 5
+    },
+    {
+      "name": "foot above the ground in stance, mm",
+      "file": "anim/report.json",
+      "path": "stance_float_mm",
+      "max": 5
+    },
+    {
+      "name": "cycle closure, mm",
+      "file": "anim/report.json",
+      "path": "cycle_closure_mm",
+      "max": 2
+    },
+    {
+      "name": "largest jump (acceleration), mm per frame squared",
+      "file": "anim/report.json",
+      "path": "pop_mm_per_frame2",
+      "max": 15
+    },
+    {
+      "name": "IK targets out of reach",
+      "file": "anim/report.json",
+      "path": "ik_out_of_reach",
+      "max": 0
+    },
+    {
+      "name": "part volume change over the cycle",
+      "file": "anim/check/report.json",
+      "path": "worst.volume_change",
+      "max": 0.1
+    },
+    {
+      "name": "stretch against the physical bound",
+      "file": "anim/check/report.json",
+      "path": "worst.stretch_excess",
+      "max": 1.0
+    },
+    {
+      "name": "folded edges",
+      "file": "anim/check/report.json",
+      "path": "worst.fold_share",
+      "max": 0.01
+    },
+    {
+      "name": "gap opened between parts, cm",
+      "file": "anim/check/report.json",
+      "path": "worst.gap_open_cm",
+      "max": 1.0
+    }
+  ],
+  "motion_walk": [
+    {
+      "name": "spacing: top acceleration over top speed",
+      "file": "anim/report.json",
+      "path": "quality.spacing",
+      "max": 0.5
+    },
+    {
+      "name": "overlap: frames the trailing part's rotation lags the head",
+      "file": "anim/report.json",
+      "path": "quality.overlap_lag_frames",
+      "min": 2
+    },
+    {
+      "name": "overlap: trailing part's rotation range over the head's",
+      "file": "anim/report.json",
+      "path": "quality.follower_ratio",
+      "min": 1.2
+    },
+    {
+      "name": "left and right feet match, mm",
+      "file": "anim/report.json",
+      "path": "quality.lr_symmetry_mm",
+      "max": 3
+    }
+  ],
+  "motion_action": [
+    {
+      "name": "spacing: top acceleration over top speed",
+      "file": "anim/report.json",
+      "path": "quality.spacing",
+      "max": 0.5
+    },
+    {
+      "name": "overlap: frames the trailing part's rotation lags the head",
+      "file": "anim/report.json",
+      "path": "quality.overlap_lag_frames",
+      "min": 2
+    },
+    {
+      "name": "overlap: trailing part's rotation range over the head's",
+      "file": "anim/report.json",
+      "path": "quality.follower_ratio",
+      "min": 1.2
+    },
+    {
+      "name": "balance: centre of mass outside the feet, mm",
+      "file": "anim/report.json",
+      "path": "quality.balance_outside_mm",
+      "max": 20
+    },
+    {
+      "name": "anticipation",
+      "file": "anim/report.json",
+      "path": "quality.anticipation",
+      "min": 0.05
+    },
+    {
+      "name": "overshoot",
+      "file": "anim/report.json",
+      "path": "quality.overshoot",
+      "min": 0.03
+    },
+    {
+      "name": "arc",
+      "file": "anim/report.json",
+      "path": "quality.arc",
+      "min": 0.05
+    }
+  ],
+  "motion_idle": [
+    {
+      "name": "spacing: top acceleration over top speed",
+      "file": "anim/report.json",
+      "path": "quality.spacing",
+      "max": 0.5
+    },
+    {
+      "name": "overlap: frames the trailing part's rotation lags the head",
+      "file": "anim/report.json",
+      "path": "quality.overlap_lag_frames",
+      "min": 2
+    },
+    {
+      "name": "overlap: trailing part's rotation range over the head's",
+      "file": "anim/report.json",
+      "path": "quality.follower_ratio",
+      "min": 1.2
+    },
+    {
+      "name": "balance: centre of mass outside the feet, mm",
+      "file": "anim/report.json",
+      "path": "quality.balance_outside_mm",
+      "max": 20
+    },
+    {
+      "name": "idle moves at least, mm",
+      "file": "anim/report.json",
+      "path": "quality.motion_amount_mm",
+      "min": 3
+    },
+    {
+      "name": "idle moves at most, mm",
+      "file": "anim/report.json",
+      "path": "quality.motion_amount_mm",
+      "max": 30
+    }
+  ],
+  "prop_contact": [
+    {
+      "name": "prop into the body, mm",
+      "file": "anim/prop/report.json",
+      "path": "max_depth_mm",
+      "max": 5
+    },
+    {
+      "name": "frames not checked",
+      "file": "anim/prop/report.json",
+      "path": "frames_unchecked",
+      "max": 0
+    },
+    {
+      "name": "frames the prop is not held",
+      "file": "anim/prop/report.json",
+      "path": "frames_not_held",
+      "max": 0
+    },
+    {
+      "name": "open shells (depth cannot be trusted)",
+      "file": "anim/prop/report.json",
+      "path": "open_shells",
+      "max": 0
+    }
+  ],
+  "engine_unreal": [
+    {
+      "name": "import errors",
+      "file": "export/unreal/report.json",
+      "path": "import_errors",
+      "max": 0
+    },
+    {
+      "name": "import warnings",
+      "file": "export/unreal/report.json",
+      "path": "import_warnings",
+      "max": 0
+    },
+    {
+      "name": "skeletal meshes",
+      "file": "export/unreal/report.json",
+      "path": "skeletal_meshes",
+      "min": 1
+    },
+    {
+      "name": "bones missing",
+      "file": "export/unreal/report.json",
+      "path": "bones_missing",
+      "max": 0
+    },
+    {
+      "name": "actions missing",
+      "file": "export/unreal/report.json",
+      "path": "actions_missing",
+      "max": 0
+    },
+    {
+      "name": "action length error, s",
+      "file": "export/unreal/report.json",
+      "path": "length_error_s",
+      "max": 0.05
+    },
+    {
+      "name": "joint distances, engine against file, mm",
+      "file": "export/unreal/report.json",
+      "path": "pose_error_mm",
+      "max": 5
+    },
+    {
+      "name": "the joint comparison can fail: a wrong moment differs by, mm",
+      "file": "export/unreal/report.json",
+      "path": "pose_check_power_mm",
+      "min": 10
+    },
+    {
+      "name": "smallest action motion in the data, mm",
+      "file": "export/unreal/report.json",
+      "path": "action_motion_mm",
+      "min": 10
+    },
+    {
+      "name": "smallest motion played on the component, mm",
+      "file": "export/unreal/report.json",
+      "path": "played_motion_mm",
+      "min": 10
+    },
+    {
+      "name": "height error m",
+      "file": "export/unreal/report.json",
+      "path": "height_error_m",
+      "max": 0.01
+    },
+    {
+      "name": "materials without the texture",
+      "file": "export/unreal/report.json",
+      "path": "materials_untextured",
+      "max": 0
+    },
+    {
+      "name": "copies of the same texture",
+      "file": "export/unreal/report.json",
+      "path": "texture_copies",
+      "max": 0
+    },
+    {
+      "name": "median colour dE, engine against Blender",
+      "file": "export/unreal/report.json",
+      "path": "albedo_delta_e_median",
+      "max": 8
+    }
+  ],
+  "uv_wire": [
+    {
+      "name": "texel density spread (CV)",
+      "file": "uv/report.json",
+      "path": "texel_density_cv",
+      "max": 0.25
+    },
+    {
+      "name": "overlap",
+      "file": "uv/report.json",
+      "path": "overlap_fraction",
+      "max": 0.01
+    },
+    {
+      "name": "utilisation",
+      "file": "uv/report.json",
+      "path": "utilisation",
+      "min": 0.5
+    },
+    {
+      "name": "stretch p95",
+      "file": "uv/report.json",
+      "path": "stretch_p95",
+      "max": 1.6
+    },
+    {
+      "name": "outside 0-1",
+      "file": "uv/report.json",
+      "path": "out_of_bounds",
+      "max": 0.0
+    }
+  ]
+}

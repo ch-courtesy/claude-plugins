@@ -1,0 +1,472 @@
+{
+ "type": "keys",
+ "fps": 24,
+ "loop": true,
+ "sole_material": "Sole",
+ "check_frames": 8,
+ "follow": [
+  {
+   "bone": "tail1",
+   "source": "tail3",
+   "period": 16,
+   "damp": 0.35,
+   "gain": 500,
+   "drag": 3,
+   "drag_from": "head"
+  },
+  {
+   "bone": "tail2",
+   "source": "tail3",
+   "period": 20,
+   "damp": 0.3,
+   "gain": 800,
+   "drag": 5,
+   "drag_from": "head"
+  },
+  {
+   "bone": "tail3",
+   "source": "tail3",
+   "period": 24,
+   "damp": 0.28,
+   "gain": 1200,
+   "drag": 7,
+   "drag_from": "head"
+  }
+ ],
+ "track": [
+  "hand.R",
+  "hand.L",
+  "head",
+  "tail3"
+ ],
+ "overlap": {
+  "driver": "head",
+  "follower": "tail3"
+ },
+ "name": "wave",
+ "frames": 110,
+ "gate": "motion_action",
+ "primary": {
+  "point": "hand.R",
+  "from": 0,
+  "to": 41
+ },
+ "poses": {
+  "rest": {
+   "hips": [
+    0,
+    0,
+    -0.008
+   ],
+   "rot": [
+    {
+     "bone": "upper_arm.L",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -8
+    },
+    {
+     "bone": "forearm.L",
+     "axis": [
+      0.643,
+      0,
+      0.766
+     ],
+     "deg": -14
+    }
+   ]
+  },
+  "wind": {
+   "hips": [
+    0.006,
+    0,
+    -0.016
+   ],
+   "rot": [
+    {
+     "bone": "upper_arm.L",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -8
+    },
+    {
+     "bone": "forearm.L",
+     "axis": [
+      0.643,
+      0,
+      0.766
+     ],
+     "deg": -14
+    },
+    {
+     "bone": "upper_arm.R",
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "deg": 12
+    },
+    {
+     "bone": "spine",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": 3
+    },
+    {
+     "bone": "head",
+     "axis": [
+      1,
+      0,
+      0
+     ],
+     "deg": 3
+    }
+   ]
+  },
+  "high": {
+   "hips": [
+    -0.008,
+    0,
+    -0.004
+   ],
+   "rot": [
+    {
+     "bone": "upper_arm.L",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -8
+    },
+    {
+     "bone": "forearm.L",
+     "axis": [
+      0.643,
+      0,
+      0.766
+     ],
+     "deg": -14
+    },
+    {
+     "bone": "upper_arm.R",
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "deg": -104
+    },
+    {
+     "bone": "forearm.R",
+     "axis": [
+      -0.643,
+      0,
+      0.766
+     ],
+     "deg": -30
+    },
+    {
+     "bone": "spine",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -4
+    },
+    {
+     "bone": "head",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -4
+    }
+   ]
+  },
+  "set": {
+   "hips": [
+    -0.006,
+    0,
+    -0.008
+   ],
+   "rot": [
+    {
+     "bone": "upper_arm.L",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -8
+    },
+    {
+     "bone": "forearm.L",
+     "axis": [
+      0.643,
+      0,
+      0.766
+     ],
+     "deg": -14
+    },
+    {
+     "bone": "upper_arm.R",
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "deg": -92
+    },
+    {
+     "bone": "forearm.R",
+     "axis": [
+      -0.643,
+      0,
+      0.766
+     ],
+     "deg": -28
+    },
+    {
+     "bone": "spine",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -3
+    },
+    {
+     "bone": "head",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -3
+    }
+   ]
+  },
+  "a": {
+   "hips": [
+    -0.006,
+    0,
+    -0.008
+   ],
+   "rot": [
+    {
+     "bone": "upper_arm.L",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -8
+    },
+    {
+     "bone": "forearm.L",
+     "axis": [
+      0.643,
+      0,
+      0.766
+     ],
+     "deg": -14
+    },
+    {
+     "bone": "upper_arm.R",
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "deg": -92
+    },
+    {
+     "bone": "forearm.R",
+     "axis": [
+      -0.643,
+      0,
+      0.766
+     ],
+     "deg": -28
+    },
+    {
+     "bone": "forearm.R",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": 26
+    },
+    {
+     "bone": "spine",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -3
+    },
+    {
+     "bone": "head",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -4
+    },
+    {
+     "bone": "head",
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "deg": 3
+    }
+   ]
+  },
+  "b": {
+   "hips": [
+    -0.006,
+    0,
+    -0.008
+   ],
+   "rot": [
+    {
+     "bone": "upper_arm.L",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -8
+    },
+    {
+     "bone": "forearm.L",
+     "axis": [
+      0.643,
+      0,
+      0.766
+     ],
+     "deg": -14
+    },
+    {
+     "bone": "upper_arm.R",
+     "axis": [
+      0,
+      -1,
+      0
+     ],
+     "deg": -92
+    },
+    {
+     "bone": "forearm.R",
+     "axis": [
+      -0.643,
+      0,
+      0.766
+     ],
+     "deg": -28
+    },
+    {
+     "bone": "forearm.R",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -18
+    },
+    {
+     "bone": "spine",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -3
+    },
+    {
+     "bone": "head",
+     "axis": [
+      0,
+      1,
+      0
+     ],
+     "deg": -2
+    },
+    {
+     "bone": "head",
+     "axis": [
+      0,
+      0,
+      1
+     ],
+     "deg": -3
+    }
+   ]
+  }
+ },
+ "keys": [
+  {
+   "frame": 0,
+   "pose": "rest"
+  },
+  {
+   "frame": 12,
+   "pose": "wind"
+  },
+  {
+   "frame": 34,
+   "pose": "high"
+  },
+  {
+   "frame": 41,
+   "pose": "set"
+  },
+  {
+   "frame": 50,
+   "pose": "a"
+  },
+  {
+   "frame": 60,
+   "pose": "b"
+  },
+  {
+   "frame": 70,
+   "pose": "a"
+  },
+  {
+   "frame": 79,
+   "pose": "b"
+  },
+  {
+   "frame": 89,
+   "pose": "set"
+  },
+  {
+   "frame": 110,
+   "pose": "rest"
+  }
+ ],
+ "delay": {
+  "forearm.R": 2,
+  "hand.R": 3,
+  "head": 2
+ }
+}

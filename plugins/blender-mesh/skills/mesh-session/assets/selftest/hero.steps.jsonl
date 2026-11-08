@@ -1,0 +1,119 @@
+# selftest "hero": the 118-step character from one cube (box-modeling/references/plan-character-lampkeeper.md)
+{"op": "primitive", "args": {"type": "cube", "size": [0.4, 0.26, 0.38], "location": [0, 0, 0.59], "tier": "pc"}, "label": "torso", "expect": {"faces": 6, "non_manifold": 0}}
+{"op": "mirror", "args": {"axis": "x"}, "label": "", "expect": {"faces": 5, "non_manifold": 0}}
+{"op": "loopcut", "args": {"at": {"axis": "x", "value": [0.05, 0.17]}, "result": "grid_x"}, "label": "grid_x", "expect": {"faces": 13, "non_manifold": 0}}
+{"op": "loopcut", "args": {"at": {"axis": "y", "value": [-0.07, 0.07]}, "result": "grid_y"}, "label": "grid_y", "expect": {"faces": 27, "non_manifold": 0}}
+{"op": "loopcut", "args": {"at": {"axis": "z", "value": [0.5, 0.62, 0.72]}, "result": "grid_z"}, "label": "grid_z", "expect": {"faces": 54, "non_manifold": 0}}
+{"op": "select", "args": {"name": "leg0", "where": {"normal": [0, 0, -1], "min": [0.05, -0.07, null], "max": [0.17, 0.07, null]}}, "label": "leg0", "expect": {"faces": 54, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "leg0", "distance": 0.14, "result": "thigh"}, "label": "thigh", "expect": {"faces": 58, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "thigh", "distance": 0.05, "result": "knee"}, "label": "knee", "expect": {"faces": 62, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "knee", "distance": 0.07, "result": "shin"}, "label": "shin", "expect": {"faces": 66, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "shin", "distance": 0.02, "result": "boot_top"}, "label": "boot_top", "expect": {"faces": 70, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "boot_top", "scale": [1.3, 1.35, 1]}, "label": "boot_flare", "expect": {"faces": 70, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "boot_top", "distance": 0.08, "result": "boot_mid"}, "label": "boot_mid", "expect": {"faces": 74, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "boot_mid", "distance": 0.04, "result": "boot_sole"}, "label": "boot_sole", "expect": {"faces": 78, "non_manifold": 0}}
+{"op": "select", "args": {"name": "toe0", "where": {"normal": [0, -1, 0], "max": [null, null, 0.11]}}, "label": "toe0", "expect": {"faces": 78, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "toe0", "distance": 0.1, "result": "toe"}, "label": "toe", "expect": {"faces": 84, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "toe", "scale": [0.92, 1, 0.75], "pivot": [0.11, -0.19, 0]}, "label": "toe_taper", "expect": {"faces": 84, "non_manifold": 0}}
+{"op": "select", "args": {"name": "arm0", "where": {"normal": [1, 0, 0], "min": [null, -0.07, 0.62], "max": [null, 0.07, 0.72]}}, "label": "arm0", "expect": {"faces": 84, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "arm0", "distance": 0.05, "result": "shoulder"}, "label": "shoulder", "expect": {"faces": 88, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "shoulder", "rotate": [0, 40, 0], "scale": [1, 0.8, 1]}, "label": "shoulder_tilt", "expect": {"faces": 88, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "shoulder", "distance": 0.1, "result": "upper"}, "label": "upper", "expect": {"faces": 92, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "upper", "distance": 0.05, "result": "elbow"}, "label": "elbow", "expect": {"faces": 96, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "elbow", "distance": 0.09, "result": "forearm"}, "label": "forearm", "expect": {"faces": 100, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "forearm", "scale": [0.86, 0.86, 0.86]}, "label": "forearm_taper", "expect": {"faces": 100, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "forearm", "distance": 0.02, "result": "wrist"}, "label": "wrist", "expect": {"faces": 104, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "wrist", "distance": 0.03, "result": "palm"}, "label": "palm", "expect": {"faces": 108, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "palm", "scale": [1.4, 1.4, 1.4]}, "label": "palm_flare", "expect": {"faces": 108, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "palm", "distance": 0.07, "result": "mitten"}, "label": "mitten", "expect": {"faces": 112, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "mitten", "distance": 0.03, "result": "mitten_tip"}, "label": "mitten_tip", "expect": {"faces": 116, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "mitten_tip", "scale": [0.7, 0.7, 0.7]}, "label": "mitten_round", "expect": {"faces": 116, "non_manifold": 0}}
+{"op": "select", "args": {"name": "thumb0", "where": {"in": "mitten_sides", "normal": [0, -1, 0]}}, "label": "thumb0", "expect": {"faces": 116, "non_manifold": 0}}
+{"op": "inset", "args": {"sel": "thumb0", "thickness": 0.015, "result": "thumb_base"}, "label": "thumb_base", "expect": {"faces": 120, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "thumb_base", "distance": 0.03, "result": "thumb"}, "label": "thumb", "expect": {"faces": 124, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "thumb", "scale": [0.8, 0.8, 0.8]}, "label": "thumb_taper", "expect": {"faces": 124, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "thumb", "distance": 0.025, "result": "thumb_tip"}, "label": "thumb_tip", "expect": {"faces": 128, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "thumb_tip", "scale": [0.7, 0.7, 0.7]}, "label": "thumb_round", "expect": {"faces": 128, "non_manifold": 0}}
+{"op": "select", "args": {"name": "neck0", "where": {"normal": [0, 0, 1], "max": [0.05, 0.07, null], "min": [null, -0.07, null]}}, "label": "neck0", "expect": {"faces": 128, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "neck0", "distance": 0.03, "result": "neck"}, "label": "neck", "expect": {"faces": 131, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "neck", "distance": 0.03, "result": "jaw"}, "label": "jaw", "expect": {"faces": 134, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "jaw", "scale": [3.6, 2.2, 1]}, "label": "jaw_out", "expect": {"faces": 134, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "jaw", "distance": 0.1, "result": "cheek"}, "label": "cheek", "expect": {"faces": 137, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "cheek", "scale": [1.1, 1.1, 1]}, "label": "cheek_out", "expect": {"faces": 137, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "cheek", "distance": 0.1, "result": "brow"}, "label": "brow", "expect": {"faces": 140, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "brow", "distance": 0.08, "result": "crown"}, "label": "crown", "expect": {"faces": 143, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "crown", "scale": [0.85, 0.9, 1]}, "label": "crown_in", "expect": {"faces": 143, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "crown", "vector": [0, 0.03, 0.08], "result": "hood1"}, "label": "hood1", "expect": {"faces": 146, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "hood1", "scale": [0.78, 0.8, 1], "rotate": [-15, 0, 0]}, "label": "hood1_shape", "expect": {"faces": 146, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "hood1", "vector": [0, 0.06, 0.07], "result": "hood2"}, "label": "hood2", "expect": {"faces": 149, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "hood2", "scale": [0.7, 0.72, 1], "rotate": [-20, 0, 0]}, "label": "hood2_shape", "expect": {"faces": 149, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "hood2", "vector": [0, 0.09, 0.03], "result": "hood3"}, "label": "hood3", "expect": {"faces": 152, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "hood3", "scale": [0.55, 0.55, 1], "rotate": [-30, 0, 0]}, "label": "hood3_shape", "expect": {"faces": 152, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "x", "nearest": [0.1, -0.17, 1.04]}, "fraction": 0.75, "result": "face_col_out"}, "label": "face_col_out", "expect": {"faces": 182, "non_manifold": 0}}
+{"op": "loopcut", "args": {"where": {"along": "x", "nearest": [0.075, -0.17, 1.04]}, "fraction": 0.45, "result": "face_col_in"}, "label": "face_col_in", "expect": {"faces": 212, "non_manifold": 0}}
+{"op": "loopcut", "args": {"at": {"axis": "z", "value": [0.98, 1.02]}, "within": {"min": [null, null, 0.9]}, "result": "eye_rows"}, "label": "eye_rows", "expect": {"faces": 226, "non_manifold": 0}}
+{"op": "select", "args": {"name": "face0", "where": {"normal": [0, -1, 0], "normal_min_dot": 0.7, "min": [null, null, 0.83], "max": [0.149, null, 1.041]}}, "label": "face0", "expect": {"faces": 226, "non_manifold": 0}}
+{"op": "inset", "args": {"sel": "face0", "thickness": 0.014, "result": "face_in"}, "label": "hood_rim", "expect": {"faces": 234, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "face_in", "distance": -0.03, "result": "skin"}, "label": "face_recess", "expect": {"faces": 242, "non_manifold": 0}}
+{"op": "select", "args": {"name": "eye_low", "domain": "vert", "where": {"in": "skin", "min": [0.06, null, 0.975], "max": [null, null, 0.985]}}, "label": "eye_low", "expect": {"faces": 242, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "eye_low", "translate": [0, 0, -0.012]}, "label": "eye_taller", "expect": {"faces": 242, "non_manifold": 0}}
+{"op": "select", "args": {"name": "eye0", "where": {"in": "skin", "min": [0.05, null, 0.96], "max": [null, null, 1.015]}}, "label": "eye0", "expect": {"faces": 242, "non_manifold": 0}}
+{"op": "inset", "args": {"sel": "eye0", "thickness": 0.009, "result": "eye_in"}, "label": "eye_rim", "expect": {"faces": 246, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "eye_in", "distance": -0.012, "result": "eye"}, "label": "eye_socket", "expect": {"faces": 250, "non_manifold": 0}}
+{"op": "select", "args": {"name": "nose0", "where": {"in": "skin", "max": [0.06, null, 0.975], "min": [null, null, 0.935]}}, "label": "nose0", "expect": {"faces": 250, "non_manifold": 0}}
+{"op": "inset", "args": {"sel": "nose0", "thickness": 0.006, "result": "nose_base"}, "label": "nose_base", "expect": {"faces": 253, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "nose_base", "distance": 0.03, "result": "nose"}, "label": "nose", "expect": {"faces": 256, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "nose", "scale": [1.15, 1, 1.15]}, "label": "nose_bulb", "expect": {"faces": 256, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "nose", "distance": 0.02, "result": "nose_tip"}, "label": "nose_tip", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "nose_tip", "scale": [0.7, 0.7, 0.7]}, "label": "nose_round", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "subsurf", "args": {"levels": 2}, "label": "preview", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "select", "args": {"name": "nose_v", "domain": "vert", "where": {"in": ["nose_sides", "nose_tip_sides"]}}, "label": "nose_v", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "nose_v", "scale": [0.5, 1, 1.5]}, "label": "nose_narrow", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "select", "args": {"name": "legs_v", "domain": "vert", "where": {"max": [null, null, 0.395]}}, "label": "legs_v", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "legs_v", "scale": [1, 1, 0.7], "pivot": [0, 0, 0.4]}, "label": "legs_short", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "select", "args": {"name": "all_v", "domain": "vert", "where": {}}, "label": "all_v", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "all_v", "translate": [0, 0, -0.12]}, "label": "drop_to_ground", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "select", "args": {"name": "leg_v", "domain": "vert", "where": {"max": [null, null, 0.27], "min": [null, null, 0.095]}}, "label": "leg_v", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "leg_v", "scale": [1.3, 1.3, 1], "pivot": [0.11, 0, 0]}, "label": "legs_thick", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "select", "args": {"name": "belly_v", "domain": "vert", "where": {"min": [null, null, 0.37], "max": [0.205, null, 0.51]}}, "label": "belly_v", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "belly_v", "scale": [1.14, 1.2, 1], "pivot": [0, 0, 0.44]}, "label": "belly_out", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "select", "args": {"name": "chest_top_v", "domain": "vert", "where": {"min": [null, null, 0.655], "max": [0.205, null, 0.665]}}, "label": "chest_top_v", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "chest_top_v", "scale": [0.84, 0.88, 1], "pivot": [0, 0, 0.66]}, "label": "shoulders_in", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "note", "args": {}, "label": "check_shape", "expect": {"faces": 259, "non_manifold": 0}}
+{"op": "loopcut", "args": {"at": {"axis": "z", "value": [0.36, 0.4]}, "within": {"max": [0.26, null, null]}, "result": "belt_edges"}, "label": "belt_loops", "expect": {"faces": 285, "non_manifold": 0}}
+{"op": "select", "args": {"name": "belt0", "where": {"min": [null, null, 0.36], "max": [0.26, null, 0.4]}}, "label": "belt0", "expect": {"faces": 285, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "belt0", "distance": 0.012, "along": "normals", "result": "belt"}, "label": "belt", "expect": {"faces": 311, "non_manifold": 0}}
+{"op": "select", "args": {"name": "buckle0", "where": {"in": "belt", "normal": [0, -1, 0], "max": [0.06, null, null]}}, "label": "buckle0", "expect": {"faces": 311, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "buckle0", "distance": 0.012, "result": "buckle"}, "label": "buckle", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"name": "Tunic", "color": [0.1, 0.22, 0.2], "metallic": 0, "roughness": 0.8}, "label": "tunic", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "select", "args": {"name": "hood_f", "where": {"min": [null, null, 0.695]}}, "label": "hood_f", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "hood_f", "name": "Hood", "color": [0.42, 0.07, 0.04], "metallic": 0, "roughness": 0.75}, "label": "hood_mat", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "select", "args": {"name": "legs_f", "where": {"min": [null, null, 0.1], "max": [0.26, null, 0.279]}}, "label": "legs_f", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "legs_f", "name": "Trousers", "color": [0.22, 0.15, 0.08], "metallic": 0, "roughness": 0.8}, "label": "legs_mat", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "select", "args": {"name": "boots_f", "where": {"max": [null, null, 0.0999]}}, "label": "boots_f", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "boots_f", "name": "Boots", "color": [0.06, 0.035, 0.02], "metallic": 0, "roughness": 0.55}, "label": "boots_mat", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "select", "args": {"name": "hand_f", "where": {"min": [0.455, null, null]}}, "label": "hand_f", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "hand_f", "name": "Mitten", "color": [0.55, 0.38, 0.09], "metallic": 0, "roughness": 0.8}, "label": "hand_mat", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "select", "args": {"name": "belt_f", "where": {"in": ["belt", "belt_sides"]}}, "label": "belt_f", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "belt_f", "name": "Belt", "color": [0.12, 0.06, 0.03], "metallic": 0, "roughness": 0.6}, "label": "belt_mat", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "select", "args": {"name": "buckle_f", "where": {"in": ["buckle", "buckle_sides"]}}, "label": "buckle_f", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "buckle_f", "name": "Brass", "color": [0.89, 0.73, 0.38], "metallic": 1, "roughness": 0.35}, "label": "buckle_mat", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "select", "args": {"name": "skin_f", "where": {"in": ["skin", "eye_in_rim", "nose_base_rim", "nose_sides", "nose", "nose_tip", "nose_tip_sides"]}}, "label": "skin_f", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "skin_f", "name": "Skin", "color": [0.72, 0.48, 0.34], "metallic": 0, "roughness": 0.55}, "label": "skin_mat", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "select", "args": {"name": "eye_f", "where": {"in": "eye"}}, "label": "eye_f", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "eye_f", "name": "Eye", "color": [0.012, 0.01, 0.01], "metallic": 0, "roughness": 0.25}, "label": "eye_mat", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "subsurf", "args": {"levels": 2, "crease": {"sel": "belt_sides", "value": 0.8}}, "label": "crease_belt", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "subsurf", "args": {"levels": 2, "crease": {"sel": "buckle_sides", "value": 0.85}}, "label": "crease_buckle", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "cleanup", "args": {}, "label": "clean", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "select", "args": {"name": "eye_v", "domain": "vert", "where": {"in": ["eye", "eye_sides"]}}, "label": "eye_v", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "eye_v", "scale": [1.25, 1, 1.35]}, "label": "eye_bigger", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "eye_sides", "name": "Eye"}, "label": "eye_walls", "expect": {"faces": 319, "non_manifold": 0}}
+{"op": "extrude", "args": {"sel": "hood3", "vector": [0, 0.05, -0.012], "result": "hood_tip"}, "label": "hood_tip", "expect": {"faces": 326, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "hood_tip", "scale": [0.42, 0.42, 0.42], "rotate": [-25, 0, 0]}, "label": "hood_tip_sharp", "expect": {"faces": 326, "non_manifold": 0}}
+{"op": "select", "args": {"name": "sh_x", "domain": "vert", "where": {"min": [0.1, null, 0.655], "max": [0.205, null, 0.665]}}, "label": "sh_x", "expect": {"faces": 326, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "sh_x", "translate": [0, 0, -0.028]}, "label": "shoulder_slope", "expect": {"faces": 326, "non_manifold": 0}}
+{"op": "select", "args": {"name": "sh_y", "domain": "vert", "where": {"min": [null, null, 0.63], "max": [0.205, null, 0.665], "normal": [0, -1, 0], "normal_min_dot": 0.25}}, "label": "sh_y", "expect": {"faces": 326, "non_manifold": 0}}
+{"op": "transform", "args": {"sel": "sh_y", "translate": [0, 0.008, -0.012]}, "label": "chest_round", "expect": {"faces": 326, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "forearm_sides", "name": "Tunic"}, "label": "cuff_forearm", "expect": {"faces": 326, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "wrist_sides", "name": "Tunic"}, "label": "cuff_wrist", "expect": {"faces": 326, "non_manifold": 0}}
+{"op": "material", "args": {"sel": "palm_sides", "name": "Mitten"}, "label": "cuff_palm", "expect": {"verts": 355, "faces": 326, "quads": 326, "tris": 0, "ngons": 0, "non_manifold": 0, "tris_eval": 20864}}

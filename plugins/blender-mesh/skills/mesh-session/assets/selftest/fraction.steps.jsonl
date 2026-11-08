@@ -1,0 +1,10 @@
+# selftest "fraction": a fractional loop must stay on one side of its ring. An edge's own
+# vertex order is arbitrary; measuring from it made the loop zigzag (x = 0.1 and 0.4).
+{"op":"primitive","args":{"type":"cube","size":[1,0.6,0.5],"location":[0,0,0.25]},"label":"a"}
+{"op":"mirror","args":{"axis":"x"}}
+{"op":"select","args":{"name":"top","where":{"normal":[0,0,1]}},"label":"top"}
+{"op":"extrude","args":{"sel":"top","distance":0.3,"result":"up"},"label":"up"}
+{"op":"loopcut","args":{"where":{"along":"z","nearest":[0.5,-0.3,0.2]},"fraction":0.25,"result":"f_low"},"label":"f_low","expect":{"new_verts":4,"warnings":0}}
+{"op":"select","args":{"name":"at_z","domain":"vert","where":{"min":[null,null,0.1249],"max":[null,null,0.1251]}},"label":"at_z","expect":{"selected":4}}
+{"op":"loopcut","args":{"where":{"along":"x","nearest":[0.25,-0.3,0.65]},"fraction":0.2,"result":"f_x"},"label":"f_x","expect":{"new_verts":8,"warnings":0}}
+{"op":"select","args":{"name":"at_x","domain":"vert","where":{"min":[0.0999,null,null],"max":[0.1001,null,null]}},"label":"at_x","expect":{"selected":8}}

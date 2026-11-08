@@ -1,0 +1,8 @@
+# selftest "falloff": a proportional move under a mirror must keep seam vertices on the plane and
+# leave their other coordinates alone. The axis was once overwritten by a loop index, so the wrong
+# coordinate of each seam vertex was zeroed and the model tore along the seam.
+{"op":"primitive","args":{"type":"cube","size":[0.4,0.4,0.4],"location":[0,0,0.2]},"label":"base"}
+{"op":"mirror","args":{"axis":"x"}}
+{"op":"loopcut","args":{"where":{"along":"x","nearest":[0.1,-0.2,0.0]},"cuts":3,"result":"rows"}}
+{"op":"select","args":{"name":"near","domain":"vert","where":{"nearest":[0.0,-0.2,0.4],"count":6}}}
+{"op":"transform","args":{"sel":"near","translate":[0,-0.03,0],"proportional":0.5},"label":"pull","expect":{"warnings":0,"non_manifold":0}}
