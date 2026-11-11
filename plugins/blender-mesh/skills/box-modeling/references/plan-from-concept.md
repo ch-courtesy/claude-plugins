@@ -12,7 +12,9 @@ worked example is `lampkeeper_plan_steps.py` in this folder; its steps are
 2. **Split into parts that overlap**, not one growing mass: tunic, hood, head, sleeve, mitten,
    trouser leg, boot. `primitive` with `"add": true`. Parts keep their loop cuts to themselves
    and each can have its own ring density. Parts on the +X side are mirrored; parts crossing
-   the plane are cut there.
+   the plane are cut there. Where two parts must read as one smooth surface, such as a seat
+   and the two trouser legs, extrude one from the other instead: overlapping pieces leave a
+   crease and a block at the crotch that no ring placement removes.
 3. **Build each part ring by ring.** A cube with loop cuts gives caps with 8 outline points
    (10 when off the seam). Then repeat: extrude the cap, `transform` with `outline` to give
    that ring its measured shape. Rings can tilt: a bent hood tip is a stack of rings between an

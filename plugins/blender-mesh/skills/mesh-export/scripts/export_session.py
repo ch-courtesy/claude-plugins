@@ -7,6 +7,10 @@ records the posed surface, then starts a clean scene, imports the GLB and measur
 back: triangles, joints, influences, height, images, and each pose compared with the original.
 A GLB without a rig is fine: skin and pose checks are then skipped. Writes DIR/model.glb,
 DIR/check.blend (the imported model) and DIR/report.json.
+
+With --carry and a prop held in grip mode, two bones go into the exported skeleton: a socket whose frame
+is the prop's own (an engine attaches the prop's separate file there with no offset) and, under it, a
+marker at the prop's `tip`, so an engine check can see whether the attached prop's point lands there.
 """
 import argparse
 import json
@@ -17,7 +21,7 @@ import sys
 
 import bpy
 import numpy as np
-from mathutils import Matrix, Vector
+from mathutils import Euler, Matrix, Vector
 from mathutils.kdtree import KDTree
 
 
@@ -32,6 +36,7 @@ ap.add_argument("--out", required=True)
 ap.add_argument("--object", default="Model")
 ap.add_argument("--spec", default="")
 ap.add_argument("--height", type=float, default=0.0, help="expected height, when there is no spec")
+ap.add_argument("--carry", default="", help="a carry file; a prop in grip mode gets a socket in the skeleton")
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
@@ -44,6 +49,28 @@ ob.select_set(True)
 
 
 FOLLOW = {b["follows"]: (b["name"], b.get("share", 0.5)) for b in SPEC.get("bones", []) if b.get("follows")}
+CARRY = read_json(a.carry, encoding="utf-8") if a.carry else None
+SOCKET = {}
+if rig and CARRY and CARRY.get("mode") == "grip":       # the prop's frame, where its own file attaches
+    held = rig.data.bones[CARRY["bone"]]
+    frame = held.matrix_local @ (Matrix.Translation(Vector(CARRY["offset"])) if CARRY.get("offset") else Matrix.Identity(4)) \
+        @ Euler([math.radians(x) for x in CARRY.get("rotate", (0, 0, 0))], "XYZ").to_matrix().to_4x4() \
+        @ Matrix.Translation(-Vector(CARRY["grip_point"]))
+    SOCKET = {"socket": CARRY.get("socket", "prop_socket"), "parent": CARRY["bone"], "tip": CARRY.get("tip")}
+    bpy.context.view_layer.objects.active = rig
+    bpy.ops.object.mode_set(mode="EDIT")
+    eb = rig.data.edit_bones.new(SOCKET["socket"])
+    eb.head, eb.tail = (0, 0, 0), (0, 0.05, 0)
+    eb.matrix = frame
+    eb.parent, eb.use_deform = rig.data.edit_bones[CARRY["bone"]], False
+    if SOCKET["tip"]:
+        SOCKET["marker"] = SOCKET["socket"] + "_tip"
+        mk = rig.data.edit_bones.new(SOCKET["marker"])
+        mk.head = frame @ Vector(SOCKET["tip"])
+        mk.tail = mk.head + frame.to_3x3() @ Vector((0, 0.03, 0))
+        mk.parent, mk.use_deform = eb, False
+    bpy.ops.object.mode_set(mode="OBJECT")
+    bpy.context.view_layer.objects.active = ob
 
 
 def expand(rots):
@@ -150,7 +177,7 @@ R = {"file_mb": os.path.getsize(glb) / 2 ** 20, "valid_header": magic == b"glTF"
      "materials": len(G.get("materials", [])), "meshes": len(G.get("meshes", [])), "skins": len(G.get("skins", [])),
      "joints": len(G["skins"][0]["joints"]) if G.get("skins") else 0, "source_bones": len(order),
      "animations": len(G.get("animations", [])), "duplicate_textures": repeated_textures(G),
-     "channels": sum(len(x["channels"]) for x in G.get("animations", []))}
+     "channels": sum(len(x["channels"]) for x in G.get("animations", [])), "socket": SOCKET}
 
 # ---- read it back into an empty scene
 bpy.ops.wm.read_factory_settings(use_empty=True)

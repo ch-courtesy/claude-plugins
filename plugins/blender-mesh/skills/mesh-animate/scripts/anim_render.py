@@ -5,7 +5,9 @@ pattern repeats every stride, so the last frame runs into the first.
       [--prop PROP.blend --prop-bone hand.L --prop-drop 0.30 --prop-swing 7 --prop-light 1.5 --prop-handle -45]
       [--carry CARRY.json]
 
-Writes DIR/frame_NNN.png. A prop hangs from the bone and swings behind it like a pendulum.
+Writes DIR/frame_NNN.png. A prop hangs from the bone and swings behind it like a pendulum, or, with a
+carry file in grip mode, is held rigidly by its socket bone. A motion made in place that records the
+path the game moves the character along (`root_path` in its report) is shown moving along it.
 """
 import argparse
 import json
@@ -16,7 +18,7 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from prop_attach import prop_matrix  # noqa: E402
+from prop_attach import carry_matrix  # noqa: E402
 
 
 def read_json(*args, **kwargs):
@@ -41,13 +43,14 @@ ap.add_argument("--carry", default="", help="a carry file; fills the prop option
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 if a.carry:
     carry = read_json(a.carry, encoding="utf-8")
-    a.prop, a.prop_bone, a.prop_drop = carry["prop"], carry["bone"], carry["drop"]
-    a.prop_swing, a.prop_handle, a.prop_light = carry["swing"], carry.get("handle"), carry.get("light", 0.0)
-    a.prop_offset = carry.get("offset")
+    a.prop, a.prop_light = carry["prop"], carry.get("light", 0.0)
+else:
+    carry = {"bone": a.prop_bone, "drop": a.prop_drop, "swing": a.prop_swing, "handle": a.prop_handle}
 out = os.path.abspath(a.out)
 os.makedirs(out, exist_ok=True)
 R = read_json(a.report, encoding="utf-8")
 N, S = R["frames"], R["stride_m"]
+PATH = R.get("root_path")                              # where the game moves a motion made in place
 sc = bpy.context.scene
 ob = bpy.data.objects[a.object]
 rig = bpy.data.objects["Rig"]
@@ -126,12 +129,12 @@ sc.view_settings.exposure = -0.3
 body = bpy.data.objects[a.object]
 for f in range(N):
     sc.frame_set(f + 1)
-    rig.location = (0, -S * f / N, 0)                  # the feet hold still on the floor
+    rig.location = PATH[f] if PATH else (0, -S * f / N, 0)   # the feet hold still on the floor
     if body.parent is None:                            # or the bones turn about points the mesh has left
         body.location = rig.location
     bpy.context.view_layer.update()
     if prop:
-        prop.matrix_world = prop_matrix(rig, a.prop_bone, a.prop_drop, a.prop_swing, f, N, a.prop_handle, getattr(a, "prop_offset", None))
+        prop.matrix_world = carry_matrix(rig, carry, f, N)
         glow_ob.location = prop.matrix_world @ Vector((0, 0, 0.11))
     sc.render.filepath = os.path.join(out, f"frame_{f:03d}.png")
     bpy.ops.render.render(write_still=True)

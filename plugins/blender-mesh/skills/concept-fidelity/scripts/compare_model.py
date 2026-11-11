@@ -129,7 +129,9 @@ CLEAR = {BY_NAME.get(RENAME.get(n.lower(), n.lower())) for n in a.see_through}
 
 # ---- every view with a label map
 FINE = 3                                               # a canvas marks every pixel it touches, so thin parts read a
-                                                       # pixel wide: draw finer and read each pixel at its centre, as labels are
+                                                       # pixel wide: draw finer and keep the middle sample of each
+                                                       # block. Drawn label maps must be made the same way, at 3x
+                                                       # and shrunk with NEAREST (SKILL.md), or thin parts differ
 views = [v for v in ("front", "side", "back", "top") if os.path.exists(os.path.join(cdir, f"labels_{v}.png"))]
 labels = sorted(PART)
 R = {"object": ob.name, "concept": cdir, "tris": t, "unmapped": unmapped, "views": {}, "gaps": []}

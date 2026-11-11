@@ -18,10 +18,11 @@
   python mesh.py SESSION uv [--angle 66] [--margin .002]  unwrap the rigged model and measure the layout (mesh-uv)
   python mesh.py SESSION texture CONCEPT_DIR [--map Material=part ...]
                                                         paint the UV'd model from the concept (mesh-texture)
-  python mesh.py SESSION glb [--spec RIG.json] [--concept DIR --map M=part ...]
+  python mesh.py SESSION glb [--spec RIG.json] [--concept DIR --map M=part ...] [--carry CARRY.json]
                                                         export GLB, read it back, measure it (mesh-export)
-  python mesh.py SESSION animate MOTION.json RIG.json   bake a motion and measure it (mesh-animate)
-  python mesh.py SESSION controls RIG.json [--carry CARRY.json]
+  python mesh.py SESSION animate MOTION.json RIG.json   bake a motion and measure it (mesh-animate);
+      [--carry CARRY.json]                              with a held weapon, measure its strike
+  python mesh.py SESSION controls RIG.json [--carry CARRY.json [--prop-motion NAME]] [--attack ATTACK.json]
                                                         motions made wrong on purpose must fail their gates
   python mesh.py SESSION propcheck MOTION CARRY.json    does a carried prop pass through the body (mesh-animate)
   python mesh.py SESSION unreal [--engine DIR --warm 30 --ddc DIR]
@@ -228,13 +229,29 @@ def made(sdir, rel):
     return ok
 
 
+def value_after(argv, i, name):
+    """The value given after option `name` at argv[i]; stops with a message when it is missing."""
+    if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+        sys.exit(f"[mesh] {name} needs a value")
+    return argv[i + 1]
+
+
 def opt(argv, name, default=None, cast=str):
+    """Take `name VALUE` out of argv; default when the option is absent."""
     if name in argv:
         i = argv.index(name)
-        val = argv[i + 1]
+        val = value_after(argv, i, name)
         del argv[i:i + 2]
         return cast(val)
     return default
+
+
+def opts(argv, name):
+    """Take every `name VALUE` out of argv, in order."""
+    found = []
+    while name in argv:
+        found.append(opt(argv, name))
+    return found
 
 
 def cmd_finish(sdir, argv):
@@ -264,11 +281,7 @@ def cmd_fidelity(sdir, argv):
     S = load_session(sdir)
     out = os.path.join(sdir, "fidelity")
     clear_reports(sdir, os.path.join("fidelity", "compare.json"))
-    maps = []
-    while "--map" in argv:
-        i = argv.index("--map")
-        maps.append(argv[i + 1])
-        del argv[i:i + 2]
+    maps = opts(argv, "--map")
     extra = ["--map"] + maps if maps else []
     blender_run([os.path.join(sdir, S["current"]), "--python", os.path.join(scripts, "compare_model.py"), "--",
                  "--concept", os.path.abspath(argv[0]), "--out", out, "--object", S["object"]] + extra + argv[1:])
@@ -311,11 +324,7 @@ def cmd_uv(sdir, argv):
 def cmd_texture(sdir, argv):
     """Paint the unwrapped model from the concept's panels (mesh-texture skill)."""
     S = load_session(sdir)
-    maps = []
-    while "--map" in argv:
-        i = argv.index("--map")
-        maps.append(argv[i + 1])
-        del argv[i:i + 2]
+    maps = opts(argv, "--map")
     extra = ["--map"] + maps if maps else []
     clear_reports(sdir, os.path.join("texture", "report.json"))
     blender_run([os.path.join(sdir, "uv", "uv.blend"), "--python",
@@ -331,18 +340,12 @@ def cmd_glb(sdir, argv):
     spec = opt(argv, "--spec")
     concept = opt(argv, "--concept")
     height = opt(argv, "--height")
-    clear = []
-    while "--see-through" in argv:
-        i = argv.index("--see-through")
-        clear.append(argv[i + 1])
-        del argv[i:i + 2]
-    maps = []
-    while "--map" in argv:
-        i = argv.index("--map")
-        maps.append(argv[i + 1])
-        del argv[i:i + 2]
+    carry = opt(argv, "--carry")                       # a gripped prop: its socket goes into the skeleton
+    clear = opts(argv, "--see-through")
+    maps = opts(argv, "--map")
     out = os.path.join(sdir, "export")
-    extra = (["--spec", os.path.abspath(spec)] if spec else []) + (["--height", height] if height else [])
+    extra = (["--spec", os.path.abspath(spec)] if spec else []) + (["--height", height] if height else []) \
+        + (["--carry", os.path.abspath(carry)] if carry else [])
     library = os.path.join(sdir, "motions", "library.blend")
     if library_is_stale(sdir):
         sys.exit("[mesh] motions/library.blend is older than the texture: bake the motions again before exporting")
@@ -394,6 +397,7 @@ def cmd_animate(sdir, argv):
     """Bake one motion, then check its frames with the rig's deformation test (mesh-animate skill).
     Motions collect in SESSION/motions/library.blend; each has its own folder for reports."""
     S = load_session(sdir)
+    carry = opt(argv, "--carry")                       # a held weapon: the strike measures its point
     spec_path, rig = os.path.abspath(argv[0]), os.path.abspath(argv[1])
     spec_json = read_json(spec_path, encoding="utf-8")
     name = spec_json.get("name", "motion")
@@ -410,12 +414,18 @@ def cmd_animate(sdir, argv):
         if os.path.exists(os.path.join(out, old)):
             os.remove(os.path.join(out, old))
     blender_run([source, "--python", os.path.join(SKILLS, "mesh-animate", "scripts", "anim_session.py"), "--",
-                 "--spec", spec_path, "--rig", rig, "--out", out, "--library", library, "--object", S["object"]])
+                 "--spec", spec_path, "--rig", rig, "--out", out, "--library", library, "--object", S["object"]]
+                + (["--carry", os.path.abspath(carry)] if carry else []))
     if not os.path.exists(os.path.join(out, "poses.json")):
         print(f"[mesh] the bake of {name} failed: no report")
         return False
     spec = read_json(rig, encoding="utf-8")
     spec["poses"] = read_json(os.path.join(out, "poses.json"), encoding="utf-8")
+    handed = {h["bone"] for h in spec_json.get("hand_off", [])}
+    if handed:                                         # a lid taken in the hand has left the back on purpose
+        carried = {x["part"] for x in spec.get("parts", [])
+                   if x.get("bone") in handed or handed & set(x.get("chain", []))}
+        spec["attach"] = [pq for pq in spec.get("attach", []) if (pq[0] in carried) == (pq[1] in carried)]
     check = os.path.join(out, "check_spec.json")
     with open(check, "w", encoding="utf-8") as fh_:
         json.dump(spec, fh_)
@@ -427,11 +437,12 @@ def cmd_animate(sdir, argv):
 def carry_args(carry):
     """A carry description as prop_contact arguments. A null handle means the prop does not turn."""
     out = ["--prop", os.path.abspath(carry["prop"])]
-    for key in ("bone", "drop", "swing", "handle", "grip"):
+    for key in ("mode", "bone", "drop", "swing", "handle", "grip"):
         if carry.get(key) is not None:
             out += ["--" + key, str(carry[key])]
-    if carry.get("offset"):
-        out += ["--offset"] + [str(x) for x in carry["offset"]]
+    for key in ("offset", "grip_point", "rotate"):
+        if carry.get(key):
+            out += ["--" + key.replace("_", "-")] + [str(x) for x in carry[key]]
     return out
 
 
@@ -450,18 +461,25 @@ def cmd_propcheck(sdir, argv):
     return code == 0
 
 
-def prop_controls(sdir, carry_path):
-    """Placements made wrong on purpose must fail the contact gate, or it detects nothing."""
+def prop_controls(sdir, carry_path, motion="walk"):
+    """Placements made wrong on purpose must fail the contact gate, or it detects nothing. A hanging prop
+    and a gripped one are moved by different settings, so each mode has its own placements; they are
+    tried on `motion`, a motion already baked in the session."""
     carry = read_json(carry_path, encoding="utf-8")
     gate = os.path.join(SKILLS, "stage-gate", "scripts", "gate.py")
     ok = True
-    spec = os.path.join(SKILLS, "mesh-animate", "assets", "controls_prop", "placements.json")
+    grip = carry.get("mode", "hang") == "grip"
+    spec = os.path.join(SKILLS, "mesh-animate", "assets", "controls_prop", "grip.json" if grip else "placements.json")
+    base = os.path.join(sdir, "motions", motion)
+    if not os.path.exists(os.path.join(base, "motion.blend")):
+        print(f"[controls] no baked motion {motion} to move the prop on: give --prop-motion NAME")
+        return False
     for c in read_json(spec, encoding="utf-8") + carry.get("controls", []):
         name = "control_prop_" + c["name"]
         folder = os.path.join(sdir, "motions", name)
         os.makedirs(folder, exist_ok=True)
         for f in ("motion.blend", "report.json"):
-            shutil.copy(os.path.join(sdir, "motions", "walk", f), folder)
+            shutil.copy(os.path.join(base, f), folder)
         trial = os.path.join(folder, "carry.json")
         change = dict(c.get("change", {}))
         if "drop_scale" in c:
@@ -486,6 +504,11 @@ def prop_controls(sdir, carry_path):
 def cmd_controls(sdir, argv):
     """Negative controls: motions made wrong on purpose must fail the criteria they name, or those
     criteria detect nothing. Runs each control in a scratch library and restores the real one."""
+    carry = opt(argv, "--carry")
+    attack = opt(argv, "--attack")
+    motion = opt(argv, "--prop-motion", "walk")
+    if attack and not carry:
+        sys.exit("[mesh] controls --attack needs --carry: the attack's weapon")
     rig = os.path.abspath(argv[0])
     folder = os.path.join(SKILLS, "mesh-animate", "assets", "controls")
     library = os.path.join(sdir, "motions", "library.blend")
@@ -495,14 +518,116 @@ def cmd_controls(sdir, argv):
         shutil.copy2(library, saved)                   # copy2 keeps its date, which later gates compare
     try:
         ok = run_controls(sdir, rig, folder)
+        if attack:
+            ok = attack_controls(sdir, rig, os.path.abspath(attack), os.path.abspath(carry)) and ok
     finally:
         if had:
             shutil.move(saved, library)
         elif os.path.exists(library):                  # made by the controls: it holds only broken motions
             os.remove(library)
-    if "--carry" in argv:
-        ok = prop_controls(sdir, argv[argv.index("--carry") + 1]) and ok
+    if carry and not attack:
+        ok = prop_controls(sdir, carry, motion) and ok
     print("[controls] " + ("every control was caught" if ok else "some controls were NOT caught"))
+    return ok
+
+
+def gate_fails(sdir, stage, name, wanted):
+    """Run a gate on a control motion; True when every wanted criterion failed."""
+    gate = os.path.join(SKILLS, "stage-gate", "scripts", "gate.py")
+    r = subprocess.run([sys.executable, "-I", gate, sdir, stage, "--anim", "motions/" + name, "--note", "negative control"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace")
+    failing = [x for x in r.stdout.splitlines() if " FAIL " in x]
+    ok = True
+    for want in wanted:
+        hit = any(want in x for x in failing)
+        ok = ok and hit
+        print(f"[controls] {name}: '{want}' {'failed as it should' if hit else 'PASSED: it detects nothing'}")
+    return ok
+
+
+def inline_poses(spec, path):
+    """A spec with the poses it includes copied in, so it can be written anywhere."""
+    spec = json.loads(json.dumps(spec))
+    extra = spec.pop("include_poses", [])
+    for x in ([extra] if isinstance(extra, str) else extra):
+        shared = read_json(os.path.join(os.path.dirname(path), x), encoding="utf-8")
+        spec["poses"] = {**shared.get("poses", shared), **spec.get("poses", {})}
+    return spec
+
+
+def attack_controls(sdir, rig, attack, carry_path):
+    """An attack that passes, broken one way at a time: each break must fail the criterion it breaks,
+    or that criterion detects nothing. Run it on an attack the character really plays."""
+    base = inline_poses(read_json(attack, encoding="utf-8"), attack)
+    st = base["strike"]
+    keys = base["keys"]
+    top = max((k for k in keys if k["frame"] <= st["from"]), key=lambda k: k["frame"])["pose"]
+
+    k_from = max(k["frame"] for k in keys if k["frame"] <= st["from"])
+    k_hit = min((k["frame"] for k in keys if k["frame"] >= st["impact"]), default=st["impact"])
+
+    def later(d):                                      # the strike itself d frames longer, the rest moved on
+        s = json.loads(json.dumps(base))
+        span = max(k_hit - k_from, 1)
+
+        def moved(f):
+            if f <= k_from:
+                return f
+            if f <= k_hit:
+                return k_from + round((f - k_from) * (span + d) / span)
+            return f + d
+        for k in s["keys"] + s.get("travel", []):
+            k["frame"] = moved(k["frame"])
+        s["frames"] += d
+        s["strike"]["impact"] = moved(st["impact"])
+        s["exempt"] = [[moved(a), moved(b)] for a, b in s.get("exempt", [])]
+        return s
+
+    calm = [f for f in range(3, base["frames"] - 3)    # a frame away from the hit and any landing
+            if not (st.get("from", 0) - 3 <= f <= st["impact"] + 5)
+            and not any(a - 3 <= f <= b + 3 for a, b in base.get("exempt", []))]
+
+    def no_wind_up():                                  # the weapon starts at the top of its wind-up
+        s = json.loads(json.dumps(base))
+        for k in s["keys"]:
+            if k["frame"] < st["from"]:
+                k["pose"] = top
+        return s
+
+    trials = [("slow", later(6), "motion_attack", ["strike, s"]),
+              ("early_hit", dict(base, strike=dict(st, impact=st["impact"] - 3)), "motion_attack",
+               ["fastest frame from the hit frame"]),
+              ("no_wind_up", no_wind_up(), "motion_attack", ["wind-up, s"]),
+              ("slide", dict(base, debug_slip=0.03), "animation_oneshot", ["foot slide on the ground"]),
+              ("pop", dict(base, debug_pop={"frame": calm[len(calm) // 2] if calm else 1, "offset": [0.03, 0, 0]}),
+               "animation_oneshot", ["jump outside the hit"]),
+              ("wrong_end", dict(base, end_pose=top), "animation_oneshot", ["end pose against"])]
+    ok = True
+    for tag, spec, stage, wanted in trials:
+        name = "control_attack_" + tag
+        path = os.path.join(sdir, "motions", name + ".json")
+        with open(path, "w", encoding="utf-8") as fh_:
+            json.dump(dict(spec, name=name), fh_, ensure_ascii=False)
+        if not cmd_animate(sdir, [path, rig, "--carry", carry_path]):
+            print(f"[controls] {name}: the bake failed, so nothing was tested")
+            ok = False
+            continue
+        ok = gate_fails(sdir, stage, name, wanted) and ok
+    carry = read_json(carry_path, encoding="utf-8")    # the blade held inside the chest
+    name = "control_attack_blade"
+    path = os.path.join(sdir, "motions", name + ".json")
+    with open(path, "w", encoding="utf-8") as fh_:
+        json.dump(dict(base, name=name), fh_, ensure_ascii=False)
+    if cmd_animate(sdir, [path, rig, "--carry", carry_path]):
+        trial = os.path.join(sdir, "motions", name, "carry.json")
+        blade = dict(carry, bone="chest", rotate=[0, 0, 0], offset=None)   # gripped inside the chest
+        with open(trial, "w", encoding="utf-8") as fh_:
+            json.dump(blade, fh_)
+        cmd_propcheck(sdir, ["motions/" + name, trial])
+        ok = gate_fails(sdir, "prop_contact", name, ["prop into the body"]) and ok
+    else:
+        print(f"[controls] {name}: the bake failed, so nothing was tested")
+        ok = False
     return ok
 
 

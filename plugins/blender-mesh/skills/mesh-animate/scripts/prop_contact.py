@@ -3,10 +3,13 @@ with the placement the renderer uses.
 
   blender -b MOTION.blend --python prop_contact.py -- --prop PROP.blend --report REPORT.json \
       --out DIR [--object Model] [--bone hand.L] [--drop 0.30] [--swing 7] [--grip Bail] [--handle -45] [--every 1]
+      [--mode grip --grip-point X Y Z --rotate RX RY RZ]
 
 Writes DIR/report.json. The part of the prop made to be held (--grip, a material) sits inside the
 hand on purpose, so that one pairing is the grip: it is reported as grip_depth_mm and must touch on
-every frame. Every other pairing counts, including the rest of the prop against the same hand.
+every frame. Every other pairing counts, including the rest of the prop against the same hand. The
+holding hand is the bone carrying the prop; in grip mode, for a socket bone with no skin of its own, it
+is the nearest ancestor with skin together with every bone below that one (the fingers of a fist).
 """
 import argparse
 import json
@@ -17,7 +20,7 @@ import bpy
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from prop_attach import prop_matrix  # noqa: E402
+from prop_attach import carry_matrix  # noqa: E402
 from shell_depth import shell_depth, shells_of  # noqa: E402
 
 
@@ -39,6 +42,9 @@ ap.add_argument("--grip", default="Bail")
 ap.add_argument("--handle", type=float, default=None, help="heading of the prop's handle in its own frame")
 ap.add_argument("--offset", type=float, nargs=3, default=None, help="grip point from the bone's middle, in its own axes")
 ap.add_argument("--every", type=int, default=1)
+ap.add_argument("--mode", default="hang", choices=("hang", "grip"))
+ap.add_argument("--grip-point", type=float, nargs=3, default=None, help="grip: the prop's own point held at the socket")
+ap.add_argument("--rotate", type=float, nargs=3, default=(0.0, 0.0, 0.0), help="grip: XYZ Euler degrees in the socket's frame")
 a = ap.parse_args(sys.argv[sys.argv.index("--") + 1:])
 
 sc = bpy.context.scene
@@ -63,6 +69,24 @@ def main_bone(verts):
     return ob.vertex_groups[max(total, key=total.get)].name if total else "-"
 
 
+def holding_bones(name, mode):
+    """The bones whose skin holds the prop. A hanging prop is held by its bone alone, as a hand holds a
+    bail. A gripped prop's socket has no skin of its own: it hands over to its nearest ancestor that has
+    some, together with the bones below that one, so a weapon in a fist is held by the hand and fingers."""
+    weighted = {ob.vertex_groups[g.group].name for v in ob.data.vertices for g in v.groups if g.weight > 0}
+    b = rig.data.bones[name]
+    if mode != "grip" or b.name in weighted:
+        return {b.name}
+    while b.name not in weighted and b.parent:
+        b = b.parent
+    return {b.name} | {c.name for c in b.children_recursive}
+
+
+carry = {"mode": a.mode, "bone": a.bone, "drop": a.drop, "swing": a.swing, "handle": a.handle, "offset": a.offset,
+         "grip_point": a.grip_point, "rotate": a.rotate}
+if a.mode == "grip" and a.grip_point is None:
+    sys.exit("[prop] --mode grip needs --grip-point")
+holders = holding_bones(a.bone, a.mode)
 body = shells_of(ob.data)
 for s in body:
     s["bone"] = main_bone(s["verts"])
@@ -81,7 +105,7 @@ checked, not_held, contact, by_frame = 0, [], 0, []
 for f in range(0, N, a.every):
     sc.frame_set(f + 1)
     bpy.context.view_layer.update()
-    place = np.array(prop_matrix(rig, a.bone, a.drop, a.swing, f, N, a.handle, a.offset))
+    place = np.array(carry_matrix(rig, carry, f, N))
     world = rest @ place[:3, :3].T + place[:3, 3]
     dg = bpy.context.evaluated_depsgraph_get()
     evaluated = ob.evaluated_get(dg)
@@ -99,7 +123,7 @@ for f in range(0, N, a.every):
             hit = shell_depth(hp, h["faces"], deformed[b["verts"]], b["faces"])
             if hit is None:
                 continue
-            if h["name"] == a.grip and b["bone"] == a.bone:
+            if h["name"] == a.grip and b["bone"] in holders:
                 gripped = True
                 grip_depth = max(grip_depth, hit[0])
                 continue
@@ -116,7 +140,8 @@ for f in range(0, N, a.every):
     if not gripped:
         not_held.append(f + 1)
 
-R = {"prop": os.path.abspath(a.prop), "bone": a.bone, "drop": a.drop, "swing": a.swing, "handle": a.handle, "grip": a.grip,
+R = {"prop": os.path.abspath(a.prop), "mode": a.mode, "bone": a.bone, "holders": sorted(holders), "drop": a.drop,
+     "swing": a.swing, "handle": a.handle, "grip": a.grip, "grip_point": a.grip_point, "rotate": list(a.rotate),
      "frames": N, "frames_checked": checked, "frames_unchecked": N - checked, "shells_body": len(body),
      "shells_prop": len(held), "open_shells": open_shells, "max_depth_mm": round(worst["depth"] * 1000, 2) if worst else 0.0,
      "worst": worst, "contact_frames": contact, "pairs": dict(sorted(pairs.items(), key=lambda kv: -kv[1]["depth_mm"])),

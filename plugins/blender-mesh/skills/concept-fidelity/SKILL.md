@@ -30,7 +30,13 @@ character faces **left**), `back`, optional `top`.
   source crops before going on** — read `references/segmentation.md`; every sheet so far
   needed its thresholds set from measured edge pixels, not guesses.
 - **Drawn by you** (a new original concept): draw the label maps directly in code and write
-  `concept.json` yourself.
+  `concept.json` yourself. Draw each label map at exactly 3x its size with hard-edged shapes
+  (Pillow's polygon fill) and shrink it with `Image.NEAREST`, which keeps the middle sample of
+  each 3x3 block. `compare_model.py` reads the model the same way (`FINE = 3`), so a part has the
+  same width in both. Other factors are not the same rule: an even one has no middle sample and
+  shifts the map by part of a pixel, and 5x reads a narrower window than the model. A 1.2 cm
+  cleaver blade, five pixels wide from the side, lost 8% of that view's IoU to a 4x map. The
+  older concepts in this project were drawn at 4x or 5x; they pass, but a new one uses 3x.
 - Pick the side view that faces left; a right-facing profile must be mirrored or swapped for
   its counterpart column.
 
@@ -96,6 +102,9 @@ per-view IoU, part IoU and contour distance, per-part extents, the largest gaps 
 - Known answers: a model against its own label maps (`--export`) gives IoU 1.000; a concept
   moved up 5 cm gives gaps of exactly −5.0 cm. The contour figures sample points at random,
   so read them to about 1 cm on the maximum, 0.1 cm on the mean.
+- The contour is every boundary pixel of the silhouette, holes included: a slit the drawing
+  leaves between two parts (a pixel of white between a jacket and a lid rim) has edges of its
+  own, and a model that closes it is measured against them.
 - **The concept must come first, or from someone who has not seen the model.** A concept
   drawn afterwards by whoever built the model only repeats the model and proves nothing;
   brief a separate agent with the text brief alone and keep it away from the model files.

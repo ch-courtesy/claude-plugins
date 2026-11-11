@@ -46,6 +46,8 @@ argv = sys.argv[1:]
 def opt(name, default=None):
     if name in argv:
         i = argv.index(name)
+        if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+            sys.exit(f"[gate] {name} needs a value")
         v = argv[i + 1]
         del argv[i:i + 2]
         return v

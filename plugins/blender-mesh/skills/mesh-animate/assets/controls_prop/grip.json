@@ -1,0 +1,32 @@
+[
+ {
+  "name": "grip_in_chest",
+  "change": {
+   "bone": "chest",
+   "rotate": [
+    0,
+    0,
+    0
+   ],
+   "offset": null
+  },
+  "must_fail": [
+   "prop into the body"
+  ],
+  "why": "held by the chest instead of the fist: the parts next to the grip sit inside the torso"
+ },
+ {
+  "name": "grip_out_of_hand",
+  "change": {
+   "offset": [
+    0,
+    0,
+    0.5
+   ]
+  },
+  "must_fail": [
+   "not held"
+  ],
+  "why": "the grip moved half a metre off the socket: the handle no longer touches the hand"
+ }
+]

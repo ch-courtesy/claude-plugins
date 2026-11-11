@@ -1,9 +1,14 @@
 """Open an exported GLB in Unreal Engine and measure what arrived (system Python and Pillow).
 
-  python unreal_session.py SESSION [--engine UE_DIR] [--warm 30] [--ddc DIR]
+  python unreal_session.py SESSION [--engine UE_DIR] [--warm 30] [--ddc DIR] [--prop-glb PROP.glb]
 
 Writes SESSION/export/unreal/: report.json, albedo_front.png, one picture per action pose, and a
 scratch project. Unreal's cache is kept beside the session (--ddc), not on the system drive.
+With --prop-glb, a weapon exported on its own (and a socket for it in the character's skeleton, see
+export_session.py --carry) is imported as a static mesh and attached to the socket; its point is
+measured against the skeleton's marker joint on every sampled pose. The engine keeps joint frames on
+the file's axes but turns a static mesh to Z-up, so the weapon goes on its socket turned back; that turn
+is found from the weapon's bounding box, proved on the marker, and reported as the socket's rotation.
 """
 import json
 import glob
@@ -38,6 +43,8 @@ argv = sys.argv[1:]
 def opt(name, default=None):
     if name in argv:
         i = argv.index(name)
+        if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+            sys.exit(f"[unreal] {name} needs a value")
         v = argv[i + 1]
         del argv[i:i + 2]
         return v
@@ -58,6 +65,7 @@ def find_engine():
 
 engine = opt("--engine") or find_engine()
 warm = float(opt("--warm", "30"))
+prop_glb = opt("--prop-glb")
 session = os.path.abspath(argv[0])
 ddc = os.path.abspath(opt("--ddc", os.path.join(os.path.dirname(session), "_ue", "ddc")))
 out = os.path.join(session, "export", "unreal")
@@ -67,6 +75,9 @@ os.makedirs(project_dir, exist_ok=True)
 os.makedirs(ddc, exist_ok=True)
 for old in glob.glob(os.path.join(out, "*.png")) + glob.glob(os.path.join(out, "*.json")):
     os.remove(old)
+# assets left by an earlier run, deleted inside the editor and imported again at once, can come back
+# without their mesh: start every check from an empty content folder of the scratch project
+shutil.rmtree(os.path.join(project_dir, "Content", "Check"), ignore_errors=True)
 project = os.path.join(project_dir, "Check.uproject")
 with open(project, "w", encoding="utf-8") as fh:
     json.dump({"FileVersion": 3, "Description": "Scratch project for testing exported GLB files.",
@@ -85,12 +96,24 @@ times = {n: [round(k * lengths[n] / 8 * FPS) / FPS for k in range(9)] for n in a
 play = {n: [round(lengths[n] * x * FPS) / FPS for x in (0.25, 0.6)] for n in actions}
 TRACK = [b for b in ("hand.L", "hand.R", "head", "foot.L", "foot.R", "tail3") if b in parents]
 config = os.path.join(out, "config.json")
+PROP = None
+socket = read_json(os.path.join(session, "export", "report.json"), encoding="utf-8").get("socket") or {}
+if prop_glb:
+    if not socket.get("marker"):
+        sys.exit("[unreal] --prop-glb needs a socket with a marker in the export: glb --carry carry.json, with a tip")
+    PG, _ = gltf_pose.load(os.path.abspath(prop_glb))
+    boxes = [PG["accessors"][p["attributes"]["POSITION"]] for m in PG["meshes"] for p in m["primitives"]]
+    lo = [min(b["min"][i] for b in boxes) for i in range(3)]
+    hi = [max(b["max"][i] for b in boxes) for i in range(3)]
+    x, y, z = socket["tip"]
+    PROP = {"glb": os.path.abspath(prop_glb), "socket": socket["socket"], "marker": socket["marker"],
+            "point_gltf": [x, z, -y], "box_gltf": [lo, hi]}   # glTF is y-up: Blender's (x, y, z) is (x, z, -y)
 
 
 def run(phase, exe, args, log):
     with open(config, "w", encoding="utf-8") as fh:
         json.dump({"phase": phase, "glb": glb, "dest": "/Game/Check", "out": out, "parents": parents, "times": times,
-                   "play": play, "track": TRACK, "warm_seconds": warm}, fh)
+                   "play": play, "track": TRACK, "warm_seconds": warm, "prop": PROP}, fh)
     env = dict(os.environ, MESH_UE_CONFIG=config)
     env["UE-LocalDataCachePath"] = ddc
     cmd = [os.path.join(engine, "Engine", "Binaries", "Win64", exe), project, "-unattended", "-nosplash", "-nop4", "-nosound",
@@ -210,6 +233,11 @@ R = {"engine": info["engine"], "engine_dir": engine, "import_errors": len(errors
      "height_m": info.get("height_m"), "height_error_m": abs(info.get("height_m", 0) - expected["height"]),
      "materials": info["materials"], "materials_untextured": info["materials_untextured"], "textures": info["textures"],
      "texture_copies": max(0, info["textures"] - images), "albedo_delta_e_median": colour}
+if PROP:
+    W = info.get("weapon", {})
+    R.update({"weapon_meshes": W.get("static_meshes", 0), "weapon_point_error_mm": W.get("point_error_mm"),
+              "weapon_axes": W.get("axes"), "weapon_box_fit_cm": W.get("box_fit_cm"),
+              "weapon_socket_rotation": W.get("attach_rotator")})   # roll, pitch, yaw for the game's socket
 with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
     json.dump(R, fh, ensure_ascii=False, indent=1)
 print(f"[unreal] {R['engine']}: {R['skeletal_meshes']} mesh, {len(info['actions'])}/{len(actions)} actions, joints off by "
