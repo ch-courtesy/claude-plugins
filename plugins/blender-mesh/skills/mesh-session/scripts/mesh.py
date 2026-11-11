@@ -229,13 +229,29 @@ def made(sdir, rel):
     return ok
 
 
+def value_after(argv, i, name):
+    """The value given after option `name` at argv[i]; stops with a message when it is missing."""
+    if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+        sys.exit(f"[mesh] {name} needs a value")
+    return argv[i + 1]
+
+
 def opt(argv, name, default=None, cast=str):
+    """Take `name VALUE` out of argv; default when the option is absent."""
     if name in argv:
         i = argv.index(name)
-        val = argv[i + 1]
+        val = value_after(argv, i, name)
         del argv[i:i + 2]
         return cast(val)
     return default
+
+
+def opts(argv, name):
+    """Take every `name VALUE` out of argv, in order."""
+    found = []
+    while name in argv:
+        found.append(opt(argv, name))
+    return found
 
 
 def cmd_finish(sdir, argv):
@@ -265,11 +281,7 @@ def cmd_fidelity(sdir, argv):
     S = load_session(sdir)
     out = os.path.join(sdir, "fidelity")
     clear_reports(sdir, os.path.join("fidelity", "compare.json"))
-    maps = []
-    while "--map" in argv:
-        i = argv.index("--map")
-        maps.append(argv[i + 1])
-        del argv[i:i + 2]
+    maps = opts(argv, "--map")
     extra = ["--map"] + maps if maps else []
     blender_run([os.path.join(sdir, S["current"]), "--python", os.path.join(scripts, "compare_model.py"), "--",
                  "--concept", os.path.abspath(argv[0]), "--out", out, "--object", S["object"]] + extra + argv[1:])
@@ -312,11 +324,7 @@ def cmd_uv(sdir, argv):
 def cmd_texture(sdir, argv):
     """Paint the unwrapped model from the concept's panels (mesh-texture skill)."""
     S = load_session(sdir)
-    maps = []
-    while "--map" in argv:
-        i = argv.index("--map")
-        maps.append(argv[i + 1])
-        del argv[i:i + 2]
+    maps = opts(argv, "--map")
     extra = ["--map"] + maps if maps else []
     clear_reports(sdir, os.path.join("texture", "report.json"))
     blender_run([os.path.join(sdir, "uv", "uv.blend"), "--python",
@@ -333,16 +341,8 @@ def cmd_glb(sdir, argv):
     concept = opt(argv, "--concept")
     height = opt(argv, "--height")
     carry = opt(argv, "--carry")                       # a gripped prop: its socket goes into the skeleton
-    clear = []
-    while "--see-through" in argv:
-        i = argv.index("--see-through")
-        clear.append(argv[i + 1])
-        del argv[i:i + 2]
-    maps = []
-    while "--map" in argv:
-        i = argv.index("--map")
-        maps.append(argv[i + 1])
-        del argv[i:i + 2]
+    clear = opts(argv, "--see-through")
+    maps = opts(argv, "--map")
     out = os.path.join(sdir, "export")
     extra = (["--spec", os.path.abspath(spec)] if spec else []) + (["--height", height] if height else []) \
         + (["--carry", os.path.abspath(carry)] if carry else [])
@@ -504,6 +504,11 @@ def prop_controls(sdir, carry_path, motion="walk"):
 def cmd_controls(sdir, argv):
     """Negative controls: motions made wrong on purpose must fail the criteria they name, or those
     criteria detect nothing. Runs each control in a scratch library and restores the real one."""
+    carry = opt(argv, "--carry")
+    attack = opt(argv, "--attack")
+    motion = opt(argv, "--prop-motion", "walk")
+    if attack and not carry:
+        sys.exit("[mesh] controls --attack needs --carry: the attack's weapon")
     rig = os.path.abspath(argv[0])
     folder = os.path.join(SKILLS, "mesh-animate", "assets", "controls")
     library = os.path.join(sdir, "motions", "library.blend")
@@ -513,17 +518,15 @@ def cmd_controls(sdir, argv):
         shutil.copy2(library, saved)                   # copy2 keeps its date, which later gates compare
     try:
         ok = run_controls(sdir, rig, folder)
-        if "--attack" in argv:
-            ok = attack_controls(sdir, rig, os.path.abspath(argv[argv.index("--attack") + 1]),
-                                 os.path.abspath(argv[argv.index("--carry") + 1])) and ok
+        if attack:
+            ok = attack_controls(sdir, rig, os.path.abspath(attack), os.path.abspath(carry)) and ok
     finally:
         if had:
             shutil.move(saved, library)
         elif os.path.exists(library):                  # made by the controls: it holds only broken motions
             os.remove(library)
-    if "--carry" in argv and "--attack" not in argv:
-        motion = argv[argv.index("--prop-motion") + 1] if "--prop-motion" in argv else "walk"
-        ok = prop_controls(sdir, argv[argv.index("--carry") + 1], motion) and ok
+    if carry and not attack:
+        ok = prop_controls(sdir, carry, motion) and ok
     print("[controls] " + ("every control was caught" if ok else "some controls were NOT caught"))
     return ok
 

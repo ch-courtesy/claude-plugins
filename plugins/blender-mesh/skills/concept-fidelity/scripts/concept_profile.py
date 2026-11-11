@@ -29,7 +29,12 @@ cdir = argv[0]
 
 
 def opt(name, default):
-    return argv[argv.index(name) + 1] if name in argv else default
+    if name not in argv:
+        return default
+    i = argv.index(name)
+    if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+        sys.exit(f"[profile] {name} needs a value")
+    return argv[i + 1]
 
 
 step = float(opt("--step", 0.05))
