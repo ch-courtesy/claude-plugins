@@ -22,7 +22,7 @@
                                                         export GLB, read it back, measure it (mesh-export)
   python mesh.py SESSION animate MOTION.json RIG.json   bake a motion and measure it (mesh-animate);
       [--carry CARRY.json]                              with a held weapon, measure its strike
-  python mesh.py SESSION controls RIG.json [--carry CARRY.json] [--attack ATTACK.json]
+  python mesh.py SESSION controls RIG.json [--carry CARRY.json [--prop-motion NAME]] [--attack ATTACK.json]
                                                         motions made wrong on purpose must fail their gates
   python mesh.py SESSION propcheck MOTION CARRY.json    does a carried prop pass through the body (mesh-animate)
   python mesh.py SESSION unreal [--engine DIR --warm 30 --ddc DIR]
@@ -461,18 +461,25 @@ def cmd_propcheck(sdir, argv):
     return code == 0
 
 
-def prop_controls(sdir, carry_path):
-    """Placements made wrong on purpose must fail the contact gate, or it detects nothing."""
+def prop_controls(sdir, carry_path, motion="walk"):
+    """Placements made wrong on purpose must fail the contact gate, or it detects nothing. A hanging prop
+    and a gripped one are moved by different settings, so each mode has its own placements; they are
+    tried on `motion`, a motion already baked in the session."""
     carry = read_json(carry_path, encoding="utf-8")
     gate = os.path.join(SKILLS, "stage-gate", "scripts", "gate.py")
     ok = True
-    spec = os.path.join(SKILLS, "mesh-animate", "assets", "controls_prop", "placements.json")
+    grip = carry.get("mode", "hang") == "grip"
+    spec = os.path.join(SKILLS, "mesh-animate", "assets", "controls_prop", "grip.json" if grip else "placements.json")
+    base = os.path.join(sdir, "motions", motion)
+    if not os.path.exists(os.path.join(base, "motion.blend")):
+        print(f"[controls] no baked motion {motion} to move the prop on: give --prop-motion NAME")
+        return False
     for c in read_json(spec, encoding="utf-8") + carry.get("controls", []):
         name = "control_prop_" + c["name"]
         folder = os.path.join(sdir, "motions", name)
         os.makedirs(folder, exist_ok=True)
         for f in ("motion.blend", "report.json"):
-            shutil.copy(os.path.join(sdir, "motions", "walk", f), folder)
+            shutil.copy(os.path.join(base, f), folder)
         trial = os.path.join(folder, "carry.json")
         change = dict(c.get("change", {}))
         if "drop_scale" in c:
@@ -515,7 +522,8 @@ def cmd_controls(sdir, argv):
         elif os.path.exists(library):                  # made by the controls: it holds only broken motions
             os.remove(library)
     if "--carry" in argv and "--attack" not in argv:
-        ok = prop_controls(sdir, argv[argv.index("--carry") + 1]) and ok
+        motion = argv[argv.index("--prop-motion") + 1] if "--prop-motion" in argv else "walk"
+        ok = prop_controls(sdir, argv[argv.index("--carry") + 1], motion) and ok
     print("[controls] " + ("every control was caught" if ok else "some controls were NOT caught"))
     return ok
 
@@ -609,7 +617,7 @@ def attack_controls(sdir, rig, attack, carry_path):
         json.dump(dict(base, name=name), fh_, ensure_ascii=False)
     if cmd_animate(sdir, [path, rig, "--carry", carry_path]):
         trial = os.path.join(sdir, "motions", name, "carry.json")
-        blade = dict(carry, bone="chest", grip_point=[0, 0, 0.6], rotate=[0, 0, 0], offset=None)
+        blade = dict(carry, bone="chest", rotate=[0, 0, 0], offset=None)   # gripped inside the chest
         with open(trial, "w", encoding="utf-8") as fh_:
             json.dump(blade, fh_)
         cmd_propcheck(sdir, ["motions/" + name, trial])

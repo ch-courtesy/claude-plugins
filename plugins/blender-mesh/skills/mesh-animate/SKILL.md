@@ -222,7 +222,7 @@ blender -b --factory-startup --python-exit-code 1 --python scripts/test_shell_de
 발 밖으로 나간 균형. 모두 잡혀야 한다. 실행 전후 실제 액션 라이브러리가 보존되는지도 확인한다.
 `--carry`를 주면 `assets/controls_prop/placements.json`의 잘못된 들기도 걷기에서 시험한다: 가슴에 건 소품,
 손에서 떨어진 소품, 너무 높이 건 소품. 값은 그 소품의 `drop`에 비례한다. 너무 높이 건 소품은 모양에 따라
-몸을 뚫거나 손을 놓치므로 어느 쪽이든 거부되면 된다(`must_fail_any`).
+몸을 뚫거나 손을 놓치므로 어느 쪽이든 거부되면 된다(`must_fail_any`). 쥐기 방식(`mode: grip`)의 carry는 `assets/controls_prop/grip.json`을 쓴다: 손 대신 가슴뼈에 쥔 무기(몸에 파고든 깊이), 소켓에서 0.5 m 떨어진 손잡이(손에 들려 있지 않음). 매달기 값(`drop`)은 쥐기에 쓰이지 않기 때문이다. 대조군을 돌릴 동작은 `--prop-motion NAME`으로 고른다(기본 `walk`). `--attack`을 주면 공격 대조군이 무기 대조군을 대신한다.
 
 `--attack attack.json --carry carry.json`을 주면 통과한 공격을 한 가지씩 망가뜨려 각 기준이 잡는지
 본다: `from` 앞 키부터 맞는 키까지의 타격 구간 자체를 6프레임 늘림(타격 시간), 맞는 프레임을 3프레임 당겨
