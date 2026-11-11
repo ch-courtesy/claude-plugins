@@ -15,7 +15,7 @@ mesh.py <session> subsurf '{"levels":2,"apply":true}'
 |---|---|
 | `levels` | 1–2 for preview, 2 for final renders (each level ×4 faces) |
 | `crease` | `sel` (edges) + `value` 0–1: sharpen edges without extra loops |
-| `shade_smooth` | default true |
+| `shade_smooth` | default true; parts added later with `primitive` `"add": true` follow the model's shading |
 | `apply` | bake into the mesh (only at the end or before export) |
 
 ## Craft

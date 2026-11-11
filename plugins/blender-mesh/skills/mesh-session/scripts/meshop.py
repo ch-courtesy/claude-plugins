@@ -393,8 +393,13 @@ def op_primitive(a):
 
 def op_add(bm, a):
     """Add a separate part to the mesh, like Shift+A in edit mode. With a mirror, a part that
-    crosses the plane is cut there; a part on the +side simply gets mirrored."""
+    crosses the plane is cut there; a part on the +side simply gets mirrored. On a model shaded
+    smooth (as `subsurf` does), the part is shaded smooth too, so no piece stays faceted."""
+    smooth = [f.smooth for f in bm.faces]
     faces = copy_shape(make_shape(a), bm)
+    if smooth and 2 * sum(smooth) > len(smooth):
+        for f in faces:
+            f.smooth = True
     n = set_sel(bm, a.get("result", "added"), "face", faces)
     return {"created": a.get("type", "cube"), "faces": n}
 

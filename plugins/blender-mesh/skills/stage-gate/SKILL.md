@@ -33,8 +33,13 @@ description: Run a 3D asset through its stages (modeling, rigging, UV, texture) 
 | animation | `mesh.py S animate motion.json rig.json`, then `gate animation --anim motions/<name>` (mesh-animate) | `motions/<name>/report.json`, `motions/<name>/check/report.json` |
 | motion_walk / motion_idle / motion_action | same bake, then `gate <motion_stage> --anim motions/<name>` | `motions/<name>/report.json` |
 | prop_contact | `mesh.py S propcheck motions/<name> carry.json`, then `gate prop_contact --anim motions/<name>` (mesh-animate) | `motions/<name>/prop/report.json` |
+| animation_oneshot | for a motion played once (an attack): `mesh.py S animate attack.json rig.json --carry carry.json`, then `gate animation_oneshot --anim motions/<name>`, in place of animation | `motions/<name>/report.json`, `motions/<name>/check/report.json` |
+| motion_attack | the same bake of a weapon strike, then `gate motion_attack --anim motions/<name>` | `motions/<name>/report.json` |
+| motion_auto_attack | a basic attack: the attack stage plus a length of 1.0 s or less | `motions/<name>/report.json` |
+| motion_run | a run at game speed: the walk stage plus 3.3 m/s or more | `motions/<name>/report.json` |
 | export | `mesh.py S glb --spec rig.json --concept <concept>` (mesh-export) | `export/report.json` |
 | engine_unreal | `mesh.py S unreal` (mesh-export) | `export/unreal/report.json`, `export/unreal/*.png` |
+| engine_unreal_weapon | for a weapon exported on its own: `mesh.py S glb ... --carry carry.json` (a carry with `tip`), then `mesh.py S unreal --prop-glb PROP.glb` | `export/unreal/report.json` |
 
 A prop with no rig or face skips rigging and uses `texture_prop` and `export_prop`: the same limits
 without the criteria that cannot apply. Worked pipelines: `box-modeling/references/lampkeeper_pipeline.sh` and

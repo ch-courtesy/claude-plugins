@@ -1,0 +1,80 @@
+{
+ "fps": 24,
+ "cycle_frames": 28,
+ "stride": 0.17,
+ "stance": 0.6,
+ "lift": 0.03,
+ "hip_drop": 0.008,
+ "bob": 0.006,
+ "sway": 0.014,
+ "roll": 4,
+ "yaw": 7,
+ "lean": 3,
+ "nod": 2,
+ "arm_swing": 20,
+ "elbow": 22,
+ "carry_swing": 6,
+ "carry_elbow": 14,
+ "sole_material": "Sole",
+ "check_frames": 8,
+ "heel_strike": 0.16,
+ "heel_off": 0.2,
+ "heel_strike_deg": 5,
+ "heel_off_deg": 7,
+ "toe_y": 0.27,
+ "heel_y": 0.135,
+ "hang_limit": 8,
+ "name": "control_pop",
+ "type": "walk",
+ "track": [
+  "hand.R",
+  "hand.L",
+  "head",
+  "tail3"
+ ],
+ "overlap": {
+  "driver": "head",
+  "follower": "tail3"
+ },
+ "follow": [
+  {
+   "bone": "tail1",
+   "source": "tail3",
+   "period": 16,
+   "damp": 0.35,
+   "gain": 500,
+   "drag": 3,
+   "drag_from": "head"
+  },
+  {
+   "bone": "tail2",
+   "source": "tail3",
+   "period": 20,
+   "damp": 0.3,
+   "gain": 800,
+   "drag": 5,
+   "drag_from": "head"
+  },
+  {
+   "bone": "tail3",
+   "source": "tail3",
+   "period": 24,
+   "damp": 0.28,
+   "gain": 1200,
+   "drag": 7,
+   "drag_from": "head"
+  }
+ ],
+ "gate": "animation",
+ "must_fail": [
+  "jump against the frames around it"
+ ],
+ "debug_pop": {
+  "frame": 9,
+  "offset": [
+   0.03,
+   0,
+   0
+  ]
+ }
+}

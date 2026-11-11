@@ -10,6 +10,9 @@ mesh.py <session> glb --spec rig.json --concept <concept_dir> --map Brass=buckle
 mesh.py <session> gate export
 mesh.py <session> unreal
 mesh.py <session> gate engine_unreal
+mesh.py <session> glb --spec rig.json --carry carry.json        # a weapon held in grip mode
+mesh.py <session> unreal --prop-glb <prop_session>/export/model.glb
+mesh.py <session> gate engine_unreal_weapon
 ```
 Writes `<session>/export/`: `model.glb`, `check.blend` (the file imported again), `report.json`,
 `fidelity/`. Runs on `motions/library.blend` when present, otherwise `texture/texture.blend`.
@@ -53,6 +56,22 @@ picture per pose. It takes about a minute.
 | `albedo_delta_e_median` | albedo capture against Blender's `texture/flat_front.png` |
 | bones, actions, lengths, height, materials, texture copies, import log | everything arrived |
 
+### A weapon on a socket
+A weapon is its own GLB (the prop's session exports it with `export_prop`). `glb --carry carry.json`,
+for a carry in grip mode, puts two bones into the character's skeleton: `prop_socket` (or the carry's
+`socket`), whose frame is the prop's own, and `prop_socket_tip` at the carry's `tip`. The motions do not
+key them; they follow the hand. `unreal --prop-glb` imports the weapon as a static mesh, attaches it to
+the socket and measures, on every sampled pose, how far its point lands from the tip marker
+(`weapon_point_error_mm`, gate `engine_unreal_weapon`).
+
+- **The engine keeps joint frames on the file's axes and turns a static mesh to Z-up.** Attached with
+  no rotation, the cleaver's point landed 1.25 m from its marker. The check finds the mesh's axes by
+  matching its bounding box to the file's (the prop's three sizes must differ), attaches it turned back by
+  the inverse, proves the turn on the marker, and reports it as `weapon_socket_rotation` (roll, pitch,
+  yaw), the rotation a game's socket needs. For the cleaver it is roll 90.
+- **Start every run from an empty content folder.** Assets deleted in the editor and imported again at
+  once came back without their static mesh; the launcher now removes `Content/Check` before the editor starts.
+
 Things that decide whether this works, each learned by a false result:
 - **Import inside the editor, not a commandlet.** A commandlet import leaves actions without bone
   compression settings and logs warnings; the same file in the editor is clean.
@@ -66,6 +85,8 @@ Things that decide whether this works, each learned by a false result:
 - **Turn texture streaming off** with `r.TextureStreaming 0`, or low mips are measured: colour dE
   read 7.3 with streaming and 1.2 without.
 - **Base colour captures are linear.** Encode to sRGB before comparing.
+- **Frame the captures to the character.** They were framed for a 1.2 m character; a 1.85 m one lost its
+  head and read colour dE 19. Above 1.2 m the camera now moves back and up in proportion.
 - **Keep the cache off a small system drive.** The launcher sets `UE-LocalDataCachePath` for its own
   process only, in `_ue/ddc` beside the session folder and shared by the sessions there. `--ddc` moves it.
 - `LogAutomationTest: Error: Condition failed` lines at startup are the engine's own
@@ -74,5 +95,6 @@ Things that decide whether this works, each learned by a false result:
 
 ## Not covered
 Unity and other engines. The lit pictures use the level's lights with a weak fill from below, because
-a scene capture has no bounce light: judge colour from `albedo_front.png`. Carried props are separate GLBs: nothing attaches the lantern to the hand in
-the engine yet. Import settings a project may choose differently are not tested.
+a scene capture has no bounce light: judge colour from `albedo_front.png`. A prop carried in hang mode
+(a lantern that swings) is a separate GLB that nothing attaches in the engine yet; a weapon in grip mode
+is attached on its socket (above). Import settings a project may choose differently are not tested.

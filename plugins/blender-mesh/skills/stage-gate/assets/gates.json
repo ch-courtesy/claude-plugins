@@ -202,7 +202,11 @@
     "2026-11-07, agreed with the user after measuring: the seam criterion changed from p95 in the UV image to the median on the surface (painted against filled texels in one small cube, facing the same way). Limit unchanged at 6. The old measure failed all four models at 12.9-32.9 with clean pictures, because p95 picks up strong contrast the drawing really has. Without the fill the new measure reads 10.5-77 and fails all four; p95 stays in the report.",
     "2026-11-07, known failure, limit kept: the lantern's seam reads 8.1 against 6. Cause found: the strip emptied around the drawing's outline lies between a bright gold edge and painted shading on the cap's eave, and half the measured cubes sit on that band. Nothing shows in the flat render. The user chose to investigate; the fill was improved from 10.3 and the measure was not changed again.",
     "2026-11-07, agreed with the user after measuring: a uv_wire stage for props made mostly of thin bars or wire, with utilisation 0.5 instead of 0.6 and everything else unchanged. A birdcage reached .517 and no more in about 200 runs, with packing already rotating and using concave shapes. Utilisation measures wasted texture space, and that cage's texture passed. The ordinary uv stage keeps 0.6.",
-    "2026-11-08, agreed with the user: a texture criterion for marks shown twice, after a robot and a bucket passed every gate with doubled rivets and a stepped patch. A painted texel counts when its two strongest panels each give 30% or more and their colours differ by dE 10 or more. Limit 5% of painted texels, fixed before the fix was measured: averaging by facing squared mixes about 45 +/- 12 degrees on a cylinder, sharpening to the 8th power about 45 +/- 3."
+    "2026-11-08, agreed with the user: a texture criterion for marks shown twice, after a robot and a bucket passed every gate with doubled rivets and a stepped patch. A painted texel counts when its two strongest panels each give 30% or more and their colours differ by dE 10 or more. Limit 5% of painted texels, fixed before the fix was measured: averaging by facing squared mixes about 45 +/- 12 degrees on a cylinder, sharpening to the 8th power about 45 +/- 3.",
+    "2026-11-09, agreed with the user before any attack was measured: one-shot motions (attacks, played once) get animation_oneshot instead of animation, and weapon strikes get motion_attack; the weapon is held rigidly in a socket bone and checked with prop_contact as before (into the body 5 mm). Motions stay in place, the path the game moves the character along is recorded. Kept from the walk and prop gates: foot slide, under and above the ground 5 mm, deformation, overlap lag 2 frames, jumps 15 mm per frame squared, now measured outside the hit and any landing the motion declares. New: the end pose within 10 mm of the pose the next motion starts from; a heavy strike at 24 fps: wind-up 0.15 s or more, strike 0.17 s or less, weapon point 6 m/s or more, its fastest frame within one of the hit frame, and 0.6 m of travel seen from above so the top-down camera reads it. Closure and spacing do not apply to a strike.",
+    "2026-11-11, agreed with the user before Musoe's motions were made again: the jump criterion of animation and animation_oneshot no longer limits acceleration itself (15 mm per frame squared), which any fast motion exceeds: kept, a basic attack took 2 s and a run 0.4 m/s. It now compares a frame's change of velocity with the larger of the same two frames earlier and later, plus 2 mm per frame squared for stillness, so playing a motion faster does not change it. Limit 4, fixed from motions already made and pops put in on purpose: thirteen smooth motions (tinbot and Musoe) read 0.07 to 2.24; one frame of the whole body moved 1 cm read 5.5 to 10. A pop in a fast swing reads lower, as it shows less. New for the game's pace: motion_auto_attack, the attack stage plus a basic attack lasting 1.0 s or less from wind-up back to guard; motion_run, the walk stage plus 3.3 m/s or more.",
+    "2026-11-11, agreed with the user with the run: spacing no longer divides top acceleration by top speed, which gives 2 pi over the period on any smooth swing, so a quick rhythm failed by itself (a 16-frame run cycle could bob its head 4 mm at most). It is now the crest factor (top over root mean square) of acceleration over that of speed: 1 on any sinusoid at any period, high where speed turns in a kink, as at a linear key. Limit 2.5, fixed from motions already made: eleven smooth tracked motions read 1.03 to 1.53 and the same played three times faster 1.09 to 1.45; the linear-key control read 5.8, and 3.6 played three times faster. Applies to motion_walk, motion_idle, motion_action and motion_run.",
+    "2026-11-11, with the user asking for the GLB and Unreal check of a character holding a weapon exported on its own: engine_unreal_weapon. The export puts a socket with the weapon's own frame and a marker at its point into the skeleton; the engine attaches the weapon's file to the socket with no offset, and its point must land on the marker within 5 mm on every sampled pose, the same tolerance as the joints. The weapon's axes in the engine are found by matching its bounding box to the file's, within 0.5 cm."
   ],
   "export": [
     {
@@ -416,10 +420,10 @@
       "max": 2
     },
     {
-      "name": "largest jump (acceleration), mm per frame squared",
+      "name": "largest jump against the frames around it",
       "file": "anim/report.json",
-      "path": "pop_mm_per_frame2",
-      "max": 15
+      "path": "pop_spike_ratio",
+      "max": 4.0
     },
     {
       "name": "IK targets out of reach",
@@ -452,12 +456,156 @@
       "max": 1.0
     }
   ],
+  "animation_oneshot": [
+    {
+      "name": "foot slide on the ground, mm",
+      "file": "anim/report.json",
+      "path": "foot_slide_mm",
+      "max": 5
+    },
+    {
+      "name": "foot under the ground, mm",
+      "file": "anim/report.json",
+      "path": "ground_penetration_mm",
+      "max": 5
+    },
+    {
+      "name": "foot above the ground in stance, mm",
+      "file": "anim/report.json",
+      "path": "stance_float_mm",
+      "max": 5
+    },
+    {
+      "name": "jump outside the hit against the frames around it",
+      "file": "anim/report.json",
+      "path": "pop_spike_ratio",
+      "max": 4.0
+    },
+    {
+      "name": "IK targets out of reach",
+      "file": "anim/report.json",
+      "path": "ik_out_of_reach",
+      "max": 0
+    },
+    {
+      "name": "end pose against the pose the next motion starts from, mm",
+      "file": "anim/report.json",
+      "path": "end_pose_mm",
+      "max": 10
+    },
+    {
+      "name": "part volume change over the motion",
+      "file": "anim/check/report.json",
+      "path": "worst.volume_change",
+      "max": 0.1
+    },
+    {
+      "name": "stretch against the physical bound",
+      "file": "anim/check/report.json",
+      "path": "worst.stretch_excess",
+      "max": 1.0
+    },
+    {
+      "name": "folded edges",
+      "file": "anim/check/report.json",
+      "path": "worst.fold_share",
+      "max": 0.01
+    },
+    {
+      "name": "gap opened between parts, cm",
+      "file": "anim/check/report.json",
+      "path": "worst.gap_open_cm",
+      "max": 1.0
+    }
+  ],
+  "motion_attack": [
+    {
+      "name": "wind-up, s",
+      "file": "anim/report.json",
+      "path": "quality.wind_up_s",
+      "min": 0.15
+    },
+    {
+      "name": "strike, s",
+      "file": "anim/report.json",
+      "path": "quality.strike_s",
+      "max": 0.17
+    },
+    {
+      "name": "weapon point top speed, m/s",
+      "file": "anim/report.json",
+      "path": "quality.tip_speed_m_s",
+      "min": 6
+    },
+    {
+      "name": "fastest frame from the hit frame",
+      "file": "anim/report.json",
+      "path": "quality.impact_offset_frames",
+      "max": 1
+    },
+    {
+      "name": "weapon point travel seen from above, m",
+      "file": "anim/report.json",
+      "path": "quality.top_travel_m",
+      "min": 0.6
+    },
+    {
+      "name": "overlap: frames the trailing part's rotation lags the head",
+      "file": "anim/report.json",
+      "path": "quality.overlap_lag_frames",
+      "min": 2
+    }
+  ],
+  "motion_auto_attack": [
+    {
+      "name": "wind-up, s",
+      "file": "anim/report.json",
+      "path": "quality.wind_up_s",
+      "min": 0.15
+    },
+    {
+      "name": "strike, s",
+      "file": "anim/report.json",
+      "path": "quality.strike_s",
+      "max": 0.17
+    },
+    {
+      "name": "weapon point top speed, m/s",
+      "file": "anim/report.json",
+      "path": "quality.tip_speed_m_s",
+      "min": 6
+    },
+    {
+      "name": "fastest frame from the hit frame",
+      "file": "anim/report.json",
+      "path": "quality.impact_offset_frames",
+      "max": 1
+    },
+    {
+      "name": "weapon point travel seen from above, m",
+      "file": "anim/report.json",
+      "path": "quality.top_travel_m",
+      "min": 0.6
+    },
+    {
+      "name": "overlap: frames the trailing part's rotation lags the head",
+      "file": "anim/report.json",
+      "path": "quality.overlap_lag_frames",
+      "min": 2
+    },
+    {
+      "name": "auto-attack length, s",
+      "file": "anim/report.json",
+      "path": "duration_s",
+      "max": 1.0
+    }
+  ],
   "motion_walk": [
     {
-      "name": "spacing: top acceleration over top speed",
+      "name": "spacing: speed turning in kinks (crest of acceleration over crest of speed)",
       "file": "anim/report.json",
-      "path": "quality.spacing",
-      "max": 0.5
+      "path": "quality.spacing_crest",
+      "max": 2.5
     },
     {
       "name": "overlap: frames the trailing part's rotation lags the head",
@@ -478,12 +626,44 @@
       "max": 3
     }
   ],
+  "motion_run": [
+    {
+      "name": "spacing: speed turning in kinks (crest of acceleration over crest of speed)",
+      "file": "anim/report.json",
+      "path": "quality.spacing_crest",
+      "max": 2.5
+    },
+    {
+      "name": "overlap: frames the trailing part's rotation lags the head",
+      "file": "anim/report.json",
+      "path": "quality.overlap_lag_frames",
+      "min": 2
+    },
+    {
+      "name": "overlap: trailing part's rotation range over the head's",
+      "file": "anim/report.json",
+      "path": "quality.follower_ratio",
+      "min": 1.2
+    },
+    {
+      "name": "left and right feet match, mm",
+      "file": "anim/report.json",
+      "path": "quality.lr_symmetry_mm",
+      "max": 3
+    },
+    {
+      "name": "run speed, m/s",
+      "file": "anim/report.json",
+      "path": "speed_m_s",
+      "min": 3.3
+    }
+  ],
   "motion_action": [
     {
-      "name": "spacing: top acceleration over top speed",
+      "name": "spacing: speed turning in kinks (crest of acceleration over crest of speed)",
       "file": "anim/report.json",
-      "path": "quality.spacing",
-      "max": 0.5
+      "path": "quality.spacing_crest",
+      "max": 2.5
     },
     {
       "name": "overlap: frames the trailing part's rotation lags the head",
@@ -524,10 +704,10 @@
   ],
   "motion_idle": [
     {
-      "name": "spacing: top acceleration over top speed",
+      "name": "spacing: speed turning in kinks (crest of acceleration over crest of speed)",
       "file": "anim/report.json",
-      "path": "quality.spacing",
-      "max": 0.5
+      "path": "quality.spacing_crest",
+      "max": 2.5
     },
     {
       "name": "overlap: frames the trailing part's rotation lags the head",
@@ -670,6 +850,26 @@
       "file": "export/unreal/report.json",
       "path": "albedo_delta_e_median",
       "max": 8
+    }
+  ],
+  "engine_unreal_weapon": [
+    {
+      "name": "weapon meshes imported",
+      "file": "export/unreal/report.json",
+      "path": "weapon_meshes",
+      "min": 1
+    },
+    {
+      "name": "weapon point against its marker joint, mm",
+      "file": "export/unreal/report.json",
+      "path": "weapon_point_error_mm",
+      "max": 5
+    },
+    {
+      "name": "weapon axes found from its size, cm off",
+      "file": "export/unreal/report.json",
+      "path": "weapon_box_fit_cm",
+      "max": 0.5
     }
   ],
   "uv_wire": [
