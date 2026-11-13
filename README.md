@@ -8,6 +8,7 @@ Claude Code와 Codex에서 함께 사용하는 로컬 플러그인 마켓플레�
 - `blender-mesh` — 원화에서 Blender 단계별 모델링·리깅·UV·텍스처·애니메이션·GLB·Unreal 검사까지 고정 기준으로 채점하며 진행합니다.
 - `explain-diff` — 방금 바뀐 코드를 초심자 눈높이 설명·퀴즈·상호작용 HTML 시각화로 이해시킵니다.
 - `thinktank` — 중앙 리서치를 바탕으로 다중 관점 숙의와 추적 가능한 브레인스토밍을 진행합니다.
+- `blog-craft` — 블로그 글을 현업 10년차 시니어 수준으로 끌어올리는 품질 공정입니다. 주제 관문, 첨부 실행 시험, codex·claude·agy 교차 리뷰, 23항목 채점, 근거 확인 반영을 제공합니다.
 
 ## Claude Code
 
@@ -18,4 +19,4 @@ Claude Code와 Codex에서 함께 사용하는 로컬 플러그인 마켓플레�
 
 - marketplace: `.agents/plugins/marketplace.json`
 - plugin manifest: `plugins/<name>/.codex-plugin/plugin.json`
-- 현재 Codex 등록 플러그인은 `recipe`뿐입니다 (`explain-diff`·`thinktank`는 Claude 전용).
+- 현재 Codex 등록 플러그인은 `recipe`뿐입니다 (`explain-diff`·`thinktank`·`blog-craft`는 Claude 전용).

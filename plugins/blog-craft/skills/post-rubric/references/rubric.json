@@ -1,0 +1,292 @@
+{
+  "version": 6,
+  "pass_line": 70,
+  "types": [
+    "problem",
+    "choice",
+    "tutorial",
+    "retrospective",
+    "note"
+  ],
+  "sections": [
+    {
+      "id": "opening",
+      "title": "시작",
+      "weight": 15
+    },
+    {
+      "id": "reader",
+      "title": "독자",
+      "weight": 15
+    },
+    {
+      "id": "structure",
+      "title": "구조",
+      "weight": 10
+    },
+    {
+      "id": "trust",
+      "title": "신뢰성",
+      "weight": 30
+    },
+    {
+      "id": "value",
+      "title": "고유 가치",
+      "weight": 20
+    },
+    {
+      "id": "style",
+      "title": "문체",
+      "weight": 5
+    },
+    {
+      "id": "render",
+      "title": "렌더링",
+      "weight": 5
+    }
+  ],
+  "items": [
+    {
+      "id": "C1",
+      "section": "opening",
+      "rules": [
+        "R1",
+        "R2"
+      ],
+      "title": "대상과 얻을 것을 첫 세 문장에",
+      "na": "never"
+    },
+    {
+      "id": "C2",
+      "section": "opening",
+      "rules": [
+        "R3"
+      ],
+      "title": "본문 앞 군더더기 없음",
+      "na": "never"
+    },
+    {
+      "id": "C3",
+      "section": "opening",
+      "rules": [
+        "R4"
+      ],
+      "title": "속편식 도입 없음",
+      "na": "any",
+      "na_condition": "시리즈 글이 아니다"
+    },
+    {
+      "id": "C4",
+      "section": "reader",
+      "rules": [
+        "R6"
+      ],
+      "title": "전제 지식 명시",
+      "na": "never"
+    },
+    {
+      "id": "C5",
+      "section": "reader",
+      "rules": [
+        "R5",
+        "R7"
+      ],
+      "title": "용어 설명이 대상 독자에 맞음",
+      "na": "never"
+    },
+    {
+      "id": "C6",
+      "section": "reader",
+      "rules": [
+        "R8"
+      ],
+      "title": "링크 없이 읽힘",
+      "na": "never"
+    },
+    {
+      "id": "C7",
+      "section": "structure",
+      "rules": [
+        "R9"
+      ],
+      "title": "글 유형에 맞는 구조",
+      "na": "never"
+    },
+    {
+      "id": "C8",
+      "section": "trust",
+      "rules": [
+        "R10"
+      ],
+      "title": "코드·명령의 실행 근거",
+      "na": "any",
+      "na_condition": "코드 블록이나 실행할 명령이 없다"
+    },
+    {
+      "id": "C9",
+      "section": "trust",
+      "rules": [
+        "R11"
+      ],
+      "title": "환경·버전·날짜",
+      "na": [
+        "retrospective",
+        "note"
+      ],
+      "na_condition": "다루는 기능·동작이 언어 표준, 라이브러리, 도구, OS 버전과 무관하다"
+    },
+    {
+      "id": "C10",
+      "section": "trust",
+      "rules": [
+        "R12"
+      ],
+      "title": "결과를 수치·출력으로 보임",
+      "na": [
+        "retrospective",
+        "note"
+      ],
+      "na_condition": "실행해서 확인할 수 있는 작업이나 동작 주장을 다루지 않는다"
+    },
+    {
+      "id": "C11",
+      "section": "trust",
+      "rules": [
+        "R13"
+      ],
+      "title": "한계·실패 조건",
+      "na": "never"
+    },
+    {
+      "id": "C12",
+      "section": "trust",
+      "rules": [
+        "R14"
+      ],
+      "title": "과잉 일반화·내부 모순 없음",
+      "na": "never"
+    },
+    {
+      "id": "C13",
+      "section": "trust",
+      "rules": [
+        "R15"
+      ],
+      "title": "외부 주장의 근거",
+      "na": "never"
+    },
+    {
+      "id": "C14",
+      "section": "value",
+      "rules": [
+        "R16"
+      ],
+      "title": "공식 문서 이상의 선택·이유·실패",
+      "na": "never"
+    },
+    {
+      "id": "C15",
+      "section": "value",
+      "rules": [
+        "R17",
+        "R18"
+      ],
+      "title": "일반론 대신 작성자의 판단",
+      "na": "never"
+    },
+    {
+      "id": "C16",
+      "section": "style",
+      "rules": [
+        "R19"
+      ],
+      "title": "말하듯 씀·어미 일관·오타 없음",
+      "na": "never"
+    },
+    {
+      "id": "C17",
+      "section": "style",
+      "rules": [
+        "R20"
+      ],
+      "title": "짧은 문장·한 문단 한 생각",
+      "na": "never"
+    },
+    {
+      "id": "C21",
+      "section": "trust",
+      "rules": [
+        "R24"
+      ],
+      "title": "독자 위험 고지와 되돌리기",
+      "na": "any",
+      "na_condition": "독자에게 관리자 권한 실행, 앱·시스템 파일 교체, 실행 정책·보안 기능 우회, 제3자 실행 파일·스크립트 내려받기, 서명 없는 바이너리, 약관에 걸릴 수 있는 조작, 데이터 삭제·덮어쓰기를 시키지 않는다"
+    },
+    {
+      "id": "C22",
+      "section": "trust",
+      "rules": [
+        "R25"
+      ],
+      "title": "막힘 없이 끝까지 따라 할 수 있음",
+      "na": [
+        "retrospective",
+        "note"
+      ],
+      "na_condition": "독자가 따라 할 절차가 없다"
+    },
+    {
+      "id": "C18",
+      "section": "render",
+      "rules": [
+        "R21"
+      ],
+      "title": "가로 넘침·마크다운 깨짐 없음",
+      "na": "never",
+      "auto": true
+    },
+    {
+      "id": "C19",
+      "section": "render",
+      "rules": [
+        "R23"
+      ],
+      "title": "코드 블록 언어 태그",
+      "na": "any",
+      "na_condition": "코드 블록이 없다",
+      "auto": true
+    },
+    {
+      "id": "C20",
+      "section": "render",
+      "rules": [
+        "R23"
+      ],
+      "title": "이미지 alt 텍스트",
+      "na": "any",
+      "na_condition": "이미지가 없다",
+      "auto": true
+    },
+    {
+      "id": "C23",
+      "section": "style",
+      "rules": [
+        "R26"
+      ],
+      "title": "소제목은 명사형(질문형·문장형 없음)",
+      "na": "any",
+      "na_condition": "소제목이 없다",
+      "auto": true
+    }
+  ],
+  "not_scored": [
+    {
+      "rule": "R22",
+      "reason": "글자 대비는 테마와 렌더링 결과로만 판단할 수 있어 원문 채점에서 뺀다. blog-post-review 미리보기에서 확인한다"
+    },
+    {
+      "rule": "사실 정확성",
+      "reason": "API 동작, 도입 버전 같은 사실이 맞는지는 외부 자료를 확인해야 해 rubric 에서 채점하지 않는다. blog-llm-review 는 자료 폴더와 대조한 사실만 보고, 자료 밖의 공식 동작은 어느 스킬도 확인하지 않는다. 글 안에서 서로 맞지 않는 서술은 C12 에서 깎는다"
+    }
+  ]
+}
