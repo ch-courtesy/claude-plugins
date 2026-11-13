@@ -6,6 +6,8 @@
 #
 # 프롬프트 소스: positional "<prompt>" | --prompt-file <f> | --stdin 중 "정확히 하나"(0개·2개는 오류).
 #   래퍼가 소스를 읽어 전체를 벤더 stdin으로 전달(스트리밍 아님, EOF까지 버퍼링). 후행 개행은 정규화됨.
+#   예외: agy는 stdin 프롬프트를 지원하지 않아 argv 한 인자(--print=<prompt>)로 넘긴다 — OS argv 한계
+#   (Windows 명령줄 32,767자)를 넘는 프롬프트는 벤더 실행 실패 rc로 드러난다.
 # --mode: read(기본)=읽기전용 안전. write=권한·샌드박스 "완전해제" — "호출자가 이미 격리했다"는 선언. 단순 쓰기추가 아님.
 #   write 매핑: claude=--dangerously-skip-permissions | agy=--mode accept-edits --dangerously-skip-permissions
 #     (agy는 권한 자동승인과 실행 모드가 별개 축이라 둘 다 명시 — 안 하면 저장된 agentMode(plan일 수 있음)에 좌우됨)
@@ -208,7 +210,11 @@ case "$agent" in
     else md=(--mode plan); fi
     # --json-schema는 --output-format json 의존(리뷰 보고, 미실측 선반영 — 동일 시점 확인 대상)
     sc=(); [ -n "$schema" ] && sc=(--output-format json --json-schema "$schema")
-    cmd=("$agent_bin" -p "${md[@]}" ${m[@]+"${m[@]}"} ${e[@]+"${e[@]}"} ${sc[@]+"${sc[@]}"}) ;;
+    # agy는 stdin으로 프롬프트를 받지 않는다(2026-11-14 실측: `-p=` + stdin → "empty prompt", rc=1).
+    # -p는 값 플래그라 `-p --mode plan`이면 "--mode"를 프롬프트로 먹는다(rc=2) — 프롬프트는 `--print=<prompt>` 한 인자로 붙인다.
+    # Git Bash(MSYS)는 '/'로 시작하는 값을 Windows 경로로 바꾸므로 이 인자만 변환에서 뺀다(스키마 경로는 계속 변환).
+    cmd=("$agent_bin" "${md[@]}" ${m[@]+"${m[@]}"} ${e[@]+"${e[@]}"} ${sc[@]+"${sc[@]}"} "--print=$prompt")
+    export MSYS2_ARG_CONV_EXCL="--print=${MSYS2_ARG_CONV_EXCL:+;$MSYS2_ARG_CONV_EXCL}" ;;
 esac
 
 # 실행 경로: capture 필요 = codex 정규화(비-raw) 또는 claude schema 사후검증
@@ -218,7 +224,9 @@ need_capture=0
 # codex·agy + schema: 네이티브 강제라 사후검증 불필요(codex는 정규화만 위 조건에 포함, agy는 exec 통과)
 
 # 프롬프트는 stdin(herestring)으로 전달 — argv 크기 한계(E2BIG) 회피, 플래그 격리는 stdin이라 자동
+# 예외: agy는 stdin을 읽지 않아 위에서 argv(--print=)에 실었다 — stdin은 닫는다
 if [ "$need_capture" -eq 0 ]; then
+  [ "$agent" = agy ] && exec "${cmd[@]}" </dev/null
   exec "${cmd[@]}" <<<"$prompt"
 fi
 

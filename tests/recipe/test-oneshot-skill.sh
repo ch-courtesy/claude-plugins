@@ -51,6 +51,21 @@ if [[ "\$name" == codex && "\${1-}" != exec ]]; then
 fi
 env > "$WORK/env.\$name"        # env 오염 검사용 — unset -v prompt/sch(E2BIG 방어) 핀
 cat > "$WORK/stdin.\$name"
+# 실물 agy는 stdin 프롬프트를 읽지 않고 -p/--print 값 플래그로만 받는다(2026-11-14 실측). -p 바로 뒤가
+# 플래그면 그것을 프롬프트로 먹고 rc=2, 프롬프트가 없으면 "empty prompt" rc=1 — 대역도 같게 거부한다.
+if [[ "\$name" == agy ]]; then
+  p="" prev=""
+  for a in "\$@"; do
+    if [[ "\$prev" == -p || "\$prev" == --print ]]; then
+      [[ "\$a" == -* ]] && { echo "error: -p took \"\$a\" as its prompt" >&2; exit 2; }
+      p="\$a"
+    fi
+    [[ "\$a" == --print=* || "\$a" == -p=* ]] && p="\${a#*=}"
+    prev="\$a"
+  done
+  [[ -n "\$p" ]] || { echo "Error: empty prompt" >&2; exit 1; }
+  printf '%s\n' "\$p" > "$WORK/prompt.agy"
+fi
 out_file="" schema_file="" prev=""
 for a in "\$@"; do
   [[ "\$prev" == --output-last-message ]] && out_file="\$a"
@@ -93,6 +108,7 @@ emit() { if [[ -n "\$out_file" ]]; then printf '%s' "\$1" > "\$out_file"; printf
 case "\${FAKE_BEHAVIOR:-echo}" in
   # echo는 emit을 안 쓴다 — \$( ) 명령 치환이 후행 개행을 지워 바이트 판정을 오염시킨다
   echo)     if [[ -n "\$out_file" ]]; then cat "$WORK/stdin.\$name" > "\$out_file"; cat "$WORK/stdin.\$name"; echo SESSION_LOG
+            elif [[ "\$name" == agy ]]; then cat "$WORK/prompt.agy"
             else cat "$WORK/stdin.\$name"; fi ;;
   json)     enforce '{"ok":true}'; emit '{"ok":true}' ;;
   badschema) enforce '{"nope":1}'; emit '{"nope":1}' ;;   # 스키마 위반(키 누락) — 네이티브 벤더는 거부
@@ -194,17 +210,24 @@ ok "claude write 플래그 매핑"
 
 echo "=== TEST 3: agy read=plan / write=skip-permissions ==="
 BEHAVIOR=echo run agy "x"
-rc_is 0; argv_has agy "-p"; argv_pair agy --mode plan
+rc_is 0; argv_pair agy --mode plan
 argv_not agy "--dangerously-skip-permissions"
-argv_not agy "x"   # 프롬프트 argv 누출 차단
-argv_len agy 3     # -p --mode plan
+# agy는 stdin 프롬프트를 읽지 않는다 — 프롬프트는 --print=<prompt> 한 인자. 값 없는 -p가 다음 플래그를
+# 프롬프트로 먹던 회귀(실물 rc=2)를 막는다
+argv_not agy "-p"; argv_has agy "--print=x"
+[[ "$(tail -1 "$WORK/argv.agy")" == --print=x ]] || fail "agy 프롬프트 인자가 맨 뒤가 아님"
+stdin_is agy ""    # stdin은 닫힘(</dev/null)
+out_is $'x\n'
+grep -q '^MSYS2_ARG_CONV_EXCL=--print=$' "$WORK/env.agy" || fail "agy 프롬프트 인자가 MSYS 경로 변환 제외 대상이 아님"
+argv_len agy 3     # --mode plan --print=x
 BEHAVIOR=echo run --mode write --model m2 --effort low agy "x"
 rc_is 0; argv_has agy "--dangerously-skip-permissions"; argv_not agy "plan"
 argv_pair agy --mode accept-edits   # 실행 모드 명시 — 저장된 agentMode(plan) 의존 차단
 argv_pair agy --model m2
 argv_pair agy --effort low
 argv_not agy "x"
-argv_len agy 8   # -p --mode accept-edits --dangerously-skip-permissions --model m2 --effort low
+argv_has agy "--print=x"
+argv_len agy 8   # --mode accept-edits --dangerously-skip-permissions --model m2 --effort low --print=x
 ok "agy 모드·model·effort 매핑"
 
 echo "=== TEST 4: codex read 정규화 — 최종 메시지 stdout, 세션 로그 stderr ==="
@@ -240,7 +263,7 @@ BEHAVIOR=echo run --effort high --model m9 agy "hi"
 rc_is 0
 argv_pair agy --mode plan
 argv_not agy "--dangerously-skip-permissions"
-argv_len agy 7     # -p --mode plan --model m9 --effort high
+argv_len agy 7     # --mode plan --model m9 --effort high --print=hi
 ok "codex 정규화 채널 분리 + read×model·effort 직교"
 
 echo "=== TEST 5: codex write + effort ==="
@@ -272,7 +295,7 @@ rc_is 0; out_is $'hi\n'; argv_has claude "--allowedTools=Read,Grep,Glob"
 argv_not claude "--raw"; argv_len claude 3   # no-op = 기본 경로와 동일 argv(실물엔 --raw 없음)
 BEHAVIOR=echo run --raw agy "hi"
 rc_is 0; out_is $'hi\n'; argv_pair agy --mode plan
-argv_not agy "--raw"; argv_len agy 3
+argv_not agy "--raw"; argv_len agy 3   # --mode plan --print=hi
 # raw×write — raw가 모드를 read로 강등하면 안 됨(raw는 출력 정규화만 담당)
 BEHAVIOR=echo run --raw --mode write codex "x"
 rc_is 0
@@ -307,21 +330,21 @@ BEHAVIOR=json run --schema "$VALID_SCHEMA" agy "x"
 rc_is 0
 argv_pair agy --json-schema "$VALID_SCHEMA"
 argv_pair agy --output-format json   # --json-schema의 플래그 의존성(output-format json 필수)
-stdin_is agy $'x\n'   # 프롬프트에 스키마 주입 금지(네이티브)
+argv_has agy "--print=x"   # 프롬프트에 스키마 주입 금지(네이티브)
 out_is '{"ok":true}'
 grep -q DEGRADED "$WORK/err" && fail "agy 네이티브 경로에 강등이 있으면 안 됨"
 argv_pair agy --mode plan
 argv_not agy "--dangerously-skip-permissions"
-argv_len agy 7   # -p --mode plan --output-format json --json-schema <f>
+argv_len agy 7   # --mode plan --output-format json --json-schema <f> --print=x
 # agy write×schema — accept-edits·skip-permissions·--json-schema 동시 유지
 BEHAVIOR=json run --mode write --schema "$VALID_SCHEMA" agy "x"
 rc_is 0
 argv_pair agy --mode accept-edits
 argv_has agy "--dangerously-skip-permissions"
 argv_pair agy --json-schema "$VALID_SCHEMA"
-argv_len agy 8   # -p --mode accept-edits --dangerously-skip-permissions --output-format json --json-schema <f>
+argv_len agy 8   # --mode accept-edits --dangerously-skip-permissions --output-format json --json-schema <f> --print=x
 out_is '{"ok":true}'   # exec 통과 채널로 결과가 stdout에 그대로
-stdin_is agy $'x\n'    # 네이티브라 write 분기에서도 주입 금지
+argv_has agy "--print=x"    # 네이티브라 write 분기에서도 주입 금지
 # 네이티브 강제 실작동 — 스키마 위반 출력이면 벤더가 거부하고 래퍼는 그 rc를 전달, stdout 오염 없음.
 # 플래그를 전달만 하고 벤더가 무시하는(=강제 안 되는) 상태와 구별하는 유일한 핀.
 BEHAVIOR=badschema run --schema "$VALID_SCHEMA" codex "x"
