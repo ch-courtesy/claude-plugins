@@ -13,6 +13,9 @@ FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)")
 TABLE_SEP = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$")
 LINK_TARGET = re.compile(r"\]\([^)]*\)")
 IMAGE = re.compile(r"!\[([^\]]*)\]\(([^)\s]*)[^)]*\)")
+# 참조형 이미지: ![alt][ref], ![alt][] (ref = alt), ![alt] (단축형). 참조 정의가 있어야 이미지로 렌더된다
+REF_IMAGE = re.compile(r"!\[([^\]]*)\](?:\[([^\]]*)\])?(?![\[(])")
+REF_DEF = re.compile(r"^ {0,3}\[([^\]]+)\]:\s*\S+")
 HTML_IMG = re.compile(r"<img\b[^>]*>", re.I)
 HTML_ALT = re.compile(r"\balt\s*=\s*(\"[^\"]*\"|'[^']*')", re.I)
 AUTOLINK = re.compile(r"<([A-Za-z][A-Za-z0-9+.-]{1,31}):[^\s<>]*>")
@@ -124,7 +127,8 @@ def check(text):
                 j += 1
             table_lines.update(rno for rno, _ in rows)
             table_lines.add(prose[i + 1][0])
-            long_cell = next((c for _, r in rows for c in cells(r) if max(map(len, c.split()), default=0) >= LONG_TOKEN), None)
+            # 링크 주소와 마크다운 기호는 화면에 보이지 않으므로 본문과 같은 방식으로 빼고 잰다
+            long_cell = next((c for _, r in rows for c in cells(r) if max(map(len, visible_text(c).split()), default=0) >= LONG_TOKEN), None)
             if ncol >= 5:
                 overflow.append((no, line.strip(), f"열이 {ncol}개인 표"))
             elif long_cell:
@@ -158,7 +162,7 @@ def check(text):
             flush()
         paragraph.append((no, line))
         # 링크 주소는 화면에 보이지 않으므로 빼고, 남은 마크다운 기호도 빼고 잰다
-        visible = MARKUP.sub("", LINK_TARGET.sub("] ", line))
+        visible = visible_text(line)
         token = max(visible.split(), key=len, default="")
         if len(token) >= LONG_TOKEN:
             overflow.append((no, token, f"공백 없는 {len(token)}자 문자열"))
@@ -198,10 +202,15 @@ def check(text):
                    ok_reason=f"코드 블록 {n}개에 모두 언어 태그가 있다", head=f"코드 블록 {n}개 중 {m}개에 태그 없음",
                    fix="출력이나 일반 텍스트 블록에는 text 를, 코드에는 언어 이름을 단다")
 
+    refs = {m.group(1).strip().lower() for _, line in prose if (m := REF_DEF.match(line))}
     images = []
     for no, line in prose:
         for m in IMAGE.finditer(line):
             images.append((no, m.group(0)[:80], m.group(1)))
+        for m in REF_IMAGE.finditer(IMAGE.sub("", line)):
+            label = (m.group(2) or m.group(1)).strip().lower()
+            if label in refs:
+                images.append((no, m.group(0)[:80], m.group(1)))
         for m in HTML_IMG.finditer(line):
             alt = HTML_ALT.search(m.group(0))
             images.append((no, m.group(0)[:80], alt.group(1)[1:-1] if alt else ""))
@@ -230,6 +239,10 @@ def check(text):
                    ok_reason=f"소제목 {len(heads)}개가 모두 명사형이다", head=f"소제목 {len(heads)}개 중 {m}개가 질문형·문장형",
                    fix="'~는 왜 안 되나' → '~가 안 되는 이유', '~가 아니었다' → '~와 무관한 원인'처럼 명사형으로 바꾼다")
     return [c18, c19, c20, c23]
+
+
+def visible_text(text):
+    return MARKUP.sub("", LINK_TARGET.sub("] ", text))
 
 
 def item(cid, score, found, ok_reason, head, fix):
