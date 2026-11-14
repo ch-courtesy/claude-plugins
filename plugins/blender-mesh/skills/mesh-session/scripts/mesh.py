@@ -594,14 +594,40 @@ def attack_controls(sdir, rig, attack, carry_path):
                 k["pose"] = top
         return s
 
-    trials = [("slow", later(6), "motion_attack", ["strike, s"]),
+    def no_follow():                                   # the key after the hit holds the hit: a dead stop
+        s = json.loads(json.dumps(base))
+        ks = sorted(s["keys"], key=lambda k: k["frame"])
+        i = next((j for j, k in enumerate(ks) if k["frame"] >= st["impact"]), None)
+        if i is not None and i + 1 < len(ks):
+            ks[i + 1]["pose"] = ks[i]["pose"]
+        s["keys"] = ks
+        return s
+
+    def held_hips():                                   # every pose keeps the first key's hips height
+        s = json.loads(json.dumps(base))
+        first = s["poses"].get(min(s["keys"], key=lambda k: k["frame"])["pose"], {})
+        z = (first.get("hips") or [0, 0, 0])[2]
+        for p_ in s["poses"].values():
+            if isinstance(p_, dict):
+                h = list(p_.get("hips") or [0, 0, 0])
+                p_["hips"] = [h[0], h[1], z]
+        return s
+
+    # slow: the strike at least three times as long (6 frames more at least); a fixed 6 left a 4-frame strike whose
+    # hips-first chain peaks early just under the limit (2026-11-14)
+    trials = [("slow", later(max(6, 2 * max(k_hit - k_from, 1))), "motion_attack", ["strike, s"]),
               ("early_hit", dict(base, strike=dict(st, impact=st["impact"] - 3)), "motion_attack",
                ["fastest frame from the hit frame"]),
               ("no_wind_up", no_wind_up(), "motion_attack", ["wind-up, s"]),
               ("slide", dict(base, debug_slip=0.03), "animation_oneshot", ["foot slide on the ground"]),
               ("pop", dict(base, debug_pop={"frame": calm[len(calm) // 2] if calm else 1, "offset": [0.03, 0, 0]}),
                "animation_oneshot", ["jump outside the hit"]),
-              ("wrong_end", dict(base, end_pose=top), "animation_oneshot", ["end pose against"])]
+              ("wrong_end", dict(base, end_pose=top), "animation_oneshot", ["end pose against"]),
+              # how the body drives the strike (2026-11-14): each break must fail its own criterion
+              ("no_chain", {k: v for k, v in base.items() if k not in ("delay", "delay_window")}, "motion_attack",
+               ["chain: smallest lag"]),
+              ("no_follow", no_follow(), "motion_attack", ["follow-through past the hit"]),
+              ("held_hips", held_hips(), "motion_attack", ["hips lowered into the strike"])]
     ok = True
     for tag, spec, stage, wanted in trials:
         name = "control_attack_" + tag
@@ -628,6 +654,22 @@ def attack_controls(sdir, rig, attack, carry_path):
     else:
         print(f"[controls] {name}: the bake failed, so nothing was tested")
         ok = False
+    if carry.get("edge"):                              # the edge said to face along the blade's normal: 90 off
+        name = "control_attack_edge"
+        path = os.path.join(sdir, "motions", name + ".json")
+        with open(path, "w", encoding="utf-8") as fh_:
+            json.dump(dict(base, name=name), fh_, ensure_ascii=False)
+        h = [t_ - g_ for t_, g_ in zip(st["tip"], carry.get("grip_point") or [0, 0, 0])]
+        e = carry["edge"]
+        normal = [h[1] * e[2] - h[2] * e[1], h[2] * e[0] - h[0] * e[2], h[0] * e[1] - h[1] * e[0]]
+        trial = os.path.join(sdir, "motions", name + "_carry.json")
+        with open(trial, "w", encoding="utf-8") as fh_:
+            json.dump(dict(carry, edge=normal), fh_)
+        if cmd_animate(sdir, [path, rig, "--carry", trial]):
+            ok = gate_fails(sdir, "motion_attack", name, ["edge out of the cutting plane"]) and ok
+        else:
+            print(f"[controls] {name}: the bake failed, so nothing was tested")
+            ok = False
     return ok
 
 

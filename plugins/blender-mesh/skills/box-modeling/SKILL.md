@@ -41,6 +41,12 @@ Grow protrusions (lid, limbs, head, handles) by extruding faces in short segment
 lines (lid/body, waist, collar) with loop cuts at exact coordinates. Check the snapshot
 against the brief after each mass.
 
+### Characters that will move: join what bends together
+Parts that only overlap cannot blend across a joint. Grow the seat and both legs out of the torso so trousers,
+crotch and torso are one surface, and keep separate parts only at clothing borders (cuff, hem, sash). Follow
+`references/continuous-body.md`; `scripts/joins.py` writes the steps for a limb grown out of the body (armhole and
+lofted rings), with its measured limit for raised A-pose arms.
+
 ## 4. Resolution where the form bends — `mesh-loopcut`
 Add loops only where a curve, a joint or a later detail needs them.
 

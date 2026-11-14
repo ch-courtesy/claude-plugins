@@ -7,9 +7,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    from motion_metrics import overlap_metrics, pops, spacing_crest, spikes, strike_metrics
+    from motion_metrics import overlap_metrics, pops, spacing_crest, spikes, strike_craft, strike_metrics
 except (ModuleNotFoundError, ImportError):
-    overlap_metrics = pops = spacing_crest = spikes = strike_metrics = None
+    overlap_metrics = pops = spacing_crest = spikes = strike_craft = strike_metrics = None
 
 
 def chop(hold_at_top=1):
@@ -163,6 +163,79 @@ class SpacingTests(unittest.TestCase):
 
     def test_stillness_has_no_score(self):
         self.assertIsNone(spacing_crest(np.zeros((30, 3)), loop=True))
+
+
+def ease(t):
+    t = np.clip(t, 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def swing(n=24, follow=True, offsets=(0, 1, 2, 2), roll=False, drop=0.06):
+    """A strike about a shoulder at the origin in the ground plane, 24 fps: from -40 degrees the point speeds up
+    (ease in) to 90 degrees at frame 12, its fastest, then (follow) carries on 60 degrees while slowing, or stops
+    dead as a strike keyed to end on the hit does. Links turn about Z with an eased profile, each `offsets`
+    frames later than the one it hangs from."""
+    t = np.arange(n, dtype=float)
+    u = np.clip((t - 4) / 8, 0, 1)
+    after = np.clip((t - 12) / 6, 0, 1)
+    a = -40 + 130 * u * u + (np.where(t > 12, 60 * np.sin(after * np.pi / 2), 0) if follow else 0)
+    r = np.radians(a)
+    tip = np.stack([0.9 * np.cos(r), 0.9 * np.sin(r), np.zeros(n)], 1)
+    tangent = np.stack([-np.sin(r), np.cos(r), np.zeros(n)], 1)
+    up = np.tile([0.0, 0.0, 1.0], (n, 1))
+    edge, normal = (up, -tangent) if roll else (tangent, up)
+
+    def quats(shift):
+        ang = np.radians(30 * ease((t - 4 - shift) / 12))
+        return np.stack([np.cos(ang / 2), np.zeros(n), np.zeros(n), np.sin(ang / 2)], 1)
+    links = dict(zip(("hips", "chest", "arm", "hand"), (quats(o) for o in offsets)))
+    hz = 0.8 - drop * ease((t - 4) / 8)
+    return tip, normal, edge, np.zeros((n, 3)), hz, 0.6, links
+
+
+@unittest.skipIf(strike_craft is None, "NumPy is not available")
+class StrikeCraftTests(unittest.TestCase):
+    def craft(self, kind="h", **kw):
+        tip, nm, ed, sh, hz, leg, links = swing(**kw)
+        return strike_craft(tip, nm, ed, sh, hz, leg, links, 24, kind=kind, start=4, end=15)
+
+    def test_a_hips_first_chain_lags_by_its_offsets(self):
+        r = self.craft(offsets=(0, 1, 2, 2))            # chest 1 frame after the hips, the arm 1 after the chest
+        self.assertAlmostEqual(r["chain_lag_chest_hips"], 1.0, delta=0.2)
+        self.assertAlmostEqual(r["chain_lag_arm_chest"], 1.0, delta=0.2)
+        self.assertGreater(r["chain_lag_min"], 0.75)
+
+    def test_a_body_moving_as_one_does_not_lag(self):
+        r = self.craft(offsets=(0, 0, 0, 0))
+        self.assertLess(abs(r["chain_lag_min"]), 0.2)
+
+    def test_a_vertical_strike_only_needs_the_arm_after_the_chest(self):
+        r = self.craft(kind="v", offsets=(0, 0, 1, 1))  # the hips do not lead a chop down
+        self.assertAlmostEqual(r["chain_lag_min"], r["chain_lag_arm_chest"])
+        self.assertGreater(r["chain_lag_min"], 0.75)
+
+    def test_an_edge_on_the_cut_and_one_rolled_off_it(self):
+        good, rolled = self.craft(), self.craft(roll=True)
+        self.assertLess(good["edge_off_plane_deg"], 2)
+        self.assertLess(good["edge_to_cut_deg"], 2)
+        self.assertGreater(rolled["edge_off_plane_deg"], 80)
+
+    def test_follow_through_against_a_dead_stop(self):
+        self.assertGreater(self.craft(follow=True)["follow_deg"], 40)
+        self.assertLess(self.craft(follow=False)["follow_deg"], 5)
+
+    def test_frames_before_the_hit_key_are_not_follow_through(self):
+        tip, nm, ed, sh, hz, leg, links = swing(follow=False)
+        r = strike_craft(tip, nm, ed, sh, hz, leg, links, 24, start=4, end=15, impact=12)
+        self.assertLess(r["follow_deg"], 5)
+        late = strike_craft(tip, nm, ed, sh, hz, leg, links, 24, start=4, end=15, impact=9)   # a peak after the key
+        self.assertLess(late["follow_deg"], 5)
+
+    def test_hips_drop_against_the_need_of_the_kind(self):
+        r = self.craft(drop=0.06)                       # 10% of a 0.6 m leg
+        self.assertAlmostEqual(r["hips_drop_leg"], 0.1, places=3)
+        self.assertAlmostEqual(r["hips_drop_margin"], 0.02, places=3)
+        self.assertLess(self.craft(kind="v", drop=0.06)["hips_drop_margin"], 0)
 
 
 if __name__ == "__main__":

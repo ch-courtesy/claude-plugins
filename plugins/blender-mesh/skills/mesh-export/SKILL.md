@@ -92,6 +92,14 @@ Things that decide whether this works, each learned by a false result:
 - `LogAutomationTest: Error: Condition failed` lines at startup are the engine's own
   `UnifiedErrorTest`, not the model.
 - Bones arrive with `.` changed to `_`, and action names gain the file name as a prefix.
+- **The engine guesses each action's frame rate from its length.** glTF has no frame rate. On
+  2026-11-14 a 24-frame action at 24 fps (1.000 s) and a 136-frame one (5.667 s = 170/30) both came in at
+  30 fps, while 23 frames (0.958 s) stayed at 24. The engine then resamples, and the 24 fps key times fall
+  between its frames.
+  - A fast swing read 10.8 mm off at the cleaver's tip, 0.885 m from the hand, against a 5 mm limit.
+  - A slow one read only 1.8 mm.
+  - `report.json` lists such actions in `resampled_actions`, and the run prints a warning.
+  - The fix is to keep an action's length off a whole number of 1/30 s (for example, add or drop a frame).
 
 ## Not covered
 Unity and other engines. The lit pictures use the level's lights with a weak fill from below, because

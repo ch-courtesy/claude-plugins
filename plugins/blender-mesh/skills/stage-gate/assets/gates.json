@@ -206,7 +206,9 @@
     "2026-11-09, agreed with the user before any attack was measured: one-shot motions (attacks, played once) get animation_oneshot instead of animation, and weapon strikes get motion_attack; the weapon is held rigidly in a socket bone and checked with prop_contact as before (into the body 5 mm). Motions stay in place, the path the game moves the character along is recorded. Kept from the walk and prop gates: foot slide, under and above the ground 5 mm, deformation, overlap lag 2 frames, jumps 15 mm per frame squared, now measured outside the hit and any landing the motion declares. New: the end pose within 10 mm of the pose the next motion starts from; a heavy strike at 24 fps: wind-up 0.15 s or more, strike 0.17 s or less, weapon point 6 m/s or more, its fastest frame within one of the hit frame, and 0.6 m of travel seen from above so the top-down camera reads it. Closure and spacing do not apply to a strike.",
     "2026-11-11, agreed with the user before Musoe's motions were made again: the jump criterion of animation and animation_oneshot no longer limits acceleration itself (15 mm per frame squared), which any fast motion exceeds: kept, a basic attack took 2 s and a run 0.4 m/s. It now compares a frame's change of velocity with the larger of the same two frames earlier and later, plus 2 mm per frame squared for stillness, so playing a motion faster does not change it. Limit 4, fixed from motions already made and pops put in on purpose: thirteen smooth motions (tinbot and Musoe) read 0.07 to 2.24; one frame of the whole body moved 1 cm read 5.5 to 10. A pop in a fast swing reads lower, as it shows less. New for the game's pace: motion_auto_attack, the attack stage plus a basic attack lasting 1.0 s or less from wind-up back to guard; motion_run, the walk stage plus 3.3 m/s or more.",
     "2026-11-11, agreed with the user with the run: spacing no longer divides top acceleration by top speed, which gives 2 pi over the period on any smooth swing, so a quick rhythm failed by itself (a 16-frame run cycle could bob its head 4 mm at most). It is now the crest factor (top over root mean square) of acceleration over that of speed: 1 on any sinusoid at any period, high where speed turns in a kink, as at a linear key. Limit 2.5, fixed from motions already made: eleven smooth tracked motions read 1.03 to 1.53 and the same played three times faster 1.09 to 1.45; the linear-key control read 5.8, and 3.6 played three times faster. Applies to motion_walk, motion_idle, motion_action and motion_run.",
-    "2026-11-11, with the user asking for the GLB and Unreal check of a character holding a weapon exported on its own: engine_unreal_weapon. The export puts a socket with the weapon's own frame and a marker at its point into the skeleton; the engine attaches the weapon's file to the socket with no offset, and its point must land on the marker within 5 mm on every sampled pose, the same tolerance as the joints. The weapon's axes in the engine are found by matching its bounding box to the file's, within 0.5 cm."
+    "2026-11-11, with the user asking for the GLB and Unreal check of a character holding a weapon exported on its own: engine_unreal_weapon. The export puts a socket with the weapon's own frame and a marker at its point into the skeleton; the engine attaches the weapon's file to the socket with no offset, and its point must land on the marker within 5 mm on every sampled pose, the same tolerance as the joints. The weapon's axes in the engine are found by matching its bounding box to the file's, within 0.5 cm.",
+    "2026-11-14, agreed with the user after a craft rubric built from published animation practice (Riot's League animators, Game Developer's 12 principles in games, a melee timing guide, CAVE Academy's offset notes): four measures of how the body drives a strike join motion_attack and motion_auto_attack, computed by motion_metrics.strike_craft from the bake (the carry needs \"edge\", the strike may give \"kind\": h, v or spin). (1) Hips first: each link's fastest turn about its own swing axis, relative to the link it hangs from; the lags chest-hips and arm-chest (arm-chest only for v and spin, whose hips do not lead or turn with the whole body) must lie in 0.75-3.5 frames (sources: the hips lead and the arm whips last, about 2 frames behind the spine; moving everything at once is the beginner's mistake). (2) The edge out of the cutting plane at most 20 degrees and against the cut at most 30, weighted by speed over the strike. (3) Follow-through: after the hit and a hold of up to 4 frames the point turns on about the shoulder at least 30 degrees (sources: 30-60 past the centre; without it the clip looks cut). (4) The hips go down at least 8% of the leg into a horizontal or spinning strike, 20% into a vertical one. Checked before agreement on controls: a hips-first delay control passed the chain (1.0/1.0 frames) where the original read 0; a blade rolled 90 degrees read 80-90; held hips read 0; a dead stop read 0-9 degrees; the unit tests in test_motion_metrics.py hold known answers. Musoe's v0 attacks failed all four; its remade attacks pass. Agreed at the same time but kept as rubric diagnostics, not gates: wind-up speed over strike speed at most 0.55 (0.35 had been calibrated on the dead-stop v0), the off-hand moving against the weapon hand in spins too, a run's bob at least 8% of the leg.",
+    "2026-11-14, found by the new attack controls on the same day, limits unchanged: the follow-through is measured from the later of the frame after the fastest and the strike's impact key. With the hips leading, the point peaks a frame or two before the arm reaches its hit key; counting from the peak took the arm's last 40 degrees into its key as follow-through, so a dead stop at the hit passed (control_attack_no_follow read 40.9). The slow control now stretches the strike at least threefold: a fixed 6 frames left a 4-frame strike at 0.167 s against 0.17."
   ],
   "export": [
     {
@@ -554,6 +556,42 @@
       "file": "anim/report.json",
       "path": "quality.overlap_lag_frames",
       "min": 2
+    },
+    {
+      "name": "chain: smallest lag down hips, chest, arm, frames",
+      "file": "anim/report.json",
+      "path": "quality.chain_lag_min",
+      "min": 0.75
+    },
+    {
+      "name": "chain: largest lag down hips, chest, arm, frames",
+      "file": "anim/report.json",
+      "path": "quality.chain_lag_max",
+      "max": 3.5
+    },
+    {
+      "name": "edge out of the cutting plane, deg",
+      "file": "anim/report.json",
+      "path": "quality.edge_off_plane_deg",
+      "max": 20
+    },
+    {
+      "name": "edge against the cut, deg",
+      "file": "anim/report.json",
+      "path": "quality.edge_to_cut_deg",
+      "max": 30
+    },
+    {
+      "name": "follow-through past the hit, deg",
+      "file": "anim/report.json",
+      "path": "quality.follow_deg",
+      "min": 30
+    },
+    {
+      "name": "hips lowered into the strike, share of the leg over the kind's need",
+      "file": "anim/report.json",
+      "path": "quality.hips_drop_margin",
+      "min": 0
     }
   ],
   "motion_auto_attack": [
@@ -598,6 +636,42 @@
       "file": "anim/report.json",
       "path": "duration_s",
       "max": 1.0
+    },
+    {
+      "name": "chain: smallest lag down hips, chest, arm, frames",
+      "file": "anim/report.json",
+      "path": "quality.chain_lag_min",
+      "min": 0.75
+    },
+    {
+      "name": "chain: largest lag down hips, chest, arm, frames",
+      "file": "anim/report.json",
+      "path": "quality.chain_lag_max",
+      "max": 3.5
+    },
+    {
+      "name": "edge out of the cutting plane, deg",
+      "file": "anim/report.json",
+      "path": "quality.edge_off_plane_deg",
+      "max": 20
+    },
+    {
+      "name": "edge against the cut, deg",
+      "file": "anim/report.json",
+      "path": "quality.edge_to_cut_deg",
+      "max": 30
+    },
+    {
+      "name": "follow-through past the hit, deg",
+      "file": "anim/report.json",
+      "path": "quality.follow_deg",
+      "min": 30
+    },
+    {
+      "name": "hips lowered into the strike, share of the leg over the kind's need",
+      "file": "anim/report.json",
+      "path": "quality.hips_drop_margin",
+      "min": 0
     }
   ],
   "motion_walk": [

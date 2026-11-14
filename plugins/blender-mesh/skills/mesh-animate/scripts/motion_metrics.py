@@ -137,3 +137,139 @@ def spacing_crest(P, loop=True, still=0.001):
     def crest(x):
         return float(x.max() / max(np.sqrt((x ** 2).mean()), 1e-12))
     return crest(sa) / crest(sv)
+
+
+# ---------------------------------------------------------------- how the body drives a strike (2026-11-14)
+# Ported from a craft rubric (the project's rubric_anim.py), whose measures were checked against broken
+# and fixed controls before the user agreed to gate them: the hips lead the chest and the chest the arm (A2), the
+# edge faces the cut (A4), the swing carries on past the hit (A5), the hips go down into it (A6).
+DROP_NEED = {"h": 0.08, "v": 0.20, "spin": 0.08}      # hips drop as a share of the leg, by kind of strike
+CHAIN_LINKS = ("hips", "chest", "arm", "hand")
+
+
+def _qmul(a, b):
+    w1, x1, y1, z1 = a
+    w2, x2, y2, z2 = b
+    return np.array([w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2, w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+                     w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2, w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2])
+
+
+def _turn_vector(q0, q1):
+    """The turn from q0 to q1 (w, x, y, z) as axis times angle in degrees, the short way."""
+    r = _qmul(np.asarray(q1, float), np.array([q0[0], -q0[1], -q0[2], -q0[3]], float))
+    if r[0] < 0:
+        r = -r
+    s = float(np.linalg.norm(r[1:]))
+    if s < 1e-12:
+        return np.zeros(3)
+    return r[1:] / s * np.degrees(2 * np.arctan2(s, r[0]))
+
+
+def _parabolic(y, i):
+    if 0 < i < len(y) - 1:
+        d = y[i - 1] - 2 * y[i] + y[i + 1]
+        if abs(d) > 1e-12:
+            return i + 0.5 * (y[i - 1] - y[i + 1]) / d
+    return float(i)
+
+
+def strike_craft(tip, normal, edge, shoulder, hips_z, leg, links, fps, kind="h", start=0, end=None, impact=None):
+    """How the body drives a weapon's strike. All per-frame arrays have one row per baked frame.
+
+    tip, normal, edge, shoulder: weapon point, blade-plane normal, edge direction (unit), weapon-side shoulder.
+    hips_z: hips height; leg: hip-joint height at rest. links: {name: quaternions (w, x, y, z)} for "hips" (in
+    the world), "chest" (against the hips), "arm" (upper arm against the chest), "hand" (against the upper arm).
+    kind: "h" a horizontal strike, "v" a vertical one, "spin" a whole-body turn.
+
+    Speeds are forward differences: frame i's speed is from i to i+1. The fastest frame is searched from `start`
+    to `end`; the strike is the run of frames round it at half that speed or more; the swing turns round at the
+    first trough before it. Returns:
+    - chain lags (A2): the frame each link turns fastest about its own swing axis (a parabola through the peak),
+      relative to the link it hangs from, from 6 frames before the turn to 3 after the peak; a link that turns
+      under 5 degrees there rides rigidly and lags 0. chain_lag_min/max take chest-hips and arm-chest for "h",
+      only arm-chest for "v" (the hips need not turn) and "spin" (the hips turn with the whole body);
+    - edge_off_plane_deg, edge_to_cut_deg (A4): the cut's direction out of the blade's plane, and against the
+      edge, weighted by speed over the strike;
+    - follow_deg, follow_frames (A5): after the hit (the later of the frame after the fastest and `impact`: with
+      the hips leading, the point can peak a frame or two before the arm reaches its hit key, and those frames
+      are still the strike) and a hold of up to 4 frames under a tenth of top speed, how far the point keeps
+      turning about the shoulder the way the strike turned;
+    - hips_drop_leg, hips_drop_margin (A6): the hips' lowest point under the first frame as a share of the leg,
+      and that less DROP_NEED[kind].
+    """
+    T = np.asarray(tip, float)
+    N_ = np.asarray(normal, float)
+    E_ = np.asarray(edge, float)
+    SH = np.asarray(shoulder, float)
+    n = len(T)
+    v = np.linalg.norm(np.diff(T, axis=0), axis=1) * fps
+    end = n - 2 if end is None else min(end, n - 2)
+    lo = min(max(start, 0), end)
+    p = lo + int(np.argmax(v[lo:end + 1]))
+    vmax = float(v[p])
+    out = {"craft_kind": kind, "craft_peak_frame": p}
+    if vmax <= 1e-9:
+        return out
+    turn = p
+    while turn > 0 and v[turn - 1] <= v[turn]:
+        turn -= 1
+    s0 = p
+    while s0 > 0 and v[s0 - 1] >= 0.5 * vmax:
+        s0 -= 1
+    s1 = p
+    while s1 < len(v) - 1 and v[s1 + 1] >= 0.5 * vmax:
+        s1 += 1
+    # A4
+    offs, leads, ws = [], [], []
+    for i in range(s0, s1 + 1):
+        d = T[i + 1] - T[i]
+        d = d / max(np.linalg.norm(d), 1e-12)
+        nm, ed = (N_[i] + N_[i + 1]) / 2, (E_[i] + E_[i + 1]) / 2
+        offs.append(np.degrees(np.arcsin(min(1.0, abs(float(d @ nm)) / max(np.linalg.norm(nm), 1e-12)))))
+        leads.append(np.degrees(np.arccos(np.clip(float(d @ ed) / max(np.linalg.norm(ed), 1e-12), -1, 1))))
+        ws.append(v[i])
+    ws = np.array(ws)
+    out["edge_off_plane_deg"] = float(np.dot(offs, ws) / ws.sum())
+    out["edge_to_cut_deg"] = float(np.dot(leads, ws) / ws.sum())
+    # A5
+    plane = np.cross(T[p] - SH[p], T[p + 1] - SH[p + 1])
+    plane = plane / max(np.linalg.norm(plane), 1e-12)
+    c, hold = max(p + 1, impact if impact is not None else 0), 0
+    while c < n - 1 and hold < 4 and v[c] < 0.1 * vmax:
+        c += 1
+        hold += 1
+    sweep, fol = 0.0, 0
+    while c < n - 1:
+        u0, u1 = T[c] - SH[c], T[c + 1] - SH[c + 1]
+        st = float(np.degrees(np.arctan2(float(np.cross(u0, u1) @ plane), float(u0 @ u1))))
+        if st <= 0.2:
+            break
+        sweep += st
+        fol += 1
+        c += 1
+    out.update({"follow_deg": sweep, "follow_frames": fol, "follow_hold_frames": hold})
+    # A2
+    w0, w1 = max(0, turn - 6), min(n - 1, p + 3)
+    peaks, turned = {}, {}
+    for name in CHAIN_LINKS:
+        Q = np.asarray(links[name], float)
+        om = np.array([_turn_vector(Q[i], Q[i + 1]) for i in range(n - 1)])
+        mean = om[max(turn, 0):w1].sum(0)
+        axis = mean / max(np.linalg.norm(mean), 1e-9)
+        sp = om @ axis
+        k = w0 + int(np.argmax(sp[w0:w1]))
+        peaks[name] = _parabolic(sp, k)
+        turned[name] = float(np.clip(sp[w0:w1], 0, None).sum())
+
+    def lag(child, parent):
+        return 0.0 if turned[child] < 5.0 else peaks[child] - peaks[parent]
+
+    lags = {"chest_hips": lag("chest", "hips"), "arm_chest": lag("arm", "chest")}
+    used = [lags["chest_hips"], lags["arm_chest"]] if kind == "h" else [lags["arm_chest"]]
+    out.update({"chain_peaks": peaks, "chain_turned_deg": turned, "chain_lag_chest_hips": lags["chest_hips"],
+                "chain_lag_arm_chest": lags["arm_chest"], "chain_lag_min": min(used), "chain_lag_max": max(used)})
+    # A6
+    z = np.asarray(hips_z, float)
+    drop = float(z[0] - z.min()) / leg if leg > 0 else 0.0
+    out.update({"hips_drop_leg": drop, "hips_drop_margin": drop - DROP_NEED.get(kind, 0.08)})
+    return out

@@ -222,6 +222,13 @@ if os.path.exists(ue_flat) and os.path.exists(blender_flat):
         rows.sort()
         colour = rows[len(rows) // 2] if rows else None
 
+# the engine guesses a frame rate from each action's length (glTF has none); one it resampled reads in-between
+# values at the file's key times, which a long weapon turns into millimetres at its tip
+resampled = {n: a_["frames"] for n, a_ in info["actions"].items()
+             if n in lengths and a_.get("frames") not in (round(lengths[n] * FPS), round(lengths[n] * FPS) + 1)}
+for n, fr in sorted(resampled.items()):
+    print(f"[unreal] warning: {n} came in with {fr} frames, not {round(lengths[n] * FPS)} at {FPS} fps: the engine "
+          f"resampled it (its length {lengths[n]:.4f} s is a whole number of 1/30 s?)")
 expected = read_json(os.path.join(session, "export", "report.json"), encoding="utf-8")
 images = len(G.get("images", []))
 R = {"engine": info["engine"], "engine_dir": engine, "import_errors": len(errors), "import_warnings": len(warnings),
@@ -232,7 +239,8 @@ R = {"engine": info["engine"], "engine_dir": engine, "import_errors": len(errors
      "action_motion": motion, "played_motion_mm": min(moved.values()) if moved else 0.0, "played_motion": moved,
      "height_m": info.get("height_m"), "height_error_m": abs(info.get("height_m", 0) - expected["height"]),
      "materials": info["materials"], "materials_untextured": info["materials_untextured"], "textures": info["textures"],
-     "texture_copies": max(0, info["textures"] - images), "albedo_delta_e_median": colour}
+     "texture_copies": max(0, info["textures"] - images), "albedo_delta_e_median": colour,
+     "resampled_actions": resampled}
 if PROP:
     W = info.get("weapon", {})
     R.update({"weapon_meshes": W.get("static_meshes", 0), "weapon_point_error_mm": W.get("point_error_mm"),
