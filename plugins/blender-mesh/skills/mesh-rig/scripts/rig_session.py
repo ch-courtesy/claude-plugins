@@ -22,7 +22,7 @@ from mathutils import Matrix, Vector
 from mathutils.kdtree import KDTree
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pose_rules import auto_raise, driven_rotations  # noqa: E402
+from pose_rules import apply_driven, auto_raise, driven_rotations  # noqa: E402
 
 
 def read_json(*args, **kwargs):
@@ -549,15 +549,14 @@ def set_pose(rots):
         if base in FOLLOW:
             h_, share = FOLLOW[base]
             expanded.append((f"{h_}.{side}" if side else h_, axis, deg * share))
-    for name, axis, deg in list(expanded):             # corrective bones driven by others ("driven_by")
-        for d_, share in DRIVEN.get(name, []):
-            expanded.append((d_, axis, deg * share))
     for name, axis, deg in sorted(expanded, key=lambda x: order[x[0]]):
         pb = rig.pose.bones[name]
         h = pb.matrix.translation.copy()
         R = Matrix.Rotation(math.radians(deg), 4, Vector(axis).normalized())
         pb.matrix = Matrix.Translation(h) @ R @ Matrix.Translation(-h) @ pb.matrix
         bpy.context.view_layer.update()
+    if DRIVEN:                                         # corrective bones ("driven_by"), as the bake does
+        apply_driven(rig, SPEC["bones"], bpy.context.view_layer.update)
     if AUTO_RAISE:                                     # a clavicle lifts once its arm passes the horizontal
         LIFTED.update(auto_raise(rig, SPEC["bones"], bpy.context.view_layer.update))
 

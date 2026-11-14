@@ -27,7 +27,7 @@ from motion_metrics import overlap_metrics, pops, spacing_crest, spikes, strike_
 from prop_attach import carry_matrix  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                                 "mesh-rig", "scripts"))
-from pose_rules import auto_raise, driven_rotations  # noqa: E402
+from pose_rules import apply_driven, auto_raise, driven_rotations  # noqa: E402
 
 
 def read_json(*args, **kwargs):
@@ -93,19 +93,10 @@ RAISES = any(b.get("auto_raise") for b in RIG["bones"])
 
 def apply_pose_rules():
     """The rig's own pose rules (mesh-rig pose_rules.py), after the body is posed and before cloth and keys: a bone
-    "driven_by" another takes its share of that bone's turn from rest, then a clavicle with "auto_raise" lifts
+    "driven_by" another takes its share of that bone's turn against its parent (pose_rules.apply_driven), then a clavicle with "auto_raise" lifts
     once its arm passes the horizontal. A rig without these keys poses exactly as before."""
-    for src, lst in DRIVEN.items():
-        if src not in rig.pose.bones:
-            continue
-        pb = rig.pose.bones[src]
-        q = (pb.matrix.to_3x3().normalized() @ pb.bone.matrix_local.to_3x3().inverted()).to_quaternion()
-        axis, ang = q.to_axis_angle()
-        if ang > math.pi:
-            ang -= 2 * math.pi
-        for d, share in lst:
-            if d in rig.pose.bones:
-                turn(d, axis[:], math.degrees(ang) * share)
+    if DRIVEN:
+        apply_driven(rig, RIG["bones"], update)
     if RAISES:
         auto_raise(rig, RIG["bones"], update)
 
@@ -740,6 +731,7 @@ def posed(name):
     for side in "LR":
         at, pitch = foot_key(name, side)
         solve_leg(side, Matrix.Rotation(math.radians(yaw), 3, "Z") @ (rest_ankle[side] + at), pitch, yaw=yaw)
+    apply_pose_rules()                                 # as every baked frame, or a raised shoulder reads as a miss
     V = evaluated()
     rig.animation_data.action = action
     return V

@@ -4,6 +4,7 @@ that poses a mesh-rig character (rig_session.py; an animation or a measuring scr
   auto_raise(rig, spec_bones, update)   a bone with "auto_raise" (a clavicle) lifts when its arm passes
                                         the horizontal, measured by where the elbow is, not the hand
   driven_rotations(spec_bones)          {source bone: [(driven bone, share)]} from "driven_by"
+  apply_driven(rig, spec_bones, update) turn each driven bone by its share of its source's turn
 
 Both are no-ops for a spec that does not use the keys, so older rigs pose exactly as before.
 """
@@ -95,4 +96,34 @@ def driven_rotations(spec_bones):
             for src in b.get("driven_by", []):
                 s = _named(src["bone"], side) if side and src["bone"].endswith(".L") else src["bone"]
                 out.setdefault(s, []).append((name, src.get("share", 0.5)))
+    return out
+
+
+def apply_driven(rig, spec_bones, update):
+    """Turn every "driven_by" bone by `share` of its source's turn, after the pose's own rotations. The source's
+    turn is taken against the bone it hangs from (its pose against its rest, both in the parent's frame), so a
+    parent's turn, which a driven child of that parent already inherits, is not counted twice. The rig check
+    (rig_session.py) and the bake (anim_session.py) both call this, so a corrective shape passed in the check is
+    the one the motions bake (2026-11-14: the check used only the rotations written in a pose, the bake the
+    source's whole turn from rest, parent included)."""
+    out = {}
+    for src, lst in driven_rotations(spec_bones).items():
+        pb = rig.pose.bones.get(src)
+        if pb is None:
+            continue
+        par = pb.parent
+        Mp = par.matrix.to_3x3().normalized() if par else Matrix.Identity(3)
+        Mp_rest = par.bone.matrix_local.to_3x3().normalized() if par else Matrix.Identity(3)
+        local_pose = Mp.inverted() @ pb.matrix.to_3x3().normalized()
+        local_rest = Mp_rest.inverted() @ pb.bone.matrix_local.to_3x3().normalized()
+        axis, ang = (local_pose @ local_rest.inverted()).to_quaternion().to_axis_angle()
+        if ang > math.pi:
+            ang -= 2 * math.pi
+        if abs(ang) < 1e-9:
+            continue
+        world_axis = (Mp @ axis).normalized()
+        for d, share in lst:
+            if d in rig.pose.bones:
+                _turn(rig, d, world_axis[:], math.degrees(ang) * share, update)
+                out[d] = out.get(d, 0.0) + math.degrees(ang) * share
     return out
