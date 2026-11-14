@@ -47,7 +47,7 @@
       "name": "recipe",
       "source": "./plugins/recipe",
       "description": "아이디어의 intent.md 프로토-스펙 캡처(intent), 다단계 작업의 워크플로 스킬 컴파일(pipeline·skill)과 정적 검증(pipecheck)·그 바이너리 빌드(pipecheck-build), Advisor 감독 워크플로, 외부 에이전트 원샷 실행 래퍼, codex-review CI 시크릿 재시드를 제공하는 에이전트 협업 도구 모음",
-      "version": "1.2.1",
+      "version": "1.2.2",
       "category": "productivity",
       "tags": [
         "intent",
@@ -90,7 +90,7 @@
       "name": "blog-craft",
       "source": "./plugins/blog-craft",
       "description": "블로그 글을 현업 10년차 시니어 수준으로 끌어올리는 품질 공정: 주제 관문(독자·검색어·경쟁 글), 첨부 실행 시험(재실행·복원 시 원본 보존, 다운로드 해시 대조), codex·claude·agy 교차 리뷰, 23항목 채점, 근거 확인 반영",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "category": "productivity",
       "tags": [
         "blog",
