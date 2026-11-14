@@ -7,5 +7,13 @@
     "email": "ch.courtesy@gmail.com"
   },
   "license": "MIT",
-  "keywords": ["blog", "writing", "review", "rubric", "quality", "seo", "technical-writing"]
+  "keywords": [
+    "blog",
+    "writing",
+    "review",
+    "rubric",
+    "quality",
+    "seo",
+    "technical-writing"
+  ]
 }
