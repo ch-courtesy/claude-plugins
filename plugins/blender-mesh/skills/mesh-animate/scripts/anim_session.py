@@ -23,8 +23,11 @@ import numpy as np
 from mathutils import Matrix, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from motion_metrics import overlap_metrics, pops, spacing_crest, spikes, strike_metrics  # noqa: E402
+from motion_metrics import overlap_metrics, pops, spacing_crest, spikes, strike_craft, strike_metrics  # noqa: E402
 from prop_attach import carry_matrix  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                                "mesh-rig", "scripts"))
+from pose_rules import auto_raise, driven_rotations  # noqa: E402
 
 
 def read_json(*args, **kwargs):
@@ -82,6 +85,29 @@ ARM_AXIS = {s: arm_axis(s) for s in "LR"}
 
 def update():
     bpy.context.view_layer.update()
+
+
+DRIVEN = driven_rotations(RIG["bones"])
+RAISES = any(b.get("auto_raise") for b in RIG["bones"])
+
+
+def apply_pose_rules():
+    """The rig's own pose rules (mesh-rig pose_rules.py), after the body is posed and before cloth and keys: a bone
+    "driven_by" another takes its share of that bone's turn from rest, then a clavicle with "auto_raise" lifts
+    once its arm passes the horizontal. A rig without these keys poses exactly as before."""
+    for src, lst in DRIVEN.items():
+        if src not in rig.pose.bones:
+            continue
+        pb = rig.pose.bones[src]
+        q = (pb.matrix.to_3x3().normalized() @ pb.bone.matrix_local.to_3x3().inverted()).to_quaternion()
+        axis, ang = q.to_axis_angle()
+        if ang > math.pi:
+            ang -= 2 * math.pi
+        for d, share in lst:
+            if d in rig.pose.bones:
+                turn(d, axis[:], math.degrees(ang) * share)
+    if RAISES:
+        auto_raise(rig, RIG["bones"], update)
 
 
 def reset():
@@ -317,6 +343,26 @@ def delay_of(name):
     return 0
 
 
+def delay_weight(f):
+    """How much of each bone's `delay` applies on frame f. Without `delay_window` the whole delay, always. With
+    `delay_window: [a, b, ramp]` the delay applies in full from frame a to b and fades in over the `ramp` frames
+    before a and out over the `ramp` frames after b (smoothstep), so a hips-first chain can drive the strike while
+    a jump's take-off and the recovery move as one. Keep |delay| * 1.5 / ramp under 1, or time runs backwards."""
+    win = W.get("delay_window")
+    if not win:
+        return 1.0
+    a, b, ramp = win
+
+    def smooth(x):
+        x = min(max(x, 0.0), 1.0)
+        return x * x * (3 - 2 * x)
+    if f < a:
+        return smooth(1 - (a - f) / ramp) if ramp > 0 else 0.0
+    if f > b:
+        return smooth(1 - (f - b) / ramp) if ramp > 0 else 0.0
+    return 1.0
+
+
 def key_at(t):
     """The two keys round time t and how far between them, eased."""
     keys = W["keys"]
@@ -335,7 +381,7 @@ def keys_body(f):
     for pb in rig.pose.bones:
         if leg_driven(pb.name):
             continue
-        t = f - delay_of(pb.name)
+        t = f - delay_of(pb.name) * delay_weight(f)
         if LOOP:
             t %= N
         t = min(max(t, keys[0]["frame"]), keys[-1]["frame"])
@@ -423,6 +469,26 @@ if old:
     bpy.data.actions.remove(old)
 track = {n: [] for n in W.get("track", [])}
 tip = [] if W.get("strike") and CARRY else None
+
+
+def weapon_side(prefix):
+    """The bone named prefix.* that the weapon's bone hangs from (upper_arm.R for a cleaver in the right hand)."""
+    b = rig.data.bones.get(CARRY["bone"]) if CARRY else None
+    while b is not None:
+        if b.name.split(".")[0] == prefix:
+            return b.name
+        b = b.parent
+    return None
+
+
+# a strike's body measures (strike_craft) need the edge's direction in the weapon's own frame ("edge" in the carry)
+CRAFT = None
+if tip is not None and CARRY.get("edge") and weapon_side("upper_arm") and "hips" in rig.pose.bones         and "chest" in rig.pose.bones:
+    _handle = Vector(W["strike"]["tip"]) - Vector(CARRY.get("grip_point") or (0, 0, 0))
+    _edge = Vector(CARRY["edge"]).normalized()
+    CRAFT = {"arm": weapon_side("upper_arm"), "hand": weapon_side("hand") or CARRY["bone"],
+             "edge": _edge, "normal": _handle.cross(_edge).normalized(),
+             "rows": {k: [] for k in ("normal", "edge", "shoulder", "hips_z", "hips", "chest", "arm", "hand")}}
 if W.get("strike") and not CARRY:
     sys.exit("[anim] a strike measures the weapon's point: pass the carry file (animate ... --carry carry.json)")
 ov = W.get("overlap")
@@ -432,6 +498,7 @@ held = {}                                              # bone -> its matrix in t
 last_q = {}
 for f in range(BAKE):
     contact = body(f % N)
+    apply_pose_rules()
     for c, s_ in zip(follow, series):
         if c.get("drag"):                              # cloth keeps the turn it had a few frames ago
             Qs = turning[c["drag_from"]]
@@ -456,6 +523,18 @@ for f in range(BAKE):
         track[n].append(list(rig.pose.bones[n].tail))
     if tip is not None:
         tip.append(list(carry_matrix(rig, CARRY, f, N) @ Vector(W["strike"]["tip"])))
+    if CRAFT:
+        R3 = carry_matrix(rig, CARRY, f, N).to_3x3().normalized()
+        rows, pb_ = CRAFT["rows"], rig.pose.bones
+        rows["normal"].append(list(R3 @ CRAFT["normal"]))
+        rows["edge"].append(list(R3 @ CRAFT["edge"]))
+        rows["shoulder"].append(list(pb_[CRAFT["arm"]].head))
+        rows["hips_z"].append(pb_["hips"].head.z)
+        qh, qc = pb_["hips"].matrix.to_quaternion(), pb_["chest"].matrix.to_quaternion()
+        qa, qd = pb_[CRAFT["arm"]].matrix.to_quaternion(), pb_[CRAFT["hand"]].matrix.to_quaternion()
+        for k, q in (("hips", qh), ("chest", qh.inverted() @ qc), ("arm", qc.inverted() @ qa),
+                     ("hand", qa.inverted() @ qd)):
+            rows[k].append(list(q))
     for n, values in rotation_track.items():
         pb = rig.pose.bones[n]
         q = pb.matrix.to_quaternion() @ pb.bone.matrix_local.to_quaternion().inverted()
@@ -625,6 +704,14 @@ else:
 if tip is not None:
     Q.update(strike_metrics(np.array(tip[:N]), sc.render.fps, st["impact"], start=st.get("from", 0),
                             end=st["impact"] + 3))
+if CRAFT:
+    rows = CRAFT["rows"]
+    leg_bone = rig.data.bones.get("thigh.L") or rig.data.bones.get("thigh")
+    Q.update(strike_craft(np.array(tip[:N]), rows["normal"][:N], rows["edge"][:N], rows["shoulder"][:N],
+                          rows["hips_z"][:N], leg_bone.head_local.z if leg_bone else 0.0,
+                          {k: rows[k][:N] for k in ("hips", "chest", "arm", "hand")}, sc.render.fps,
+                          kind=st.get("kind", "h"), start=st.get("from", 0), end=st["impact"] + 3,
+                          impact=st["impact"]))
 
 
 def evaluated():

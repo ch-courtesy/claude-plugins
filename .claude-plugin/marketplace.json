@@ -13,7 +13,7 @@
       "name": "blender-mesh",
       "source": "./plugins/blender-mesh",
       "description": "원화에서 Blender로 단계별 폴리곤 모델링·리깅·UV·텍스처·애니메이션·GLB 내보내기·Unreal 검사까지, 단계마다 고정 기준으로 채점하며 반복하는 스킬 모음",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "creative",
       "tags": [
         "blender",
