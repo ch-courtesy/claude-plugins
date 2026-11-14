@@ -90,7 +90,7 @@
       "name": "blog-craft",
       "source": "./plugins/blog-craft",
       "description": "블로그 글을 현업 10년차 시니어 수준으로 끌어올리는 품질 공정: 주제 관문(독자·검색어·경쟁 글), 첨부 실행 시험(재실행·복원 시 원본 보존, 다운로드 해시 대조), codex·claude·agy 교차 리뷰, 23항목 채점, 근거 확인 반영",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "category": "productivity",
       "tags": [
         "blog",
