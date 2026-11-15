@@ -326,6 +326,24 @@ def harmonic_fill(W, ids, loc, rule_at, harm, rules, P):
             else:
                 part[:, [c for c in range(M.shape[1]) if c not in own]] = 0.0
             rest_ = M[jj] - part if m is not seam else None
+            # the solve mixed weights that were already split parent -> helper -> child (the rule's own fixed
+            # vertices); undo that split first, half the helper back to the parent and half to the child, or the
+            # split below is applied twice (2026-11-16, PR review): a child share t gives the helper 1 - |1 - 2t|,
+            # so t = child + helper / 2
+            pn = nm(rule["chain"][0])
+            if pn not in names_:
+                names_.append(pn)
+                M = np.concatenate([M, np.zeros((len(M), 1))], 1)
+                part = np.concatenate([part, np.zeros((len(part), 1))], 1)
+                if rest_ is not None:
+                    rest_ = np.concatenate([rest_, np.zeros((len(rest_), 1))], 1)
+            pi = names_.index(pn)
+            if pi not in own:                          # a parent column made just now is this side's own
+                own.append(pi)
+            h_ = part[:, hi].copy()
+            part[:, pi] += h_ / 2
+            part[:, ci] += h_ / 2
+            part[:, hi] = 0.0
             tot = part.sum(1)
             t = part[:, ci] / np.maximum(tot, 1e-12)
             kid = np.clip(2 * t - 1, 0, 1)

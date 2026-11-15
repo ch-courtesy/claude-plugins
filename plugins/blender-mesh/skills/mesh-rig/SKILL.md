@@ -60,10 +60,13 @@ rules; Musoe's v2 and v3 attempts, and eight variants of their weights, failed o
    elbow failed at 2.7 times the bound in the sleeve at 90 degrees. A chain blend 0.10 m wide, 3.25 cm past the
    pivot, with the half-turn helper, inside an elbow region of five 4 cm walls: 0.6–0.8 from 60 to 140 degrees.
 2. *Let the shoulder's turn spread over the body.* The armpit region (body faces round the hole, and the shoulder top)
-   solved with `harmonic`, its `conduct` 0.1 against the sleeve's 1, so the blend runs out over the flank instead of
-   gathering at the apex; the shoulder pivot 2.5 cm below the arm's axis; `auto_raise` gentle (0.1, 6 degrees: more
-   lifted the apex with the clavicle); the torso's spine-to-chest step below the armpit, so a chest twist turns the
-   flank with it. With the geometry of box-modeling's continuous-body reference, the lab's worst pose was 0.94.
+   solved with `harmonic`, its `conduct` about a tenth of the sleeve's (Musoe: 0.085 against 0.5), so the blend runs
+   out over the flank instead of gathering at the apex; the shoulder pivot 2 cm below the arm's axis; `auto_raise`
+   gentle (0.1, 6 degrees: more lifted the apex with the clavicle); the torso's spine-to-chest step below the armpit,
+   so a chest twist turns the flank with it. The ring under the armpit's bottom must be held on the torso's chain by
+   a rule earlier in the spec (Musoe's "waist"): left to the trousers, the solve drew the hip bone up the flank and a
+   chest twist tore it. With the geometry of box-modeling's continuous-body reference, the lab's worst pose was 0.94
+   and Musoe's worst baked frame 0.996.
 3. *Find the faces, not the part.* Each pose's `stretch_at` lists the worst part's five most strained edges with their
    rest midpoints and lengths. A part's name alone sent the earlier attempts to tune weights for faults that were
    5 mm sliver rows and border faces.
