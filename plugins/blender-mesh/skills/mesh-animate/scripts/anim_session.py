@@ -20,14 +20,15 @@ import sys
 
 import bpy
 import numpy as np
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from motion_metrics import overlap_metrics, pops, spacing_crest, spikes, strike_craft, strike_metrics  # noqa: E402
 from prop_attach import carry_matrix  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                                 "mesh-rig", "scripts"))
-from pose_rules import apply_driven, auto_raise, driven_rotations  # noqa: E402
+from pose_rules import (align_hinge, apply_driven, apply_twist_helpers, auto_raise, driven_rotations,  # noqa: E402
+                        hinge_axis, joint_angles, joint_ranges, twist_helpers)
 
 
 def read_json(*args, **kwargs):
@@ -89,6 +90,12 @@ def update():
 
 DRIVEN = driven_rotations(RIG["bones"])
 RAISES = any(b.get("auto_raise") for b in RIG["bones"])
+TWISTS = bool(twist_helpers(RIG["bones"]))
+RANGES = joint_ranges(RIG["bones"])                  # (bone, its range): elbows, knees
+HINGES = {n: r["toward"] for n, r in RANGES if r.get("toward")}   # bone -> its hinge's fold direction at rest
+if not RANGES:
+    print("[anim] warning: the rig spec gives no joint ranges (\"bend_max\"), so no joint is checked for closing "
+          "past what the body allows")
 
 
 def apply_pose_rules():
@@ -99,6 +106,8 @@ def apply_pose_rules():
         apply_driven(rig, RIG["bones"], update)
     if RAISES:
         auto_raise(rig, RIG["bones"], update)
+    if TWISTS:                                         # helpers with "twist_share", from their source's swing and twist
+        apply_twist_helpers(rig, RIG["bones"], update)
 
 
 def reset():
@@ -178,7 +187,10 @@ def solve_leg(side, A, pitch, hang=0.0, yaw=0.0):
     axis = (A - H).normalized()
     pole = Matrix.Rotation(math.radians(yaw), 3, "Z") @ Vector((0, -1, 0))
     pole = (pole - axis * pole.dot(axis)).normalized()
-    aim(thigh, H + axis * along + pole * out_)
+    knee = H + axis * along + pole * out_
+    aim(thigh, knee)
+    if shin in HINGES:                                 # the thigh turned about itself so the knee folds as a hinge
+        align_hinge(rig, shin, HINGES[shin], pole.cross(axis), update)
     aim(shin, A)
     b = rig.pose.bones[shin]
     d_ = (b.tail - b.head).normalized()
@@ -261,7 +273,11 @@ def walk_body(f):
         ax = ARM_AXIS[side]
         swing = sign * amp * c1
         turn(f"upper_arm.{side}", (1, 0, 0), swing)
-        turn(f"forearm.{side}", ax, -(bend + 0.35 * amp * (1 - sign * c1) / 2))
+        if f"forearm.{side}" in HINGES:               # the elbow folds about its hinge as the swung arm carries it
+            turn(f"forearm.{side}", hinge_axis(rig, f"forearm.{side}", HINGES[f"forearm.{side}"])[:],
+                 bend + 0.35 * amp * (1 - sign * c1) / 2)
+        else:
+            turn(f"forearm.{side}", ax, -(bend + 0.35 * amp * (1 - sign * c1) / 2))
         out_ = W.get("carry_out", 0.0) if side == carry else 0.0
         turn(f"upper_arm.{side}", (0, 1, 0), (1 if side == "L" else -1) * (W.get("arm_down", 0.0) - out_))
     for r in W.get("hold", []):
@@ -366,25 +382,53 @@ def key_at(t):
     return k0, k1, EASE[k1.get("ease", W.get("ease", "inout"))](u)
 
 
+def swing_twist(q):
+    """A bone's local turn as (swing, twist): twist about the bone's own axis (local Y), then the swing that is left,
+    q = swing @ twist."""
+    tw = Quaternion((q.w, 0.0, q.y, 0.0))
+    if tw.magnitude < 1e-9:                            # a half turn square to the bone: no twist to take apart
+        tw = Quaternion()
+    tw.normalize()
+    return q @ tw.inverted(), tw
+
+
 def keys_body(f):
     reset()
     keys = W["keys"]
-    for pb in rig.pose.bones:
-        if leg_driven(pb.name):
-            continue
-        t = f - delay_of(pb.name) * delay_weight(f)
+    def between(t):
         if LOOP:
             t %= N
         t = min(max(t, keys[0]["frame"]), keys[-1]["frame"])
         k = min(max(i for i, x in enumerate(keys) if x["frame"] <= t), len(keys) - 2)
         k0, k1 = keys[k], keys[k + 1]
         u = (t - k0["frame"]) / max(k1["frame"] - k0["frame"], 1)
-        e = EASE[k1.get("ease", W.get("ease", "inout"))](u)
+        return k0, k1, EASE[k1.get("ease", W.get("ease", "inout"))](u)
+
+    for pb in rig.pose.bones:
+        if leg_driven(pb.name):
+            continue
+        k0, k1, e = between(f - delay_of(pb.name) * delay_weight(f))
         q0, l0 = POSES[k0["pose"]][pb.name]
         q1, l1 = POSES[k1["pose"]][pb.name]
         if q0.dot(q1) < 0:                              # the same turn, taken the short way round
             q1 = -q1
-        pb.rotation_quaternion = q0.slerp(q1, e)
+        if pb.name in HINGES:
+            # (2026-11-15) a hinge's turn is its fold and its twist about itself, each eased on its own: one slerp of
+            # both bent a forearm 27-30 degrees out of its hinge between two keys that were both in it
+            (s0, w0), (s1, w1) = swing_twist(q0), swing_twist(q1)
+            if s0.dot(s1) < 0:
+                s1 = -s1
+            if w0.dot(w1) < 0:
+                w1 = -w1
+            pb.rotation_quaternion = s0.slerp(s1, e) @ w0.slerp(w1, e)
+        else:
+            pb.rotation_quaternion = q0.slerp(q1, e)
+        if W.get("delay_turns_only") and delay_of(pb.name):
+            # (2026-11-15) the delay leads or lags a bone's turn only: its place keeps the motion's own time, as the
+            # feet do. A hips delay of -2 dropped the hips of a landing two frames before the feet came down, and
+            # the knees folded to 172 degrees (the joint range gate)
+            k0, k1, e = between(f)
+            l0, l1 = POSES[k0["pose"]][pb.name][1], POSES[k1["pose"]][pb.name][1]
         pb.location = l0.lerp(l1, e)
     update()
     k0, k1, e = key_at(f)
@@ -485,11 +529,18 @@ if W.get("strike") and not CARRY:
 ov = W.get("overlap")
 rotation_track = {ov[k]: [] for k in ("driver", "follower")} if ov else {}
 frames = []
+bends = {}                                             # bone -> (least bend, most bend, (excess, frame, bend, side))
 held = {}                                              # bone -> its matrix in the hand's frame, from the grab
 last_q = {}
 for f in range(BAKE):
     contact = body(f % N)
     apply_pose_rules()
+    if RANGES and f < N:                               # how far each ranged joint closes, and which way, every frame
+        for bn_, (deg_, side_, ex_) in joint_angles(rig, RANGES).items():
+            lo_, hi_, worst_ = bends.get(bn_, (deg_, deg_, None))
+            if worst_ is None or ex_ > worst_[0]:
+                worst_ = (ex_, f, deg_, side_)
+            bends[bn_] = (min(lo_, deg_), max(hi_, deg_), worst_)
     for c, s_ in zip(follow, series):
         if c.get("drag"):                              # cloth keeps the turn it had a few frames ago
             Qs = turning[c["drag_from"]]
@@ -754,13 +805,20 @@ if root_path:
     travel = {"root_path": root_path, "travel_m": float(np.linalg.norm(rp[-1] - rp[0])),
               "travel_top_speed_m_s": float(step_.max()) if len(step_) else 0.0}
 
+range_of = dict(RANGES)
+worst_joint = max(bends, key=lambda n: (bends[n][2][0], bends[n][1])) if bends else None
+_wj = bends[worst_joint][2] if worst_joint else None
+joint_range = {"joint_range_excess_deg": _wj[0] if worst_joint else 0.0,
+               "joint_bend_deg": {n: [round(lo, 2), round(hi, 2)] for n, (lo, hi, _) in bends.items()},
+               "joint_range_at": ({"bone": worst_joint, "frame": _wj[1], "bend_deg": _wj[2], "side_deg": _wj[3],
+                                   "range": range_of[worst_joint]} if worst_joint else None)}
 R = {"name": NAME, "kind": KIND, "frames": N, "fps": sc.render.fps, "speed_m_s": speed, "stride_m": S,
      "loop": LOOP, "duration_s": N / sc.render.fps, "pop_spike_ratio": spike, "spike_at": spike_at,
      "end_pose_mm": end_pose_mm, "frames_no_foot_down": no_foot_down, "pop_exempt_frames": sorted(exempt),
      **travel,
      "ik_out_of_reach": clamped[0], "foot_slide_mm": slide * 1000, "ground_penetration_mm": penetration * 1000,
      "stance_float_mm": floating * 1000, "cycle_closure_mm": closure * 1000, "pop_mm_per_frame2": accel * 1000,
-     "pop_at": pop_at, "quality": Q}
+     "pop_at": pop_at, **joint_range, "quality": Q}
 sc.frame_set(1)
 bpy.context.preferences.filepaths.save_version = 0
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(out, "motion.blend"))
@@ -774,4 +832,10 @@ with open(os.path.join(out, "report.json"), "w", encoding="utf-8") as fh:
 print(f"[anim] {NAME}: {N} frames; slide {R['foot_slide_mm']:.1f}, under {R['ground_penetration_mm']:.1f}, float "
       f"{R['stance_float_mm']:.1f}, closure {R['cycle_closure_mm']:.2f}, pop {R['pop_mm_per_frame2']:.1f} "
       f"({pop_at['material']} f{pop_at['frame']}), out of reach {clamped[0]}")
+if worst_joint:
+    ja = R["joint_range_at"]
+    rg = ja["range"]
+    print(f"[anim] joints: worst {ja['bone']} at f{ja['frame']}: bend {ja['bend_deg']:.1f} (range "
+          f"{rg.get('min', 0):.0f}..{rg['max']:.0f}), off its hinge {ja['side_deg']:.1f} (most {rg.get('side', 180):.0f}); "
+          f"past its range by {R['joint_range_excess_deg']:.1f}")
 print("[anim] quality:", {k: (round(v, 3) if isinstance(v, float) else v) for k, v in Q.items()})

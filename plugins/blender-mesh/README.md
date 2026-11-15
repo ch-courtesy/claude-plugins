@@ -14,6 +14,12 @@
 거는 `delay_window`, 이어진 몸통·바지(`box-modeling/references/continuous-body.md`), 쇄골 자동 상승과
 보정 본(`mesh-rig`), Unreal이 동작을 30 fps로 다시 샘플링할 때의 경고(`mesh-export`)를 더했습니다.
 
+0.4.0은 이어진 관절을 다룹니다: 어깨·팔꿈치·무릎을 겹친 부품이 아닌 한 장의 피부로 굽히는 규칙(조화 보간
+웨이트, 관절 영역 양 끝의 단단한 칸, 겨드랑이 영역과 전도도, `mesh-rig`의 "Joined joints"), 관절 가동 범위
+게이트(`bend_max`·`bend_toward`: 너무 접히거나 거꾸로·옆으로 꺾인 관절), IK와 굽기가 경첩 평면을 지키게 하는
+처리(`pose_rules.align_hinge`, 경첩 본의 굽힘·비틀림 분리 보간, 다리 IK와 걷기 팔꿈치), 회전에만 지연을 거는
+`delay_turns_only`, 리그 보고서의 `stretch_at`(가장 나쁜 부위에서 가장 늘어난 모서리의 위치)을 더했습니다.
+
 ## 설치
 
 ```
