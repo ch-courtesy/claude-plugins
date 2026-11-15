@@ -34,12 +34,22 @@ The hole goes on a 2 x 2 patch of the body's faces (8 border vertices, the limb 
 the patch spans the hole's height, or vertices are dragged across a ring and the faces fold. The lofted rings stay on
 the drawn surface where it bulges (a deltoid), never go inside the body (`inside`), and keep `min_step` apart on the
 short side of a limb that leaves at an angle (without it the armpit rings bunched into a crease).
-Musoe's silhouette held (front IoU 0.970, side 0.967), but the rig did not: an A-posed arm (40° down) raised
-120–170 degrees must stretch the armpit about 90% on average, and the gate's per-part stretch bound was exceeded
-3.7 times. Use it for limbs that stay near their rest angle, or a T-pose, or a design with a big armpit. Otherwise
-keep the sleeve as a tube deep inside the torso and let the clavicle carry it (mesh-rig `auto_raise`).
+Musoe's silhouette held (front IoU 0.970, side 0.967). The first rigs failed (the armpit at 1.8–3.7 times the
+stretch bound), and the 2026-11-13 conclusion was that an A-posed arm cannot be joined. That was wrong: an arm lab
+(Musoe's torso and one arm, 2026-11-16) passed every test pose to 170 degrees once the geometry stopped feeding the
+stretch into a few tiny faces. Build the hole and rings so:
+- **Keep the hole clear of the body's rings**, about 3 cm or more above and below. A hole whose top and bottom ran to
+  5 mm off the rings at its patch's border left sliver rows at the armpit's apex and the shoulder top; those rows
+  took the whole shoulder's stretch (4 times over). Musoe: half height 0.12 → 0.09 between rings 1.15 and 1.40.
+- **Space the lofted rings evenly** (`at=[0.2, 0.4, 0.6, 0.8]`); a first ring at 0.15 sat 1.8 cm from the hole on
+  the short underside.
+- **Give the rig room**: name an armpit region of body faces round the hole that also takes the shoulder top, so
+  the weights can spread the turn over the flank and the shoulder (mesh-rig, "Joined joints").
+The rig settings that go with it are in mesh-rig.
 
 ## Elbow and knee at a cuff or hem
-On Musoe the rolled cuff and the gathered hem sit on the elbow and knee. Blending across them stretched the cuff and
-hem 110–150% and failed the gate, so they stay overlaps, rigid on each side. A joint that must bend smoothly needs the
-clothing border away from it and 3 rings across it (rubric M2).
+A cuff or hem on the joint can be one tube with the limb: model it as a bulge of the same rings. What failed on
+Musoe v3 (110–150%, then 2.7 times the bound at 90 degrees) was the ring spacing: rings 1.7–5 cm apart round the
+pivot (the cuff's bulge and lip) put the bend into the shortest walls. Rings about 4 cm apart across the joint, the
+bulge kept, passed to 140 degrees. Name the joint's region one wall wider than the blend at each end (mesh-rig keeps
+those walls rigid), so the faces outside it never see a moving ring.

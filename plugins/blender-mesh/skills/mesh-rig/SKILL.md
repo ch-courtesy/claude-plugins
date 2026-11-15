@@ -35,21 +35,52 @@ Apply the mirror first (`mirror` with `"mode":"apply"`, last line of the plan). 
 | part `"measure_as": part` | measure this region's stretch with another region | a rigid strip (a crotch on its own bone) has no bend bound of its own; its stretch belongs to the trouser legs it joins |
 | bone `"auto_raise": {"arm", "from_deg", "ratio", "max_deg", "soft_deg", "keep_arm"}` | a clavicle lifts by `ratio` of the angle the arm's elbow is above `from_deg` past the horizontal, easing in over `soft_deg` (default 20) and saturating towards `max_deg` (tanh), so neither end kinks; with keep_arm (default) the arm is turned back so it keeps its pose direction | shoulders rise when arms go overhead; measured from the elbow, not the hand, as riggers do. Musoe: 0.35, 18° → the shoulder top rises 2.7 cm at 170° |
 | bone `"driven_by": [{"bone", "share"}]` | a corrective leaf bone takes `share` of each source's world rotation (negative turns against it) | a crotch bone between both thighs. One share cannot serve one leg and both legs: Musoe's crotch line moved 3.6 cm at share 0 and 2.5 cm at −0.1, but −0.05 already over-stretched the squat |
+| bone `"bend_max": deg` | the most the joint at this bone's head may close: degrees between the bone and its parent, 0 = in line. The bake reports how far past it any frame goes, and the animation gates fail on any excess (`joint_range_excess_deg`) | an elbow folded past what the arm allows hides inside overlapping parts but cannot be skinned. Give the forearm and the shin one: Musoe uses elbow 140, knee 150 |
+| bone `"bend_toward": [x, y, z]` (with `bend_max`) | the joint is a hinge: at rest, the world direction this bone swings when the joint closes (mirrored in x on .R). The bend is then signed about the hinge axis, which rides on the parent, so a parent turned about itself turns the hinge with it; `"bend_min"` (default −10) limits a bend the wrong way and `"side_max"` (default 20) a fold out of the hinge's plane | an IK that aims each bone the shortest way leaves the parent's own turn to chance: Musoe's arms had elbows bent 112° backwards and 78° sideways, unseen with rigid parts. With it the bake also keeps hinges in their plane (see mesh-animate) |
 
 The pose rules live in `scripts/pose_rules.py` so every script that poses a rig (an animation bake, a measuring
 script) can apply them the same way; rig_session applies them to every spec pose, never to baked frames. A pose
 report gains `auto_raise_deg` when the spec uses the rule.
 
+A script that solves a limb by IK (a pose kit that places a hand) should turn the limb's root about itself with
+`pose_rules.align_hinge(rig, child, toward, p × u, update)` after aiming it, where p is the pole (the side the
+elbow or knee points to) and u the root-to-end line: the hinge is then p × u however far the limb is bent, so a
+nearly straight limb gets a defined turn too. `hinge_roll` gives the turn without making it; keep it within what
+the joint allows (about ±90° for a shoulder) by swinging the pole round u. `scripts/test_pose_rules.py` checks the
+rules on a two-bone arm (`blender -b --factory-startup --python test_pose_rules.py`).
+
 **Measuring a joined piece.** With region parts, stretch, folds and area are measured per (region, side): a body
 measured as one piece would hide an armpit in the average. Volume stays per piece. The symmetry check compares a
 vertex's X.L with its mirror's X.R, since a vertex in a side band legitimately holds both.
 
-**What joining costs (Musoe v2, 2026-11-13).** One-piece trousers joined to the torso passed every gate. A sleeve
-grown out of the torso of an A-posed arm (40° down) did not: raising it 120–170° must stretch the armpit about 90% on
-average however the weights are spread (the hand travels ~0.5 m against ~0.3 m of skin), and the per-region
-stretch reached 3.7 times the bound. Bending a deep sleeve overlap on the clavicle instead lost 26–39% of the
-sleeve's volume. A blend across a rolled cuff or gathered hem that sits on the joint stretched it 110–150%. For such
-a design keep the overlap at the clothing border, rigid on each side, and let the clavicle carry the sleeve.
+**Joined joints (arm lab, 2026-11-16).** A limb joined to the body bends as one skin when the weights obey three
+rules; Musoe's v2 and v3 attempts, and eight variants of their weights, failed only for want of them.
+1. *Blend only inside the joint's region, one rigid wall short of each end.* Subdivision moves a face from the cage
+   rings round it, so a face just outside a blend stretches with it while its own part's bound has no bend: v3's
+   elbow failed at 2.7 times the bound in the sleeve at 90 degrees. A chain blend 0.10 m wide, 3.25 cm past the
+   pivot, with the half-turn helper, inside an elbow region of five 4 cm walls: 0.6–0.8 from 60 to 140 degrees.
+2. *Let the shoulder's turn spread over the body.* The armpit region (body faces round the hole, and the shoulder top)
+   solved with `harmonic`, its `conduct` 0.1 against the sleeve's 1, so the blend runs out over the flank instead of
+   gathering at the apex; the shoulder pivot 2.5 cm below the arm's axis; `auto_raise` gentle (0.1, 6 degrees: more
+   lifted the apex with the clavicle); the torso's spine-to-chest step below the armpit, so a chest twist turns the
+   flank with it. With the geometry of box-modeling's continuous-body reference, the lab's worst pose was 0.94.
+3. *Find the faces, not the part.* Each pose's `stretch_at` lists the worst part's five most strained edges with their
+   rest midpoints and lengths. A part's name alone sent the earlier attempts to tune weights for faults that were
+   5 mm sliver rows and border faces.
+
+Keys of the joined-joint rules (part keys unless noted; a spec without them rigs as before):
+| key | meaning |
+|---|---|
+| `"harmonic": 1` (2: biharmonic) | the region's weights solved along the surface between its neighbours' (each vertex the mean of its cage neighbours) |
+| `"helper"` + `"child"` with `harmonic` | the solved blend split parent → half-turn helper → child |
+| `"free_arc": [lo, hi]` | only the stretch of the rule's chain between lo and hi metres is solved; the rest keeps the chain's weights |
+| `"pivot"`, `"pivot_power"` | edges conduct in proportion to (distance from that bone's head) ** power: the blend gathers near the joint (power 1 was best for a shoulder; negative is worse) |
+| `"conduct"` | a factor on the conductance of the region's own edges: below 1 the region takes more of the blend |
+| bone `"follows"` + `"twist_share"` | the helper takes `share` of its source's swing and `twist_share` of its twist (a forearm turned 180° about itself must not twist the elbow) |
+
+**What joining cost before (Musoe v2, 2026-11-13).** Grown out of the torso of an A-posed arm (40° down), with rings
+bunched at the armhole and a blend reaching its region's borders, the sleeve stretched 3.7 times the bound; a deep
+sleeve overlap bent on the clavicle lost 26–39% of its volume. Both are superseded by the rules above.
 
 Weights are computed, not bone-heat: automatic weights are unreliable on overlapping separate
 parts, and this way they are predictable and exactly symmetric.

@@ -5,12 +5,25 @@ that poses a mesh-rig character (rig_session.py; an animation or a measuring scr
                                         the horizontal, measured by where the elbow is, not the hand
   driven_rotations(spec_bones)          {source bone: [(driven bone, share)]} from "driven_by"
   apply_driven(rig, spec_bones, update) turn each driven bone by its share of its source's turn
+  apply_twist_helpers(rig, spec_bones, update)
+                                        a helper with "follows" and "twist_share" is set from its source's turn,
+                                        swing and twist taken apart (added 2026-11-15)
+  joint_ranges(spec_bones)              [(bone, range)] for every bone with "bend_max" (added 2026-11-15)
+  joint_angles(rig, ranges)             {bone: (bend, side, excess)}: how far each ranged joint closes, which way,
+                                        and how far past its range it is
+  hinge_axis(rig, child, toward)        the hinge's axis in the world as the parent stands: a turn about it by a
+                                        positive angle folds the child towards "bend_toward"
+  hinge_roll(rig, child, toward, parent_dir, want)
+                                        how far a hinge's parent must turn about itself for the hinge's axis to lie
+                                        along want (p x u for an IK with pole p and root-to-end line u)
+  align_hinge(rig, child, toward, want, update)
+                                        turn the parent about itself by that much (an IK's knee or elbow)
 
-Both are no-ops for a spec that does not use the keys, so older rigs pose exactly as before.
+All are no-ops for a spec that does not use the keys, so older rigs pose exactly as before.
 """
 import math
 
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 
 def _sides(b):
@@ -127,3 +140,152 @@ def apply_driven(rig, spec_bones, update):
                 _turn(rig, d, world_axis[:], math.degrees(ang) * share, update)
                 out[d] = out.get(d, 0.0) + math.degrees(ang) * share
     return out
+
+
+def twist_helpers(spec_bones):
+    """[(helper, source, share, twist_share)] for every bone with "follows" and "twist_share", in spec order, both
+    sides of a mirrored bone. A source named without a side follows the helper's side."""
+    out = []
+    for b in spec_bones:
+        if b.get("follows") is None or b.get("twist_share") is None:
+            continue
+        for name, side in _sides(b):
+            out.append((name, _named(b["follows"], side), float(b.get("share", 0.5)), float(b["twist_share"])))
+    return out
+
+
+def apply_twist_helpers(rig, spec_bones, update):
+    """Set every helper with "twist_share" from its source's turn (2026-11-15, Musoe v3's joined arm and leg).
+
+    The source's turn is taken against the helper's own parent (rest to pose), then split into its twist about the
+    source's own rest axis and the swing that is left. The helper gets `share` of the swing and `twist_share` of the
+    twist, about the source's head, and rides on its parent. Run after every other rule (auto_raise moves the arm).
+
+    Why: a plain "follows" helper turns by its share of every rotation given to its source, twist included. An elbow
+    helper of a forearm that twists 180 degrees (a cleaver turned edge-down) then twists the elbow's skin by 90 and
+    collapses it; a helper with twist_share 0 bends with the elbow and never twists. Because only the swing is taken,
+    a twist near 180 degrees, whose sign is ambiguous, cannot make the helper jump. Returns {helper: degrees}."""
+    out = {}
+    for h, src, share, tws in twist_helpers(spec_bones):
+        ph, ps = rig.pose.bones.get(h), rig.pose.bones.get(src)
+        if ph is None or ps is None:
+            continue
+        par = ph.parent
+        Mp = par.matrix.copy() if par else Matrix.Identity(4)
+        Mp_rest = par.bone.matrix_local.copy() if par else Matrix.Identity(4)
+        s_pose = Mp.inverted() @ ps.matrix                     # the source in the helper's parent frame
+        s_rest = Mp_rest.inverted() @ ps.bone.matrix_local
+        q = (s_pose.to_3x3().normalized() @ s_rest.to_3x3().normalized().inverted()).to_quaternion()
+        if q.w < 0:
+            q = -q
+        axis = (s_rest.to_3x3().normalized() @ Vector((0, 1, 0))).normalized()
+        along = q.x * axis.x + q.y * axis.y + q.z * axis.z
+        tw = Quaternion((q.w, axis.x * along, axis.y * along, axis.z * along))
+        if tw.magnitude < 1e-9:                            # a half turn about an axis square to the source
+            tw = Quaternion()
+        tw.normalize()
+        swing = q @ tw.inverted()
+        target = Quaternion().slerp(swing, share) @ Quaternion().slerp(tw, tws)
+        pivot = s_rest.translation
+        R = Matrix.Translation(pivot) @ target.to_matrix().to_4x4() @ Matrix.Translation(-pivot)
+        ph.matrix = Mp @ R @ Mp_rest.inverted() @ ph.bone.matrix_local
+        update()
+        out[h] = math.degrees(target.angle)
+    return out
+
+
+def joint_ranges(spec_bones):
+    """[(bone, range)] for every bone with "bend_max", both sides of a mirrored bone. The range is a dict:
+      max     "bend_max": the most the joint may close, degrees between the bone and its parent (0 = in line)
+      toward  "bend_toward": at rest, the world direction the bone swings when the joint closes ([0, -1, 0] for an
+              elbow whose forearm folds forward); mirrored in x on the .R side. With it the joint is a hinge: the
+              bend is signed about the hinge axis that rides on the parent, and two more limits apply:
+      min     "bend_min" (default -10): a bend the wrong way past this is out of range
+      side    "side_max" (default 20): how far the bone may leave the hinge's plane, degrees
+    An elbow is a forearm's range, a knee a shin's."""
+    out = []
+    for b in spec_bones:
+        if b.get("bend_max") is None:
+            continue
+        for name, side in _sides(b):
+            r = {"max": float(b["bend_max"])}
+            if b.get("bend_toward") is not None:
+                t_ = list(b["bend_toward"])
+                if side == "R":
+                    t_[0] = -t_[0]
+                r.update(toward=t_, min=float(b.get("bend_min", -10.0)), side=float(b.get("side_max", 20.0)))
+            out.append((name, r))
+    return out
+
+
+def joint_angles(rig, ranges):
+    """{bone: (bend, side, excess)} in the current pose for (bone, range) pairs from joint_ranges. bend is degrees
+    between the bone and its parent; for a hinge ("toward") it is signed about the hinge axis, which is fixed in the
+    parent bone (so an upper arm that turns about itself turns the elbow's hinge with it), and side is how far the
+    bone has left the hinge's plane. excess is how far past the range the joint is (0 inside it).
+
+    Why (2026-11-15, Musoe v3): the bake never asked how far a joint closed, nor which way. With overlapping rigid
+    parts an off-hand folded to 174 degrees, and an elbow bent 112 degrees backwards, only sank one part into the
+    other, unseen; joined skin cannot follow either. A bone with no parent is skipped."""
+    out = {}
+    for name, r in ranges:
+        pb = rig.pose.bones.get(name)
+        if pb is None or pb.parent is None:
+            continue
+        par = pb.parent
+        p = (par.tail - par.head).normalized()
+        c = (pb.tail - pb.head).normalized()
+        if r.get("toward") is None:
+            bend = math.degrees(c.angle(p, 0.0))
+            out[name] = (bend, 0.0, max(0.0, bend - r["max"]))
+            continue
+        c_rest = (pb.bone.tail_local - pb.bone.head_local).normalized()
+        h_rest = c_rest.cross(Vector(r["toward"]))
+        if h_rest.length < 1e-6:
+            raise ValueError(f"{name}: bend_toward lies along the bone at rest")
+        h_par = par.bone.matrix_local.to_3x3().inverted() @ h_rest.normalized()
+        h = (par.matrix.to_3x3() @ h_par).normalized()
+        bend = math.degrees(math.atan2(p.cross(c).dot(h), p.dot(c)))
+        side = math.degrees(math.asin(max(-1.0, min(1.0, c.dot(h)))))
+        out[name] = (bend, side, max(0.0, bend - r["max"], r["min"] - bend, abs(side) - r["side"]))
+    return out
+
+
+def hinge_axis(rig, child, toward):
+    """The hinge axis of `child`'s joint in the world, riding on its parent as the parent stands; a turn of the child
+    about it by a positive angle folds the child towards `toward` (its "bend_toward")."""
+    pb = rig.pose.bones[child]
+    par = pb.parent
+    h = (pb.bone.tail_local - pb.bone.head_local).normalized().cross(Vector(toward)).normalized()
+    return (par.matrix.to_3x3() @ (par.bone.matrix_local.to_3x3().inverted() @ h)).normalized()
+
+
+def hinge_roll(rig, child, toward, parent_dir, want):
+    """Degrees the parent of hinge `child` must turn about its own axis, once turned the shortest way to parent_dir,
+    for the hinge (given by the child's "bend_toward" `toward`, as joint_ranges gives it) to lie along `want`. For a
+    two-bone IK with the joint towards pole p off the root-to-end line u, the hinge is p x u however far the limb is
+    bent, so a nearly straight limb gets its turn from the pole as well (taken from the bent child instead, it swung
+    from frame to frame as a stance leg straightened). None when `want` lies along the parent."""
+    par = rig.pose.bones[child].parent
+    a = Vector(parent_dir).normalized()
+    want = Vector(want)
+    want = want - a * want.dot(a)
+    if want.length < 1e-6:
+        return None
+    h = (par.tail - par.head).normalized().rotation_difference(a) @ hinge_axis(rig, child, toward)
+    want.normalize()
+    return math.degrees(math.atan2(h.cross(want).dot(a), h.dot(want)))
+
+
+def align_hinge(rig, child, toward, want, update):
+    """Turn the parent of hinge `child` about its own axis so the hinge lies along `want` (p x u, see hinge_roll);
+    call it after the parent is aimed and before the child is (2026-11-15). Aiming each bone the shortest way leaves
+    the parent's own turn to chance, so a knee or an elbow can fold sideways or backwards, which skin cannot follow.
+    Returns the degrees turned, or None."""
+    par = rig.pose.bones[child].parent
+    a = (par.tail - par.head).normalized()
+    ang = hinge_roll(rig, child, toward, a, want)
+    if ang is None:
+        return None
+    _turn(rig, par.name, a[:], ang, update)
+    return ang

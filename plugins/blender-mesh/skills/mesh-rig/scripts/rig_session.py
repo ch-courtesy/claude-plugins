@@ -22,7 +22,7 @@ from mathutils import Matrix, Vector
 from mathutils.kdtree import KDTree
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from pose_rules import apply_driven, auto_raise, driven_rotations  # noqa: E402
+from pose_rules import apply_driven, apply_twist_helpers, auto_raise, driven_rotations, twist_helpers  # noqa: E402
 
 
 def read_json(*args, **kwargs):
@@ -55,6 +55,7 @@ BONES, SIDED = [], set()
 FOLLOW = {b["follows"]: (b["name"], b.get("share", 0.5)) for b in SPEC["bones"] if b.get("follows")}
 DRIVEN = driven_rotations(SPEC["bones"])
 AUTO_RAISE = any(b.get("auto_raise") for b in SPEC["bones"])
+TWIST_HELPERS = bool(twist_helpers(SPEC["bones"]))        # helpers set from their source's swing and twist
 LIFTED = {}                                            # clavicle -> degrees lifted in the last pose
 for b in SPEC["bones"]:
     if b.get("mirror"):
@@ -208,6 +209,143 @@ def other_side(n):
     return n[:-2] + ".R" if n.endswith(".L") else n
 
 
+def harmonic_fill(W, ids, loc, rule_at, harm, rules, P):
+    """(2026-11-15) Weights of the vertices of "harmonic" regions solved as the harmonic interpolation of the
+    weights around them: each such vertex is the mean of its cage neighbours (weighted by 1 / edge length), the
+    vertices of the other rules held fixed. A region that bridges two rules (an armpit between the torso and the
+    arm, an elbow between upper arm and forearm) then blends over its whole surface, along the surface, with no step
+    at either border. With "helper" and "child" the blend is then split as a chain with a joint helper: where t is
+    the child's share, the parent side keeps 1 - min(2t, 1), the child max(2t - 1, 0), the helper the rest.
+    "free_arc": [lo, hi] solves only the vertices whose place along the rule's chain (metres from its first head) lies
+    in that stretch; the others keep the chain's own weights, so a joint's blend can end on a ring inside the region.
+    "pivot": a bone whose head is the joint: edges conduct in proportion to (distance from it) ** pivot_power.
+    "harmonic": 2 solves the biharmonic instead (any rule asking for it makes the piece's solve biharmonic).
+    "conduct": a factor on the conductance of the edges inside that rule's region: above 1 the region takes less of
+    the blend, below 1 more (balancing two regions of one joint, such as an arm's underside against the flank)."""
+    E_ = np.array([(loc[a_], loc[b_]) for a_, b_ in CAGE_EDGES if a_ in loc and b_ in loc], np.int64).reshape(-1, 2)
+    names_ = list(W)
+    M = np.stack([W[n] for n in names_], 1)
+    free = harm[rule_at].copy()
+    for r_id, (rule, js) in enumerate(rules):         # "free_arc": only this stretch of the rule's chain is solved
+        if rule.get("harmonic") and rule.get("free_arc") and "chain" in rule:
+            js = np.array(js)
+            Pm = P[js].copy()
+            Pm[:, 0] = np.abs(Pm[:, 0])
+            _, _, arc = chain_weights(Pm, [side_of(n, 1.0) for n in rule["chain"]], 0.05)
+            lo, hi = rule["free_arc"]
+            free[js] &= (arc >= lo) & (arc <= hi)
+    if not free.any():
+        return W
+    idx = -np.ones(len(ids), np.int64)
+    idx[free] = np.arange(free.sum())
+    n_ = int(free.sum())
+    w_ = 1.0 / np.maximum(np.linalg.norm(P[E_[:, 0]] - P[E_[:, 1]], axis=1), 1e-6)
+    # "pivot": an edge of that rule conducts in proportion to its distance from the joint's pivot (the named bone's
+    # head, on the edge's side), so the blend gathers near the joint, where a turn moves the skin least, and skin far
+    # from it (the side of the chest below an armpit) stays with its own bone
+    for rule, js in rules:
+        if rule.get("harmonic") and rule.get("pivot"):
+            mine = np.zeros(len(ids), bool)
+            mine[np.array(js)] = True
+            e_in = mine[E_[:, 0]] | mine[E_[:, 1]]
+            mid = (P[E_[:, 0]] + P[E_[:, 1]]) / 2
+            mid[:, 0] = np.abs(mid[:, 0])
+            piv = BONE[side_of(rule["pivot"], 1.0)][0]
+            d = np.linalg.norm(mid - piv, axis=1)
+            w_ = np.where(e_in, w_ * np.maximum(d, 0.02) ** rule.get("pivot_power", 1.0), w_)
+    for rule, js in rules:                             # "conduct": a factor on the rule's own edges
+        if rule.get("harmonic") and rule.get("conduct"):
+            mine = np.zeros(len(ids), bool)
+            mine[np.array(js)] = True
+            w_ = np.where(mine[E_[:, 0]] & mine[E_[:, 1]], w_ * rule["conduct"], w_)
+    order = max(int(r.get("harmonic") or 0) for r, _ in rules)
+    if order >= 2:
+        # biharmonic: the least squares of the (weighted) Laplacian over the free vertices and the fixed ones next to
+        # them, so the blend meets its neighbours with their slope (no kink at the region's border): the faces just
+        # outside a joint barely move with it
+        near = free.copy()
+        np.logical_or.at(near, E_[:, 0], free[E_[:, 1]])
+        np.logical_or.at(near, E_[:, 1], free[E_[:, 0]])
+        rows = np.nonzero(near)[0]
+        ridx = -np.ones(len(ids), np.int64)
+        ridx[rows] = np.arange(len(rows))
+        Lr = np.zeros((len(rows), len(ids)))
+        for (a_, b_), we in zip(E_, w_):
+            for u, v in ((a_, b_), (b_, a_)):
+                if near[u]:
+                    Lr[ridx[u], u] += we
+                    Lr[ridx[u], v] -= we
+        Af = Lr[:, free]
+        rhs = -Lr[:, ~free] @ M[~free]
+        sol = np.linalg.solve(Af.T @ Af + 1e-9 * np.eye(n_), Af.T @ rhs)
+        M[free] = np.clip(sol, 0.0, None)
+        M[free] /= np.maximum(M[free].sum(1, keepdims=True), 1e-12)
+    else:
+        A = np.zeros((n_, n_))
+        B = np.zeros((n_, M.shape[1]))
+        for (a_, b_), we in zip(E_, w_):
+            for u, v in ((a_, b_), (b_, a_)):
+                if not free[u]:
+                    continue
+                A[idx[u], idx[u]] += we
+                if free[v]:
+                    A[idx[u], idx[v]] -= we
+                else:
+                    B[idx[u]] += we * M[v]
+        lonely = np.diag(A) <= 0                       # a free vertex with no neighbour keeps its rule's weights
+        A[lonely, lonely] = 1.0
+        B[lonely] = M[free][lonely]
+        M[free] = np.linalg.solve(A, B)
+    for r_id, (rule, js) in enumerate(rules):
+        if not (rule.get("harmonic") and rule.get("helper") and rule.get("child")):
+            continue
+        js = np.array(js)
+        js = js[free[js]]
+        for side in ("L", "R"):
+            nm = lambda b: f"{b}.{side}" if b in SIDED else b   # noqa: E731
+            for b in (nm(rule["child"]), nm(rule["helper"])):
+                if b not in names_:
+                    names_.append(b)
+                    M = np.concatenate([M, np.zeros((len(M), 1))], 1)
+        x_ = P[js, 0]
+        seam = np.abs(x_) <= 1e-4
+        for side, m in (("L", x_ > 1e-4), ("R", x_ < -1e-4), ("L", seam), ("R", seam)):
+            jj = js[m]
+            if not len(jj):
+                continue
+            nm = lambda b: f"{b}.{side}" if b in SIDED else b   # noqa: E731
+            ci, hi = names_.index(nm(rule["child"])), names_.index(nm(rule["helper"]))
+            own = [c for c, n in enumerate(names_) if not n.endswith(".L") and not n.endswith(".R")
+                   or n.endswith("." + side)]
+            # a vertex on the seam is split per side: its own side's bones and half the unsided ones each way
+            part = M[jj].copy()
+            if m is seam:
+                part[:, [c for c in range(M.shape[1]) if c not in own]] = 0.0
+                unsided = [c for c, n in enumerate(names_) if not n.endswith(".L") and not n.endswith(".R")]
+                part[:, unsided] *= 0.5
+            else:
+                part[:, [c for c in range(M.shape[1]) if c not in own]] = 0.0
+            rest_ = M[jj] - part if m is not seam else None
+            tot = part.sum(1)
+            t = part[:, ci] / np.maximum(tot, 1e-12)
+            kid = np.clip(2 * t - 1, 0, 1)
+            par = 1 - np.clip(2 * t, 0, 1)
+            up = np.where(t < 1 - 1e-9, par / np.maximum(1 - t, 1e-9), 0.0)
+            others = [c for c in own if c not in (ci, hi)]
+            new_ = np.zeros_like(part)
+            new_[:, others] = part[:, others] * up[:, None]
+            new_[:, hi] = part[:, hi] * up + (1 - par - kid) * tot
+            new_[:, ci] = kid * tot
+            if m is seam:
+                if side == "L":
+                    seam_sum = new_
+                else:
+                    M[jj] = seam_sum + new_
+            else:
+                M[jj] = new_ + rest_
+    return {n: M[:, c] for c, n in enumerate(names_)}
+
+
 def region_weights(k, ids):
     """Weights of a piece that holds region parts: each vertex by its own rule, on its own side. A rule is
     evaluated on the vertex mirrored to +x with the left bones, then given to the side the vertex is on; within
@@ -244,12 +382,17 @@ def region_weights(k, ids):
                 if m.any():
                     nm_ = shape[0] if sd == "L" else [other_side(n) for n in shape[0]]
                     REGION_SHAPE[(k, unit, sd)] = (nm_, shape[1], shape[2])
+    harm = np.array([bool(r.get("harmonic")) for r, _ in by_rule.values()])
+    if harm.any():
+        W = harmonic_fill(W, ids, loc, rule_at, harm, list(by_rule.values()), P)
     sm = np.array([r.get("smooth", 0) for r, _ in by_rule.values()], np.int64)
     rings = int(sm.max()) if len(sm) else 0
     if rings and len(by_rule) > 1:
         E_ = np.array([(loc[a_], loc[b_]) for a_, b_ in CAGE_EDGES if a_ in loc and b_ in loc], np.int64).reshape(-1, 2)
         # a border between two rules is smoothed over the larger of their "smooth" ring counts (0 keeps it sharp)
         border = rule_at[E_[:, 0]] != rule_at[E_[:, 1]]
+        if harm.any():                                 # a harmonic region already meets its neighbours smoothly
+            border &= ~(harm[rule_at[E_[:, 0]]] | harm[rule_at[E_[:, 1]]])
         reach = np.maximum(sm[rule_at[E_[:, 0]]], sm[rule_at[E_[:, 1]]]) * border
         budget = np.zeros(len(ids), np.int64)
         np.maximum.at(budget, E_[:, 0], reach)
@@ -559,6 +702,8 @@ def set_pose(rots):
         apply_driven(rig, SPEC["bones"], bpy.context.view_layer.update)
     if AUTO_RAISE:                                     # a clavicle lifts once its arm passes the horizontal
         LIFTED.update(auto_raise(rig, SPEC["bones"], bpy.context.view_layer.update))
+    if TWIST_HELPERS:                                  # last: the arm may have been turned back by auto_raise
+        apply_twist_helpers(rig, SPEC["bones"], bpy.context.view_layer.update)
 
 
 # ---- rest check, then every pose
@@ -590,6 +735,7 @@ for pose in SPEC["poses"]:
     L = np.linalg.norm(V[E[:, 0]] - V[E[:, 1]], axis=1)
     ok = L0 > 1e-6
     strain = np.abs(L[ok] / L0[ok] - 1)
+    ok_e = ok                                          # the edges measured (ok is reused for the triangles below)
     by_part = {r: strain[ulabel[E[ok, 0]] == r] for r in units}
     strain_part = UNAME[max(by_part, key=lambda r: np.percentile(by_part[r], 99) if len(by_part[r]) else 0)]
     ok = A0 > 1e-9
@@ -606,6 +752,16 @@ for pose in SPEC["poses"]:
         allowed = max(0.35, 1.2 * bound)
         if p99 / allowed > excess:
             excess, excess_part, bound_of = p99 / allowed, UNAME[r], bound
+            excess_unit = r
+    # (2026-11-16) where the worst part stretches: its most strained edges, their rest midpoints and lengths. A part's
+    # name alone hid that Musoe v3's joined arm failed on 5 mm sliver rows at the armhole and on the faces just outside
+    # the elbow's blend; both were found only by listing the edges
+    stretch_at = []
+    if excess > 0:
+        in_ = np.nonzero(ok_e)[0][ulabel[E[ok_e, 0]] == excess_unit]
+        for e_ in in_[np.argsort(-strain[ulabel[E[ok_e, 0]] == excess_unit])[:5]]:
+            stretch_at.append({"at": [round(float(c), 4) for c in (V0[E[e_, 0]] + V0[E[e_, 1]]) / 2],
+                               "strain": round(float(abs(L[e_] / L0[e_] - 1)), 3), "rest_cm": round(float(L0[e_]) * 100, 2)})
     N1 = tri_normals(V)
     folded = FLAT_AT_REST & (np.einsum("ij,ij->i", N1[PAIR[:, 0]], N1[PAIR[:, 1]]) < -0.5)   # over 120 degrees
     shares = {r: float(folded[PAIR_PART == r].mean()) for r in units if (PAIR_PART == r).any()}
@@ -619,7 +775,7 @@ for pose in SPEC["poses"]:
          "strain_max": float(strain.max()), "area_ratio_p001": float(np.percentile(ratio, 0.1)),
          "gap_open_cm": gaps.get(wg, 0.0), "gap_pair": wg, "strain_part": strain_part, "area_part": area_part,
          "stretch_excess": excess, "stretch_excess_part": excess_part, "stretch_bound": bound_of,
-         "fold_share": shares[fold_root], "fold_part": UNAME[fold_root]}
+         "fold_share": shares[fold_root], "fold_part": UNAME[fold_root], "stretch_at": stretch_at}
     if AUTO_RAISE:
         s["auto_raise_deg"] = {n: round(d, 2) for n, d in LIFTED.items()}
     R["poses"][pose["name"]] = s
