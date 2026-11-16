@@ -1,0 +1,8 @@
+﻿[[knowledge]]
+id = "INF-001"
+fact = "열쇠가 있다"
+awareness = [{character = "CHR-001", understanding = "앎", status = "confirmed", evidence = "E001-S01:P001"}]
+reader_episode = 1
+status = "confirmed"
+evidence = "E001-S01:P001"
+

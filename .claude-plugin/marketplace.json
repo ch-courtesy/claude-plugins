@@ -100,6 +100,22 @@
         "quality",
         "technical-writing"
       ]
+    },
+    {
+      "name": "writing-craft",
+      "source": "./plugins/writing-craft",
+      "description": "수필·설명문·논설문·리뷰 초안, 단편·장편·웹소설 장면 작성, 다른 회사 모델의 장르별 채점, 긴 이야기 TOML 장부와 연속성 점검",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": [
+        "writing",
+        "essay",
+        "fiction",
+        "web-novel",
+        "rubric",
+        "korean",
+        "story-bible"
+      ]
     }
   ]
 }

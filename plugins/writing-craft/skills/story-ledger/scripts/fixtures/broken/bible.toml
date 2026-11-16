@@ -1,0 +1,24 @@
+﻿[[settings]]
+id = "SET-001"
+fact = "폐역"
+conditions = "항상"
+exceptions = "없음"
+status = "confirmed"
+evidence = "E001-S01:P001"
+
+[[settings]]
+id = "SET-002"
+fact = "열쇠"
+conditions = "항상"
+exceptions = "없음"
+status = "confirmed"
+evidence = "E001-S01:P001"
+
+[[settings]]
+id = "SET-001"
+fact = "폐역"
+conditions = "항상"
+exceptions = "없음"
+status = "confirmed"
+evidence = "E001-S01:P001"
+
