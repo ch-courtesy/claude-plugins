@@ -1,0 +1,11 @@
+{
+  "name": "writing-craft",
+  "version": "0.1.0",
+  "description": "장르별 글쓰기 작법: 수필·설명문·논설문·리뷰 초안, 단편·장편·웹소설 장면 초안, 장르별 0·1·2점 채점, 긴 글 설정·인물·지식·시간선 장부와 기계 점검",
+  "author": {
+    "name": "예의상",
+    "email": "ch.courtesy@gmail.com"
+  },
+  "license": "MIT",
+  "keywords": ["writing", "essay", "fiction", "web-novel", "rubric", "korean", "story-bible"]
+}
