@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 7,
   "pass_line": 70,
   "types": [
     "problem",
@@ -236,6 +236,25 @@
       "na_condition": "독자가 따라 할 절차가 없다"
     },
     {
+      "id": "C26",
+      "section": "opening",
+      "rules": [
+        "R29"
+      ],
+      "title": "제목 약속을 첫 화면에서 지킴",
+      "na": "never"
+    },
+    {
+      "id": "C27",
+      "section": "structure",
+      "rules": [
+        "R30"
+      ],
+      "title": "소제목만 읽어도 줄거리",
+      "na": "any",
+      "na_condition": "소제목이 두 개 미만이다"
+    },
+    {
       "id": "C18",
       "section": "render",
       "rules": [
@@ -276,6 +295,26 @@
       "title": "소제목은 명사형(질문형·문장형 없음)",
       "na": "any",
       "na_condition": "소제목이 없다",
+      "auto": true
+    },
+    {
+      "id": "C24",
+      "section": "style",
+      "rules": [
+        "R27"
+      ],
+      "title": "문체 패턴 밀도",
+      "na": "never",
+      "auto": true
+    },
+    {
+      "id": "C25",
+      "section": "style",
+      "rules": [
+        "R28"
+      ],
+      "title": "굵은 글씨 예산",
+      "na": "never",
       "auto": true
     }
   ],
