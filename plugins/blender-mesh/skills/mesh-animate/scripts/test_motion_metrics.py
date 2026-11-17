@@ -8,8 +8,10 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from motion_metrics import overlap_metrics, pops, spacing_crest, spikes, strike_craft, strike_metrics
+    from motion_metrics import airborne_runs, arm_leg_opposition, ballistic, free_arm_range, jump_phases
 except (ModuleNotFoundError, ImportError):
     overlap_metrics = pops = spacing_crest = spikes = strike_craft = strike_metrics = None
+    airborne_runs = arm_leg_opposition = ballistic = free_arm_range = jump_phases = None
 
 
 def chop(hold_at_top=1):
@@ -236,6 +238,74 @@ class StrikeCraftTests(unittest.TestCase):
         self.assertAlmostEqual(r["hips_drop_leg"], 0.1, places=3)
         self.assertAlmostEqual(r["hips_drop_margin"], 0.02, places=3)
         self.assertLess(self.craft(kind="v", drop=0.06)["hips_drop_margin"], 0)
+
+
+class BodyMechanicsTests(unittest.TestCase):
+    """2026-11-16: flights against free fall, arms against legs, a still off-hand, a jump's crouch and landing."""
+
+    def run_cycle(self, rise_scale):
+        """A 16-frame run at 24 fps: each foot down 4 frames, flights of 4 frames between; hips on a free-fall arc in
+        flight (scaled by rise_scale) and flat in stance."""
+        fps, air, z = 24.0, [], []
+        for half in range(2):
+            for k in range(8):
+                down = k < 4
+                air.append(not down)
+                if down:
+                    z.append(1.0)
+                else:                                   # flight from frame 3 (last down) to frame 8 (next down)
+                    t, T = (k - 3) / fps, 5 / fps
+                    z.append(1.0 + rise_scale * (9.81 / 2) * t * (T - t))
+        return z, air, fps
+
+    def test_a_free_fall_flight_scores_one(self):
+        z, air, fps = self.run_cycle(1.0)
+        r = ballistic(z, air, fps)
+        self.assertAlmostEqual(r["ballistic_min"], 1.0, places=2)
+        self.assertAlmostEqual(r["flight_share"], 0.5)
+
+    def test_a_gliding_flight_scores_low(self):
+        z, air, fps = self.run_cycle(0.25)
+        self.assertAlmostEqual(ballistic(z, air, fps)["ballistic_min"], 0.25, places=2)
+
+    def test_a_flight_wrapping_round_a_loop_is_one_flight(self):
+        air = [True, True, False, False, True, True]
+        self.assertEqual(airborne_runs(air, loop=True), [(4, 7), ])
+
+    def test_nothing_flies_in_a_walk(self):
+        r = ballistic([1.0] * 16, [False] * 16, 24.0)
+        self.assertIsNone(r["ballistic_min"])
+
+    def test_opposite_arm_and_leg(self):
+        ph = np.linspace(0, 2 * np.pi, 16, endpoint=False)
+        legL, legR = 30 * np.sin(ph), -30 * np.sin(ph)
+        good = arm_leg_opposition({"L": 20 * np.sin(ph + np.pi), "R": 20 * np.sin(ph)}, {"L": legL, "R": legR}, "LR")
+        self.assertGreater(good["arm_leg_opposition"], 0.99)
+        same = arm_leg_opposition({"L": 20 * np.sin(ph), "R": 20 * np.sin(ph + np.pi)}, {"L": legL, "R": legR}, "LR")
+        self.assertLess(same["arm_leg_opposition"], -0.99)
+        # a thigh held forward most of the cycle (high knees) is not a sinusoid; its swing phase still counts
+        knees = {"L": np.clip(60 * np.sin(ph), -10, None) + 30, "R": np.clip(-60 * np.sin(ph), -10, None) + 30}
+        lagged = arm_leg_opposition({"L": 20 * np.sin(ph + np.pi), "R": 20 * np.sin(ph)}, knees, "LR")
+        self.assertGreater(lagged["arm_leg_opposition"], 0.99)
+        late = arm_leg_opposition({"L": 20 * np.sin(ph + np.pi + np.pi / 2), "R": 0 * ph}, {"L": legL, "R": legR}, "L")
+        self.assertAlmostEqual(late["arm_leg_lag_deg"], 90.0, places=3)
+        locked = arm_leg_opposition({"L": np.zeros(16), "R": 20 * np.sin(ph)}, {"L": legL, "R": legR}, "L")
+        self.assertEqual(locked["arm_leg_opposition"], -1.0)
+        self.assertEqual(locked["free_arm_swing_deg"], 0.0)
+
+    def test_free_arm_range(self):
+        still = [[1, 0, 0, 0]] * 10
+        self.assertAlmostEqual(free_arm_range(still), 0.0, places=3)
+        a = np.radians(np.linspace(0, 90, 10))
+        turning = [[np.cos(x / 2), 0, 0, np.sin(x / 2)] for x in a]
+        self.assertAlmostEqual(free_arm_range(turning), 90.0, places=2)
+
+    def test_jump_crouch_and_landing(self):
+        z = [1.0] * 3 + [0.9, 0.85, 0.9] + [1.1, 1.2, 1.1] + [1.0, 0.8, 0.9, 1.0]
+        air = [False] * 6 + [True] * 3 + [False] * 4
+        r = jump_phases(z, air, 24.0, stand_z=1.0, leg=0.5)
+        self.assertAlmostEqual(r["jump_crouch"], 0.3, places=6)
+        self.assertAlmostEqual(r["jump_absorb"], 0.4, places=6)
 
 
 if __name__ == "__main__":

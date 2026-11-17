@@ -153,9 +153,13 @@ for c in G[stage]:
     except (KeyError, IndexError, TypeError, ValueError):
         v = None
     limit = c.get("min", c.get("max"))
-    ok = v is not None and (v >= c["min"] if "min" in c else v <= c["max"])
+    # "when_present" (2026-11-16): a measure that only some motions have (a flight, a jump) passes as n/a when the
+    # file is there and fresh but holds no value; a missing or stale file still fails
+    na = v is None and c.get("when_present") and cache[fp] is not None
+    ok = bool(na) or (v is not None and (v >= c["min"] if "min" in c else v <= c["max"]))
     failed += 0 if ok else 1
-    rows.append({"name": c["name"], "value": v, "limit": limit, "kind": "min" if "min" in c else "max", "ok": ok})
+    rows.append({"name": c["name"], "value": "n/a" if na else v, "limit": limit, "kind": "min" if "min" in c else "max",
+                 "ok": ok})
 
 print(f"[gate] {stage}: " + ("PASS" if not failed else f"{failed} of {len(rows)} failing"))
 for r in rows:
