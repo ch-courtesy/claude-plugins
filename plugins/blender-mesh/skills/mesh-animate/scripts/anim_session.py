@@ -24,6 +24,7 @@ from mathutils import Matrix, Quaternion, Vector
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from motion_metrics import overlap_metrics, pops, spacing_crest, spikes, strike_craft, strike_metrics  # noqa: E402
+from motion_metrics import arm_leg_opposition, ballistic, free_arm_range, jump_phases  # noqa: E402
 from prop_attach import carry_matrix  # noqa: E402
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
                                 "mesh-rig", "scripts"))
@@ -252,12 +253,62 @@ def foot_target(side, p):
     return Vector((x0.x, y, z)), False, ho + (-hs - ho) * ease(u), math.sin(math.pi * u) ** 2
 
 
+def leg_peaks():
+    """{side: the phase (0..1) at which that leg reaches furthest forward}, from the line from the hip to the ankle
+    target over one cycle (first harmonic), so each arm can come forward with the other leg (2026-11-16).
+
+    Why: the arms swung on a fixed cos(2 pi p) that brought the left arm forward at p = 0, when the left heel lands,
+    a same-side swing; a run with a short stance also moves the legs' peaks off the half cycle."""
+    out = {}
+    for side in "LR":
+        hip = rig.data.bones[f"thigh.{side}"].head_local
+        ang = []
+        for k in range(64):
+            A = foot_target(side, k / 64)[0]
+            ang.append(math.atan2(-(A.y - hip.y), hip.z - W.get("hip_drop", 0.0) - A.z))
+        c = sum(a_ * math.cos(2 * math.pi * k / 64) for k, a_ in enumerate(ang))
+        s = sum(a_ * math.sin(2 * math.pi * k / 64) for k, a_ in enumerate(ang))
+        out[side] = (math.atan2(s, c) / (2 * math.pi)) % 1.0
+    return out
+
+
+LEG_PEAK = None
+
+
+def run_rise(p):
+    """With "flight" (a run, stance under half the cycle): how far the body is raised at phase p. Each half cycle
+    is one foot's stance, then a flight with both feet up until the other foot lands. In flight the hips and both
+    feet follow free fall, g/2 t (T - t), so they leave the ground together; in stance the hips sink on a half sine
+    whose depth g T Ts / (2 pi) keeps their speed through touchdown and takeoff (a spring-mass leg), so "bob" is
+    not used (2026-11-16). A sin^2 sink started from rest and stopped the fall dead at each landing (pop 4.8).
+
+    Why: the generator drew each foot on the ground and bobbed the hips on a fixed cos(4 pi p), so a swing foot
+    skimmed the ground at both ends of its swing and both feet were never up at once: Musoe's run had no flight at
+    3.45 m/s, and cutting its bob to pass the pop gate made it glide. Returns (hips offset, feet offset) in metres."""
+    h = p % 0.5
+    T = (0.5 - STANCE) * N / sc.render.fps
+    if h < STANCE:
+        Ts = STANCE * N / sc.render.fps
+        return -9.81 * T * Ts / (2 * math.pi) * math.sin(math.pi * h / STANCE), 0.0
+    tt = (h - STANCE) * N / sc.render.fps
+    rise = 9.81 / 2 * tt * (T - tt)
+    return rise, rise
+
+
 def walk_body(f):
+    global LEG_PEAK
     p = (f % N) / N
+    if LEG_PEAK is None:
+        LEG_PEAK = leg_peaks()
     reset()
     s1, c1 = math.sin(2 * math.pi * p), math.cos(2 * math.pi * p)
     c2 = math.cos(4 * math.pi * p)
-    move("hips", (W["sway"] * math.sin(2 * math.pi * (p - 0.15)), 0, -W["hip_drop"] - W["bob"] * c2))
+    if W.get("flight") and STANCE < 0.5:
+        hips_up, feet_up = run_rise(p)
+        move("hips", (W["sway"] * math.sin(2 * math.pi * (p - 0.15)), 0, -W["hip_drop"] + hips_up))
+    else:
+        feet_up = 0.0
+        move("hips", (W["sway"] * math.sin(2 * math.pi * (p - 0.15)), 0, -W["hip_drop"] - W["bob"] * c2))
     roll, yaw = W["roll"], W["yaw"]
     turn("hips", (0, 1, 0), roll * math.sin(2 * math.pi * (p - 0.15)))
     turn("hips", (0, 0, 1), yaw * s1)
@@ -271,13 +322,17 @@ def walk_body(f):
     for side, sign in (("R", 1.0), ("L", -1.0)):
         amp, bend = (W["carry_swing"], W["carry_elbow"]) if side == carry else (W["arm_swing"], W["elbow"])
         ax = ARM_AXIS[side]
-        swing = sign * amp * c1
+        if W.get("arm_phase") == "fixed":             # the swing before 2026-11-16 (left arm with the left leg)
+            fwd = -sign * c1
+        else:                                          # forward with the other leg; a positive turn swings it back
+            fwd = math.cos(2 * math.pi * (p - LEG_PEAK["R" if side == "L" else "L"]))
+        swing = -amp * fwd
         turn(f"upper_arm.{side}", (1, 0, 0), swing)
         if f"forearm.{side}" in HINGES:               # the elbow folds about its hinge as the swung arm carries it
             turn(f"forearm.{side}", hinge_axis(rig, f"forearm.{side}", HINGES[f"forearm.{side}"])[:],
-                 bend + 0.35 * amp * (1 - sign * c1) / 2)
+                 bend + 0.35 * amp * (1 + fwd) / 2)
         else:
-            turn(f"forearm.{side}", ax, -(bend + 0.35 * amp * (1 - sign * c1) / 2))
+            turn(f"forearm.{side}", ax, -(bend + 0.35 * amp * (1 + fwd) / 2))
         out_ = W.get("carry_out", 0.0) if side == carry else 0.0
         turn(f"upper_arm.{side}", (0, 1, 0), (1 if side == "L" else -1) * (W.get("arm_down", 0.0) - out_))
     for r in W.get("hold", []):
@@ -285,6 +340,9 @@ def walk_body(f):
     contact = []
     for side in "LR":
         A, on, pitch, hang = foot_target(side, p)
+        if feet_up:                                    # in flight both feet ride the body's rise
+            A = A + Vector((0, 0, feet_up))
+            on = False
         solve_leg(side, A, pitch, hang)
         contact.append(on)
     return contact
@@ -528,6 +586,25 @@ if W.get("strike") and not CARRY:
     sys.exit("[anim] a strike measures the weapon's point: pass the carry file (animate ... --carry carry.json)")
 ov = W.get("overlap")
 rotation_track = {ov[k]: [] for k in ("driver", "follower")} if ov else {}
+AIR_MM = 20                                            # a foot this far above its rest height is off the ground
+BODY = ({"hips_z": [], "air": [], "arm": {"L": [], "R": []}, "thigh": {"L": [], "R": []},
+         "arm_q": {"L": [], "R": []}}
+        if all(b in rig.pose.bones for b in ("hips", "chest", "upper_arm.L", "upper_arm.R", "thigh.L", "thigh.R",
+                                            "foot.L", "foot.R")) else None)
+rest_heel = {s: rig.data.bones[f"foot.{s}"].head_local.copy() for s in "LR"} if BODY else {}   # at rest, not as posed
+rest_toe = {s: rig.data.bones[f"foot.{s}"].tail_local.copy() for s in "LR"} if BODY else {}
+
+
+def swing_deg(bone, parent):
+    """How far a bone has swung forward (positive, towards -y at rest) about its parent's own x axis, degrees."""
+    pb_, pp = rig.pose.bones[bone], rig.pose.bones[parent]
+    to_local = pp.matrix.to_3x3().inverted()
+    d = (to_local @ (pb_.tail - pb_.head)).normalized()
+    d0 = (pp.bone.matrix_local.to_3x3().inverted() @ (pb_.bone.tail_local - pb_.bone.head_local)).normalized()
+    x = Vector((1, 0, 0))
+    return -math.degrees(math.atan2(d0.cross(d).dot(x), d0.dot(d)))
+
+
 frames = []
 bends = {}                                             # bone -> (least bend, most bend, (excess, frame, bend, side))
 held = {}                                              # bone -> its matrix in the hand's frame, from the grab
@@ -584,6 +661,16 @@ for f in range(BAKE):
             q.negate()
         axis, angle = q.to_axis_angle()
         values.append(np.array(axis) * angle)
+    if BODY and f < N:                                 # body mechanics (2026-11-16): flights, arms against legs
+        pb_ = rig.pose.bones
+        BODY["hips_z"].append(pb_["hips"].head.z)
+        BODY["air"].append(all(min(pb_[f"foot.{s}"].head.z - rest_heel[s].z, pb_[f"foot.{s}"].tail.z - rest_toe[s].z)
+                               > AIR_MM / 1000 for s in "LR"))
+        for s in "LR":
+            BODY["arm"][s].append(swing_deg(f"upper_arm.{s}", "chest"))
+            BODY["thigh"][s].append(swing_deg(f"thigh.{s}", "hips"))
+            q_ = (pb_["chest"].matrix.to_quaternion().inverted() @ pb_[f"upper_arm.{s}"].matrix.to_quaternion())
+            BODY["arm_q"][s].append(list(q_))
     frames.append({"frame": f, "contact": contact,
                    "basis": {pb.name: [list(pb.rotation_quaternion), list(pb.location)] for pb in rig.pose.bones}})
     for pb in rig.pose.bones:
@@ -701,6 +788,17 @@ cr = {n: v for n, v in cr.items() if v is not None}
 Q["spacing_crest"] = max(cr.values()) if cr else 0.0
 Q["spacing_crest_worst"] = max(cr, key=cr.get) if cr else ""
 Q["motion_amount_mm"] = max(float(np.linalg.norm(p - p.mean(0), axis=1).max()) for p in T.values()) * 1000 if T else 0.0
+if BODY:                                                # body mechanics (2026-11-16)
+    fps_ = sc.render.fps
+    Q.update(ballistic(BODY["hips_z"], BODY["air"], fps_, loop=LOOP))
+    arm_side = weapon_side("upper_arm")
+    free_ = [s for s in "LR" if arm_side != f"upper_arm.{s}"]
+    Q["free_arm_range_deg"] = min(free_arm_range(BODY["arm_q"][s]) for s in free_) if free_ else None
+    if KIND == "walk":                                 # a walk or a run: the arms swing against the legs
+        Q.update(arm_leg_opposition(BODY["arm"], BODY["thigh"], free_))
+    elif not LOOP:
+        leg_ = rig.data.bones["thigh.L"].length + rig.data.bones["shin.L"].length if "shin.L" in rig.data.bones else 1.0
+        Q.update(jump_phases(BODY["hips_z"], BODY["air"], fps_, rig.data.bones["hips"].head_local.z, leg_))
 
 if ov:
     Q.update(overlap_metrics(rotation_track[ov["driver"]][:N], rotation_track[ov["follower"]][:N],

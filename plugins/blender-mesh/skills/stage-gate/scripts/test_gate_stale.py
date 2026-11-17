@@ -76,6 +76,20 @@ try:
         good.append(ok)
         print(f"{'ok  ' if ok else 'FAIL'} {name}: passing {sorted(s for s, p in got.items() if p)}"
               + ("" if ok else f" (want {sorted(want)})"))
+    # "when_present" (2026-11-16): a value the report does not hold passes as n/a, but only from a fresh report
+    na = os.path.join(root, "gates_na.json")
+    with open(na, "w", encoding="utf-8") as fh:
+        json.dump({"animation": [{"name": "flight", "file": "anim/report.json", "path": "absent", "min": 1,
+                                  "when_present": True}]}, fh)
+    for name, changed, missing, want in [
+            ("n/a: a fresh report without the value passes", {}, (), True),
+            ("n/a: a stale report still fails", {"rig/rig.blend": 800, "rig/report.json": 810}, (), False),
+            ("n/a: no report still fails", {}, ("motions/walk/report.json",), False)]:
+        r = subprocess.run([sys.executable, "-I", GATE, make(root, changed, missing), "animation", "--gates", na,
+                            "--anim", "motions/walk"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+        ok = (r.returncode == 0) == want
+        good.append(ok)
+        print(f"{'ok  ' if ok else 'FAIL'} {name}")
 finally:
     shutil.rmtree(root, ignore_errors=True)
 print(f"[test] {sum(good)}/{len(good)} passed")

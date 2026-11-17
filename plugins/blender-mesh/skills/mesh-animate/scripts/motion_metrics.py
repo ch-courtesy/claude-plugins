@@ -273,3 +273,120 @@ def strike_craft(tip, normal, edge, shoulder, hips_z, leg, links, fps, kind="h",
     drop = float(z[0] - z.min()) / leg if leg > 0 else 0.0
     out.update({"hips_drop_leg": drop, "hips_drop_margin": drop - DROP_NEED.get(kind, 0.08)})
     return out
+
+
+# ---------------------------------------------------------------- body mechanics (2026-11-16)
+G = 9.81
+
+
+def airborne_runs(air, loop=True):
+    """[(first, last)] frame runs where `air` is true (both feet off the ground), last inclusive. A loop's run that
+    wraps round the end is joined with the one at the start."""
+    air = list(bool(a) for a in air)
+    n = len(air)
+    if not n or all(air):
+        return [(0, n - 1)] if n else []
+    runs, i = [], 0
+    while i < n:
+        if air[i]:
+            j = i
+            while j + 1 < n and air[j + 1]:
+                j += 1
+            runs.append((i, j))
+            i = j + 1
+        else:
+            i += 1
+    if loop and len(runs) > 1 and runs[0][0] == 0 and runs[-1][1] == n - 1:
+        runs = [(runs[-1][0], runs[0][1] + n)] + runs[1:-1]
+    return runs
+
+
+def ballistic(hips_z, air, fps, loop=True, min_frames=2):
+    """How the hips rise while both feet are off the ground, against free fall. A flight of t seconds (from the last
+    frame on the ground to the first frame back on it) carries the body g t^2 / 8 above the straight line between
+    the two (taken on the same frames, so a sampled free fall scores 1); hips that rise less glide, more float. Returns ballistic_min and ballistic_max (rise over that need,
+    over flights of at least min_frames airborne frames), flight_share (airborne frames over all), and the worst
+    flight's rise and need in mm; None ratios when nothing flies.
+
+    Why: Musoe's run had both feet up in 12 of its 16 frames and a 2.4 cm bob, which a flight of 0.29 s cannot
+    have (10 cm); the gates measured pops and slides, so cutting the bob to pass them made it glide."""
+    z = np.asarray(hips_z, float)
+    n = len(z)
+    out = {"flight_share": float(np.mean(np.asarray(air, bool))) if n else 0.0, "ballistic_min": None,
+           "ballistic_max": None, "flight_rise_mm": None, "flight_need_mm": None}
+    ratios = []
+    for a, b in airborne_runs(air, loop):
+        if b - a + 1 < min_frames:
+            continue
+        i0, i1 = a - 1, b + 1                          # last frame down, first frame down again
+        if not loop and (i0 < 0 or i1 >= n):
+            continue
+        idx = np.arange(i0, i1 + 1)
+        zz = z[idx % n]
+        t = (i1 - i0) / fps
+        chord = zz[0] + (zz[-1] - zz[0]) * (idx - i0) / (i1 - i0)
+        rise = float((zz - chord).max())
+        k = np.arange(1, i1 - i0)                      # the free-fall rise on the same frames (a peak can fall
+        need = float((G / 2 * (k / fps) * ((i1 - i0 - k) / fps)).max())   # between two of them)
+        ratios.append((rise / need, rise, need))
+    if ratios:
+        lo, hi = min(ratios), max(ratios)
+        out.update(ballistic_min=lo[0], ballistic_max=hi[0], flight_rise_mm=lo[1] * 1000, flight_need_mm=lo[2] * 1000)
+    return out
+
+
+def _phase(x):
+    """Phase (radians) and amplitude of a loop's first harmonic: the swing once per cycle, whatever its shape."""
+    x = np.asarray(x, float)
+    c = np.fft.rfft(x - x.mean())[1] if len(x) > 2 else 0j
+    return float(np.angle(c)), float(abs(c)) * 2 / max(len(x), 1)
+
+
+def arm_leg_opposition(arm, thigh, free, still_deg=2.0):
+    """How each free arm swings against the opposite thigh in a loop (series of signed degrees, forward positive):
+    the cosine of the phase lag between their once-a-cycle swings, 1 when the left arm comes forward with the right
+    leg, -1 for a same-side swing; -1 for an arm that swings less than still_deg. Returns the least over the free
+    arms, the largest lag in degrees and the free arms' least swing range (None values without a free arm).
+
+    The phase of the first harmonic, not a correlation of the curves: a thigh held forward most of the cycle (high
+    knees) is not a sinusoid, and a correlation of the curves scored a same-side swing above Musoe's own run."""
+    cs, lags, rng = [], [], []
+    for s in free:
+        o = "R" if s == "L" else "L"
+        pa, aa = _phase(arm[s])
+        pt, at = _phase(thigh[o])
+        lag = (pa - pt + np.pi) % (2 * np.pi) - np.pi
+        ok = aa >= still_deg / 2 and at >= still_deg / 2
+        cs.append(float(np.cos(lag)) if ok else -1.0)
+        lags.append(abs(float(np.degrees(lag))) if ok else 180.0)
+        rng.append(float(np.ptp(np.asarray(arm[s], float))))
+    if not cs:
+        return {"arm_leg_opposition": None, "arm_leg_lag_deg": None, "free_arm_swing_deg": None}
+    return {"arm_leg_opposition": min(cs), "arm_leg_lag_deg": max(lags), "free_arm_swing_deg": min(rng)}
+
+
+def free_arm_range(quats):
+    """The largest turn between any two frames of one arm's orientation against the chest ([w, x, y, z] per frame),
+    in degrees: a hand held still at the chest through a whole motion turns a few degrees."""
+    q = np.asarray(quats, float)
+    if len(q) < 2:
+        return 0.0
+    q = q / np.linalg.norm(q, axis=1, keepdims=True)
+    d = np.abs(q @ q.T).clip(0, 1)
+    return float(np.degrees(2 * np.arccos(d.min())))
+
+
+def jump_phases(hips_z, air, fps, stand_z, leg, before=0.4, after=0.3, min_frames=3):
+    """For a one-shot jump (a flight of at least min_frames): how far the hips sink in the `before` seconds ahead of
+    leaving the ground (the crouch that launches it) and in the `after` seconds after touching down (the landing
+    taken in the legs), each over the leg's length. None when nothing flies."""
+    z = np.asarray(hips_z, float)
+    runs = [(a, b) for a, b in airborne_runs(air, loop=False) if b - a + 1 >= min_frames and a > 0 and b < len(z) - 1]
+    if not runs:
+        return {"jump_crouch": None, "jump_absorb": None}
+    a, b = max(runs, key=lambda r: r[1] - r[0])
+    k0 = max(0, a - 1 - int(round(before * fps)))
+    crouch = (stand_z - float(z[k0:a].min())) / leg
+    k1 = min(len(z), b + 2 + int(round(after * fps)))
+    absorb = (float(z[b + 1]) - float(z[b + 1:k1].min())) / leg
+    return {"jump_crouch": crouch, "jump_absorb": absorb}

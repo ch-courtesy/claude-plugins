@@ -52,6 +52,8 @@ motions → GLB) must be no newer than what was made from it, so redoing any ear
 stage on an old input, or saving a file again without measuring it again all ask for a new
 measurement. Each stage writes its report last and `mesh.py` removes the old one before the stage
 runs, so a run that fails leaves nothing to pass. `scripts/test_gate_stale.py` checks these cases.
+A criterion with `"when_present": true` measures something only some motions have (a flight, a jump): a fresh
+report without that value passes it as n/a, while a missing or stale report still fails (2026-11-16).
 
 An animation passes both its common `animation` mechanics gate and its motion-specific gate.
 Run `mesh.py S controls rig.json --carry carry.json` to prove that the animation and contact criteria
