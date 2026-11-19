@@ -30,6 +30,9 @@
 | 한국어: '-적·의·것·들' 빼기, '~에 대한', '~ 중 하나', '~같다' | 김정선 [S39] | 2차 |
 | 한국어: 번역투 목록 | techit 정리 [S40], 이오덕 [S43], 이중 피동 [S44] | 2차 |
 | 국립국어원 번역투 특집 | [S41] | 확인 못 함 |
+| B5 환산은 독자가 아는 기준에 댈 때만 | 숫자에 맥락 문장(perspective)을 붙이면 기억·추정이 나아졌다 [S45], 재표현 효과는 독자가 아는 대상에서 나온다 [S46]. '실제로 겪는 기준에만'은 2026-11-16 비교 평가의 뜻 불명 환산 문장에서 끌어낸 우리 판단 | 초록 확인 |
+| A7 한 글 한 독자 | Every Page is Page One: 한 쪽은 한 목적, 그 일을 하는 사람을 위해 [S47] | 1차 |
+| 같은 집계끼리만 묶기 | 비교하는 분모는 같은 출처에서 [S48]. 원문은 연도 간 분모 비교이고, 한 제목·표 안으로 넓힌 것은 우리 판단 | 1차 |
 | 자동 문체 항목의 기준값(1,000자당 개수 등) | 출처 없음. 공개 글로 보정한 우리 기준(`post-rubric` C24·C25) | — |
 
 ## 출처
@@ -77,3 +80,7 @@
 - [S42] Wikipedia, "Wikipedia:Signs of AI writing" (WikiProject AI Cleanup, 2026-11-14 열람) — https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing
 - [S43] 서울신문, 이오덕 인터뷰 (1992-04-13) — https://www.seoul.co.kr/news/1992/04/13/19920413010001 ; 『우리글 바로 쓰기』 소개(경향, 2009) — https://weekly.khan.co.kr/article/200912231533231
 - [S44] 이중 피동 설명(2차) — https://wikidocs.net/165243
+- [S45] Barrio, Goldstein, Hofman, "Improving Comprehension of Numbers in the News," CHI 2016 (초록) — https://www.microsoft.com/en-us/research/?p=215388
+- [S46] Hullman et al., "Improving Comprehension of Measurements Using Concrete Re-expression Strategies," CHI 2018 (초록) — https://mucollective.northwestern.edu/project/concrete-reexpression
+- [S47] Mark Baker, "Every Page is Page One" — https://mbakeranalecta.github.io/spfe-open-toolkit/spfe-docs-essays/every-page-is-page-one.html
+- [S48] DHIS2, "Denominators" (data quality guidance) — https://docs.dhis2.org/en/implement/data-quality/denominators.html
