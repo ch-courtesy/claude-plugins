@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """초안 문장마다 가장 가까운 자료 원문을 짝지어, 옮기면서 빠진 한정어와 넓힌 말을 표시한다.
 
-사용: python source_pair.py <초안.md> <자료 폴더나 파일> [...] [--out 보고.md] [--min 0.3]
+사용: python source_pair.py <초안.md> <자료 폴더나 파일> [...] [--out 보고.md] [--min 0.3] [--max-lines 30]
 
 숫자 대조(num_check)는 값이 맞는지만 본다. 이 도구는 숫자가 맞아도 뜻이 바뀌는 옮김을 찾는다.
   - 빠진 한정어: 짝지은 자료 문장에는 있는데 초안 문장에는 없는 조건·범위·확신 표시
     (괄호 속 조건, '~의 경우', '일부', '약', '[추정]'·'가정'·'확인 못 함', '진행 중', '예:' 등)
   - 넓힌 말: 초안 문장에만 있는 '모두'·'두 종류'·'항상'·'어느 쪽도'·'해당 사항 없음' 같은 전칭·분류어
   - '원문대로'·'그대로'라고 쓴 문장: 이어지는 따옴표 인용이 자료에 글자 그대로 있는지
+  - 부재·유일·전체 주장('한 번도', '없다', '기록 없음', '뿐', '유일', 'n개입니다', '모두', '세 가지'):
+    그 문장(표 행이면 같은 행)의 날짜·도구명·드문 낱말이 함께 나오는 자료 줄을 '모두' 뽑는다.
+    가장 가까운 한 줄만 보는 1절은 반대 증거가 다른 줄에 있는 이 주장을 구조상 못 잡는다.
 판정은 하지 않는다. 사람(또는 초안을 쓰지 않은 세션)이 짝을 보고 고칠지 정한다.
 """
 from __future__ import annotations
@@ -37,6 +40,88 @@ WIDEN = re.compile(
 )
 PAREN_HEDGE = re.compile(r"경우|때|만(?![가-힣])|추정|가정|확인|진행|일부|약\s|예[:\s]|제외|포함|기준|한정|이상|이하|까지|부터|대상|조건|뿐")
 QUOTE = re.compile(r"[\"“”'‘’「」『』]([^\"“”'‘’「」『』]{6,})[\"“”'‘’「」『』]")
+# 부재·유일·전체 주장. 이 문장이 맞으려면 자료 전체에 반대 줄이 없어야 한다.
+ABSENT = re.compile(
+    r"한\s*번도|전혀|없(?:다|습니다|었|음|는|어)|않(?:았|는다|습니다)|안\s*(?:썼|씀|했)|기록\s*없|"
+    r"뿐|유일|처음|모두|모든|전부|오직|"
+    r"\d+\s*(?:개|건|회|번|곳|편|명)(?:입니다|이다|였|뿐|만|밖에)|[한두세네다섯]\s*(?:가지|종류)"
+)
+RELDAY = re.compile(r"이날|그날|당일|이 날|그 날|같은 날")
+DATE_RX = re.compile(r"(?:(?:19|20)\d{2}[-./]\s*)?(?<!\d)(\d{1,2})\s*(?:[-/]|월\s*)\s*(\d{1,2})(?:일)?(?!\d)")
+NAME_RX = re.compile(r"`([^`]{2,40})`|([A-Za-z][A-Za-z0-9_.+-]*[A-Za-z0-9])")
+NAME_STOP = {"md", "hq", "the", "and", "or", "of", "to", "in", "is"}
+JOSA = re.compile(r"(?:으로는|에서는|으로|에서|에게|까지|부터|처럼|보다|이라|라는|이나|과의|와의|은|는|이|가|을|를|에|의|와|과|도|만|로|나)$")
+KO_STOP = {"없다", "없습니다", "없음", "없는", "기록", "번도", "모두", "모든", "전부", "유일", "처음", "가지", "종류",
+           "않았", "않았습니다", "않았다", "입니다", "있다", "있습니다", "이날", "그날", "당일", "같은", "자료", "발췌", "일지",
+           "적힌", "쓰지", "사용하지", "하지", "했습니다", "했다"}
+
+
+def norm_dates(s: str):
+    out = set()
+    for m in DATE_RX.finditer(s):
+        mo, d = int(m.group(1)), int(m.group(2))
+        if 1 <= mo <= 12 and 1 <= d <= 31:
+            out.add(f"{mo:02d}-{d:02d}")
+    return out
+
+
+def name_terms(s: str):
+    out = set()
+    for m in NAME_RX.finditer(s):
+        t = (m.group(1) or m.group(2)).strip()
+        if t.lower() not in NAME_STOP and not re.fullmatch(r"[\d.,%:-]+", t):
+            out.add(t)
+    return out
+
+
+def ko_terms(s: str):
+    out = set()
+    for w in re.findall(r"[가-힣]{2,}", s):
+        w = JOSA.sub("", w)
+        if len(w) >= 2 and w not in KO_STOP and not ABSENT.search(w):
+            out.add(w)
+    return out
+
+
+def counter_lines(sent, row, prev_date, lines):
+    """부재·유일 주장 한 문장에 대해, 자료에서 같은 날짜·이름·드문 낱말이 함께 나오는 줄을 모두 돌려준다.
+
+    lines는 자료의 줄 단위 목록 (파일, 줄, 줄 전체)이다. 한 줄 안의 뒤 문장도 그 줄 앞의 날짜를 따르게 줄로 본다.
+    날짜가 없으면 자료 줄의 1/3 넘게 나오는 이름(글의 주제어)은 조건에서 뺀다. 남는 조건이 없으면 None.
+    """
+    dates = norm_dates(row) or (prev_date if RELDAY.search(sent) else set())
+    lows = [f"{f}:{i}:{u}".lower() for f, i, u in lines]
+    n = len(lines)
+    cap = max(3, n // 6)
+
+    def terms(text):
+        nm = set()
+        for t in name_terms(text):
+            k = sum(t.lower() in h for h in lows)
+            if k and (dates or k <= max(3, n // 3)):
+                nm.add(t)
+        return nm, {w for w in ko_terms(text) if 0 < sum(w in u for _, _, u in lines) <= cap}
+
+    names, rare = terms(sent)
+    if not (dates or names or rare) and row.strip() != sent.strip():
+        names, rare = terms(row)  # 표의 '기록 없음' 칸처럼 문장에 낱말이 없으면 같은 행에서 가져온다
+    if not (dates or names or rare):
+        return None
+    need = min(2, len(rare))
+    hits = []
+    for (f, i, u), low in zip(lines, lows):
+        if dates and not (norm_dates(u) & dates):
+            continue
+        got = sorted(t for t in names if t.lower() in low)
+        if names and not got:
+            continue
+        kr = sorted(w for w in rare if w in u)
+        if not dates and not names and len(kr) < need:
+            continue
+        hits.append((f, i, u, got + kr))
+    return dates, names, rare, hits
+
+
 SENT_SPLIT = re.compile(r"(?<=[다요음함됨임])\.\s+|(?<=[.!?])\s+(?=[가-힣A-Z\"“'‘(])|\n")
 
 
@@ -47,12 +132,15 @@ def read_sources(paths):
             files += sorted(f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in TEXT_EXT)
         elif p.is_file():
             files.append(p)
-    units = []  # (파일, 줄, 문장)
+    units, lines = [], []  # (파일, 줄, 문장), (파일, 줄, 줄 전체)
     for f in files:
         for i, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-            for u in split_units(line):
+            us = split_units(line)
+            for u in us:
                 units.append((f.name, i, u))
-    return units
+            if us:
+                lines.append((f.name, i, line.strip()))
+    return units, lines
 
 
 def split_units(line: str):
@@ -74,17 +162,27 @@ def grams(s: str, n: int = 3):
     return {t[i:i + n] for i in range(max(0, len(t) - n + 1))}
 
 
-def draft_units(text: str):
+def draft_units(text: str, with_row: bool = False):
+    """초안 문장 (줄, 문장) 또는 (줄, 문장, 그 줄 전체, 그 줄 앞에서 마지막으로 나온 날짜)."""
     text = re.split(r"\n#+\s*작업 메모", text)[0]
-    units, in_code = [], False
+    units, in_code, last = [], False, set()
     for i, line in enumerate(text.splitlines(), 1):
         if line.strip().startswith("```"):
             in_code = not in_code
             continue
-        if in_code or line.startswith("#"):
+        if in_code:
             continue
-        for u in split_units(line):
-            units.append((i, u))
+        if line.startswith("#"):
+            last = norm_dates(line)
+            continue
+        us = split_units(line)
+        if with_row and line.lstrip().startswith("|"):
+            # 표의 짧은 칸('기록 없음', '없음')도 주장이다. 8글자 미만이라 split_units가 버린 칸을 되살린다.
+            us += [c.strip() for c in line.strip().strip("|").split("|")
+                   if c.strip() and c.strip() not in us and ABSENT.search(c)]
+        for u in us:
+            units.append((i, u, line, set(last)) if with_row else (i, u))
+        last = norm_dates(line) or last
     return units
 
 
@@ -113,18 +211,28 @@ def main():
     ap.add_argument("sources", nargs="+")
     ap.add_argument("--out")
     ap.add_argument("--min", type=float, default=0.3, help="짝으로 볼 최소 겹침(초안 문장 3글자 조각 중 자료 문장에 있는 비율)")
+    ap.add_argument("--max-lines", type=int, default=30, help="4절에서 주장 하나에 보여 줄 자료 줄 수 상한")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
 
-    src = read_sources(a.sources)
+    src, src_lines = read_sources(a.sources)
     if not src:
         sys.exit("자료 파일을 못 읽었다")
     src_g = [(f, i, u, grams(u)) for f, i, u in src]
     src_all = "\n".join(u for _, _, u in src)
     src_flat = re.sub(r"\s+", "", src_all)
 
+    draft_text = Path(a.draft).read_text(encoding="utf-8")
+    absent = []
+    for ln, s, row, prev in draft_units(draft_text, with_row=True):
+        if not ABSENT.search(s):
+            continue
+        r = counter_lines(s, row, prev, src_lines)
+        if r and r[3]:
+            absent.append((ln, s, [m.group(0) for m in ABSENT.finditer(s)], r))
+
     rows, widen_only, quote_bad = [], [], []
-    for ln, s in draft_units(Path(a.draft).read_text(encoding="utf-8")):
+    for ln, s in draft_units(draft_text):
         g = grams(s)
         if len(g) < 6:
             continue
@@ -159,10 +267,30 @@ def main():
             "따옴표 안 문장이 자료에 그대로 없다. '원문'·'그대로'라고 했으면 자료 글자로 바꾸고, 풀어 쓴 것이면 따옴표와 '원문대로'를 뺀다."]
     for ln, q in quote_bad:
         out.append(f"- 초안 {ln}줄: \"{q}\"")
+    out += ["", f"## 4. 부재·유일·전체 주장의 반증 후보 줄 ({len(absent)}건)",
+            "'한 번도·없다·기록 없음·뿐·유일·n개입니다·모두·세 가지' 문장마다, 그 문장(표 행이면 같은 행, '이날'이면 앞에 나온 날짜)의 "
+            "날짜·이름·드문 낱말이 함께 나오는 자료 줄을 빠짐없이 모았다. 목록을 끝까지 읽고 한 줄이라도 주장과 어긋나면"
+            "(그날 다른 줄에서 썼다, 같은 것이 더 있다, 실패 줄이 있다) 주장을 그 줄들의 범위로 좁히거나 뺀다. "
+            "자료가 발췌·일부라면 '발췌에는'처럼 범위를 밝힌다. 증상(빈 출력)과 원인(권한 거부)을 같은 목록으로 세지 않는다."]
+    for ln, s, keys, (dates, names, rare, hits) in absent:
+        cond = []
+        if dates:
+            cond.append("날짜 " + "·".join(sorted(dates)))
+        if names:
+            cond.append("이름 " + "·".join(sorted(names)))
+        if rare and not dates and not names:
+            cond.append("낱말 " + "·".join(sorted(rare)))
+        out += ["", f"- 초안 {ln}줄 [{', '.join(dict.fromkeys(k.strip() for k in keys))}]: {s}",
+                f"  - 모은 조건: {' / '.join(cond)} → 자료 {len(hits)}줄"]
+        for f, i, u, got in hits[:a.max_lines]:
+            tag = f" ({', '.join(got)})" if got else ""
+            out.append(f"  - {f}:{i}{tag}: {u[:500]}")
+        if len(hits) > a.max_lines:
+            out.append(f"  - … {len(hits) - a.max_lines}줄 더(--max-lines로 늘림)")
     report = "\n".join(out) + "\n"
     if a.out:
         Path(a.out).write_text(report, encoding="utf-8")
-        print(f"{a.out}: 한정어 {len(rows)} · 넓힌 말 {len(widen_only)} · 인용 {len(quote_bad)}")
+        print(f"{a.out}: 한정어 {len(rows)} · 넓힌 말 {len(widen_only)} · 인용 {len(quote_bad)} · 부재 주장 {len(absent)}")
     else:
         print(report)
 
