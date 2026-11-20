@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """초안 문장마다 가장 가까운 자료 원문을 짝지어, 옮기면서 빠진 한정어와 넓힌 말을 표시한다.
 
-사용: python source_pair.py <초안.md> <자료 폴더나 파일> [...] [--out 보고.md] [--min 0.3] [--max-lines 30]
+사용: python source_pair.py <초안.md> <자료 폴더나 파일> [...] [--out 보고.md] [--min 0.3] [--max-lines 60]
 
 숫자 대조(num_check)는 값이 맞는지만 본다. 이 도구는 숫자가 맞아도 뜻이 바뀌는 옮김을 찾는다.
   - 빠진 한정어: 짝지은 자료 문장에는 있는데 초안 문장에는 없는 조건·범위·확신 표시
@@ -211,7 +211,7 @@ def main():
     ap.add_argument("sources", nargs="+")
     ap.add_argument("--out")
     ap.add_argument("--min", type=float, default=0.3, help="짝으로 볼 최소 겹침(초안 문장 3글자 조각 중 자료 문장에 있는 비율)")
-    ap.add_argument("--max-lines", type=int, default=30, help="4절에서 주장 하나에 보여 줄 자료 줄 수 상한")
+    ap.add_argument("--max-lines", type=int, default=60, help="4절에서 주장 하나에 적을 자료 줄 위치 수 상한")
     a = ap.parse_args()
     sys.stdout.reconfigure(encoding="utf-8")
 
@@ -271,7 +271,9 @@ def main():
             "'한 번도·없다·기록 없음·뿐·유일·n개입니다·모두·세 가지' 문장마다, 그 문장(표 행이면 같은 행, '이날'이면 앞에 나온 날짜)의 "
             "날짜·이름·드문 낱말이 함께 나오는 자료 줄을 빠짐없이 모았다. 목록을 끝까지 읽고 한 줄이라도 주장과 어긋나면"
             "(그날 다른 줄에서 썼다, 같은 것이 더 있다, 실패 줄이 있다) 주장을 그 줄들의 범위로 좁히거나 뺀다. "
-            "자료가 발췌·일부라면 '발췌에는'처럼 범위를 밝힌다. 증상(빈 출력)과 원인(권한 거부)을 같은 목록으로 세지 않는다."]
+            "자료가 발췌·일부라면 '발췌에는'처럼 범위를 밝힌다. 증상(빈 출력)과 원인(권한 거부)을 같은 목록으로 세지 않는다. "
+            "주장마다 자료 줄 위치만 적고, 줄 원문은 이 절 끝 '4-1'에 한 번씩 모았다."]
+    seen: dict[tuple, str] = {}
     for ln, s, keys, (dates, names, rare, hits) in absent:
         cond = []
         if dates:
@@ -282,11 +284,16 @@ def main():
             cond.append("낱말 " + "·".join(sorted(rare)))
         out += ["", f"- 초안 {ln}줄 [{', '.join(dict.fromkeys(k.strip() for k in keys))}]: {s}",
                 f"  - 모은 조건: {' / '.join(cond)} → 자료 {len(hits)}줄"]
+        refs = []
         for f, i, u, got in hits[:a.max_lines]:
-            tag = f" ({', '.join(got)})" if got else ""
-            out.append(f"  - {f}:{i}{tag}: {u[:500]}")
-        if len(hits) > a.max_lines:
-            out.append(f"  - … {len(hits) - a.max_lines}줄 더(--max-lines로 늘림)")
+            seen.setdefault((f, i), u)
+            refs.append(f"{f}:{i}" + (f"({'·'.join(got)})" if got else ""))
+        more = f" … {len(hits) - a.max_lines}줄 더(--max-lines로 늘림)" if len(hits) > a.max_lines else ""
+        out.append(f"  - 자료 줄: {', '.join(refs)}{more}")
+    if seen:
+        out += ["", f"### 4-1. 4절에 나온 자료 줄 원문 ({len(seen)}줄)"]
+        for (f, i), u in sorted(seen.items(), key=lambda x: (x[0][0], x[0][1])):
+            out.append(f"- {f}:{i}: {u[:600]}")
     report = "\n".join(out) + "\n"
     if a.out:
         Path(a.out).write_text(report, encoding="utf-8")

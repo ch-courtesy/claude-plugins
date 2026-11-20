@@ -47,19 +47,25 @@ def block(sec, needle):
 def test_same_day_lines_all_listed(tmp_path):
     b = block(run(tmp_path), "한 번도")
     assert "날짜 11-02" in b
-    for ln in (":148:", ":159:", ":165:"):
+    for ln in ("src.md:2(", "src.md:3(", "src.md:4("):  # 11-02의 148·159·165줄
         assert ln in b
-    assert ":11:" not in b.replace("2026-11-02", "")  # 11-04 줄은 빠진다
+    assert "src.md:5" not in b  # 11-04 줄은 빠진다
 
 
 def test_count_claim_gets_every_matching_line(tmp_path):
     b = block(run(tmp_path), "1개입니다")
-    assert "06.md:21:" in b and "06.md:26:" in b
+    assert "src.md:6(" in b and "src.md:7(" in b
 
 
 def test_no_name_claim_uses_rare_word(tmp_path):
     b = block(run(tmp_path), "실패로 적힌")
-    assert "실패" in b and ":165:" in b
+    assert "src.md:4(실패)" in b
+
+
+def test_line_text_once_in_appendix(tmp_path):
+    sec = run(tmp_path)
+    app = sec.split("### 4-1.")[1]
+    assert app.count("src.md:4:") == 1 and "Sonnet 조사원으로 대체해 진행 중" in app
 
 
 def test_work_memo_ignored(tmp_path):
