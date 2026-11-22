@@ -5,20 +5,20 @@ from pathlib import Path
 
 HERE = Path(__file__).parent
 SRC = """# 출처: 일지 발췌
-journal/2026-11-02.md:148:- 사용량 보고. agy는 HQ가 한 번도 쓰지 않았다.
-journal/2026-11-02.md:159:- 정정: 오너 말에 다시 확인했다. `agy -p`가 정상으로 답했다.
-journal/2026-11-02.md:165:- W-35: agy 2회 실패(명령 권한 거부, 5분 시간 초과, 빈 출력) → Sonnet 조사원으로 대체해 진행 중.
-journal/2026-11-04.md:11:- agy 1회는 5분 제한에 걸려 결과 없음.
-journal/2026-11-06.md:21:- web-fetch 서브에이전트 2개를 썼고 agy는 안 썼다.
-journal/2026-11-06.md:26:- content-writer 2개와 web-fetch 1개를 썼다.
+log/2026-11-02.md:148:- 백업 점검. srv1은 restic을 한 번도 쓰지 않았다.
+log/2026-11-02.md:159:- 정정: 담당자 말에 다시 확인했다. `restic check`가 정상으로 답했다.
+log/2026-11-02.md:165:- 작업 35: restic 2회 실패(명령 권한 거부, 5분 시간 초과, 빈 출력) → rsync 복사로 대체해 진행 중.
+log/2026-11-04.md:11:- restic 1회는 5분 제한에 걸려 결과 없음.
+log/2026-11-06.md:21:- rclone 작업 2개를 썼고 restic은 안 썼다.
+log/2026-11-06.md:26:- cron 작업 2개와 rclone 1개를 썼다.
 """
 DRAFT = """# 제목
 
 | 날짜 | 기록 |
 |---|---|
-| 11-02 | 이날 HQ는 agy를 한 번도 쓰지 않았습니다. |
+| 11-02 | 이날 srv1은 restic을 한 번도 쓰지 않았습니다. |
 
-원문을 읽은 서브에이전트는 11-06의 web-fetch 1개입니다.
+원격으로 옮긴 작업은 11-06의 rclone 1개입니다.
 
 일지에 실패로 적힌 줄은 발췌에 없습니다.
 
@@ -65,7 +65,7 @@ def test_no_name_claim_uses_rare_word(tmp_path):
 def test_line_text_once_in_appendix(tmp_path):
     sec = run(tmp_path)
     app = sec.split("### 4-1.")[1]
-    assert app.count("src.md:4:") == 1 and "Sonnet 조사원으로 대체해 진행 중" in app
+    assert app.count("src.md:4:") == 1 and "rsync 복사로 대체해 진행 중" in app
 
 
 def test_work_memo_ignored(tmp_path):
