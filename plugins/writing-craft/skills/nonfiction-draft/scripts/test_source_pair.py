@@ -70,3 +70,11 @@ def test_line_text_once_in_appendix(tmp_path):
 
 def test_work_memo_ignored(tmp_path):
     assert "이 절은 보지 않는다" not in run(tmp_path)
+
+
+def test_missing_source_path_stops(tmp_path):
+    draft = tmp_path / 'd.md'
+    draft.write_text('# 글\n\n자료 100개를 확인했다.\n', encoding='utf-8')
+    r = subprocess.run([sys.executable, str(HERE / 'source_pair.py'), str(draft), str(draft), str(tmp_path / '없음.md')],
+                       capture_output=True)
+    assert r.returncode != 0 and r.stdout == b''

@@ -47,3 +47,18 @@ def test_angle_bracket_dialogue_is_not_register_mix(tmp_path):
     checks = run(tmp_path, '민재가 말했다. 〈저는 어제 푹 잤어요〉. 연한 회색이었다.\n\n〈열린 꺾쇠만 있다.\n')
     assert checks['register_mix'] == []
     assert len(checks['pairs']) == 1
+
+
+@pytest.mark.parametrize('opening', ["그는 don't라고 적었다.", "'닫지 않은 따옴표였다.", '“닫지 않은 말이었다.'])
+def test_unclosed_quote_does_not_hide_later_paragraphs(tmp_path, opening):
+    checks = run(tmp_path, opening + '\n\n비가 왔습니다. 길이 젖었다.\n')
+    assert len(checks['register_mix']) == 1
+
+
+def test_apostrophe_does_not_hide_same_paragraph(tmp_path):
+    assert run(tmp_path, "그는 don't라고 적었다. 비가 왔습니다.")['register_mix']
+
+
+def test_pairs_ignore_list_numbers_and_code(tmp_path):
+    checks = run(tmp_path, "1) 첫째\n- 가) 둘째\n\n```\nprint(')')\n```\n\n`)` 기호\n\n끝)\n")
+    assert [c['line'] for c in checks['pairs']] == [10]

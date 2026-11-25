@@ -132,6 +132,8 @@ def read_sources(paths):
             files += sorted(f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in TEXT_EXT)
         elif p.is_file():
             files.append(p)
+        else:
+            sys.exit(f"자료 경로가 없다: {p}")
     units, lines = [], []  # (파일, 줄, 문장), (파일, 줄, 줄 전체)
     for f in files:
         for i, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):

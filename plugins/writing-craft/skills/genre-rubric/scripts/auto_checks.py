@@ -22,8 +22,18 @@ def analyze(path, sequence_limit=3):
         return {'line': line, 'text': excerpt.strip()[:160], **extra}
 
     stack = []
+    pair_fence = None
     for number, line in enumerate(lines, 1):
-        for char in line:
+        match = re.match(r'^\s{0,3}(`{3,}|~{3,})', line)
+        if match:
+            if pair_fence is None:
+                pair_fence = match[1]
+            elif match[1][0] == pair_fence[0] and len(match[1]) >= len(pair_fence):
+                pair_fence = None
+        # 코드와 '1)' 같은 목록 번호의 괄호는 짝 검사에서 뺀다.
+        pair_line = '' if match or pair_fence else re.sub(r'(`+).*?\1', '', line)
+        pair_line = re.sub(r'^\s*(?:[-*+]\s+)?(?:\d{1,3}|[가-힣A-Za-z])\)(?=\s)', '', pair_line)
+        for char in pair_line:
             if char in PAIRS:
                 stack.append((char, number, line))
             elif char in PAIRS.values():
@@ -59,9 +69,14 @@ def analyze(path, sequence_limit=3):
             filtered.append('')
             continue
         line = re.sub(r'(`+).*?\1', lambda m: ' ' * len(m[0]), line)
+        if not line.strip():
+            # 닫지 않은 따옴표가 뒤 문단까지 지우지 않게 문단마다 다시 센다.
+            quote_stack = []
         result = []
-        for char in line:
-            if quote_stack and char == quote_stack[-1]:
+        for index, char in enumerate(line):
+            if char == "'" and re.fullmatch(r"[A-Za-z0-9]'[A-Za-z0-9]", line[max(0, index - 1):index + 2]):
+                result.append(char)  # don't 같은 아포스트로피는 인용 부호가 아니다.
+            elif quote_stack and char == quote_stack[-1]:
                 quote_stack.pop()
                 result.append(' ')
             elif char in QUOTES:

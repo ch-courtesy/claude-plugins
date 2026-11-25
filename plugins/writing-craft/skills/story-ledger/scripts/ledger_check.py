@@ -148,7 +148,9 @@ def check(ledger_dir, foreshadow_limit=30, min_chars=None, count='without_spaces
     for file, kind, row in confirmed:
         if kind == 'foreshadow' and not row.get('resolved_episode') and not row.get('discarded_episode') and latest - row['setup_episode'] > foreshadow_limit:
             add('stale_foreshadow', file, row, f'회수·폐기 없이 {latest - row["setup_episode"]}회차가 지났다.', severity='warn')
-    if episodes_text_dir:
+    if episodes_text_dir and not Path(episodes_text_dir).is_dir():
+        add('missing_field', str(episodes_text_dir), {}, '본문 디렉터리가 없다.')
+    elif episodes_text_dir:
         for path in sorted(Path(episodes_text_dir).iterdir()):
             if not re.fullmatch(r'E\d{3,}\.(md|txt)', path.name):
                 continue

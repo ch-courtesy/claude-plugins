@@ -106,3 +106,9 @@ def test_invalid_nested_status(ledger):
     text = path.read_text(encoding='utf-8-sig').replace('status = "confirmed",', 'status = "unknown",')
     path.write_text(text, encoding='utf-8')
     assert 'missing_field' in {f['check'] for f in run(ledger)[1]['findings']}
+
+
+def test_missing_text_dir_is_reported():
+    code, report = run(FIXTURES / 'clean', '--episodes-text-dir', FIXTURES / '없는폴더')
+    assert code == 1
+    assert [item['check'] for item in report['findings']] == ['missing_field']
