@@ -37,6 +37,8 @@ def read_sources(paths):
             files += sorted(f for f in p.rglob("*") if f.is_file() and f.suffix.lower() in TEXT_EXT)
         elif p.is_file():
             files.append(p)
+        else:
+            sys.exit(f"자료 경로가 없다: {p}")
     out = []
     for f in files:
         try:
@@ -108,7 +110,7 @@ def main():
     ap.add_argument("draft")
     ap.add_argument("materials", nargs="+")
     ap.add_argument("--out")
-    ap.add_argument("--min", type=float, default=10, help="이보다 작은 정수(%·소수 아님)는 건너뜀(기본 10)")
+    ap.add_argument("--min", type=float, default=10, help="이보다 작은 정수(%%·소수 아님)는 건너뜀(기본 10)")
     a = ap.parse_args()
 
     draft_lines = Path(a.draft).read_text(encoding="utf-8").splitlines()
@@ -148,11 +150,8 @@ def main():
     # 2. 숫자
     rep += ["## 2. 숫자·날짜 대조", "| 줄 | 본문 값 | 자료 위치 | 판정·후보 |", "|---|---|---|---|"]
     n_ok = n_bad = 0
-    in_code = False
     seen = set()
     for ln, line in enumerate(draft_lines, 1):
-        if line.strip().startswith("```"):
-            in_code = not in_code
         ds = dates_in(line)
         for key, _, raw in ds:
             if (raw, ln) in seen:
