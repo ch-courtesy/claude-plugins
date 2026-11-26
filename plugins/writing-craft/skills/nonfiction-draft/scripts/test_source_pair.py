@@ -78,3 +78,41 @@ def test_missing_source_path_stops(tmp_path):
     r = subprocess.run([sys.executable, str(HERE / 'source_pair.py'), str(draft), str(draft), str(tmp_path / '없음.md')],
                        capture_output=True)
     assert r.returncode != 0 and r.stdout == b''
+
+
+DRAFT_WIDE = """# 제목
+
+rsync 복사는 대부분 권한 거부로 끝났습니다.
+
+11-04에는 restic을 다시 돌리지 않았습니다.
+
+11-06에 rclone과 cron은 어느 쪽도 결과를 얻지 못했습니다.
+
+11-02 담당자에게 묻지 않고 넘어갔습니다.
+"""
+
+
+def test_wider_quantity_and_absence_words(tmp_path):
+    (tmp_path / "src.md").write_text(SRC, encoding="utf-8")
+    (tmp_path / "draft.md").write_text(DRAFT_WIDE, encoding="utf-8")
+    out = tmp_path / "rep.md"
+    subprocess.run([sys.executable, str(HERE / "source_pair.py"), str(tmp_path / "draft.md"),
+                    str(tmp_path / "src.md"), "--out", str(out)], check=True, capture_output=True)
+    sec = out.read_text(encoding="utf-8").split("## 4.")[1]
+    b = block(sec, "대부분")
+    assert "src.md:4(" in b  # rsync가 나오는 유일한 줄
+    assert "src.md:5(" in block(sec, "다시 돌리지")  # 11-04 줄
+    b = block(sec, "어느 쪽도")
+    assert "src.md:6(" in b and "src.md:7(" in b
+    assert "src.md:3(" in block(sec, "묻지 않고")  # 11-02 담당자 줄
+
+
+def test_quantity_claim_falls_back_to_topic_word(tmp_path):
+    (tmp_path / "src.md").write_text(SRC, encoding="utf-8")
+    (tmp_path / "draft.md").write_text("# 제목\n\nrestic은 대부분 그랬습니다.\n", encoding="utf-8")
+    out = tmp_path / "rep.md"
+    subprocess.run([sys.executable, str(HERE / "source_pair.py"), str(tmp_path / "draft.md"),
+                    str(tmp_path / "src.md"), "--out", str(out)], check=True, capture_output=True)
+    b = block(out.read_text(encoding="utf-8").split("## 4.")[1], "대부분")
+    for ln in ("src.md:2(", "src.md:3(", "src.md:4(", "src.md:5(", "src.md:6("):  # restic이 나오는 줄 전부
+        assert ln in b
