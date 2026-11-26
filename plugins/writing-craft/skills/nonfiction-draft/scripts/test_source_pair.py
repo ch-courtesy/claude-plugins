@@ -27,9 +27,9 @@ DRAFT = """# 제목
 """
 
 
-def run(tmp_path):
-    (tmp_path / "src.md").write_text(SRC, encoding="utf-8")
-    (tmp_path / "draft.md").write_text(DRAFT, encoding="utf-8")
+def run(tmp_path, draft=DRAFT, src=SRC):
+    (tmp_path / "src.md").write_text(src, encoding="utf-8")
+    (tmp_path / "draft.md").write_text(draft, encoding="utf-8")
     out = tmp_path / "rep.md"
     subprocess.run([sys.executable, str(HERE / "source_pair.py"), str(tmp_path / "draft.md"),
                     str(tmp_path / "src.md"), "--out", str(out)], check=True, capture_output=True)
@@ -116,3 +116,34 @@ def test_quantity_claim_falls_back_to_topic_word(tmp_path):
     b = block(out.read_text(encoding="utf-8").split("## 4.")[1], "대부분")
     for ln in ("src.md:2(", "src.md:3(", "src.md:4(", "src.md:5(", "src.md:6("):  # restic이 나오는 줄 전부
         assert ln in b
+
+
+def test_only_claim_lists_matching_backup_line(tmp_path):
+    draft = """rsync 대체 투입 기록만 있습니다.
+rsync 사용 횟수만남아 있습니다.
+rsync 사용 횟수만 적었습니다.
+rsync 복사본을 필요한 만큼 만들었습니다.
+rsync 담당자를 만나 비용 만원을 지급했습니다.
+rsync 실행 기록만  있습니다.
+"""
+    sec = run(tmp_path, draft)
+    for claim in draft.splitlines()[:3]:
+        assert "src.md:4(" in block(sec, claim)
+    for other in draft.splitlines()[3:]:
+        assert other not in sec
+
+
+def test_absence_cell_uses_least_common_row_word(tmp_path):
+    src = """백업 비용과 저장 한도를 점검했다.
+원격 백업의 전송 한도를 올렸다.
+백업 비용 및 복원 한도를 확인했다.
+주간 백업 비용과 보관 한도를 검토했다.
+야간 백업 비용을 정산했다.
+복원 시험 비용을 추가했다.
+"""
+    for cell in ("기록 없음", "없음", "없다"):
+        sec = run(tmp_path, f"| 비용·한도 | {cell} |", src)
+        b = block(sec, cell)
+        for ln in (1, 2, 3, 4):
+            assert f"src.md:{ln}(한도)" in b
+        assert "src.md:5" not in b and "src.md:6" not in b
