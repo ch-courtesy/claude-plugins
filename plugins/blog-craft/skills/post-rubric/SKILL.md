@@ -1,6 +1,6 @@
 ---
 name: post-rubric
-description: 블로그 글 초안을 외부 LLM 에이전트 CLI(codex·claude·agy 중 하나)로 독립 채점해, 현업 10년차 시니어 기준 23개 항목(독자 위험 고지·끝까지 따라 하기·소제목 형식 포함) 점수와 100점 총점, 2점 미만 항목의 지적 목록을 낸다. 글 채점, rubric, 발행 전 점수 확인에 사용
+description: 블로그 글 초안을 외부 LLM 에이전트 CLI(codex·claude·agy 중 하나)로 독립 채점해, 현업 10년차 시니어 기준 27개 항목(독자 위험 고지·끝까지 따라 하기·소제목 형식·문체 패턴 포함) 점수와 100점 총점, 2점 미만 항목의 지적 목록을 낸다. 글 채점, rubric, 발행 전 점수 확인에 사용
 node:
   in:
     worktree_dir: { shape: text }
@@ -47,11 +47,11 @@ node:
 
    채점자가 `agy` 면 프롬프트 맨 앞에 "셸 명령 도구를 쓰지 마라 — 파일 보기 도구와 아래 원문만 쓴다" 한 줄을 더한다. 읽기 모드(agy `--mode plan`)는 비대화형이라 셸 도구 승인 요청이 자동 거부되고 출력 없이 끝난다(2026-11-14). agy 프롬프트는 명령줄 한 인자로 넘어가므로 Windows 에서 기준과 원문을 합쳐 32,767자를 넘으면 실행이 실패한다 — 그때는 다른 채점자를 쓴다
 3. **실행.** `worktree_dir` 에서 `bash "$oneshot/references/oneshot.sh" --mode read --prompt-file "$tmp/prompt.txt" <reviewer> > "$tmp/stdout.txt" 2> "$tmp/stderr.txt"` 를 실행한다. `$oneshot` 은 설치된 recipe 플러그인의 oneshot 스킬 디렉터리다. 여러 버전이 있으면 가장 높은 버전을 쓴다(`ls -d ~/.claude/plugins/cache/*/recipe/*/skills/oneshot | sort -V | tail -1`). 모델과 effort 는 지정하지 않고 CLI 기본값을 쓴다. 종료 코드 0 또는 3(강등 — stdout 에 결과 있음)이면 다음 단계로 간다. stderr 는 codex 세션 로그가 항상 섞이므로 성공 판정에 쓰지 않고, 실패했을 때 원인을 찾는 데만 본다
-4. **검증·계산.** `python <이 스킬 디렉터리>/scripts/score.py --rubric <이 스킬 디렉터리>/references/rubric.json --post <post_path> --review "$tmp/stdout.txt" --reviewer <reviewer> --out "$tmp/result.json"` (`python` 이 없으면 `python3`). 스크립트가 채점자 항목(C1~C17, C21, C22)의 누락, 점수 범위, 글 유형별 N/A 허용 여부, 인용이 글에 실제로 있는지를 검사한다. 원문에서 셀 수 있는 C18~C20·C23 은 같은 디렉터리의 `auto_items.py` 로 직접 센 뒤 총점을 계산한다. 총점은 채점자에게 맡기지 않는다. 결과는 `--out` 파일과 stdout 에 같은 JSON 으로 나오고, 실패 사유는 그 JSON 의 `errors` 에 있다
+4. **검증·계산.** `python <이 스킬 디렉터리>/scripts/score.py --rubric <이 스킬 디렉터리>/references/rubric.json --post <post_path> --review "$tmp/stdout.txt" --reviewer <reviewer> --out "$tmp/result.json"` (`python` 이 없으면 `python3`). 스크립트가 채점자 항목(C1~C17, C21, C22, C26, C27)의 누락, 점수 범위, 글 유형별 N/A 허용 여부, 인용이 글에 실제로 있는지를 검사한다. 원문에서 셀 수 있는 C18~C20·C23~C25 는 같은 디렉터리의 `auto_items.py` 로 직접 센 뒤 총점을 계산한다. 총점은 채점자에게 맡기지 않는다. 결과는 `--out` 파일과 stdout 에 같은 JSON 으로 나오고, 실패 사유는 그 JSON 의 `errors` 에 있다
 5. **다시 시키기(한 번만).** 3단계 종료 코드가 0·3 이 아니거나 4단계가 종료 코드 1(`ok: false`)이면, `prompt.txt` 끝에 아래 문단을 붙여 3·4단계를 한 번 더 실행한다. 3단계가 실패했으면 `<문제>` 에는 stderr 마지막 몇 줄의 요약을, 4단계가 실패했으면 `errors` 를 한 줄에 하나씩 넣는다. 처음부터 다시 채점하게 하는 것이므로 직전 출력은 붙이지 않는다
 
    ```text
-   직전 출력의 문제(이것을 고쳐 C1~C17, C21, C22 전체를 다시 출력한다):
+   직전 출력의 문제(이것을 고쳐 C1~C17, C21, C22, C26, C27 전체를 다시 출력한다):
    - <문제>
    ```
 6. **실패로 끝내기.** 두 번째도 실패하면 `score` 는 `{"total": null, "reviewer": <reviewer>, "error": "<요약>"}`, `findings` 는 `{"severity": "P1", "category": "writing", "location": "-", "issue": "<reviewer> 채점 실패: <요약>", "suggestion": "수동 채점", "reviewer": <reviewer>}` 하나로 낸다. 이때는 임시 디렉터리를 지우지 않고 경로를 보고해, 사람이 stdout·stderr 를 볼 수 있게 한다
@@ -73,4 +73,4 @@ node:
   |---|---|---|---|---|
   | C14 공식 문서 이상의 선택·이유·실패 | 0 | 전체 | ... | ... |
   ```
-- 합격선 70 은 기존 글 24편을 codex 로 채점한 분포(39~85, 중앙값 55.5)와, 같은 글을 다시 채점했을 때의 차이(4~12점)를 보고 정했다(2026-10-31). 한 번의 채점이 이만큼 흔들리므로 합격선은 경고에만 쓰고 진행을 막지 않는다. 이 값은 채점표 5판(C1~C20) 기준이다. 6판(C21~C23 추가, 시니어 기준선)으로 기존 글을 다시 채점해 분포를 본 뒤 합격선을 다시 정한다. 그 전까지는 70을 그대로 쓴다
+- 합격선 70 은 기존 글 24편을 codex 로 채점한 분포(39~85, 중앙값 55.5)와, 같은 글을 다시 채점했을 때의 차이(4~12점)를 보고 정했다(2026-10-31). 한 번의 채점이 이만큼 흔들리므로 합격선은 경고에만 쓰고 진행을 막지 않는다. 이 값은 채점표 5판(C1~C20) 기준이다. 6판(C21~C23 추가, 시니어 기준선)·7판(C24~C27 추가, 2026-11-16)으로 기존 글을 다시 채점해 분포를 본 뒤 합격선을 다시 정한다. 그 전까지는 70을 그대로 쓴다
