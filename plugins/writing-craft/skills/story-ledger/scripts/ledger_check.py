@@ -86,6 +86,11 @@ def check(ledger_dir, foreshadow_limit=30, min_chars=None, count='without_spaces
             if kind == 'characters' and (row.get('state') not in ('alive', 'dead') or (row.get('state') == 'dead' and type(row.get('death_episode')) is not int)):
                 add('missing_field', file, row, 'state 또는 사망 회차 death_episode를 확인하라.')
                 valid = False
+            for key in ('participants', 'events', 'new_facts', 'forbidden_info', 'foreshadows'):
+                value = row.get(key)
+                if isinstance(value, list) and any(not isinstance(item, str) for item in value):
+                    add('missing_field', file, row, f'{key}의 항목은 모두 ID 문자열이어야 한다.')
+                    valid = False
             for key, nested_fields in NESTED.items():
                 for entry in row.get(key, []) if isinstance(row.get(key, []), list) else []:
                     if not isinstance(entry, dict) or any(type(entry.get(k)) is not t for k, t in nested_fields.items()):

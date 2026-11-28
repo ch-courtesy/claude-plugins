@@ -125,3 +125,12 @@ def test_missing_text_dir_is_reported():
     code, report = run(FIXTURES / 'clean', '--episodes-text-dir', FIXTURES / '없는폴더')
     assert code == 1
     assert [item['check'] for item in report['findings']] == ['missing_field']
+
+
+@pytest.mark.parametrize('bad', ['[["CHR-001"]]', '[1]', '[{id = "CHR-001"}]'])
+def test_non_string_participant_is_reported_not_crash(ledger, bad):
+    path = ledger / 'scenes' / 'E003-S01.toml'
+    path.write_text(path.read_text(encoding='utf-8-sig').replace('participants = ["CHR-001", "CHR-002"]', f'participants = {bad}'), encoding='utf-8')
+    code, report = run(ledger)
+    assert code == 1
+    assert any(f['check'] == 'missing_field' and 'participants' in f['message'] for f in report['findings'])
