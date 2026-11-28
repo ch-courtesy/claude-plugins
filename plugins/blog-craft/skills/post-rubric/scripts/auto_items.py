@@ -1,4 +1,4 @@
-"""원문만 세면 되는 항목(렌더링 C18~C20, 소제목 형식 C23)을 채점자 대신 계산한다.
+"""원문 자동 항목(렌더링 C18~C20, 소제목 C23, 문체 C24·C25)을 채점자 대신 계산한다.
 
 LLM 에게 줄 길이나 태그 개수를 세게 하면 실행마다 결과가 흔들리고 인용이 길어진다.
 score.py 가 불러 쓰고, 단독으로 실행하면 글 하나의 결과를 출력한다.
@@ -33,6 +33,153 @@ BLOCK_START = re.compile(r"^ {0,3}(#{1,6}(\s|$)|[-*+]\s|\d{1,9}[.)]\s|>)")  # �
 LONG_TOKEN = 45  # 모바일 한 줄에 영문 40자 정도가 들어간다. 경계에 걸리는 API 이름까지 잡지 않도록 여유를 둔다
 LONG_CODE_LINE = 100
 MAX_LISTED = 8
+
+
+# 출처 번호는 post-draft/references/sources.md. 기준값은 품질 공정을 거친 공개 글 15편으로 보정(2026-11-16).
+# TL04('로부터')·TL12('-적')·TL13('~것이다')·TL15('~ 중 하나')·AI15(방향어)·AI17('할 수 있습니다'):
+# 공개 글에서 적중의 과반이 오탐(고치면 뜻이 바뀜)이라 자동 항목에서 뺐다. post-draft 지침에는 남겨 사람이 판단한다.
+# AI09·10·11·14·18은 요청대로 C24에서 제외. M1~M7은 이 항목의 범위 밖이다.
+# threshold=None: 매 적중을 후보로, 숫자: 해당 밀도를 초과한 패턴을 후보 하나로 센다.
+STYLE_PATTERNS = (
+    # TL01 [S37][S40]
+    {"id": "TL01", "re": re.compile('에\\s?의(해|하여|한)\\s'), "threshold": None, "ex": '김 대리에 의해 작성됐습니다 → 김 대리가 작성했습니다'},
+    # TL02 [S40]
+    {"id": "TL02", "re": re.compile('(작업|처리|사용|분석|개발|운영|설계|구현|검토)에\\s?있어(서)?\\s'), "threshold": None, "ex": '엑셀 작업에 있어 중요한 것 → 엑셀로 작업할 때 중요한 것'},
+    # TL03 [S40]
+    {"id": "TL03", "re": re.compile('(시간|회의|간담회|모임|자리|기회|관심|의미|경험|대화)(을|를)\\s?(가지|갖|가졌)'), "threshold": None, "ex": '회의를 가졌습니다 → 회의했습니다'},
+    # TL05 [S40]
+    {"id": "TL05", "re": re.compile('(을|를)\\s?통(해|하여|한)'), "threshold": 1.0, "ex": '이 글을 통해 알아봅니다 → (삭제)'},
+    # TL06 [S39][S40]
+    {"id": "TL06", "re": re.compile('에\\s?(대한|대해(서)?|대하여|관한|관해(서)?|관하여)'), "threshold": 2.0, "ex": '범위에 대해서는 → 범위는'},
+    # TL07 [S40]
+    {"id": "TL07", "re": re.compile('(하는|되는)\\s?중(이다|입니다|에\\s?있)'), "threshold": None, "ex": '검토하는 중입니다 → 검토하고 있습니다'},
+    # TL08 [S44]
+    {"id": "TL08", "re": re.compile('(보여|잊혀|불려|쓰여|나뉘어|닫혀|열려|읽혀|되어)지(다|고|는|며|면|게|었|ㄴ|ㄹ|어|습)'), "threshold": None, "ex": '되어집니다 → 됩니다, 보여집니다 → 보입니다'},
+    # TL09 조사 초안(출처 미확인/우리 기준)
+    {"id": "TL09", "re": re.compile('에도\\s?불구하고'), "threshold": None, "ex": '→ ~지만, ~는데도'},
+    # TL10 조사 초안(출처 미확인/우리 기준)
+    {"id": "TL10", "re": re.compile('(으)?로\\s?인(해|하여|한)'), "threshold": 0.5, "ex": '오류로 인해 → 오류 때문에 / 오류로'},
+    # TL11 [S40]
+    {"id": "TL11", "re": re.compile('그녀'), "threshold": None, "ex": '그녀 → 이름·직책'},
+    # TL14 [S39]
+    {"id": "TL14", "re": re.compile('(모든|여러|각|많은|다양한)\\s[가-힣]+들(은|는|이|가|을|를|의|에)'), "threshold": None, "ex": '모든 파일들을 → 모든 파일을'},
+    # TL16 조사 초안(출처 미확인/우리 기준)
+    {"id": "TL16", "re": re.compile('(할|될)\\s?수\\s?있(을|는)\\s?것(으로|이다|입니다|\\s?같)'), "threshold": None, "ex": '해결될 수 있을 것입니다 → 해결됩니다 / 해결될 수 있습니다'},
+    # TL17 [S39]
+    {"id": "TL17", "re": re.compile('것\\s?같(다|습니다|아요)'), "threshold": 0.5, "ex": '문제인 것 같습니다 → 문제입니다(확실한 경우)'},
+    # TL18 조사 초안(출처 미확인/우리 기준)
+    {"id": "TL18", "re": re.compile('(을|를)\\s?진행(하|했|합|한|해)'), "threshold": None, "ex": '설치를 진행합니다 → 설치합니다'},
+    # TL19 조사 초안(출처 미확인/우리 기준)
+    {"id": "TL19", "re": re.compile('(소개|입력|연결|향상|감소|증가|발생|작동|설치)시(키|켜|킨|킵)'), "threshold": None, "ex": '입력시킵니다 → 입력합니다'},
+    # TL20 [S40]
+    {"id": "TL20", "re": re.compile('하기\\s?위(해|하여)서?'), "threshold": 1.0, "ex": '확인하기 위해 → 확인하려고'},
+    # AI01 [S7]
+    {"id": "AI01", "re": re.compile('(알아|살펴)(보겠습니다|볼까요|보도록\\s?하겠습니다|봅시다)'), "threshold": None, "ex": '알아보겠습니다 → 본론부터'},
+    # AI02 조사 초안(출처 미확인/우리 기준)
+    {"id": "AI02", "re": re.compile('(오늘은|이번\\s?(글|포스팅)에서는)'), "threshold": None, "ex": '오늘은 → 삭제'},
+    # AI03 [S42] heading_re의 '정리' 등은 실용적인 요약 제목도 잡아 제외.
+    {"id": "AI03", "re": re.compile('(결론적으로|요약하자면|정리하자면|마치며|마무리하며)'), "threshold": None, "ex": '요약하자면 → 삭제'},
+    # AI04 조사 초안(출처 미확인/우리 기준)
+    {"id": "AI04", "re": re.compile('(도움이\\s?되(셨|었)?(기를|길|으면)|댓글로\\s?(남겨|알려)|공감(과|\\s?및)\\s?구독|읽어\\s?주셔서\\s?감사)'), "threshold": None, "ex": '도움이 되셨기를 → 삭제'},
+    # AI05 [S42]
+    {"id": "AI05", "re": re.compile('(단순(히|한)\\s?[^.。]{0,20}(이|가)?\\s?아니(라|고)|뿐만\\s?아니라)'), "threshold": 0.5, "ex": '뿐만 아니라 → 문장 나누기'},
+    # AI06 [S42] 실제 출력을 설명하는 '보여 줍니다'는 제외.
+    {"id": "AI06", "re": re.compile('(중요한|핵심적인|필수적인|결정적인)\\s?(역할|의미|요소)'), "threshold": None, "ex": '핵심적인 역할 → 구체적인 역할'},
+    # AI07 [S16]
+    {"id": "AI07", "re": re.compile('(다양한|효과적(인|으로)|효율적(인|으로)|원활(한|하게)|혁신적(인|으로)|획기적(인|으로)|완벽(한|하게))'), "threshold": 1.0, "ex": '효과적인 → 수치·결과'},
+    # AI08 [S32]
+    {"id": "AI08", "re": re.compile('(여정|열쇠|첫걸음|날개를\\s?달|마법(처럼|같은)|게임\\s?체인저|판도를\\s?바꾸|두\\s?마리\\s?토끼|양날의\\s?검|한\\s?줄기\\s?빛)'), "threshold": None, "ex": '마법처럼 → 실제 작동 방식'},
+    # AI12 조사 초안. 이모지 분기는 실제 데이터(✅)도 잡으므로 제외.
+    {"id": "AI12", "re": re.compile('[!！]'), "threshold": None, "ex": '느낌표 → 마침표'},
+    # AI13 [S37] 원칙 4
+    {"id": "AI13", "re": re.compile(r'(정말|매우|아주|굉장히|상당히|너무나|무척|확실히)\s'), "threshold": 1.0, "ex": '매우 빠릅니다 → 빠릅니다 / 측정값'},
+    # AI16 [S7]
+    {"id": "AI16", "re": re.compile('\\[(여기|이곳|링크|클릭|바로\\s?가기)\\]'), "threshold": None, "ex": '여기 → 링크 대상 이름'},
+)
+
+STYLE_LIMITS = (0.5, 1.5)  # 후보/1,000자: 이하 2점, 이하 1점, 초과 0점
+BOLD_LIMITS = (1.0, 3.0)  # 굵은 구간/1,000자. 30자 이상 구간은 최대 1점
+INLINE_CODE = re.compile(r"(?<![\\`])(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)")
+HTML_COMMENT = re.compile(r"<!--[\s\S]*?-->")
+BARE_URL = re.compile(r"https?://[^\s<>]+")
+BOLD = re.compile(r"(?<![\\*])\*\*([^*\n]+)\*\*(?!\*)|(?<![\\_])__([^_\n]+)__(?!_)")
+
+
+def style_rows(text):
+    """검사 대상 원문과 화면 글자를 함께 보존한다(링크 글자·굵게 표시는 검사에 필요)."""
+    # 주석은 화면에 없는 편집 메모. 줄바꿈을 남겨 원문 줄 번호를 보존한다.
+    text = HTML_COMMENT.sub(lambda m: "\n" * m[0].count("\n"), text)
+    _, prose, _ = scan(text)
+    lines = [""] * len(text.splitlines())
+    included = set()
+    for no, line in prose:
+        if re.match(r"^ {0,3}>", line) or REF_DEF.match(line) or TABLE_SEP.match(line):
+            continue
+        lines[no - 1] = line
+        included.add(no)
+    joined = INLINE_CODE.sub(lambda m: "\n" * m[0].count("\n"), "\n".join(lines))
+    rows = []
+    for no, line in enumerate(joined.split("\n"), 1):
+        if no not in included:
+            continue
+        line = AUTOLINK.sub("", LINK_TARGET.sub("]", line))
+        line = BARE_URL.sub("", line)
+        line = re.sub(r"!\[([^\]]*)\]", r"[\1]", line)
+        visible = visible_text(line)
+        visible = re.sub(r"^ {0,3}#{1,6}\s+", "", visible)
+        visible = visible.replace("__", "")
+        rows.append((no, line, visible))
+    return rows
+
+
+def style_metrics(text):
+    rows = style_rows(text)
+    # 본문 공백·빈 줄을 포함하고, 제외한 행의 줄바꿈은 세지 않는다.
+    chars = len("\n".join(visible for _, _, visible in rows))
+    unit = chars / 1000
+    candidates, hits, bold, sentences = [], {}, [], []
+    original_lines = text.splitlines()
+    for pattern in STYLE_PATTERNS:
+        # AI16은 링크 표기, 나머지는 화면에 보이는 글자로 검사한다.
+        matched = [(no, original_lines[no - 1].strip(), pattern["id"] + ": " + pattern["ex"])
+                   for no, raw, visible in rows
+                   for _ in pattern["re"].finditer(raw if pattern["id"] == "AI16" else visible)]
+        hits[pattern["id"]] = matched
+        if pattern["threshold"] is None:
+            candidates.extend(matched)
+        elif matched and len(matched) > pattern["threshold"] * unit:
+            candidates.append(matched[0])
+    for no, raw, _ in rows:
+        for match in BOLD.finditer(raw):
+            content = match[1] if match[1] is not None else match[2]
+            found = (no, match[0], "30자 이상 문장 굵게" if len(visible_text(content)) >= 30 else "굵은 구간")
+            bold.append(found)
+            if len(visible_text(content)) >= 30:
+                sentences.append(found)
+    return {"chars": chars, "hits": hits, "candidates": sorted(candidates),
+            "style_density": len(candidates) / unit if unit else 0,
+            "bold": bold, "sentences": sentences,
+            "bold_density": len(bold) / unit if unit else 0}
+
+
+def style_items(text):
+    metrics = style_metrics(text)
+    density = metrics["style_density"]
+    score = 2 if density <= STYLE_LIMITS[0] else 1 if density <= STYLE_LIMITS[1] else 0
+    c24 = item("C24", score, metrics["candidates"],
+               ok_reason=f"문체 후보 {len(metrics['candidates'])}개, 1,000자당 {density:.2f}개",
+               head=f"문체 후보 {len(metrics['candidates'])}개, 1,000자당 {density:.2f}개",
+               fix="표시한 패턴을 문맥에 맞게 고치되 뜻이 바뀌는 경우 유지한다")
+    density = metrics["bold_density"]
+    score = 2 if density <= BOLD_LIMITS[0] else 1 if density <= BOLD_LIMITS[1] else 0
+    if metrics["sentences"]:
+        score = min(score, 1)
+    found = metrics["sentences"] + [b for b in metrics["bold"] if b not in metrics["sentences"]]
+    c25 = item("C25", score, found,
+               ok_reason=f"굵은 구간 {len(metrics['bold'])}개, 1,000자당 {density:.2f}개, 문장 굵게 없음",
+               head=f"굵은 구간 {len(metrics['bold'])}개, 1,000자당 {density:.2f}개, 30자 이상 {len(metrics['sentences'])}개",
+               fix="굵은 글씨는 짧은 핵심어에만 쓰고 문장 전체의 강조를 푼다")
+    return [c24, c25]
 
 
 def split_front_matter(text):
@@ -110,6 +257,7 @@ def cells(line):
 
 
 def check(text):
+    c24, c25 = style_items(text)
     blocks, prose, unclosed = scan(text)
     overflow, broken = [], []
 
@@ -238,7 +386,7 @@ def check(text):
         c23 = item("C23", 2 if m == 0 else 1 if m == 1 else 0, bad,
                    ok_reason=f"소제목 {len(heads)}개가 모두 명사형이다", head=f"소제목 {len(heads)}개 중 {m}개가 질문형·문장형",
                    fix="'~는 왜 안 되나' → '~가 안 되는 이유', '~가 아니었다' → '~와 무관한 원인'처럼 명사형으로 바꾼다")
-    return [c18, c19, c20, c23]
+    return [c18, c19, c20, c23, c24, c25]
 
 
 def visible_text(text):
