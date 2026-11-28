@@ -56,7 +56,7 @@ def test_year_mismatch_is_flagged(tmp_path):
 
 def test_negative_sign_kept(tmp_path):
     src = tmp_path / 's.md'
-    src.write_text('수익 -100원, 3-5개, 작업 W-701.\n', encoding='utf-8')
+    src.write_text('수익 -100원, 3-5개, 모델 A-7.\n', encoding='utf-8')
     draft = tmp_path / 'd.md'
     draft.write_text('# 글\n\n수익 100원이었다.\n\n손익 -100원이었다.\n', encoding='utf-8')
     r = run(draft, src)
