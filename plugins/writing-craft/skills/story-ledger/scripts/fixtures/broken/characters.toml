@@ -1,0 +1,27 @@
+﻿[[characters]]
+id = "CHR-001"
+name = "지연"
+desire = "귀환"
+strategy = "탐색"
+relationships = []
+speech = "짧게"
+body = "건강"
+state = "dead"
+death_episode = 2
+possessions = [{item = "SET-002", episode = 3, status = "confirmed", evidence = "E003-S01:P001"}]
+status = "confirmed"
+evidence = "E001-S01:P001"
+
+[[characters]]
+id = "CHR-002"
+name = "민수"
+desire = "귀환"
+strategy = "탐색"
+relationships = []
+speech = "짧게"
+body = "건강"
+state = "alive"
+possessions = [{item = "SET-002", episode = 3, status = "confirmed", evidence = "E003-S01:P001"}]
+status = "confirmed"
+evidence = "E001-S01:P001"
+

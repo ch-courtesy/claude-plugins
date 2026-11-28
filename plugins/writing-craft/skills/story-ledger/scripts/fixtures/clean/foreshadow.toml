@@ -1,0 +1,7 @@
+[[foreshadows]]
+id = "FS-001"
+setup_episode = 1
+reappearances = [2]
+resolved_episode = 3
+status = "confirmed"
+evidence = "E001-S01:P001"

@@ -1,0 +1,33 @@
+﻿[[events]]
+id = "EVT-001"
+episode = 1
+date = "2026-01-01"
+time = "정오"
+duration = "1시간"
+location = "SET-001"
+movement = "없음"
+status = "confirmed"
+evidence = "E001-S01:P001"
+
+[[events]]
+id = "EVT-002"
+episode = 2
+date = "2026-01-02"
+time = "정오"
+duration = "1시간"
+location = "SET-001"
+movement = "없음"
+status = "confirmed"
+evidence = "E001-S01:P001"
+
+[[events]]
+id = "EVT-003"
+episode = 3
+date = "2025-12-31"
+time = "정오"
+duration = "1시간"
+location = "SET-001"
+movement = "없음"
+status = "confirmed"
+evidence = "E001-S01:P001"
+

@@ -1,0 +1,17 @@
+﻿id = "E003-S01"
+episode = 3
+participants = ["CHR-001", "CHR-002"]
+pov = "CHR-001"
+time = "정오"
+location = "SET-001"
+goal = "열쇠 찾기"
+resistance = "잠긴 문"
+result = "발견"
+aftermath = "귀환 결정"
+before = "열쇠 없음"
+after = "열쇠 있음"
+forbidden_info = []
+foreshadows = ["FS-001"]
+status = "confirmed"
+evidence = "E001-S01:P001"
+

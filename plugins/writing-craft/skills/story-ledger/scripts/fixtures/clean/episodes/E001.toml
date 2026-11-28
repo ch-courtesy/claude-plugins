@@ -1,0 +1,10 @@
+﻿id = "E001"
+episode = 1
+events = ["EVT-001"]
+choice_cost = "탐색과 시간"
+new_facts = []
+unresolved = []
+next_plan = "귀환 검토(미확정)"
+status = "confirmed"
+evidence = "E001-S01:P001"
+
