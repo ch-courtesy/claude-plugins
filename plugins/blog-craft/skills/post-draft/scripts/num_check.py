@@ -23,7 +23,8 @@ from pathlib import Path
 
 TEXT_EXT = {".txt", ".md", ".csv", ".tsv", ".json", ".log", ".yaml", ".yml"}
 EXCLUDE_MARK = re.compile(r"글에는?\s*(쓰지|안\s*씀|안\s*썼|넣지|옮기지)|내부용|글에\s*쓰지\s*않|독자용\s*아님")
-NUM = re.compile(r"(?<![0-9A-Za-z_.])(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(\s*%)?(?![0-9A-Za-z_])")
+# 부호는 숫자 바로 앞에 붙고 그 앞이 숫자·글자가 아닐 때만 음수로 본다('3-5'·'W-7'은 범위·이름)
+NUM = re.compile(r"(?<![0-9A-Za-z_.])([-−]?)(\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d+))?(\s*%)?(?![0-9A-Za-z_])")
 DATE_KO = re.compile(r"(?:(\d{4})년\s*)?(\d{1,2})월\s*(\d{1,2})일")
 DATE_ISO = re.compile(r"(?<![\d-])(?:(\d{4})-(\d{1,2})-(\d{1,2})|()(\d{2})-(\d{2}))(?![\d-])")
 WORD = re.compile(r"[가-힣A-Za-z]{2,}")
@@ -44,29 +45,34 @@ def read_sources(paths):
         try:
             text = f.read_text(encoding="utf-8")
         except UnicodeDecodeError:
+            print(f"경고: UTF-8이 아닌 글자가 있어 깨진 글자를 대체해 읽음: {f}", file=sys.stderr)
             text = f.read_text(encoding="utf-8", errors="replace")
         for i, line in enumerate(text.splitlines(), 1):
             out.append((f, i, line))
     return out
 
 
-def norm_num(intpart, frac):
+def norm_num(sign, intpart, frac):
     v = intpart.replace(",", "")
     v = v.lstrip("0") or "0"
     if frac and frac.strip("0"):
         v += "." + frac.rstrip("0")
+    if sign and v != "0":
+        v = "-" + v
     return v
 
 
 def dates_in(line):
+    """((연도 또는 None, 월, 일), 위치, 원문) 목록. 연도는 적혀 있을 때만 넣는다."""
     found = []
     for m in DATE_KO.finditer(line):
-        found.append(((int(m.group(2)), int(m.group(3))), m.span(), m.group(0)))
+        y = int(m.group(1)) if m.group(1) else None
+        found.append(((y, int(m.group(2)), int(m.group(3))), m.span(), m.group(0)))
     for m in DATE_ISO.finditer(line):
         g = m.groups()
-        mo, d = (int(g[1]), int(g[2])) if g[0] else (int(g[4]), int(g[5]))
+        y, mo, d = (int(g[0]), int(g[1]), int(g[2])) if g[0] else (None, int(g[4]), int(g[5]))
         if 1 <= mo <= 12 and 1 <= d <= 31:
-            found.append(((mo, d), m.span(), m.group(0)))
+            found.append(((y, mo, d), m.span(), m.group(0)))
     return found
 
 
@@ -75,7 +81,7 @@ def nums_in(line, skip_spans=()):
     for m in NUM.finditer(line):
         if any(a <= m.start() < b for a, b in skip_spans):
             continue
-        res.append((norm_num(m.group(1), m.group(2)), bool(m.group(3)), m.group(0).strip()))
+        res.append((norm_num(m.group(1), m.group(2), m.group(3)), bool(m.group(4)), m.group(0).strip()))
     return res
 
 
@@ -130,8 +136,8 @@ def main():
     mat_date = {}
     for f, i, line in src:
         ds = dates_in(line)
-        for key, _, _ in ds:
-            mat_date.setdefault(key, []).append(loc(f, i))
+        for (y, mo, d), _, _ in ds:
+            mat_date.setdefault((mo, d), []).append((y, loc(f, i)))
         for v, _, _ in nums_in(line, [s for _, s, _ in ds]):
             mat_num.setdefault(v, []).append(loc(f, i))
     mat_vals = sorted({fnum(v) for v in mat_num if len(v) < 16})
@@ -140,7 +146,7 @@ def main():
         first_loc.setdefault(fnum(v), locs[0])
 
     draft_vals = sorted({fnum(v) for l in draft_lines for v, pct, _ in nums_in(l)
-                         if v in mat_num and (pct or "." in v or fnum(v) >= a.min)})
+                         if v in mat_num and (pct or "." in v or abs(fnum(v)) >= a.min)})
 
     rep = ["# 숫자·사실 대조 보고 (num_check)", ""]
     # 1. 형식
@@ -153,21 +159,30 @@ def main():
     seen = set()
     for ln, line in enumerate(draft_lines, 1):
         ds = dates_in(line)
-        for key, _, raw in ds:
+        for (y, mo, d), _, raw in ds:
             if (raw, ln) in seen:
                 continue
             seen.add((raw, ln))
-            hit = mat_date.get(key)
-            if hit:
+            hits = mat_date.get((mo, d), [])
+            same = [l for hy, l in hits if y is None or hy == y]
+            no_year = [l for hy, l in hits if hy is None]
+            other_years = sorted({hy for hy, _ in hits if hy is not None and hy != y})
+            if same:
                 n_ok += 1
-                rep.append(f"| {ln} | {raw} | {', '.join(hit[:2])} | 일치 |")
+                rep.append(f"| {ln} | {raw} | {', '.join(same[:2])} | 일치 |")
+            elif no_year:
+                n_ok += 1
+                rep.append(f"| {ln} | {raw} | {', '.join(no_year[:2])} | 월·일 일치(자료에 연도 없음 — 연도는 직접 본다) |")
+            elif other_years:
+                n_bad += 1
+                rep.append(f"| {ln} | {raw} | {', '.join(l for _, l in hits[:2])} | **연도 다름** — 자료는 {', '.join(map(str, other_years))}년 |")
             else:
                 n_bad += 1
                 rep.append(f"| {ln} | {raw} | — | **자료에 없는 날짜** |")
         line_nums = nums_in(line, [s for _, s, _ in ds])
         for v, pct, raw in line_nums:
             x = fnum(v)
-            if not pct and "." not in v and x < a.min:
+            if not pct and "." not in v and abs(x) < a.min:
                 continue
             if (raw, ln) in seen:
                 continue

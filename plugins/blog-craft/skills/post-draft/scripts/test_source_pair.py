@@ -147,3 +147,16 @@ def test_absence_cell_uses_least_common_row_word(tmp_path):
         for ln in (1, 2, 3, 4):
             assert f"src.md:{ln}(한도)" in b
         assert "src.md:5" not in b and "src.md:6" not in b
+
+
+def test_same_name_files_in_two_folders_kept_apart(tmp_path):
+    (tmp_path / "mat" / "a").mkdir(parents=True)
+    (tmp_path / "mat" / "b").mkdir(parents=True)
+    (tmp_path / "mat" / "a" / "log.md").write_text("- srv1은 restic을 한 번도 쓰지 않았다.\n", encoding="utf-8")
+    (tmp_path / "mat" / "b" / "log.md").write_text("- 정정: srv1 restic check가 정상으로 답했다.\n", encoding="utf-8")
+    (tmp_path / "draft.md").write_text("# 제목\n\nsrv1은 restic을 한 번도 쓰지 않았습니다.\n", encoding="utf-8")
+    r = subprocess.run([sys.executable, str(HERE / "source_pair.py"), "draft.md", "mat"],
+                       cwd=tmp_path, capture_output=True, check=True)
+    app = r.stdout.decode("utf-8").split("### 4-1.")[1]
+    assert "mat/a/log.md:1:" in app and "mat/b/log.md:1:" in app
+    assert "정상으로 답했다" in app
