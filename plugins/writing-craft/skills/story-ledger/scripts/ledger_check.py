@@ -148,12 +148,14 @@ def check(ledger_dir, foreshadow_limit=30, min_chars=None, count='without_spaces
     for file, kind, row in confirmed:
         if kind == 'foreshadow' and not row.get('resolved_episode') and not row.get('discarded_episode') and latest - row['setup_episode'] > foreshadow_limit:
             add('stale_foreshadow', file, row, f'회수·폐기 없이 {latest - row["setup_episode"]}회차가 지났다.', severity='warn')
+    checked_texts = 0
     if episodes_text_dir and not Path(episodes_text_dir).is_dir():
         add('missing_field', str(episodes_text_dir), {}, '본문 디렉터리가 없다.')
     elif episodes_text_dir:
         for path in sorted(Path(episodes_text_dir).iterdir()):
             if not re.fullmatch(r'E\d{3,}\.(md|txt)', path.name):
                 continue
+            checked_texts += 1
             raw = path.read_bytes()
             file = 'texts/' + path.name
             files[file] = hashlib.sha256(raw).hexdigest()
@@ -161,6 +163,9 @@ def check(ledger_dir, foreshadow_limit=30, min_chars=None, count='without_spaces
             counts = {'with_spaces': len(text), 'without_spaces': len(re.sub(r'\s', '', text))}
             if min_chars is not None and counts[count] < min_chars:
                 add('short_episode', file, {'id': path.stem}, f'본문 {counts[count]}자가 하한 {min_chars}자보다 작다.', counts)
+    if min_chars is not None and checked_texts == 0 and not (episodes_text_dir and not Path(episodes_text_dir).is_dir()):
+        where = str(episodes_text_dir) if episodes_text_dir else '--episodes-text-dir'
+        add('no_episode_text', where, {}, '분량 하한을 줬지만 검사한 본문이 없다(E001.md 같은 이름의 파일이 없거나 본문 폴더를 안 줌).')
     return {'files': files, 'findings': findings, 'ok': not any(f['severity'] == 'error' for f in findings)}
 
 

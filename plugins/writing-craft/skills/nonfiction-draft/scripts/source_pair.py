@@ -154,13 +154,24 @@ def read_sources(paths):
         else:
             sys.exit(f"자료 경로가 없다: {p}")
     units, lines = [], []  # (파일, 줄, 문장), (파일, 줄, 줄 전체)
+    cwd = Path.cwd().resolve()
     for f in files:
-        for i, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        # 다른 폴더의 같은 이름 파일이 섞이지 않게 현재 폴더 기준 상대 경로(밖이면 전체 경로)로 적는다
+        try:
+            label = f.resolve().relative_to(cwd).as_posix()
+        except ValueError:
+            label = f.resolve().as_posix()
+        try:
+            text = f.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            print(f"경고: UTF-8이 아닌 글자가 있어 깨진 글자를 대체해 읽음: {label}", file=sys.stderr)
+            text = f.read_text(encoding="utf-8", errors="replace")
+        for i, line in enumerate(text.splitlines(), 1):
             us = split_units(line)
             for u in us:
-                units.append((f.name, i, u))
+                units.append((label, i, u))
             if us:
-                lines.append((f.name, i, line.strip()))
+                lines.append((label, i, line.strip()))
     return units, lines
 
 

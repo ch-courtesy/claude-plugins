@@ -72,6 +72,19 @@ def test_counts_and_limit(ledger):
     assert run(ledger, '--min-chars', 3, '--count', 'with_spaces', '--episodes-text-dir', texts)[1]['findings'] == []
 
 
+
+def test_min_chars_without_texts_is_error(ledger, tmp_path):
+    empty = tmp_path / 'empty_texts'
+    empty.mkdir()
+    (empty / 'notes.md').write_text('본문 아님\n', encoding='utf-8')
+    for args in (('--min-chars', 3000, '--episodes-text-dir', empty), ('--min-chars', 3000)):
+        code, report = run(ledger, *args)
+        assert code == 1
+        assert 'no_episode_text' in {f['check'] for f in report['findings']}
+    code, report = run(ledger)
+    assert 'no_episode_text' not in {f['check'] for f in report['findings']}
+
+
 @pytest.mark.parametrize('filename,old,new', [
     ('timeline.toml', 'SET-001', 'SET-999'),
     ('knowledge.toml', 'CHR-001', 'CHR-999'),

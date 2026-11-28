@@ -20,9 +20,10 @@
 ```text
 /plugin marketplace add <이 저장소의 URL 또는 로컬 경로>
 /plugin install writing-craft@courtesy-claude-plugins
+/plugin install recipe@courtesy-claude-plugins
 ```
 
-독립 채점에는 같은 마켓플레이스의 `recipe` 플러그인(`recipe:oneshot`)과 글쓴 모델과 다른 회사의 CLI 모델이 필요하다. 기계 점검에는 Python이 필요하며 장부 TOML 읽기는 Python 3.11 이상을 사용한다.
+독립 채점(`genre-rubric`)에는 같은 마켓플레이스의 `recipe` 플러그인(`recipe:oneshot`)과 글쓴 모델과 다른 회사의 CLI 모델이 필요하다. `recipe`는 자동으로 같이 설치되지 않으므로 위 둘째 줄로 따로 설치하라. 기계 점검에는 Python이 필요하며 장부 TOML 읽기는 Python 3.11 이상을 사용한다.
 
 ## blog-craft와의 관계
 
